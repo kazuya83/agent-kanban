@@ -1,8 +1,8 @@
 # Windows（exe）・macOS（dmg）・Linux（AppImage）のアプリをビルドして、自動でリリースする
 # - push / プルリクエスト: まずテスト
-# - main への push: 最新のリリースからアプリの中身が変わっていれば、5分待ってから
+# - main への push: 最新のリリースからアプリの中身が変わっていれば、テストのあとすぐに
 #   バージョンを自動で上げて（0.1.8 → 0.1.9）3つの OS でビルドし、GitHub Release を作り、インストールを確かめる
-#   - 5分のあいだに次の push が来たら、前の実行は取り消す（続けてマージしても、リリースは最後の1回だけ）
+#   - 途中で次の push が来たら、前の実行は取り消す（続けてマージしても、リリースまで進むのは最後の1回）
 #   - 0.2.0 のように大きく上げたいときは、package.json の version をその番号にして push する
 #   - バージョンの決め方は scripts/next-version.js
 # - 手動実行（Actions の「Run workflow」）: すぐに 3つの OS でビルドして「Artifacts」に置く（リリースはしない）
@@ -47,24 +47,15 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ] && [ "$release" = "true" ]; then
             echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::v$version を自動でリリースします（5分のあいだに次の push がなければ）"
+            echo "::notice::v$version を自動でリリースします"
           else
             echo "release=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # 続けて push されたときに、リリースを最後の1回にまとめるための待ち時間。
-  # 待っているあいだに次の push が来ると、この実行は取り消される（concurrency）
-  wait:
-    needs: test
-    if: needs.test.outputs.release == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - run: sleep 300
-
   build:
-    needs: [test, wait]
-    # ビルドは、リリースするとき（待ち時間のあと）と手動実行のときだけ
-    if: always() && needs.test.result == 'success' && (needs.wait.result == 'success' || github.event_name == 'workflow_dispatch')
+    needs: test
+    # ビルドは、リリースするときと手動実行のときだけ
+    if: needs.test.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -123,8 +114,8 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [test, wait, build]
-    if: always() && needs.test.outputs.release == 'true' && needs.wait.result == 'success' && needs.build.result == 'success'
+    needs: [test, build]
+    if: needs.test.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
