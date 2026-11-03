@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { Store } = require('../src/store');
-const { AgentManager, SKILL_SUGGEST_PROMPT } = require('../src/agent');
+const { AgentManager } = require('../src/agent');
 const { PermissionServer } = require('../src/permission-server');
 
 const FAKE = path.join(__dirname, 'fake-claude.js');
@@ -803,7 +803,7 @@ test('マージ先のフォルダで rebase が途中なら、わかりやすく
 });
 
 test('完了（マージ済み）のタスクでも会話を続けられる: 同じ場所に worktree を作り直して同じ会話の続きから動く', async () => {
-  const { repo, agents, g } = setup();
+  const { repo, store, agents, g } = setup();
   const c = agents.createCard({ title: 'reopen', prompt: '最初の作業' });
   agents.start(c.id);
   await waitFor(() => c.status === 'review');
@@ -837,13 +837,23 @@ test('完了（マージ済み）のタスクでも会話を続けられる: 同
   assert.strictEqual(skillNotes.length, 1, 'スキルの提案の通知は1回だけ');
   assert.strictEqual(skillNotes[0].action, 'suggestSkills');
 
-  // 通知のボタンからスキルの提案を頼む（完了したタスクからでも）
-  agents.actNotification(skillNotes[0].id);
+  // 通知のボタンからスキルの提案を頼む（完了したタスクからでも）。元のカードは使い回さず、新しい会話のカードで頼む
+  const logsBefore = c.logs.length;
+  const r = agents.actNotification(skillNotes[0].id);
   assert.ok(skillNotes[0].actedAt && skillNotes[0].read, '対応済み・既読になる');
   assert.throws(() => agents.actNotification(skillNotes[0].id), /対応済み/);
-  await waitFor(() => c.status === 'review');
-  assert.ok(c.logs.some((l) => l.kind === 'user' && l.text === SKILL_SUGGEST_PROMPT));
-  assert.match(await agents.diff(c.id), /スキル（SKILL\.md）として残しておく/);
+  const chat = store.cards.find((x) => x.id === r.cardId);
+  assert.ok(chat && chat.id !== c.id, '新しいカードを作る');
+  assert.strictEqual(chat.kind, 'chat');
+  assert.strictEqual(chat.skillSuggestFrom, c.id);
+  assert.match(chat.title, /スキルの提案: reopen/);
+  assert.match(chat.prompt, /スキル（SKILL\.md）として残しておく/);
+  assert.match(chat.prompt, /最初の作業/, '元のタスクの指示を渡す');
+  assert.match(chat.prompt, /スキルを追加して/, '元のタスクのやりとりも渡す');
+  await waitFor(() => chat.status === 'review');
+  assert.strictEqual(c.status, 'done', '元のタスクは完了のまま（開き直さない）');
+  assert.strictEqual(c.logs.length, logsBefore, '元のタスクのログに足さない');
+  assert.ok(!fs.existsSync(wt), 'worktree を作り直さない');
 });
 
 test('PR を作って完了したタスクの続きは、origin の前のブランチとぶつからない名前のブランチで動く', async () => {

@@ -1743,11 +1743,12 @@ $('notifPanel').addEventListener('click', async (e) => {
   if (act) {
     const n = (state.board.notifications || []).find((v) => v.id === act.dataset.nact);
     const c = n && card(n.cardId);
-    if (n && n.action === 'suggestSkills' && c && c.status === 'done' && !confirm('完了したタスクの続きとして、worktree を作り直して Claude にスキルを提案してもらいます。よろしいですか？')) return;
-    const ok = await runBusy('スキルの提案を頼んでいます…', () => api.actNotification(act.dataset.nact).then(() => true), 'スキルの提案を頼みました。返事が来たら、下の欄から追加したいものを伝えてください');
-    if (ok && c) {
+    const r = await runBusy('スキルの提案を頼んでいます…', () => api.actNotification(act.dataset.nact).then((v) => v || {}), 'スキルの提案を新しい会話で頼みました。返事が来たら、下の欄から追加したいものを伝えてください');
+    const to = (r && r.cardId) || (c && c.id);
+    if (r && to) {
       closeNotifications();
-      select(c.id);
+      if (!card(to)) state.board = await api.getBoard();
+      select(to);
     }
     return;
   }

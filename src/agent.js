@@ -23,6 +23,33 @@ const SKILL_SUGGEST_PROMPT = [
   '- 置き場所は、このリポジトリ用（.claude/skills/<名前>/SKILL.md）か、自分用（~/.claude/skills/<名前>/SKILL.md）のどちらがよいかも書いてください',
   '- まだファイルは作らないでください。最後に「どれを追加しますか？」と聞いてください',
 ].join('\n');
+// スキルの提案を頼む会話の最初の指示。元のタスクの指示・やりとり・結果をまとめて渡す
+function buildSkillSuggestPrompt(c) {
+  const lines = [`次のタスク「${c.title}」の作業を振り返ってください。`, ''];
+  lines.push('## タスクの指示', truncate(c.prompt, 3000), '');
+  const talk = (c.logs || [])
+    .filter((l) => (l.kind === 'user' && l.text !== c.prompt) || l.kind === 'text')
+    .map((l) => `${l.kind === 'user' ? '【ユーザー】' : '【Claude】'} ${truncate(String(l.text).trim(), 800)}`);
+  if (talk.length) {
+    let picked = [];
+    let size = 0;
+    for (let i = talk.length - 1; i >= 0 && size < 6000; i--) {
+      picked.unshift(talk[i]);
+      size += talk[i].length;
+    }
+    if (picked.length < talk.length) picked = ['（前のやりとりは省略）', ...picked];
+    lines.push('## やりとり（抜粋）', ...picked, '');
+  }
+  const info = [];
+  if (c.issue) info.push(`- Issue: #${c.issue.number} ${c.issue.url || ''}`.trim());
+  if (c.branch) info.push(`- ブランチ: ${c.branch}`);
+  if ((c.mergedInto || []).length) info.push(`- 取り込み先: ${c.mergedInto.join(', ')}（git log で変更を確かめられます）`);
+  if (c.prUrl) info.push(`- PR: ${c.prUrl}`);
+  if (c.worktreePath && !isChat(c)) info.push(`- 作業フォルダ: ${c.worktreePath}`);
+  if (info.length) lines.push('## 結果', ...info, '');
+  lines.push('---', '', SKILL_SUGGEST_PROMPT.replace('ここまでの作業を振り返って', 'このタスクの作業をもとに'));
+  return lines.join('\n');
+}
 const RESUME_PROMPT = '前回の作業は、アプリの終了で途中で中断されました。worktree の今の状態（git status / git diff など）を確かめて、中断したところから作業を続けてください。';
 const CHAT_RESUME_PROMPT = '前回の返事は、アプリの終了で途中で中断されました。中断したところから続けてください。';
 
@@ -409,12 +436,14 @@ class AgentManager extends EventEmitter {
     const n = this.store.notifications.find((x) => x.id === id);
     if (!n) throw new Error('通知が見つかりません');
     if (!n.action || n.actedAt) throw new Error('この通知はもう対応済みです');
-    if (n.action === 'suggestSkills') this.suggestSkills(n.cardId);
+    let result = null;
+    if (n.action === 'suggestSkills') result = { cardId: this.suggestSkills(n.cardId).id };
     else throw new Error(`知らない操作です: ${n.action}`);
     n.actedAt = Date.now();
     n.read = true;
     this.store.save();
     this.emit('changed', n.cardId);
+    return result;
   }
 
   // タスクが「完了」に入ったときに呼ぶ。完了の通知と、スキルにしませんか？の通知を出す
@@ -596,15 +625,24 @@ class AgentManager extends EventEmitter {
     this.enqueue(c, withSkill(skill, message.trim()));
   }
 
-  // スキルにしておくとよいものを、同じ会話の続きで提案してもらう
+  /**
+   * スキルにしておくとよいものを提案してもらう。
+   * 元のタスクのカードは使い回さず（完了したタスクを開き直したり、worktree を作り直したりしない）、
+   * 新しい会話のカードを作って、元のタスクの中身を渡して提案してもらう
+   * @returns {object} 作った会話のカード
+   */
   suggestSkills(id) {
-    this.send(id, SKILL_SUGGEST_PROMPT);
+    const src = this.must(id);
+    const chat = this.createChat({ message: buildSkillSuggestPrompt(src), title: `💡 スキルの提案: ${src.title}` });
+    chat.skillSuggestFrom = src.id;
     for (const n of this.store.notifications) {
       if (n.cardId === id && n.action === 'suggestSkills' && !n.actedAt) {
         n.actedAt = Date.now();
         n.read = true;
       }
     }
+    this.changed(chat);
+    return chat;
   }
 
   /**
@@ -1748,4 +1786,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
+module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
