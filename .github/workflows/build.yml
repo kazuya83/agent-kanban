@@ -68,6 +68,27 @@ jobs:
         env:
           # 証明書なしでビルドする（macOS はアドホック署名）
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # ビルドしたアプリを実際に起動して、画面が出るか確かめる（Mac / Windows）
+      - name: Launch the built app and check the window
+        if: runner.os != 'Linux'
+        timeout-minutes: 6
+        shell: bash
+        run: |
+          npm install --no-save playwright-core@1.48.2
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            ls dist
+            APP=$(ls -d dist/mac*/"Claude Agent Kanban.app" | head -n1)
+            codesign -dv --verbose=2 "$APP" 2>&1 | head -12 || true
+            node test/smoke-packaged.js "$APP/Contents/MacOS/Claude Agent Kanban" smoke-built.png
+          else
+            node test/smoke-packaged.js "dist/win-unpacked/Claude Agent Kanban.exe" smoke-built.png
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always() && runner.os != 'Linux'
+        with:
+          name: smoke-built-${{ runner.os }}
+          path: smoke-*.png
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: claude-agent-kanban-${{ runner.os }}
@@ -119,7 +140,13 @@ jobs:
           # Same as a user would run: curl ... | bash  (pinned to this commit)
           curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/install.sh" | /bin/bash
           if [ "$RUNNER_OS" = "macOS" ]; then
-            test -d "/Applications/Claude Agent Kanban.app" || test -d "$HOME/Applications/Claude Agent Kanban.app"
+            APP="/Applications/Claude Agent Kanban.app"
+            [ -d "$APP" ] || APP="$HOME/Applications/Claude Agent Kanban.app"
+            test -d "$APP"
+            # ユーザーと同じく、インストールしたアプリを起動して画面を確かめる
+            npm install --prefix /tmp/pw --no-save --no-package-lock playwright-core@1.48.2 >/dev/null
+            ls -la "$APP/Contents/Resources" | head
+            NODE_PATH=/tmp/pw/node_modules timeout 300 node test/smoke-packaged.js "$APP/Contents/MacOS/Claude Agent Kanban" smoke-installed.png
           else
             test -x "$HOME/.local/bin/claude-agent-kanban"
           fi
