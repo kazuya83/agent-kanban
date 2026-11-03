@@ -785,12 +785,23 @@ class AgentManager extends EventEmitter {
         // 自分の作業中のフォルダには触らない
         let dir = await git.worktreeForBranch(top, target);
         let temp = null;
-        if (dir) {
-          if (await git.isDirty(dir)) throw new Error(`${target} をチェックアウトしている ${dir} に未コミットの変更があります。コミットするか退避してからマージしてください。`);
-        } else {
+        if (!dir) {
           temp = path.join(path.dirname(c.worktreePath), `_merge-${c.id}-${Date.now()}`);
-          await git.addWorktreeForBranch(top, temp, target);
-          dir = temp;
+          try {
+            await git.addWorktreeForBranch(top, temp, target);
+            dir = temp;
+          } catch (err) {
+            // 「main は <フォルダ> で使われています」と断られたら、そのフォルダでマージする
+            const at = git.checkedOutAtFromError(err);
+            if (!at) throw err;
+            temp = null;
+            dir = at;
+          }
+        }
+        if (!temp) {
+          const op = await git.operationInProgress(dir);
+          if (op) throw new Error(`${target} をチェックアウトしている ${dir} で ${op} が途中です。終わらせるか中止してから、もう一度マージしてください。`);
+          if (await git.isDirty(dir)) throw new Error(`${target} をチェックアウトしている ${dir} に未コミットの変更があります。コミットするか退避してからマージしてください。`);
         }
         try {
           await git.merge(dir, c.branch, (c.issue ? `Merge agent task: ${c.title.replace(/^#\d+\s*/, '')} (#${c.issue.number})` : `Merge agent task: ${c.title}`), target);

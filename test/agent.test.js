@@ -387,7 +387,7 @@ test('マージして origin に push する（origin が進んでいれば取�
   fs.writeFileSync(path.join(other, 'o2.txt'), 'y\n');
   execFileSync('git', ['add', '.'], { cwd: other });
   execFileSync('git', ['-c', 'user.name=o', '-c', 'user.email=o@o', 'commit', '-qm', 'other 2'], { cwd: other });
-  execFileSync('git', ['pull', '-q', '--no-rebase', 'origin', 'main'], { cwd: other });
+  execFileSync('git', ['-c', 'user.name=o', '-c', 'user.email=o@o', 'pull', '-q', '--no-rebase', 'origin', 'main'], { cwd: other });
   execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: other });
   fs.writeFileSync(path.join(repo, 'local.txt'), 'z\n');
   g('add', 'local.txt');
@@ -475,4 +475,36 @@ test('コンフリクト: マージで止まる → Claude に解消してもら
   assert.ok(!(await require('../src/git').mergeInProgress(c.worktreePath)));
   assert.strictEqual(fs.readFileSync(path.join(c.worktreePath, 'README.md'), 'utf8'), 'hello from c\n');
   assert.ok(c.conflict, 'コンフリクトの情報は残る（あとで解消できる）');
+});
+
+test('マージ先がメインのフォルダでチェックアウトされていて、一覧から見つからなくても、そのフォルダでマージする', async () => {
+  const { repo, store, agents, g } = setup();
+  store.settings.permissionMode = 'bypassPermissions';
+  const git = require('../src/git');
+  const c = agents.createCard({ title: 'wt', prompt: 'x' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  // 一覧から見つけられない環境を再現する
+  const orig = git.worktreeForBranch;
+  git.worktreeForBranch = async () => null;
+  try {
+    const r = await agents.merge(c.id, { target: 'main' });
+    assert.ok(r.merged);
+  } finally {
+    git.worktreeForBranch = orig;
+  }
+  assert.match(g('log', '--oneline', '-1', 'main').toString(), /Merge agent task: wt/);
+  assert.ok(fs.readdirSync(repo).some((f) => f.startsWith('out-')), 'チェックアウト中のフォルダにも反映');
+  assert.ok(!g('worktree', 'list').toString().includes('_merge-'));
+});
+
+test('マージ先のフォルダで rebase が途中なら、わかりやすく止める', async () => {
+  const { repo, store, agents, g } = setup();
+  store.settings.permissionMode = 'bypassPermissions';
+  const c = agents.createCard({ title: 'rb', prompt: 'x' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  const p = g('rev-parse', '--git-path', 'rebase-merge').toString().trim();
+  fs.mkdirSync(path.isAbsolute(p) ? p : path.join(repo, p), { recursive: true });
+  await assert.rejects(agents.merge(c.id, { target: 'main' }), /rebase が途中です/);
 });

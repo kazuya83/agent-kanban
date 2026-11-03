@@ -169,11 +169,41 @@ async function createBranch(repo, name, startPoint) {
 
 // branch をチェックアウトしている worktree のパス（なければ null）
 async function worktreeForBranch(repo, branch) {
-  const out = await git(repo, ['worktree', 'list', '--porcelain']);
+  const want = `refs/heads/${branch}`;
+  const out = await git(repo, ['worktree', 'list', '--porcelain']).catch(() => '');
   let current = null;
-  for (const line of out.split('\n')) {
-    if (line.startsWith('worktree ')) current = line.slice('worktree '.length);
-    else if (line === `branch refs/heads/${branch}`) return current;
+  for (const raw of out.split('\n')) {
+    const line = raw.replace(/\r$/, '').trim();
+    if (line.startsWith('worktree ')) current = line.slice('worktree '.length).trim();
+    else if (line.startsWith('branch ') && line.slice('branch '.length).trim() === want) return current;
+  }
+  // 念のため、メインのフォルダの HEAD も見る
+  const head = (await git(repo, ['symbolic-ref', '-q', 'HEAD']).catch(() => '')).trim();
+  if (head === want) return (await toplevel(repo)) || repo;
+  return null;
+}
+
+// worktree add で「そのブランチは <フォルダ> で使われています」と断られたときの、そのフォルダ
+function checkedOutAtFromError(err) {
+  const m = String((err && err.message) || '').match(/(?:already used by worktree at|already checked out at|is already checked out at) '([^']+)'/);
+  return m ? m[1] : null;
+}
+
+// そのフォルダで rebase / マージ / cherry-pick などが途中か
+async function operationInProgress(dir) {
+  const fs = require('fs');
+  const path = require('path');
+  const checks = [
+    ['rebase-merge', 'rebase'],
+    ['rebase-apply', 'rebase'],
+    ['MERGE_HEAD', 'マージ'],
+    ['CHERRY_PICK_HEAD', 'cherry-pick'],
+    ['REVERT_HEAD', 'revert'],
+    ['BISECT_LOG', 'bisect'],
+  ];
+  for (const [name, label] of checks) {
+    const p = (await git(dir, ['rev-parse', '--git-path', name]).catch(() => '')).trim();
+    if (p && fs.existsSync(path.isAbsolute(p) ? p : path.join(dir, p))) return label;
   }
   return null;
 }
@@ -217,10 +247,12 @@ async function push(repo, remote, branch, setUpstream) {
 // ローカルのブランチを、remote のブランチまで早送りする（チェックアウト中ならそのフォルダで）
 async function fastForward(repo, branch, toRef, checkedOutDir) {
   if (checkedOutDir) await git(checkedOutDir, ['merge', '--ff-only', toRef]);
-  else await git(repo, ['update-ref', `refs/heads/${branch}`, toRef]);
+  else await git(repo, ['fetch', '-q', '.', `${toRef}:refs/heads/${branch}`]);
 }
 
 module.exports = {
+  checkedOutAtFromError,
+  operationInProgress,
   conflictFiles,
   mergeInProgress,
   startMerge,
