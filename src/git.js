@@ -155,7 +155,18 @@ async function branchExists(repo, name) {
   }
 }
 
+// 外から受け取ったブランチ名を git / gh の引数に渡す前に確かめる。
+// 「-」で始まる名前はオプションとして解釈されてしまう（引数インジェクション）ので受け付けない
+function assertSafeRef(name, label = 'ブランチ名') {
+  const s = String(name ?? '');
+  if (!s || s.startsWith('-') || /[\x00-\x20\x7f~^:?*[\\]/.test(s) || s.includes('..') || s.includes('@{')) {
+    throw new Error(`「${s}」は${label}に使えません`);
+  }
+  return s;
+}
+
 async function checkBranchName(repo, name) {
+  assertSafeRef(name);
   try {
     await git(repo, ['check-ref-format', '--branch', name]);
   } catch {
@@ -404,6 +415,7 @@ module.exports = {
   merge,
   branchExists,
   checkBranchName,
+  assertSafeRef,
   createBranch,
   worktreeForBranch,
   addWorktreeForBranch,

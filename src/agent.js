@@ -36,6 +36,24 @@ function truncate(s, n) {
   return s.length > n ? `${s.slice(0, n)}…` : s;
 }
 
+// Claude Code のセッション ID（UUID など）か。claude の --resume にそのまま渡すので、
+// 「-」で始まる値（オプションとして解釈される）や記号を含む値は受け付けない
+function isSessionId(id) {
+  return typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id);
+}
+function assertSessionId(id) {
+  if (!isSessionId(id)) throw new Error('会話（セッション）の ID が正しくありません');
+  return id;
+}
+
+// Windows で .cmd / .bat をシェル（cmd.exe）経由で起動するときの引数のクオート。
+// cmd.exe では " の中でも % の展開が効き、\" ではクオートを抜けられてしまうので、そうした文字を含む引数は拒否する
+function quoteForCmd(a) {
+  const s = String(a);
+  if (/["%!\r\n\0]/.test(s)) throw new Error(`この値はコマンドの引数に使えません: ${truncate(s, 60)}`);
+  return /[\s&|<>^()]/.test(s) || !s ? `"${s}"` : s;
+}
+
 function slugify(s) {
   const slug = String(s)
     .toLowerCase()
@@ -525,6 +543,7 @@ class AgentManager extends EventEmitter {
       c.forkNext = false;
       return;
     }
+    assertSessionId(session.id);
     c.sessions = c.sessions || [];
     const own = c.sessions.find((x) => x.id === session.id && x.origin === 'task');
     c.sessionId = session.id;
@@ -762,7 +781,9 @@ class AgentManager extends EventEmitter {
 
   writeMcpConfig(c) {
     if (!this.permission) return null;
-    fs.mkdirSync(this.opts.mcpDir, { recursive: true });
+    // 承認サーバーのトークンを含むので、自分だけが読めるようにする
+    fs.mkdirSync(this.opts.mcpDir, { recursive: true, mode: 0o700 });
+    if (!isWin) fs.chmodSync(this.opts.mcpDir, 0o700);
     const file = path.join(this.opts.mcpDir, `${c.id}.json`);
     const config = {
       mcpServers: {
@@ -779,7 +800,8 @@ class AgentManager extends EventEmitter {
         },
       },
     };
-    fs.writeFileSync(file, JSON.stringify(config, null, 2));
+    fs.writeFileSync(file, JSON.stringify(config, null, 2), { mode: 0o600 });
+    if (!isWin) fs.chmodSync(file, 0o600);
     return file;
   }
 
@@ -805,7 +827,7 @@ class AgentManager extends EventEmitter {
     if (allowed.length) args.push('--allowedTools', ...allowed);
     const mcpConfig = this.writeMcpConfig(c);
     if (mcpConfig) args.push('--mcp-config', mcpConfig, '--permission-prompt-tool', PERMISSION_TOOL);
-    if (c.sessionId) args.push('--resume', c.sessionId);
+    if (c.sessionId) args.push('--resume', assertSessionId(c.sessionId));
     // 既存の会話を引き継ぐときは、元の会話を変えないようにフォークする（新しい ID になる）
     if (c.sessionId && c.forkNext) args.push('--fork-session');
 
@@ -820,8 +842,7 @@ class AgentManager extends EventEmitter {
     }
     // Windows の .cmd / .bat はシェル経由でしか起動できない。.exe は直接起動する
     const useShell = isWin && /\.(cmd|bat)$/i.test(resolved);
-    const quote = (a) => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
-    const child = spawn(useShell ? quote(resolved) : resolved, useShell ? args.map(quote) : args, {
+    const child = spawn(useShell ? quoteForCmd(resolved) : resolved, useShell ? args.map(quoteForCmd) : args, {
       cwd,
       // 承認待ちの MCP ツール呼び出しがタイムアウトしないようにする
       env: { ...process.env, MCP_TOOL_TIMEOUT: '86400000' },
@@ -1215,6 +1236,7 @@ class AgentManager extends EventEmitter {
     const target = String(opts.target || c.baseBranch || '').trim();
     if (!target) throw new Error('マージ先のブランチを指定してください');
     if (target === c.branch) throw new Error('タスク自身のブランチにはマージできません');
+    git.assertSafeRef(target, 'マージ先のブランチ名');
 
     if (await git.mergeInProgress(c.worktreePath)) throw new Error('コンフリクトの解消が終わっていません。「解消した」を押すか、取り込みを中止してください');
 
@@ -1339,6 +1361,7 @@ class AgentManager extends EventEmitter {
     const base = String(opts.base || c.prBase || c.baseBranch || '').trim();
     if (!base) throw new Error('PR のマージ先のブランチを指定してください');
     if (base === c.branch) throw new Error('タスク自身のブランチには PR を作れません');
+    git.assertSafeRef(base, 'PR のマージ先のブランチ名');
     if (!(await git.hasRemote(top, 'origin'))) throw new Error('このリポジトリに origin がありません。GitHub のリポジトリを origin に設定してください');
     if (await git.mergeInProgress(c.worktreePath)) throw new Error('コンフリクトの解消が終わっていません。「解消した」を押すか、取り込みを中止してください');
 
@@ -1656,4 +1679,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, isChat, cleanBranchName, buildBranchNamePrompt };
+module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
