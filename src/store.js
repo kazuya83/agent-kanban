@@ -18,14 +18,35 @@ const DEFAULT_SETTINGS = {
   pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
   suggestSkillsOnDone: true, // タスクが完了したら「スキルにしませんか？」と通知する
   branchNamingRule: '', // ブランチの命名規則（自然言語）。空なら agent/issue-12-xxxx のようないつもの名前
+  weeklyResetDay: '', // 週間上限がリセットされる曜日（'0'=日〜'6'=土）。空なら claude が知らせてくる日時を使う
+  weeklyResetTime: '00:00', // 週間上限がリセットされる時刻（HH:MM・ローカル時刻）。weeklyResetDay を決めたときに使う
 };
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const COST_LOG_KEEP_MS = 8 * WEEK_MS; // これより古い金額の記録は捨てる
+
+// リセット日時の1つ（anchor）から、now を含む1週間 [start, end) を求める
+function weekAround(anchorMs, now) {
+  const k = Math.floor((now - anchorMs) / WEEK_MS) + 1;
+  const end = anchorMs + k * WEEK_MS;
+  return { start: end - WEEK_MS, end };
+}
+
+// 曜日と時刻（ローカル）から、直近のリセット日時を1つ作る
+function anchorFromDay(day, time, now) {
+  const [h, m] = String(time || '00:00').split(':').map((v) => parseInt(v, 10) || 0);
+  const d = new Date(now);
+  d.setHours(Math.min(23, Math.max(0, h)), Math.min(59, Math.max(0, m)), 0, 0);
+  d.setDate(d.getDate() + ((Number(day) - d.getDay() + 7) % 7));
+  return d.getTime();
+}
 
 const MAX_NOTIFICATIONS = 200;
 
 class Store {
   constructor(file) {
     this.file = file;
-    this.data = { settings: { ...DEFAULT_SETTINGS }, cards: [], removedCost: {}, notifications: [] };
+    this.data = { settings: { ...DEFAULT_SETTINGS }, cards: [], removedCost: {}, costLog: [], weeklyResetAt: 0, notifications: [] };
     this.timer = null;
     this.load();
   }
@@ -38,6 +59,8 @@ class Store {
       this.data.cards = Array.isArray(raw.cards) ? raw.cards : [];
       this.data.removedCost = raw.removedCost && typeof raw.removedCost === 'object' ? raw.removedCost : {};
       this.data.notifications = Array.isArray(raw.notifications) ? raw.notifications : [];
+      this.data.costLog = Array.isArray(raw.costLog) ? raw.costLog : [];
+      this.data.weeklyResetAt = Number(raw.weeklyResetAt) || 0;
     } catch {
       /* 初回起動 */
     }
@@ -99,6 +122,48 @@ class Store {
       : Object.values(this.data.removedCost).reduce((sum, v) => sum + (Number(v) || 0), 0);
     return live + removed;
   }
+
+  // 使った金額を日時つきで残す（週ごとの合計に使う）
+  addCost(repoPath, usd, at = Date.now()) {
+    const v = Number(usd) || 0;
+    if (v <= 0) return;
+    this.data.costLog.push({ at, repo: repoPath || '', usd: v });
+    const limit = at - COST_LOG_KEEP_MS;
+    if (this.data.costLog[0] && this.data.costLog[0].at < limit) this.data.costLog = this.data.costLog.filter((e) => e.at >= limit);
+  }
+
+  // claude が知らせてきた週間上限のリセット日時（ミリ秒）を覚えておく
+  setWeeklyResetAt(ms) {
+    const v = Number(ms) || 0;
+    if (v > 0 && v !== this.data.weeklyResetAt) {
+      this.data.weeklyResetAt = v;
+      return true;
+    }
+    return false;
+  }
+
+  // 今の週（週間上限のリセットからリセットまで）の期間と、その間に使った金額
+  // source: 'settings'（設定の曜日・時刻）/ 'claude'（claude が知らせてきた日時）/ 'default'（どちらもないので月曜 0:00）
+  weeklyCost(repoPath, now = Date.now()) {
+    const s = this.data.settings;
+    let anchor;
+    let source;
+    if (s.weeklyResetDay !== '' && s.weeklyResetDay != null && /^[0-6]$/.test(String(s.weeklyResetDay))) {
+      anchor = anchorFromDay(s.weeklyResetDay, s.weeklyResetTime, now);
+      source = 'settings';
+    } else if (this.data.weeklyResetAt) {
+      anchor = this.data.weeklyResetAt;
+      source = 'claude';
+    } else {
+      anchor = anchorFromDay(1, '00:00', now);
+      source = 'default';
+    }
+    const { start, end } = weekAround(anchor, now);
+    const usd = this.data.costLog
+      .filter((e) => (!repoPath || e.repo === repoPath) && e.at >= start && e.at < end)
+      .reduce((sum, e) => sum + (Number(e.usd) || 0), 0);
+    return { usd, start, end, source };
+  }
 }
 
-module.exports = { Store, DEFAULT_SETTINGS, MAX_NOTIFICATIONS };
+module.exports = { Store, DEFAULT_SETTINGS, MAX_NOTIFICATIONS, weekAround, anchorFromDay, WEEK_MS };
