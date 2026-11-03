@@ -234,6 +234,7 @@ app.whenReady().then(async () => {
   handle('conflict:complete', (id) => agents.completeConflict(id));
   handle('conflict:abort', (id) => agents.abortConflict(id));
   handle('conflict:dismiss', (id) => agents.dismissConflict(id));
+  handle('conflict:fromPr', (id) => agents.reopenPrConflict(id));
   handle('card:permission', ({ id, reqId, decision, message }) => agents.answerPermission(id, reqId, decision, message));
   handle('card:answer', ({ id, reqId, answers }) => agents.answerQuestion(id, reqId, answers));
   handle('card:open', async (id) => {

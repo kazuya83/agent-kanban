@@ -363,6 +363,97 @@ test('PR が閉じられたときと、状態を取れないとき', async () =>
   assert.strictEqual(c.status, 'review');
 });
 
+test('PR がコンフリクトしたら、アプリの中で解消して PR を更新できる', async () => {
+  const { agents, c, setPr, g, repo } = await setupPr('pr conflict');
+  const git = require('../src/git');
+  const commitIn = (dir, file, text, msg) => {
+    fs.writeFileSync(path.join(dir, file), text);
+    execFileSync('git', ['add', file], { cwd: dir });
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', msg], { cwd: dir });
+  };
+  commitIn(c.worktreePath, 'README.md', 'hello from task\n', 'task');
+  await agents.createPullRequest(c.id);
+  // PR を作ったあとで、origin の main が進んでコンフリクトする
+  commitIn(repo, 'README.md', 'hello from main\n', 'main moved');
+  g('push', '-q', 'origin', 'main');
+
+  // GitHub が計算中（UNKNOWN）のあいだは何もしない
+  setPr({ mergeable: 'UNKNOWN' });
+  await agents.checkPullRequests();
+  assert.ok(!c.conflict);
+
+  setPr({ mergeable: 'CONFLICTING' });
+  await agents.checkPullRequests();
+  assert.ok(c.conflict && c.conflict.pr, 'カードにコンフリクトが出る');
+  assert.strictEqual(c.conflict.target, 'main');
+  assert.strictEqual(c.prMergeable, 'CONFLICTING');
+  assert.strictEqual(c.status, 'review');
+
+  // 閉じても、もう一度出せる。次の確認で何度も出し直さない
+  agents.dismissConflict(c.id);
+  await agents.checkPullRequests();
+  assert.ok(!c.conflict);
+  agents.reopenPrConflict(c.id);
+  assert.ok(c.conflict.pr);
+
+  // 自分で解消する: origin/main を取り込んだ途中の状態になる
+  const res = await agents.resolveConflict(c.id, 'manual');
+  assert.ok(res.manual);
+  assert.deepStrictEqual(c.conflict.files, ['README.md']);
+  assert.match(fs.readFileSync(path.join(c.worktreePath, 'README.md'), 'utf8'), /<<<<<<</);
+  // 解消中は、GitHub の状態が変わってもカードのコンフリクトは消さない
+  setPr({ mergeable: 'MERGEABLE' });
+  await agents.checkPullRequests();
+  assert.ok(c.conflict && c.conflict.manual);
+  setPr({ mergeable: 'CONFLICTING' });
+  await agents.checkPullRequests();
+
+  fs.writeFileSync(path.join(c.worktreePath, 'README.md'), 'hello from task and main\n');
+  await agents.completeConflict(c.id);
+  assert.ok(!(await git.mergeInProgress(c.worktreePath)));
+  assert.ok(c.conflictResolved && c.conflictResolved.pr);
+  assert.match(agents.logs(c.id).at(-1).text, /PR を更新/);
+
+  // PR を更新（push）すると、origin のブランチに main の変更が入る
+  await agents.createPullRequest(c.id, { base: 'main' });
+  assert.strictEqual(c.conflictResolved, null);
+  assert.strictEqual(c.prMergeable, null);
+  const remoteRepo = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: repo }).toString().trim();
+  const rg = (...a) => execFileSync('git', a, { cwd: remoteRepo }).toString();
+  assert.strictEqual(rg('show', `${c.branch}:README.md`), 'hello from task and main\n');
+  rg('merge-base', '--is-ancestor', 'main', c.branch);
+
+  // コンフリクトがなくなったら、そのまま
+  setPr({ mergeable: 'MERGEABLE' });
+  await agents.checkPullRequests();
+  assert.ok(!c.conflict);
+  assert.strictEqual(c.prMergeable, 'MERGEABLE');
+});
+
+test('PR がコンフリクトしたら、Claude に解消してもらえる', async () => {
+  const { agents, c, setPr, g, repo } = await setupPr('pr conflict agent');
+  const commitIn = (dir, file, text, msg) => {
+    fs.writeFileSync(path.join(dir, file), text);
+    execFileSync('git', ['add', file], { cwd: dir });
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', msg], { cwd: dir });
+  };
+  commitIn(c.worktreePath, 'README.md', 'hello from task\n', 'task');
+  await agents.createPullRequest(c.id);
+  commitIn(repo, 'README.md', 'hello from main\n', 'main moved');
+  g('push', '-q', 'origin', 'main');
+  // ローカルの main は origin より古くても、origin/main を取り込む
+  g('reset', '-q', '--hard', 'HEAD~1');
+
+  setPr({ mergeable: 'CONFLICTING' });
+  await agents.checkPullRequests();
+  await agents.resolveConflict(c.id, 'agent');
+  await waitFor(() => c.status === 'review' && c.conflictResolved);
+  assert.ok(c.conflictResolved.pr);
+  const merged = fs.readFileSync(path.join(c.worktreePath, 'README.md'), 'utf8');
+  assert.match(merged, /hello from task/);
+  assert.match(merged, /hello from main/);
+});
+
 test('PR: origin がないとエラー', async () => {
   const { store, agents } = setup();
   store.settings.permissionMode = 'bypassPermissions';
