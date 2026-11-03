@@ -24,8 +24,15 @@ class PermissionServer {
     });
   }
 
+  // トークンの比較は、一致した文字数で時間が変わらないようにする
+  validToken(got) {
+    const a = Buffer.from(String(got || ''));
+    const b = Buffer.from(this.token);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
+
   handle(req, res) {
-    if (req.method !== 'POST' || req.url !== '/permission' || req.headers['x-kanban-token'] !== this.token) {
+    if (req.method !== 'POST' || req.url !== '/permission' || !this.validToken(req.headers['x-kanban-token'])) {
       res.writeHead(403).end();
       return;
     }

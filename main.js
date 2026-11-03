@@ -32,6 +32,13 @@ function createWindow() {
       sandbox: true,
     },
   });
+  // アプリの画面以外へは移動させない。新しいウインドウも開かせない（リンクは open:external で許可した URL だけを外部ブラウザで開く）
+  const appUrl = require('url').pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).href;
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url !== appUrl) e.preventDefault();
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.session.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'clipboard-sanitized-write'));
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.on('closed', () => (win = null));
   // Windows / Linux はウインドウを閉じるとアプリも終わるので、閉じる前に終了の確認を出す（キャンセルならウインドウを残す）
@@ -139,6 +146,11 @@ app.whenReady().then(async () => {
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     if (patch && 'suggestSkillsOnDone' in patch) patch = { ...patch, suggestSkillsOnDone: !!patch.suggestSkillsOnDone };
     if (patch && 'issueStatusSync' in patch) patch = { ...patch, issueStatusSync: !!patch.issueStatusSync };
+    if (patch && 'baseBranch' in patch) {
+      const b = String(patch.baseBranch || '').trim();
+      if (b) git.assertSafeRef(b, 'ベースブランチ名');
+      patch = { ...patch, baseBranch: b };
+    }
     if (patch && 'statusFieldName' in patch) patch = { ...patch, statusFieldName: String(patch.statusFieldName || '').trim() };
     if (patch && 'statusMapping' in patch) {
       const m = patch.statusMapping || {};
