@@ -15,6 +15,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,16 +35,19 @@ jobs:
         run: npx electron-builder --win --dir --x64 --publish never
 
       - name: Launch the app built from this commit (macOS)
+        timeout-minutes: 6
         if: runner.os == 'macOS'
         run: |
           ls dist
           codesign -dv --verbose=2 "dist/mac-arm64/Claude Agent Kanban.app" 2>&1 | head -20 || true
           node test/smoke-packaged.js "dist/mac-arm64/Claude Agent Kanban.app/Contents/MacOS/Claude Agent Kanban" smoke-built.png
       - name: Launch the app built from this commit (Windows)
+        timeout-minutes: 6
         if: runner.os == 'Windows'
         run: node test/smoke-packaged.js "dist/win-unpacked/Claude Agent Kanban.exe" smoke-built.png
 
       - name: Install the latest release like a user and launch it (macOS)
+        timeout-minutes: 6
         if: runner.os == 'macOS'
         continue-on-error: true
         run: |
@@ -54,6 +58,7 @@ jobs:
           xattr -l "$APP" || true
           node test/smoke-packaged.js "$APP/Contents/MacOS/Claude Agent Kanban" smoke-installed.png
       - name: Install the latest release like a user and launch it (Windows)
+        timeout-minutes: 6
         if: runner.os == 'Windows'
         continue-on-error: true
         shell: powershell
