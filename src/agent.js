@@ -273,7 +273,8 @@ class AgentManager extends EventEmitter {
 
   // テストで差し替えられるようにメソッドにしておく
   setIssueProjectStatus(repoPath, number, key) {
-    return github.setIssueProjectStatus(repoPath, number, key, { gh: this.opts.ghPath });
+    const s = this.store.settings;
+    return github.setIssueProjectStatus(repoPath, number, key, { gh: this.opts.ghPath, fieldName: s.statusFieldName, mapping: s.statusMapping });
   }
 
   // 実行中の Projects の更新が終わるまで待つ（テスト・終了時用）

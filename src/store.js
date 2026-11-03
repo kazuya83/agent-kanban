@@ -13,6 +13,8 @@ const DEFAULT_SETTINGS = {
   defaultSkill: '', // 新しいタスクを作るときに最初から選んでおくスキル
   integration: 'merge', // レビュー後の取り込み方: merge（ローカルで直接マージ） / pr（push してプルリクエストを作る）
   issueStatusSync: true, // Issue から作ったタスクの列に合わせて、GitHub Projects の Status（In progress / In review / Done）を変える
+  statusFieldName: '', // Projects で変える項目（単一選択）の名前。空なら「Status」
+  statusMapping: { inProgress: '', inReview: '', done: '' }, // 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空なら名前から自動で探す
   pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
 };
 
@@ -28,6 +30,7 @@ class Store {
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       this.data.settings = { ...DEFAULT_SETTINGS, ...(raw.settings || {}) };
+      this.data.settings.statusMapping = { ...DEFAULT_SETTINGS.statusMapping, ...(this.data.settings.statusMapping || {}) };
       this.data.cards = Array.isArray(raw.cards) ? raw.cards : [];
     } catch {
       /* 初回起動 */

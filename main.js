@@ -150,9 +150,15 @@ app.whenReady().then(async () => {
     };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping'];
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     if (patch && 'issueStatusSync' in patch) patch = { ...patch, issueStatusSync: !!patch.issueStatusSync };
+    if (patch && 'statusFieldName' in patch) patch = { ...patch, statusFieldName: String(patch.statusFieldName || '').trim() };
+    if (patch && 'statusMapping' in patch) {
+      const m = patch.statusMapping || {};
+      const str = (v) => String(v || '').trim();
+      patch = { ...patch, statusMapping: { inProgress: str(m.inProgress), inReview: str(m.inReview), done: str(m.done) } };
+    }
     for (const k of allowed) if (patch && k in patch) store.settings[k] = patch[k];
     store.settings.maxParallel = Math.min(10, Math.max(1, parseInt(store.settings.maxParallel, 10) || 1));
     store.save();

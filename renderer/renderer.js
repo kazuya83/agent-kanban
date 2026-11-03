@@ -1336,6 +1336,15 @@ async function openSettings() {
      <div class="field">
        <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> Issue のステータスを自動で変える（GitHub Projects）</label>
        <small>Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。</small>
+       <div class="status-map">
+         <label class="field"><span>変える項目（Project の単一選択フィールド名。空なら Status）</span><input id="sStatusField" placeholder="Status" value="${esc(s.statusFieldName || '')}" /></label>
+         <div class="row">
+           <label class="field"><span>実行中 →</span><input id="sMapProgress" placeholder="自動（In progress など）" value="${esc((s.statusMapping || {}).inProgress || '')}" /></label>
+           <label class="field"><span>レビュー →</span><input id="sMapReview" placeholder="自動（In review など）" value="${esc((s.statusMapping || {}).inReview || '')}" /></label>
+           <label class="field"><span>完了 →</span><input id="sMapDone" placeholder="自動（Done など）" value="${esc((s.statusMapping || {}).done || '')}" /></label>
+         </div>
+         <small>列ごとに使う選択肢の名前を指定できます（カンマ区切りで候補を複数書けます。大文字小文字・絵文字・記号は無視して比べます）。空の列は名前から自動で探します。</small>
+       </div>
        <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div></div>
      <label class="field"><span>権限モード</span>
        <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
@@ -1369,6 +1378,8 @@ async function openSettings() {
             claudePath: $('sClaude').value.trim() || 'claude',
             defaultSkill: defSkill || '',
             issueStatusSync: $('sIssueSync').checked,
+            statusFieldName: $('sStatusField').value.trim(),
+            statusMapping: { inProgress: $('sMapProgress').value.trim(), inReview: $('sMapReview').value.trim(), done: $('sMapDone').value.trim() },
           }),
         );
         if (r) {
