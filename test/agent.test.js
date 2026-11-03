@@ -346,3 +346,133 @@ test('エージェントからの質問: 選択肢（複数選択・その他）
     server.close();
   }
 });
+
+test('マージして origin に push する（origin が進んでいれば取り込む・分岐していれば止める・新しいブランチ）', async () => {
+  const { tmp, repo, store, agents, g } = setup();
+  store.settings.permissionMode = 'bypassPermissions';
+  // origin（bare リポジトリ）を用意する
+  const remote = path.join(tmp, 'remote.git');
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
+  g('remote', 'add', 'origin', remote);
+  g('push', '-q', 'origin', 'main');
+  const rg = (...a) => execFileSync('git', ['--git-dir', remote, ...a]).toString().trim();
+
+  // 1) ふつうに push
+  const a = agents.createCard({ title: 'push-a', prompt: 'A' });
+  agents.start(a.id);
+  await waitFor(() => a.status === 'review');
+  await agents.merge(a.id, { target: 'main', push: true });
+  assert.strictEqual(a.status, 'done');
+  assert.strictEqual(rg('rev-parse', 'main'), g('rev-parse', 'main').toString().trim(), 'origin/main がローカルの main と同じ');
+  assert.match(rg('log', '--oneline', '-1', 'main'), /Merge agent task: push-a/);
+  assert.deepStrictEqual(a.pushedTo, ['main']);
+
+  // 2) 他の人が origin/main に push していた → ローカルに取り込んでからマージして push
+  const other = path.join(tmp, 'other');
+  execFileSync('git', ['clone', '-q', remote, other]);
+  fs.writeFileSync(path.join(other, 'other.txt'), 'x\n');
+  execFileSync('git', ['add', '.'], { cwd: other });
+  execFileSync('git', ['-c', 'user.name=o', '-c', 'user.email=o@o', 'commit', '-qm', 'other change'], { cwd: other });
+  execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: other });
+  const b = agents.createCard({ title: 'push-b', prompt: 'B' });
+  agents.start(b.id);
+  await waitFor(() => b.status === 'review');
+  await agents.merge(b.id, { target: 'main', push: true });
+  const log = rg('log', '--oneline', 'main');
+  assert.match(log, /Merge agent task: push-b/);
+  assert.match(log, /other change/, '他の人の変更も残っている');
+  assert.ok(fs.existsSync(path.join(repo, 'other.txt')), 'チェックアウト中の main にも取り込まれた');
+
+  // 3) ローカルと origin が分岐 → 止める（ローカルは変えない）
+  fs.writeFileSync(path.join(other, 'o2.txt'), 'y\n');
+  execFileSync('git', ['add', '.'], { cwd: other });
+  execFileSync('git', ['-c', 'user.name=o', '-c', 'user.email=o@o', 'commit', '-qm', 'other 2'], { cwd: other });
+  execFileSync('git', ['pull', '-q', '--no-rebase', 'origin', 'main'], { cwd: other });
+  execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: other });
+  fs.writeFileSync(path.join(repo, 'local.txt'), 'z\n');
+  g('add', 'local.txt');
+  g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'local only');
+  const c = agents.createCard({ title: 'push-c', prompt: 'C' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  const before = g('rev-parse', 'main').toString().trim();
+  await assert.rejects(agents.merge(c.id, { target: 'main', push: true }), /別々に進んでいます/);
+  assert.strictEqual(g('rev-parse', 'main').toString().trim(), before);
+  assert.strictEqual(c.status, 'review');
+
+  // 4) 新しいブランチを作ってマージ → origin にも新しいブランチができる（-u）
+  await agents.merge(c.id, { target: 'feature/new', createNew: true, push: true });
+  assert.match(rg('log', '--oneline', '-1', 'feature/new'), /Merge agent task: push-c/);
+  assert.strictEqual(g('rev-parse', '--abbrev-ref', 'feature/new@{upstream}').toString().trim(), 'origin/feature/new');
+});
+
+test('コンフリクト: マージで止まる → Claude に解消してもらう / 自分で解消する → もう一度マージ', async () => {
+  const { repo, store, agents, g } = setup();
+  store.settings.permissionMode = 'bypassPermissions';
+  const commitIn = (dir, file, text, msg) => {
+    fs.writeFileSync(path.join(dir, file), text);
+    execFileSync('git', ['add', file], { cwd: dir });
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', msg], { cwd: dir });
+  };
+  // タスクのブランチと main の両方で README.md を変えて、コンフリクトさせる
+  const make = async (title) => {
+    const c = agents.createCard({ title, prompt: title });
+    agents.start(c.id);
+    await waitFor(() => c.status === 'review');
+    commitIn(c.worktreePath, 'README.md', `hello from ${title}\n`, `task ${title}`);
+    return c;
+  };
+
+  // 1) Claude に解消してもらう
+  const a = await make('a');
+  commitIn(repo, 'README.md', 'hello from main 1\n', 'main 1');
+  const r = await agents.merge(a.id, { target: 'main' });
+  assert.ok(r.conflict);
+  assert.deepStrictEqual(a.conflict.files, ['README.md']);
+  assert.strictEqual(a.status, 'review');
+  assert.ok(!(await require('../src/git').mergeInProgress(repo)), 'main 側のマージは中止済み');
+  await agents.resolveConflict(a.id, 'agent');
+  await waitFor(() => a.status === 'review' && a.conflictResolved);
+  assert.strictEqual(a.conflict, null);
+  const merged = fs.readFileSync(path.join(a.worktreePath, 'README.md'), 'utf8');
+  assert.match(merged, /hello from a/);
+  assert.match(merged, /hello from main 1/);
+  const r2 = await agents.merge(a.id, { target: 'main' });
+  assert.ok(r2.merged);
+  assert.strictEqual(a.status, 'done');
+
+  // 2) Claude が解消しきれなかった → 「まだ残っています」。印付きのファイルはコミットしない
+  const b = await make('b');
+  commitIn(repo, 'README.md', 'hello from main 2\n', 'main 2');
+  assert.ok((await agents.merge(b.id, { target: 'main' })).conflict);
+  process.env.FAKE_BAD_RESOLVE = '1';
+  try {
+    await agents.resolveConflict(b.id, 'agent');
+    await waitFor(() => b.status === 'review' && b.conflict && b.conflict.unresolved);
+  } finally {
+    delete process.env.FAKE_BAD_RESOLVE;
+  }
+  assert.deepStrictEqual(b.conflict.unresolved, ['README.md']);
+  assert.ok(await require('../src/git').mergeInProgress(b.worktreePath), '取り込みの途中のまま（コミットしていない）');
+  await assert.rejects(agents.merge(b.id, { target: 'main' }), /解消が終わっていません/);
+
+  // 3) 自分で解消する: 印が残っているうちは完了できない → 直すと完了 → マージ
+  await assert.rejects(agents.completeConflict(b.id), /印/);
+  fs.writeFileSync(path.join(b.worktreePath, 'README.md'), 'hello from b and main 2\n');
+  await agents.completeConflict(b.id);
+  assert.strictEqual(b.conflictResolved.target, 'main');
+  assert.ok((await agents.merge(b.id, { target: 'main' })).merged);
+  assert.strictEqual(fs.readFileSync(path.join(repo, 'README.md'), 'utf8'), 'hello from b and main 2\n');
+
+  // 4) 取り込みを中止
+  const c = await make('c');
+  commitIn(repo, 'README.md', 'hello from main 3\n', 'main 3');
+  assert.ok((await agents.merge(c.id, { target: 'main' })).conflict);
+  const res = await agents.resolveConflict(c.id, 'manual');
+  assert.ok(res.manual);
+  assert.match(fs.readFileSync(path.join(c.worktreePath, 'README.md'), 'utf8'), /<<<<<<</);
+  await agents.abortConflict(c.id);
+  assert.ok(!(await require('../src/git').mergeInProgress(c.worktreePath)));
+  assert.strictEqual(fs.readFileSync(path.join(c.worktreePath, 'README.md'), 'utf8'), 'hello from c\n');
+  assert.ok(c.conflict, 'コンフリクトの情報は残る（あとで解消できる）');
+});

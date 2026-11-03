@@ -102,6 +102,7 @@ class AgentManager extends EventEmitter {
     for (const c of this.store.cards) {
       c.permissions = [];
       c.questions = [];
+      if (c.conflict) c.conflict.resolving = false;
       if (c.status === 'queued') c.status = c.worktreePath ? 'review' : 'todo';
       if (c.status === 'running') {
         c.status = 'failed';
@@ -444,7 +445,8 @@ class AgentManager extends EventEmitter {
       // 状態を「レビュー」にする前に、作業内容をブランチにコミットしておく
       if (!spawnError) {
         try {
-          if (await git.commitAll(c.worktreePath, this.commitMessage(c))) this.log(c, 'system', '変更を worktree のブランチにコミットしました');
+          const canCommit = await this.afterConflictRun(c);
+          if (canCommit && (await git.commitAll(c.worktreePath, this.commitMessage(c)))) this.log(c, 'system', '変更を worktree のブランチにコミットしました');
         } catch (err) {
           this.log(c, 'error', `コミットに失敗しました: ${err.message}`);
         }
@@ -745,6 +747,7 @@ class AgentManager extends EventEmitter {
    *   target: マージ先（省略時はベースブランチ）
    *   createNew: target を新しく作る（ベースブランチから分岐）
    *   keep: マージ後も worktree とブランチを残してタスクを続ける
+   *   push: マージしたあと origin に push する（origin/<target> にも反映）
    */
   async merge(id, opts = {}) {
     const c = this.must(id);
@@ -755,6 +758,8 @@ class AgentManager extends EventEmitter {
     const target = String(opts.target || c.baseBranch || '').trim();
     if (!target) throw new Error('マージ先のブランチを指定してください');
     if (target === c.branch) throw new Error('タスク自身のブランチにはマージできません');
+
+    if (await git.mergeInProgress(c.worktreePath)) throw new Error('コンフリクトの解消が終わっていません。「解消した」を押すか、取り込みを中止してください');
 
     this.merging = this.merging || new Set();
     this.merging.add(id);
@@ -768,6 +773,10 @@ class AgentManager extends EventEmitter {
       } else if (!(await git.branchExists(top, target))) {
         throw new Error(`ブランチ ${target} が見つかりません`);
       }
+
+      // origin にも反映するときは、先に origin の最新を取ってきてローカルをそろえる
+      const remote = 'origin';
+      const remoteHas = opts.push ? await this.syncWithOrigin(c, top, target) : false;
 
       const finalDiff = await git.diff(c.worktreePath, c.baseCommit);
       const ahead = await git.countCommits(top, `${target}..${c.branch}`);
@@ -785,6 +794,14 @@ class AgentManager extends EventEmitter {
         }
         try {
           await git.merge(dir, c.branch, (c.issue ? `Merge agent task: ${c.title.replace(/^#\d+\s*/, '')} (#${c.issue.number})` : `Merge agent task: ${c.title}`), target);
+        } catch (err) {
+          if (!err.conflictFiles) throw err;
+          // コンフリクト: マージは中止済み。カードに出して、解消の方法を選んでもらう
+          c.conflict = { target, files: err.conflictFiles, push: !!opts.push, keep: !!opts.keep, at: Date.now() };
+          c.conflictResolved = null;
+          this.log(c, 'error', `${target} とコンフリクトしています: ${err.conflictFiles.join(', ')}`);
+          this.changed(c);
+          return { conflict: c.conflict };
         } finally {
           if (temp) await git.removeWorktree(top, temp);
         }
@@ -794,10 +811,23 @@ class AgentManager extends EventEmitter {
       }
       c.mergedInto = [...new Set([...(c.mergedInto || []), target])];
       c.lastMergeTarget = target;
+      c.conflict = null;
+      c.conflictResolved = null;
+
+      if (opts.push) {
+        try {
+          await git.push(top, remote, target, !remoteHas);
+        } catch (err) {
+          this.changed(c);
+          throw new Error(`ローカルの ${target} へのマージは済みましたが、origin への push に失敗しました。ターミナルで git push origin ${target} を試してください。\n${err.message}`);
+        }
+        this.log(c, 'system', `origin/${target} に push しました`);
+        c.pushedTo = [...new Set([...(c.pushedTo || []), target])];
+      }
 
       if (opts.keep) {
         this.changed(c);
-        return;
+        return { merged: true };
       }
       await git.removeWorktree(top, c.worktreePath);
       await git.deleteBranch(top, c.branch);
@@ -806,9 +836,143 @@ class AgentManager extends EventEmitter {
       c.status = 'done';
       c.mergedAt = Date.now();
       this.changed(c);
+      return { merged: true };
     } finally {
       this.merging.delete(id);
     }
+  }
+
+  // origin の target を取ってきて、ローカルの target を早送りでそろえる。origin に target があれば true
+  async syncWithOrigin(c, top, target) {
+    const remote = 'origin';
+    if (!(await git.hasRemote(top, remote))) throw new Error('このリポジトリには origin がありません。push せずにマージするか、origin を設定してください');
+    let has;
+    try {
+      has = await git.fetchBranch(top, remote, target);
+    } catch (err) {
+      throw new Error(`origin の最新を取ってこられませんでした（ネットワークや GitHub のログインを確認してください）。\n${err.message}`);
+    }
+    if (!has) return false;
+    const behind = await git.countCommits(top, `${target}..${remote}/${target}`);
+    const localAhead = await git.countCommits(top, `${remote}/${target}..${target}`);
+    if (behind > 0 && localAhead > 0) {
+      throw new Error(`ローカルの ${target} と origin/${target} が別々に進んでいます。先にターミナルで ${target} を origin/${target} とそろえてから（git pull など）、もう一度マージしてください`);
+    }
+    if (behind > 0) {
+      const dir = await git.worktreeForBranch(top, target);
+      if (dir && (await git.isDirty(dir))) throw new Error(`${target} をチェックアウトしている ${dir} に未コミットの変更があるため、origin の最新を取り込めません`);
+      await git.fastForward(top, target, `${remote}/${target}`, dir);
+      this.log(c, 'system', `origin/${target} の新しいコミット ${behind} 件をローカルの ${target} に取り込みました`);
+    }
+    return true;
+  }
+
+  // ---------- コンフリクトの解消 ----------
+
+  /**
+   * マージ先のブランチをタスクの worktree に取り込み、コンフリクトを解消する
+   * @param {'agent'|'manual'} mode  agent: Claude に解消してもらう / manual: 自分でエディタで直す
+   */
+  async resolveConflict(id, mode) {
+    const c = this.must(id);
+    if (!c.conflict) throw new Error('コンフリクトはありません');
+    if (!['review', 'failed'].includes(c.status)) throw new Error('実行中は解消を始められません');
+    const wt = c.worktreePath;
+    const target = c.conflict.target;
+    let files;
+    if (await git.mergeInProgress(wt)) {
+      files = await git.conflictFiles(wt);
+    } else {
+      await git.commitAll(wt, this.commitMessage(c));
+      if (c.conflict.push) await this.syncWithOrigin(c, c.repoPath, target);
+      files = await git.startMerge(wt, target);
+      this.log(c, 'system', `${target} をタスクのブランチに取り込み始めました`);
+      if (!files.length) {
+        await git.finishMerge(wt);
+        this.markResolved(c, 'コンフリクトなしで取り込めました');
+        return { resolved: true };
+      }
+    }
+    c.conflict = { ...c.conflict, files, manual: mode === 'manual', resolving: mode === 'agent', unresolved: undefined };
+    if (mode === 'manual') {
+      this.log(c, 'system', `自分で解消するモード: ${wt} の ${files.join(', ')} を直してから「解消した」を押してください`);
+      this.changed(c);
+      return { manual: true, path: wt };
+    }
+    const prompt = [
+      `ブランチ \`${target}\` をこのブランチに取り込もうとしたところ、コンフリクトが起きました（git merge は途中の状態です）。`,
+      '',
+      'コンフリクトしているファイル:',
+      ...files.map((f) => `- ${f}`),
+      '',
+      'それぞれのファイルの <<<<<<< / ======= / >>>>>>> を、両方の変更の意図を保つように解消してください。',
+      `解消したら \`git add\` してから \`git commit --no-edit\` でマージを完了してください。テストがあれば実行して確かめてください。`,
+      '最後に、どう解消したかを短くまとめてください。',
+    ].join('\n');
+    this.log(c, 'user', prompt);
+    this.enqueue(c, prompt);
+    return { agent: true };
+  }
+
+  // 自分で直したあと「解消した」
+  async completeConflict(id) {
+    const c = this.must(id);
+    if (!c.conflict) throw new Error('コンフリクトはありません');
+    const wt = c.worktreePath;
+    if (!(await git.mergeInProgress(wt))) {
+      const marked = await git.filesWithMarkers(wt, c.conflict.files);
+      if (marked.length) throw new Error(`まだコンフリクトの印（<<<<<<< など）が残っています: ${marked.join(', ')}`);
+      this.markResolved(c, 'コンフリクトを解消しました');
+      return;
+    }
+    // git add 済みでも、印が残っていればまだ
+    const marked = await git.filesWithMarkers(wt, c.conflict.files);
+    if (marked.length) throw new Error(`まだコンフリクトの印（<<<<<<< など）が残っています: ${marked.join(', ')}`);
+    await git.finishMerge(wt);
+    this.markResolved(c, 'コンフリクトを解消して、取り込みを完了しました');
+  }
+
+  async abortConflict(id) {
+    const c = this.must(id);
+    if (c.worktreePath && (await git.mergeInProgress(c.worktreePath))) await git.abortMerge(c.worktreePath);
+    if (c.conflict) c.conflict = { ...c.conflict, manual: false, resolving: false, unresolved: undefined };
+    this.log(c, 'system', '取り込みを中止しました');
+    this.changed(c);
+  }
+
+  dismissConflict(id) {
+    const c = this.must(id);
+    c.conflict = null;
+    c.conflictResolved = null;
+    this.changed(c);
+  }
+
+  markResolved(c, msg) {
+    c.conflictResolved = { target: c.conflict.target, push: c.conflict.push, keep: c.conflict.keep };
+    c.conflict = null;
+    this.log(c, 'system', `${msg}。もう一度マージすると、コンフリクトなしでマージできます`);
+    this.changed(c);
+  }
+
+  // エージェントの作業が終わったとき: コンフリクトの解消中なら、ちゃんと解消できたかを確かめる
+  async afterConflictRun(c) {
+    const wt = c.worktreePath;
+    if (!c.conflict || !c.conflict.resolving) {
+      // 取り込みの途中（自分で解消中）なら、印の残ったファイルをコミットしない
+      return !(await git.mergeInProgress(wt));
+    }
+    const inProgress = await git.mergeInProgress(wt);
+    const marked = await git.filesWithMarkers(wt, c.conflict.files);
+    const unmerged = inProgress ? await git.conflictFiles(wt) : [];
+    const left = [...new Set([...marked, ...unmerged])];
+    if (left.length) {
+      c.conflict = { ...c.conflict, resolving: false, manual: inProgress, unresolved: left };
+      this.log(c, 'error', `コンフリクトがまだ残っています: ${left.join(', ')}。もう一度 Claude に頼むか、自分で直してください`);
+      return false;
+    }
+    if (inProgress) await git.finishMerge(wt);
+    this.markResolved(c, 'Claude がコンフリクトを解消しました');
+    return true;
   }
 
   async discard(id) {

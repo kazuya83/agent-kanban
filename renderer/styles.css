@@ -299,3 +299,12 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .k-question .log-k, .k-question .log-x { color: #b57bff; }
 .card.asking { border-left-color: #b57bff; border-color: color-mix(in srgb, #b57bff 60%, transparent); animation: pulse-q 2s infinite; }
 @keyframes pulse-q { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, #b57bff 25%, transparent); } }
+
+/* コンフリクト */
+.b-conflict { background: color-mix(in srgb, var(--err) 22%, transparent); color: var(--err); font-weight: 600; }
+.card.conflicting { border-left-color: var(--err); border-color: color-mix(in srgb, var(--err) 55%, transparent); }
+.cf-box { margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--err) 50%, transparent); background: color-mix(in srgb, var(--err) 7%, var(--panel)); }
+.cf-box.ok { border-color: color-mix(in srgb, var(--ok) 50%, transparent); background: color-mix(in srgb, var(--ok) 7%, var(--panel)); }
+.cf-box p { margin: 6px 0; }
+.cf-files { margin: 6px 0; padding-left: 18px; max-height: 120px; overflow: auto; }
+.cf-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }

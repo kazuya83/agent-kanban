@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS = {
   claudePath: 'claude',
   maxParallel: 3,
   defaultSkill: '', // 新しいタスクを作るときに最初から選んでおくスキル
+  pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
 };
 
 class Store {

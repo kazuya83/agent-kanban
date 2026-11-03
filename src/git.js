@@ -2,9 +2,11 @@
 const { execFile } = require('child_process');
 const fs = require('fs');
 
-function git(cwd, args, { allowExitCodes = [] } = {}) {
+function git(cwd, args, { allowExitCodes = [], network = false } = {}) {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, maxBuffer: 64 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+    // ネットワークを使うときは、パスワード入力を待って止まらないようにする（認証はキーチェーンや SSH の設定を使う）
+    const env = network ? { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } : process.env;
+    execFile('git', args, { cwd, env, maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: network ? 120000 : 0 }, (err, stdout, stderr) => {
       if (err) {
         if (typeof err.code === 'number' && allowExitCodes.includes(err.code)) return resolve(stdout);
         const e = new Error(`git ${args.join(' ')} に失敗しました: ${(stderr || err.message).trim()}`);
@@ -95,9 +97,53 @@ async function merge(cwd, branch, message, target) {
   try {
     await git(cwd, [...(await identityArgs(cwd)), 'merge', '--no-ff', '-m', message, branch]);
   } catch (err) {
+    const files = await conflictFiles(cwd).catch(() => []);
     await git(cwd, ['merge', '--abort']).catch(() => {});
-    throw new Error(`${target || 'マージ先'} へのマージでコンフリクトが起きたため中止しました。追加指示で「${target || 'マージ先'} を取り込んでコンフリクトを解消して」と頼むか、手動でマージしてください。\n${err.message}`);
+    if (files.length) {
+      const e = new Error(`${target || 'マージ先'} へのマージでコンフリクトが起きたため、マージを中止しました（${files.join(', ')}）`);
+      e.conflictFiles = files;
+      throw e;
+    }
+    throw err;
   }
+}
+
+// ---------- コンフリクト ----------
+
+async function conflictFiles(dir) {
+  const out = await git(dir, ['diff', '--name-only', '--diff-filter=U']);
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+async function mergeInProgress(dir) {
+  try {
+    await git(dir, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// dir（タスクの worktree）に ref を取り込み始める。コンフリクトしたら途中の状態のまま、そのファイルを返す
+async function startMerge(dir, ref) {
+  await git(dir, [...(await identityArgs(dir)), 'merge', '--no-ff', '--no-commit', ref], { allowExitCodes: [1] });
+  return conflictFiles(dir);
+}
+
+// <<<<<<< などの印が残っているファイル
+async function filesWithMarkers(dir, files) {
+  if (!files || !files.length) return [];
+  const out = await git(dir, ['grep', '-l', '-E', '^(<<<<<<<|>>>>>>>)( |$)', '--', ...files], { allowExitCodes: [1] }).catch(() => '');
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+async function finishMerge(dir) {
+  await git(dir, ['add', '-A']);
+  await git(dir, [...(await identityArgs(dir)), 'commit', '-q', '--no-edit']);
+}
+
+async function abortMerge(dir) {
+  await git(dir, ['merge', '--abort']);
 }
 
 async function branchExists(repo, name) {
@@ -149,7 +195,42 @@ async function diff(wt, baseCommit) {
   return out;
 }
 
+// ---------- リモート（origin） ----------
+
+async function hasRemote(repo, remote = 'origin') {
+  const out = await git(repo, ['remote']).catch(() => '');
+  return out.split('\n').map((s) => s.trim()).includes(remote);
+}
+
+// remote の branch を取ってくる。remote にそのブランチがなければ false
+async function fetchBranch(repo, remote, branch) {
+  const heads = await git(repo, ['ls-remote', '--heads', remote, branch], { network: true });
+  if (!heads.trim()) return false;
+  await git(repo, ['fetch', '--no-tags', remote, `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`], { network: true });
+  return true;
+}
+
+async function push(repo, remote, branch, setUpstream) {
+  await git(repo, ['push', ...(setUpstream ? ['-u'] : []), remote, `refs/heads/${branch}:refs/heads/${branch}`], { network: true });
+}
+
+// ローカルのブランチを、remote のブランチまで早送りする（チェックアウト中ならそのフォルダで）
+async function fastForward(repo, branch, toRef, checkedOutDir) {
+  if (checkedOutDir) await git(checkedOutDir, ['merge', '--ff-only', toRef]);
+  else await git(repo, ['update-ref', `refs/heads/${branch}`, toRef]);
+}
+
 module.exports = {
+  conflictFiles,
+  mergeInProgress,
+  startMerge,
+  filesWithMarkers,
+  finishMerge,
+  abortMerge,
+  hasRemote,
+  fetchBranch,
+  push,
+  fastForward,
   git,
   toplevel,
   currentBranch,

@@ -131,7 +131,11 @@ app.whenReady().then(async () => {
   handle('repo:info', async () => {
     const repo = store.settings.repoPath;
     if (!repo) return { branches: [], current: '' };
-    return { branches: await git.branches(repo).catch(() => []), current: await git.currentBranch(repo).catch(() => '') };
+    return {
+      branches: await git.branches(repo).catch(() => []),
+      current: await git.currentBranch(repo).catch(() => ''),
+      hasOrigin: await git.hasRemote(repo, 'origin').catch(() => false),
+    };
   });
   handle('settings:update', (patch) => {
     const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill'];
@@ -184,8 +188,17 @@ app.whenReady().then(async () => {
   handle('sessions:list', () => require('./src/sessions').listSessions(store.settings.repoPath));
   handle('card:logs', (id) => agents.logs(id));
   handle('card:diff', (id) => agents.diff(id));
-  handle('card:merge', ({ id, target, createNew, keep }) => agents.merge(id, { target, createNew, keep }));
+  handle('card:merge', async ({ id, target, createNew, keep, push }) => {
+    // push するかどうかは覚えておき、次のマージでも同じにする
+    store.settings.pushAfterMerge = !!push;
+    store.save();
+    return agents.merge(id, { target, createNew, keep, push });
+  });
   handle('card:discard', (id) => agents.discard(id));
+  handle('conflict:resolve', ({ id, mode }) => agents.resolveConflict(id, mode));
+  handle('conflict:complete', (id) => agents.completeConflict(id));
+  handle('conflict:abort', (id) => agents.abortConflict(id));
+  handle('conflict:dismiss', (id) => agents.dismissConflict(id));
   handle('card:permission', ({ id, reqId, decision, message }) => agents.answerPermission(id, reqId, decision, message));
   handle('card:answer', ({ id, reqId, answers }) => agents.answerQuestion(id, reqId, answers));
   handle('card:open', async (id) => {

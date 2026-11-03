@@ -78,11 +78,12 @@ function permissionBlock(c, compact) {
 function badgeFor(c) {
   if ((c.questions || []).length) return ['question', '質問'];
   if ((c.permissions || []).length) return ['waiting', '承認待ち'];
+  if (c.conflict && !c.conflict.resolving && c.status !== 'running' && c.status !== 'queued') return ['conflict', 'コンフリクト'];
   if (c.awaitingReply && (c.status === 'review' || c.status === 'failed')) return ['awaiting', '回答待ち'];
   return [c.status, STATUS_LABEL[c.status]];
 }
 function needsYou(c) {
-  return (c.questions || []).length || (c.permissions || []).length || (c.awaitingReply && c.status === 'review');
+  return (c.questions || []).length || (c.permissions || []).length || (c.awaitingReply && c.status === 'review') || (c.conflict && !c.conflict.resolving && c.status === 'review');
 }
 
 // ボードのカード用（短く）。1問だけの単一選択なら、その場で答えられる
@@ -128,6 +129,57 @@ function questionFormHtml(c) {
     .join('');
 }
 
+// ---- コンフリクト ----
+function conflictBoxHtml(c) {
+  const busy = c.status === 'running' || c.status === 'queued';
+  if (c.conflict) {
+    const k = c.conflict;
+    const files = (k.unresolved && k.unresolved.length ? k.unresolved : k.files) || [];
+    let actions;
+    if (k.resolving && busy) actions = '<p class="muted small">Claude がコンフリクトを解消しています…（ログで進み具合を見られます）</p>';
+    else if (k.manual)
+      actions = `<p class="small">タスクの worktree で、上のファイルの <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> 〜 <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code> を直してください。</p>
+        <div class="cf-actions"><button class="btn" data-cact="open">フォルダを開く</button><button class="btn primary" data-cact="complete">解消した（取り込みを完了）</button><button class="btn" data-cact="agent">Claude に任せる</button><button class="btn ghost" data-cact="abort">取り込みを中止</button></div>`;
+    else
+      actions = `<div class="cf-actions"><button class="btn primary" data-cact="agent">Claude に解消してもらう</button><button class="btn" data-cact="manual">自分で解消する</button><button class="btn ghost" data-cact="dismiss">閉じる</button></div>
+        <p class="muted small">どちらも、${esc(k.target)} をこのタスクのブランチに取り込んで解消します。${esc(k.target)} 自体は解消が終わってマージするまで変わりません。</p>`;
+    return `<div class="cf-box">
+      <b>⚠ ${esc(k.target)} とコンフリクトしています${k.unresolved && k.unresolved.length ? '（まだ残っています）' : ''}</b>
+      <ul class="cf-files">${files.map((f) => `<li class="mono">${esc(f)}</li>`).join('')}</ul>
+      ${actions}
+    </div>`;
+  }
+  if (c.conflictResolved && !busy && (c.status === 'review' || c.status === 'failed')) {
+    const r = c.conflictResolved;
+    return `<div class="cf-box ok"><b>✓ ${esc(r.target)} を取り込んで、コンフリクトを解消しました</b>
+      <p class="small">差分タブで解消の内容を確かめてから、マージしてください。</p>
+      <div class="cf-actions"><button class="btn primary" data-cact="remerge">${esc(r.target)} にマージ${r.push ? 'して push' : ''}</button><button class="btn ghost" data-cact="dismiss">閉じる</button></div></div>`;
+  }
+  return '';
+}
+
+async function conflictAction(c, act) {
+  if (act === 'agent') return run(() => api.resolveConflict(c.id, 'agent'), 'Claude に解消を頼みました');
+  if (act === 'manual') {
+    const r = await run(() => api.resolveConflict(c.id, 'manual'));
+    if (r && r.manual) {
+      toast('worktree にコンフリクトした状態を作りました。エディタで直してください', 'ok');
+      run(() => api.open(c.id));
+    } else if (r && r.resolved) toast('コンフリクトなしで取り込めました', 'ok');
+    return;
+  }
+  if (act === 'open') return run(() => api.open(c.id));
+  if (act === 'complete') return run(() => api.completeConflict(c.id), '取り込みを完了しました');
+  if (act === 'abort') return run(() => api.abortConflict(c.id), '取り込みを中止しました');
+  if (act === 'dismiss') return run(() => api.dismissConflict(c.id));
+  if (act === 'remerge') {
+    const r = c.conflictResolved;
+    const res = await run(() => api.merge(c.id, { target: r.target, push: r.push, keep: r.keep }));
+    if (res && res.merged) toast(`${r.target} にマージしました${r.push ? '（origin にも push しました）' : ''}`, 'ok');
+    else if (res && res.conflict) toast('まだコンフリクトしています。もう一度解消してください');
+  }
+}
+
 // フォームから回答を集める（複数選択は「, 」でつなぐ）
 function collectAnswers(form, c) {
   const req = (c.questions || []).find((r) => r.id === form.dataset.req);
@@ -153,7 +205,7 @@ function cardHtml(c) {
   const [bcls, blabel] = badgeFor(c);
   const since = c.status === 'running' ? c.startedAt : null;
   return `
-    <div class="card s-${c.status} ${waiting ? (bcls === 'waiting' ? 'waiting' : 'asking') : ''} ${state.selected === c.id ? 'selected' : ''}" draggable="${c.status === 'todo'}" data-id="${c.id}">
+    <div class="card s-${c.status} ${waiting ? (bcls === 'waiting' ? 'waiting' : bcls === 'conflict' ? 'conflicting' : 'asking') : ''} ${state.selected === c.id ? 'selected' : ''}" draggable="${c.status === 'todo'}" data-id="${c.id}">
       <div class="card-top">
         <span class="badge b-${bcls}">${blabel}</span>
         ${since ? `<span class="elapsed" data-since="${since}">${elapsed(since)}</span>` : ''}
@@ -277,7 +329,7 @@ function closeDetail() {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply]);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -299,11 +351,12 @@ function renderDetailHead() {
       ${sessionRowHtml(c)}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
       ${c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''}
-      ${(c.mergedInto || []).length ? `<dt>マージ済み</dt><dd>${c.mergedInto.map(esc).join(', ')}</dd>` : ''}
+      ${(c.mergedInto || []).length ? `<dt>マージ済み</dt><dd>${c.mergedInto.map((b) => esc(b) + ((c.pushedTo || []).includes(b) ? '（origin にも push 済み）' : '')).join(', ')}</dd>` : ''}
       ${c.costUsd ? `<dt>コスト</dt><dd>$${c.costUsd.toFixed(3)}</dd>` : ''}
       ${(c.alwaysAllow || []).length ? `<dt>常に許可</dt><dd>${c.alwaysAllow.map(esc).join(', ')}</dd>` : ''}
     </dl>
     ${c.error ? `<div class="d-error">${esc(c.error)}</div>` : ''}
+    ${conflictBoxHtml(c)}
     ${questionFormHtml(c)}
     ${c.awaitingReply && (s === 'review' || s === 'failed') ? `<div class="d-awaiting"><b>💬 Claude が質問しています</b><p>${esc(String(c.lastText || '').slice(-600))}</p><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>` : ''}
     ${permissionBlock(c, false)}
@@ -335,6 +388,12 @@ $('detailHead').addEventListener('input', (e) => {
   if (box && e.target.value.trim()) box.checked = true;
 });
 $('detailHead').addEventListener('click', async (e) => {
+  const ca = e.target.closest('[data-cact]');
+  if (ca) {
+    const c = card(state.selected);
+    if (c) conflictAction(c, ca.dataset.cact);
+    return;
+  }
   const qa = e.target.closest('[data-qact]');
   if (qa) {
     const form = qa.closest('.qform');
@@ -771,6 +830,8 @@ async function openMerge(c) {
          <option value="__new__">＋ 新しいブランチを作ってマージ…</option>
        </select></label>
      <label class="field hidden" id="mNewWrap"><span>新しいブランチの名前（${esc(c.baseBranch)} から作ります）</span><input id="mNew" placeholder="例: feature/login-improvements" /></label>
+     <label class="check"><input type="checkbox" id="mPush" ${info.hasOrigin && state.board.settings.pushAfterMerge !== false ? 'checked' : ''} ${info.hasOrigin ? '' : 'disabled'} /> マージしたあと origin に push する（<code id="mPushTarget">origin/…</code> にも反映）</label>
+     ${info.hasOrigin ? '' : '<p class="muted small">このリポジトリには origin がないので、ローカルのブランチにだけマージします。</p>'}
      <label class="check"><input type="checkbox" id="mKeep" /> マージ後もタスクを続ける（worktree とブランチを残す）</label>
      <p class="muted small" id="mHint"></p>
      <div class="modal-actions"><button class="btn ghost" id="mCancel">キャンセル</button><button class="btn primary" id="mOk">マージ</button></div>`,
@@ -779,13 +840,16 @@ async function openMerge(c) {
         const isNew = $('mTarget').value === '__new__';
         $('mNewWrap').classList.toggle('hidden', !isNew);
         const t = isNew ? $('mNew').value.trim() || '（新しいブランチ）' : $('mTarget').value;
-        $('mHint').textContent = $('mKeep').checked
-          ? `${t} にマージしたあとも、このタスクはレビュー列に残ります。続けて追加指示を送ったり、別のブランチにマージしたりできます。`
-          : `${t} にマージしたあと、worktree とブランチ ${c.branch} を削除して「完了」にします。`;
+        $('mPushTarget').textContent = `origin/${t}`;
+        const pushText = $('mPush').checked ? `origin の最新を取り込んでからローカルの ${t} にマージし、origin/${t} に push します。` : `ローカルの ${t} にだけマージします（origin には push しません）。`;
+        $('mHint').textContent = pushText + ($('mKeep').checked
+          ? 'マージしたあとも、このタスクはレビュー列に残ります。'
+          : `マージしたあと、worktree とブランチ ${c.branch} を削除して「完了」にします。`);
         if (isNew) $('mNew').focus();
       };
       $('mTarget').onchange = update;
       $('mKeep').onchange = update;
+      $('mPush').onchange = update;
       $('mNew').oninput = update;
       update();
       $('mCancel').onclick = closeModal;
@@ -794,7 +858,17 @@ async function openMerge(c) {
         const target = isNew ? $('mNew').value.trim() : $('mTarget').value;
         if (!target) return toast('ブランチ名を入力してください');
         $('mOk').disabled = true;
-        const ok = await run(() => api.merge(c.id, { target, createNew: isNew, keep: $('mKeep').checked }).then(() => true), `${target} にマージしました`);
+        const push = $('mPush').checked;
+        $('mOk').textContent = push ? 'マージして push しています…' : 'マージしています…';
+        const res = await run(() => api.merge(c.id, { target, createNew: isNew, keep: $('mKeep').checked, push }));
+        $('mOk').textContent = 'マージ';
+        if (res && res.conflict) {
+          closeModal();
+          toast(`${target} とコンフリクトしたので、マージを中止しました。詳細画面から解消できます`);
+          return;
+        }
+        if (res) toast(push ? `${target} にマージして origin/${target} に push しました` : `${target} にマージしました`, 'ok');
+        const ok = !!res;
         $('mOk').disabled = false;
         if (ok) closeModal();
       };
