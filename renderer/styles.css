@@ -99,9 +99,8 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 
 /* レイアウト */
 .layout { flex: 1; display: flex; min-height: 0; }
-.board { flex: 1; display: grid; grid-template-columns: repeat(5, minmax(170px, 1fr)); gap: 12px; padding: 14px; overflow: auto; min-width: 0; }
+.board { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(170px, 1fr)); gap: 12px; padding: 14px; overflow: auto; min-width: 0; }
 .column { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; min-height: 0; }
-.column.chat-col { border-style: dashed; }
 .column.drop { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
 .column > header { display: flex; justify-content: space-between; padding: 10px 12px; font-weight: 600; border-bottom: 1px solid var(--line); }
 .count { color: var(--muted); font-weight: 400; }
@@ -187,6 +186,45 @@ body.resizing { cursor: col-resize; user-select: none; }
 .k-result .log-x { color: var(--ok); }
 .k-permission .log-x { color: var(--warn); }
 .k-system .log-x, .k-stderr .log-x { color: var(--muted); font-size: 12px; }
+
+/* ログの Markdown 表示 */
+.log-md .log-x { white-space: normal; line-height: 1.6; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md blockquote, .md pre, .md .md-table { margin: 0 0 8px; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 12px 0 6px; line-height: 1.35; }
+.md h1 { font-size: 16px; }
+.md h2 { font-size: 15px; padding-bottom: 3px; border-bottom: 1px solid var(--line); }
+.md h3 { font-size: 14px; }
+.md h4, .md h5, .md h6 { font-size: 13px; }
+.md ul, .md ol { padding-left: 20px; }
+.md li { margin: 2px 0; }
+.md li > ul, .md li > ol { margin: 2px 0; }
+.md li input[type=checkbox] { width: auto; margin: 0 4px 0 0; vertical-align: -2px; }
+.md code { font-family: var(--mono); font-size: 0.9em; background: var(--panel-2); border: 1px solid var(--line); padding: 0 4px; border-radius: 4px; }
+.md pre.md-code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow-x: auto; white-space: pre; }
+.md pre.md-code code { background: none; border: 0; padding: 0; font-size: 11.5px; }
+.md blockquote { border-left: 3px solid var(--line); padding: 2px 10px; color: var(--muted); }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+.md .md-table { overflow-x: auto; }
+.md table { border-collapse: collapse; font-size: 12px; }
+.md th, .md td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; }
+.md th { background: var(--panel-2); }
+.md a.md-link { color: var(--accent); cursor: pointer; text-decoration: underline; word-break: break-all; }
+.k-result .md { color: var(--ok); }
+
+/* 会話はモーダルで開く */
+.d-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 8; }
+.detail.as-modal {
+  position: fixed; z-index: 9; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(860px, calc(100vw - 48px)); max-width: none; min-width: 0; height: calc(100vh - 64px);
+  border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+.detail.as-modal .d-resizer { display: none; }
+.chat-btn { position: relative; }
+.chat-count { margin-left: 6px; font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--line); color: var(--text); }
+.chat-count.warn { background: var(--warn); color: #000; font-weight: 600; }
+.chat-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; margin-bottom: 12px; }
 
 /* 差分（GitHub 風） */
 .diff-stat { padding: 6px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
