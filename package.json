@@ -1,6 +1,6 @@
 {
   "name": "agent-kanban",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Claude Code のタスクをカンバンで管理し、git worktree ごとに並列実行するデスクトップアプリ",
   "main": "main.js",
   "license": "MIT",

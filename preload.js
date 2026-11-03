@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('api', {
   merge: (id, opts) => call('card:merge', { id, ...(opts || {}) }),
   discard: (id) => call('card:discard', id),
   answerPermission: (id, reqId, decision, message) => call('card:permission', { id, reqId, decision, message }),
+  answerQuestion: (id, reqId, answers) => call('card:answer', { id, reqId, answers }),
   open: (id) => call('card:open', id),
   onBoard: (cb) => ipcRenderer.on('board:changed', (_e, d) => cb(d)),
   onLog: (cb) => ipcRenderer.on('card:log', (_e, d) => cb(d)),

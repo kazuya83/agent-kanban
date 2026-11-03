@@ -6,7 +6,7 @@ const COLUMNS = [
   { key: 'done', label: '完了', statuses: ['done'] },
 ];
 const STATUS_LABEL = { todo: '未着手', queued: '待機中', running: '実行中', review: 'レビュー待ち', failed: 'エラー', done: 'マージ済み' };
-const LOG_LABEL = { user: 'あなた', text: 'Claude', tool: 'ツール', tool_result: '結果', tool_error: '結果(エラー)', system: 'システム', result: '完了', error: 'エラー', stderr: 'stderr', permission: '承認' };
+const LOG_LABEL = { question: '質問', user: 'あなた', text: 'Claude', tool: 'ツール', tool_result: '結果', tool_error: '結果(エラー)', system: 'システム', result: '完了', error: 'エラー', stderr: 'stderr', permission: '承認' };
 const PERMISSION_MODES = [
   ['default', '毎回確認する（すべての操作をカードで承認）'],
   ['acceptEdits', 'ファイル編集は自動で許可、コマンドなどは確認する（おすすめ）'],
@@ -72,19 +72,97 @@ function permissionBlock(c, compact) {
     .join('') + (compact && reqs.length > 1 ? `<div class="perm-more">ほか ${reqs.length - 1} 件の承認待ち</div>` : '');
 }
 
+// ---- エージェントからの質問 ----
+
+// カードの状態を表すバッジ（質問・承認待ち・回答待ちを優先して出す）
+function badgeFor(c) {
+  if ((c.questions || []).length) return ['question', '質問'];
+  if ((c.permissions || []).length) return ['waiting', '承認待ち'];
+  if (c.awaitingReply && (c.status === 'review' || c.status === 'failed')) return ['awaiting', '回答待ち'];
+  return [c.status, STATUS_LABEL[c.status]];
+}
+function needsYou(c) {
+  return (c.questions || []).length || (c.permissions || []).length || (c.awaitingReply && c.status === 'review');
+}
+
+// ボードのカード用（短く）。1問だけの単一選択なら、その場で答えられる
+function questionCompactHtml(c) {
+  const req = (c.questions || [])[0];
+  if (!req) return '';
+  const q = req.questions[0];
+  const quick = req.questions.length === 1 && !q.multiSelect && q.options.length && q.options.length <= 4;
+  return `<div class="qbox" data-card="${c.id}" data-req="${req.id}">
+    <div class="q-title">❓ ${esc(q.header ? q.header + ': ' : '')}${esc(q.question)}</div>
+    ${quick
+      ? `<div class="q-quick">${q.options.map((o) => `<button class="btn small" data-qpick="${esc(o.label)}" title="${esc(o.description)}">${esc(o.label)}</button>`).join('')}<button class="btn small ghost" data-qopen="1">その他…</button></div>`
+      : `<div class="q-quick"><button class="btn small primary" data-qopen="1">回答する（${req.questions.length}問）</button></div>`}
+  </div>`;
+}
+
+// 詳細パネル用の回答フォーム
+function questionFormHtml(c) {
+  return (c.questions || [])
+    .map(
+      (req) => `<div class="qform" data-card="${c.id}" data-req="${req.id}">
+      <div class="q-title">❓ Claude からの質問</div>
+      ${req.questions
+        .map(
+          (q, i) => `<div class="q-item" data-qi="${i}">
+          <div class="q-head">${q.header ? `<span class="q-chip">${esc(q.header)}</span>` : ''}${esc(q.question)}${q.multiSelect ? '<span class="muted small">（複数選べます）</span>' : ''}</div>
+          <div class="q-opts">
+            ${q.options
+              .map(
+                (o) => `<label class="q-opt"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="q-${req.id}-${i}" value="${esc(o.label)}" />
+                <span><b>${esc(o.label)}</b>${o.description ? `<small>${esc(o.description)}</small>` : ''}</span></label>`,
+              )
+              .join('')}
+            <label class="q-opt other"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="q-${req.id}-${i}" value="__other__" />
+              <span><b>その他</b><input class="q-other" placeholder="自由に入力" /></span></label>
+          </div>
+        </div>`,
+        )
+        .join('')}
+      <div class="q-actions"><button class="btn primary" data-qact="submit">回答する</button><button class="btn ghost" data-qact="skip" title="Claude に、妥当だと思う方法で進めてもらいます">答えずに続ける</button></div>
+    </div>`,
+    )
+    .join('');
+}
+
+// フォームから回答を集める（複数選択は「, 」でつなぐ）
+function collectAnswers(form, c) {
+  const req = (c.questions || []).find((r) => r.id === form.dataset.req);
+  if (!req) return null;
+  const answers = {};
+  req.questions.forEach((q, i) => {
+    const item = form.querySelector(`.q-item[data-qi="${i}"]`);
+    const other = item.querySelector('.q-other').value.trim();
+    const picked = [...item.querySelectorAll('input[type=radio]:checked, input[type=checkbox]:checked')].map((x) => x.value);
+    const vals = picked.filter((v) => v !== '__other__');
+    if (other && (picked.includes('__other__') || !vals.length || q.multiSelect)) vals.push(other);
+    answers[q.question] = vals.join(', ');
+  });
+  return answers;
+}
+
+async function sendAnswer(cardId, reqId, answers) {
+  return run(() => api.answerQuestion(cardId, reqId, answers).then(() => true), answers ? '回答しました' : 'そのまま続けてもらいます');
+}
+
 function cardHtml(c) {
-  const waiting = (c.permissions || []).length > 0;
+  const waiting = needsYou(c);
+  const [bcls, blabel] = badgeFor(c);
   const since = c.status === 'running' ? c.startedAt : null;
   return `
-    <div class="card s-${c.status} ${waiting ? 'waiting' : ''} ${state.selected === c.id ? 'selected' : ''}" draggable="${c.status === 'todo'}" data-id="${c.id}">
+    <div class="card s-${c.status} ${waiting ? (bcls === 'waiting' ? 'waiting' : 'asking') : ''} ${state.selected === c.id ? 'selected' : ''}" draggable="${c.status === 'todo'}" data-id="${c.id}">
       <div class="card-top">
-        <span class="badge b-${waiting ? 'waiting' : c.status}">${waiting ? '承認待ち' : STATUS_LABEL[c.status]}</span>
+        <span class="badge b-${bcls}">${blabel}</span>
         ${since ? `<span class="elapsed" data-since="${since}">${elapsed(since)}</span>` : ''}
       </div>
       <div class="card-title">${c.issue ? `<a class="issue-chip" data-url="${esc(c.issue.url)}" title="Issue を開く">#${c.issue.number}</a> ${esc(c.title.replace(/^#\d+\s*/, ''))}` : esc(c.title)}</div>
       ${c.skill ? `<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">⚡ /${esc(c.skill)}</span></div>` : ''}
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
       ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(c.lastMessage)}</div>` : ''}
+      ${questionCompactHtml(c)}
       ${permissionBlock(c, true)}
       <div class="card-meta">
         ${c.branch ? `<span title="${esc(c.branch)}">⎇ ${esc(c.branch.replace(/^agent\//, ''))}</span>` : ''}
@@ -99,8 +177,8 @@ function renderBoard() {
   $('baseInfo').textContent = settings.repoPath ? `ベース: ${settings.baseBranch || 'チェックアウト中のブランチ'}` : '';
   const running = cards.filter((c) => c.status === 'running').length;
   const queued = cards.filter((c) => c.status === 'queued').length;
-  const waiting = cards.filter((c) => (c.permissions || []).length).length;
-  $('runInfo').innerHTML = `実行中 ${running}/${settings.maxParallel || 1}${queued ? ` ・ 待機 ${queued}` : ''}${waiting ? ` ・ <b class="warn">承認待ち ${waiting}</b>` : ''}`;
+  const waiting = cards.filter((c) => needsYou(c)).length;
+  $('runInfo').innerHTML = `実行中 ${running}/${settings.maxParallel || 1}${queued ? ` ・ 待機 ${queued}` : ''}${waiting ? ` ・ <b class="warn">あなたの対応待ち ${waiting}</b>` : ''}`;
 
   if (!settings.repoPath) {
     $('board').innerHTML = `<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、Claude Code を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ</button></div>`;
@@ -110,7 +188,7 @@ function renderBoard() {
   $('board').innerHTML = COLUMNS.map((col) => {
     const list = cards
       .filter((c) => col.statuses.includes(c.status))
-      .sort((a, b) => ((b.permissions || []).length - (a.permissions || []).length) || (b.createdAt - a.createdAt));
+      .sort((a, b) => (needsYou(b) ? 1 : 0) - (needsYou(a) ? 1 : 0) || b.createdAt - a.createdAt);
     return `
       <section class="column" data-col="${col.key}">
         <header><span>${col.label}</span><span class="count">${list.length}</span></header>
@@ -121,6 +199,16 @@ function renderBoard() {
 
 // ボード上のクリック・ドラッグ（イベント委譲）
 $('board').addEventListener('click', (e) => {
+  const qp = e.target.closest('[data-qpick], [data-qopen]');
+  if (qp) {
+    e.stopPropagation();
+    const box = qp.closest('.qbox');
+    if (qp.dataset.qopen) return select(box.dataset.card);
+    const c = card(box.dataset.card);
+    const req = c && (c.questions || []).find((r) => r.id === box.dataset.req);
+    if (req) sendAnswer(c.id, req.id, { [req.questions[0].question]: qp.dataset.qpick });
+    return;
+  }
   const btn = e.target.closest('[data-decision]');
   if (btn) {
     e.stopPropagation();
@@ -189,7 +277,7 @@ function closeDetail() {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.sessionId, c.forkNext, c.sessions]);
+  const sig = JSON.stringify([c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -202,7 +290,7 @@ function renderDetailHead() {
   ].filter(Boolean);
   $('detailHead').innerHTML = `
     <div class="d-title-row">
-      <span class="badge b-${(c.permissions || []).length ? 'waiting' : s}">${(c.permissions || []).length ? '承認待ち' : STATUS_LABEL[s]}</span>
+      <span class="badge b-${badgeFor(c)[0]}">${badgeFor(c)[1]}</span>
       <h2 class="d-title">${esc(c.title)}</h2>
       <button class="icon" id="closeDetail" title="閉じる">✕</button>
     </div>
@@ -216,6 +304,8 @@ function renderDetailHead() {
       ${(c.alwaysAllow || []).length ? `<dt>常に許可</dt><dd>${c.alwaysAllow.map(esc).join(', ')}</dd>` : ''}
     </dl>
     ${c.error ? `<div class="d-error">${esc(c.error)}</div>` : ''}
+    ${questionFormHtml(c)}
+    ${c.awaitingReply && (s === 'review' || s === 'failed') ? `<div class="d-awaiting"><b>💬 Claude が質問しています</b><p>${esc(String(c.lastText || '').slice(-600))}</p><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>` : ''}
     ${permissionBlock(c, false)}
     <div class="d-actions">${btns.join('')}</div>`;
   $('closeDetail').onclick = closeDetail;
@@ -236,10 +326,26 @@ function renderDetailHead() {
   $('followInput').disabled = !canFollow;
   drawFollowSkill();
   $('followBtn').disabled = !canFollow;
-  $('followInput').placeholder = canFollow ? '追加の指示を送る（Ctrl/⌘ + Enter で送信）。同じセッションの続きとして動きます' : s === 'todo' ? '開始すると、終わったあとに追加の指示を送れます' : 'エージェントの作業中は送れません';
+  $('followInput').placeholder = canFollow && c.awaitingReply ? 'Claude への回答を書く（Ctrl/⌘ + Enter で送信）' : canFollow ? '追加の指示を送る（Ctrl/⌘ + Enter で送信）。同じセッションの続きとして動きます' : s === 'todo' ? '開始すると、終わったあとに追加の指示を送れます' : 'エージェントの作業中は送れません';
 }
 
+$('detailHead').addEventListener('input', (e) => {
+  if (!e.target.classList.contains('q-other')) return;
+  const box = e.target.closest('.q-opt').querySelector('input[type=radio], input[type=checkbox]');
+  if (box && e.target.value.trim()) box.checked = true;
+});
 $('detailHead').addEventListener('click', async (e) => {
+  const qa = e.target.closest('[data-qact]');
+  if (qa) {
+    const form = qa.closest('.qform');
+    const c = card(form.dataset.card);
+    if (!c) return;
+    if (qa.dataset.qact === 'skip') return sendAnswer(c.id, form.dataset.req, null);
+    const answers = collectAnswers(form, c);
+    const empty = Object.entries(answers || {}).find(([, v]) => !v);
+    if (empty) return toast(`「${empty[0]}」に答えてください`);
+    return sendAnswer(c.id, form.dataset.req, answers);
+  }
   const chip = e.target.closest('.issue-chip');
   if (chip) return run(() => api.openExternal(chip.dataset.url));
   const dec = e.target.closest('[data-decision]');

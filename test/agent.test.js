@@ -296,3 +296,53 @@ test('スキルを付けて実行する（最初の指示と追加指示）', as
   assert.match(await agents.diff(c.id), /\+スキルなしで/);
   assert.strictEqual(c.logs.filter((l) => l.kind === 'user')[2].skill, undefined);
 });
+
+test('エージェントからの質問: 選択肢（複数選択・その他）に答える / 答えずに続ける / 文章の質問は「回答待ち」', async () => {
+  const { store, agents } = setup();
+  const server = new PermissionServer((p, s) => agents.requestPermission(p, s));
+  await server.start();
+  agents.setPermissionEndpoint(server.port, server.token);
+  try {
+    const c = agents.createCard({ title: 'ask', prompt: '[ask] 設定して' });
+    agents.start(c.id);
+    await waitFor(() => (c.questions || []).length === 1);
+    const req = c.questions[0];
+    assert.strictEqual(req.questions.length, 2);
+    assert.strictEqual(req.questions[1].multiSelect, true);
+    assert.strictEqual(c.permissions.length, 0, '質問は承認とは別');
+    assert.throws(() => agents.answerQuestion(c.id, req.id, { 'どの色にしますか？': '青' }), /答えてください/);
+    assert.throws(() => agents.answerPermission(c.id, req.id, 'allow'), /もう終わっています/);
+    agents.answerQuestion(c.id, req.id, { 'どの色にしますか？': '青', '対応する OS は？': 'Mac, Linux' });
+    assert.strictEqual(c.questions.length, 0);
+    // このあと Bash の承認が来る
+    await waitFor(() => c.permissions.length === 1);
+    agents.answerPermission(c.id, c.permissions[0].id, 'allow');
+    await waitFor(() => c.status === 'review');
+    const d = await agents.diff(c.id);
+    assert.match(d, /"どの色にしますか？"="青"/);
+    assert.match(d, /"対応する OS は？"="Mac, Linux"/);
+    assert.strictEqual(c.awaitingReply, false);
+
+    // 答えずに続ける
+    agents.send(c.id, '[ask] もう一度');
+    await waitFor(() => (c.questions || []).length === 1);
+    agents.answerQuestion(c.id, c.questions[0].id, null);
+    await waitFor(() => c.permissions.length === 1);
+    agents.answerPermission(c.id, c.permissions[0].id, 'allow');
+    await waitFor(() => c.status === 'review' && c.logs.some((l) => l.text === '答えずに続ける'));
+    assert.match(await agents.diff(c.id), /did not answer/);
+
+    // 文章で質問して止まる → 回答待ち。答えると外れる
+    agents.send(c.id, '[q] 方法を決めて');
+    await waitFor(() => c.status === 'review' && c.awaitingReply === true);
+    assert.match(c.lastText, /進めますか？/);
+    agents.send(c.id, 'B で');
+    assert.strictEqual(c.awaitingReply, false);
+    await waitFor(() => c.permissions.length === 1);
+    agents.answerPermission(c.id, c.permissions[0].id, 'allow');
+    await waitFor(() => c.status === 'review');
+    assert.strictEqual(c.awaitingReply, false);
+  } finally {
+    server.close();
+  }
+});

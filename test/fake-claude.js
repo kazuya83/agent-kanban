@@ -96,6 +96,27 @@ async function turn(prompt, sessionId) {
   out({ type: 'assistant', message: { content: [{ type: 'text', text: `了解: ${prompt}` }] } });
   if (process.env.FAKE_SLEEP) await sleep(Number(process.env.FAKE_SLEEP));
 
+  // [ask] があれば、選択肢の質問（AskUserQuestion）をする
+  const cfgQ = opt('--mcp-config');
+  if (prompt.includes('[ask]') && cfgQ) {
+    const qinput = { questions: [
+      { question: 'どの色にしますか？', header: '色', multiSelect: false, options: [{ label: '赤', description: '情熱' }, { label: '青', description: '落ち着き' }] },
+      { question: '対応する OS は？', header: 'OS', multiSelect: true, options: [{ label: 'Mac', description: '' }, { label: 'Windows', description: '' }] },
+    ] };
+    out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_q', name: 'AskUserQuestion', input: qinput }] } });
+    const d = await askPermission(cfgQ, 'AskUserQuestion', qinput);
+    const text = d.behavior === 'allow' && d.updatedInput.answers
+      ? `Your questions have been answered: ${Object.entries(d.updatedInput.answers).map(([q, a]) => `"${q}"="${a}"`).join(', ')}`
+      : 'The user did not answer the questions.';
+    out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_q', content: text }] } });
+    prompt += `\n[answers] ${text}`;
+  }
+  // [q] があれば、最後に文章で質問して止まる
+  if (prompt.includes('[q]')) {
+    out({ type: 'assistant', message: { content: [{ type: 'text', text: 'どちらの方法で進めますか？\n- A: 速い\n- B: 安全' }] } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: 'どちらの方法で進めますか？', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
+    return;
+  }
   const file = `out-${Date.now()}.txt`;
   const input = { command: `echo > ${file}` };
   out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input }] } });

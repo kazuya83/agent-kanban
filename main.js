@@ -79,6 +79,23 @@ app.whenReady().then(async () => {
 
   agents.on('changed', notifyBoard);
   agents.on('log', (id, entry) => send('card:log', { id, entry }));
+  // 質問・回答待ちも、承認と同じように通知する
+  const notify = (card, title, body) => {
+    if (Notification.isSupported()) {
+      const n = new Notification({ title, body: String(body).slice(0, 200) });
+      n.on('click', () => {
+        if (win) {
+          win.show();
+          win.focus();
+          send('card:focus', card.id);
+        }
+      });
+      n.show();
+    }
+    if (win && !win.isFocused()) win.flashFrame(true);
+  };
+  agents.on('question', (card, qs) => notify(card, `質問: ${card.title}`, qs.map((q) => q.question).join(' / ')));
+  agents.on('awaiting', (card) => notify(card, `回答待ち: ${card.title}`, card.lastText || 'Claude が質問しています'));
   agents.on('permission', (card, req) => {
     if (Notification.isSupported()) {
       const n = new Notification({ title: `承認待ち: ${card.title}`, body: `${req.toolName}  ${req.summary}`.slice(0, 200) });
@@ -170,6 +187,7 @@ app.whenReady().then(async () => {
   handle('card:merge', ({ id, target, createNew, keep }) => agents.merge(id, { target, createNew, keep }));
   handle('card:discard', (id) => agents.discard(id));
   handle('card:permission', ({ id, reqId, decision, message }) => agents.answerPermission(id, reqId, decision, message));
+  handle('card:answer', ({ id, reqId, answers }) => agents.answerQuestion(id, reqId, answers));
   handle('card:open', async (id) => {
     const c = agents.must(id);
     if (!c.worktreePath) throw new Error('worktree がありません');

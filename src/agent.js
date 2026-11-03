@@ -29,6 +29,7 @@ function slugify(s) {
 
 function summarizeInput(input) {
   if (!input || typeof input !== 'object') return '';
+  if (Array.isArray(input.questions)) return truncate(input.questions.map((q) => q && q.question).filter(Boolean).join(' / '), 300);
   const v = input.command ?? input.file_path ?? input.notebook_path ?? input.path ?? input.pattern ?? input.url ?? input.query ?? input.description;
   return truncate(typeof v === 'string' ? v : JSON.stringify(input), 300);
 }
@@ -47,6 +48,17 @@ function notFoundMessage(cmd) {
 function cleanSkill(s) {
   const v = String(s || '').trim().replace(/^\//, '');
   return v || null;
+}
+
+// Claude の最後の返事が、ユーザーへの質問で終わっているか
+function endsWithQuestion(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  const lines = t.split(/\n+/).filter((l) => l.trim());
+  // 「どちらにしますか？」のあとに選択肢の箇条書きが続く形もあるので、箇条書きは飛ばして見る
+  let i = lines.length - 1;
+  while (i > 0 && /^\s*([-*•・]|\d+[.)．]|[A-Za-z][.)])\s+/.test(lines[i])) i--;
+  return /[?？]\s*[)）」』*_`]*\s*$/.test(lines[i] || '');
 }
 
 function splitList(s) {
@@ -89,6 +101,7 @@ class AgentManager extends EventEmitter {
   recoverInterrupted() {
     for (const c of this.store.cards) {
       c.permissions = [];
+      c.questions = [];
       if (c.status === 'queued') c.status = c.worktreePath ? 'review' : 'todo';
       if (c.status === 'running') {
         c.status = 'failed';
@@ -261,6 +274,8 @@ class AgentManager extends EventEmitter {
   }
 
   enqueue(c, prompt) {
+    c.awaitingReply = false;
+    c.lastText = '';
     c.pendingPrompt = prompt;
     c.status = 'queued';
     c.queuedAt = Date.now();
@@ -449,6 +464,11 @@ class AgentManager extends EventEmitter {
       } else if (code === 0 && !run.resultError) {
         c.status = 'review';
         c.error = null;
+        c.awaitingReply = endsWithQuestion(c.lastText);
+        if (c.awaitingReply) {
+          this.log(c, 'question', 'Claude が質問しています。下の欄から答えると、続きから進めます');
+          this.emit('awaiting', c);
+        }
       } else {
         c.status = 'failed';
         c.error = run.resultError || `claude が終了コード ${code} で終了しました`;
@@ -482,6 +502,7 @@ class AgentManager extends EventEmitter {
         for (const b of (ev.message && ev.message.content) || []) {
           if (b.type === 'text' && b.text && b.text.trim()) {
             this.log(c, 'text', b.text);
+            c.lastText = b.text.trim();
             c.lastMessage = truncate(b.text.trim(), 200);
           } else if (b.type === 'tool_use') {
             this.log(c, 'tool', `${b.name}  ${summarizeInput(b.input)}`);
@@ -602,6 +623,7 @@ class AgentManager extends EventEmitter {
     const c = this.store.card(cardId);
     if (!c) return Promise.resolve({ behavior: 'deny', message: 'タスクが見つかりません' });
     input = input && typeof input === 'object' ? input : {};
+    if (toolName === 'AskUserQuestion') return this.askQuestion(c, input, toolUseId, signal);
     if ((c.alwaysAllow || []).includes(toolName)) {
       this.log(c, 'permission', `自動で許可しました: ${toolName}  ${summarizeInput(input)}`);
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
@@ -621,11 +643,60 @@ class AgentManager extends EventEmitter {
     });
   }
 
+  // ---------- エージェントからの質問（AskUserQuestion） ----------
+
+  // 選択肢の質問を、カードの回答フォームとして出す。ユーザーが答えるまで待つ
+  askQuestion(c, input, toolUseId, signal) {
+    const questions = (Array.isArray(input.questions) ? input.questions : [])
+      .map((q) => ({
+        question: String(q.question || ''),
+        header: String(q.header || ''),
+        multiSelect: !!q.multiSelect,
+        options: (Array.isArray(q.options) ? q.options : []).map((o) => ({ label: String(o.label || ''), description: String(o.description || '') })),
+      }))
+      .filter((q) => q.question);
+    if (!questions.length) return Promise.resolve({ behavior: 'allow', updatedInput: input });
+    return new Promise((resolve) => {
+      const id = crypto.randomBytes(6).toString('hex');
+      this.pending.set(id, { cardId: c.id, toolName: 'AskUserQuestion', input, resolve, kind: 'question', questions });
+      c.questions = [...(c.questions || []), { id, toolUseId, questions, at: Date.now() }];
+      this.log(c, 'question', `質問: ${questions.map((q) => q.question).join(' / ')}`);
+      this.changed(c);
+      this.emit('question', c, questions);
+      signal?.addEventListener('abort', () => {
+        if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: '中断されました' }, null);
+      });
+    });
+  }
+
+  /**
+   * 質問に答える
+   * @param {Record<string, string>|null} answers  質問文 → 回答（複数選択は「, 」でつなぐ）。null なら答えずに続けさせる
+   */
+  answerQuestion(cardId, reqId, answers) {
+    this.must(cardId);
+    const p = this.pending.get(reqId);
+    if (!p || p.cardId !== cardId || p.kind !== 'question') throw new Error('この質問はもう終わっています');
+    if (!answers) {
+      this.settle(reqId, { behavior: 'deny', message: 'ユーザーは質問に答えずに、そのまま進めるよう求めています。妥当だと思う方法で続けてください。' }, '答えずに続ける');
+      return;
+    }
+    const clean = {};
+    for (const q of p.questions) {
+      const a = String(answers[q.question] ?? '').trim();
+      if (!a) throw new Error(`「${q.header || q.question}」に答えてください`);
+      clean[q.question] = a;
+    }
+    const c = this.store.card(cardId);
+    this.log(c, 'user', Object.entries(clean).map(([q, a]) => `${q} → ${a}`).join('\n'), { answer: true });
+    this.settle(reqId, { behavior: 'allow', updatedInput: { ...p.input, answers: clean } }, '回答しました');
+  }
+
   // decision: 'allow' | 'deny' | 'always'
   answerPermission(cardId, reqId, decision, message) {
     const c = this.must(cardId);
     const p = this.pending.get(reqId);
-    if (!p || p.cardId !== cardId) throw new Error('この承認リクエストはもう終わっています');
+    if (!p || p.cardId !== cardId || p.kind === 'question') throw new Error('この承認リクエストはもう終わっています');
     if (decision === 'always') {
       c.alwaysAllow = c.alwaysAllow || [];
       if (!c.alwaysAllow.includes(p.toolName)) c.alwaysAllow.push(p.toolName);
@@ -646,7 +717,8 @@ class AgentManager extends EventEmitter {
     const c = this.store.card(p.cardId);
     if (c) {
       c.permissions = (c.permissions || []).filter((r) => r.id !== reqId);
-      if (label) this.log(c, 'permission', `${label}: ${p.toolName}`);
+      c.questions = (c.questions || []).filter((r) => r.id !== reqId);
+      if (label) this.log(c, p.kind === 'question' ? 'question' : 'permission', p.kind === 'question' ? label : `${label}: ${p.toolName}`);
       this.changed(c);
     }
     p.resolve(result);
@@ -755,4 +827,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, PERMISSION_TOOL };
+module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion };

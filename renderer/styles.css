@@ -274,3 +274,28 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .sk-desc { font-size: 12px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .card-skill-row { margin: 2px 0 4px; overflow: hidden; }
 .card-skill-row .skill-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+
+/* エージェントからの質問 */
+.b-question { background: color-mix(in srgb, #b57bff 25%, transparent); color: #b57bff; font-weight: 600; }
+.b-awaiting { background: color-mix(in srgb, #b57bff 18%, transparent); color: #b57bff; font-weight: 600; }
+.qbox, .qform { margin-top: 8px; padding: 8px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, #b57bff 50%, transparent); background: color-mix(in srgb, #b57bff 8%, var(--panel)); cursor: default; }
+.q-title { font-size: 12px; font-weight: 600; margin-bottom: 6px; word-break: break-word; }
+.q-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+.q-item { margin: 8px 0 10px; }
+.q-head { font-weight: 600; margin-bottom: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.q-chip { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, #b57bff 22%, transparent); color: #b57bff; }
+.q-opts { display: flex; flex-direction: column; gap: 6px; }
+.q-opt { display: flex; gap: 8px; align-items: flex-start; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); cursor: pointer; }
+.q-opt:hover { border-color: #b57bff; }
+.q-opt:has(input:checked) { border-color: #b57bff; background: color-mix(in srgb, #b57bff 10%, var(--panel-2)); }
+.q-opt input[type=radio], .q-opt input[type=checkbox] { width: auto; margin-top: 3px; }
+.q-opt span { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.q-opt small { color: var(--muted); }
+.q-opt .q-other { margin-top: 4px; padding: 5px 8px; font-size: 12px; }
+.q-actions { display: flex; gap: 8px; margin-top: 6px; }
+.d-awaiting { margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, #b57bff 50%, transparent); background: color-mix(in srgb, #b57bff 8%, var(--panel)); }
+.d-awaiting p { margin: 6px 0; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; }
+.d-awaiting small { color: var(--muted); }
+.k-question .log-k, .k-question .log-x { color: #b57bff; }
+.card.asking { border-left-color: #b57bff; border-color: color-mix(in srgb, #b57bff 60%, transparent); animation: pulse-q 2s infinite; }
+@keyframes pulse-q { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, #b57bff 25%, transparent); } }
