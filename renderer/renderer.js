@@ -75,7 +75,11 @@ function permissionBlock(c, compact) {
 // ---- エージェントからの質問 ----
 
 // カードの状態を表すバッジ（質問・承認待ち・回答待ちを優先して出す）
+function isInterrupted(c) {
+  return !!c.interrupted && c.status !== 'running' && c.status !== 'queued';
+}
 function badgeFor(c) {
+  if (isInterrupted(c)) return ['interrupted', '中断'];
   if ((c.questions || []).length) return ['question', '質問'];
   if ((c.permissions || []).length) return ['waiting', '承認待ち'];
   if (c.conflict && !c.conflict.resolving && c.status !== 'running' && c.status !== 'queued') return ['conflict', 'コンフリクト'];
@@ -83,7 +87,7 @@ function badgeFor(c) {
   return [c.status, STATUS_LABEL[c.status]];
 }
 function needsYou(c) {
-  return (c.questions || []).length || (c.permissions || []).length || (c.awaitingReply && c.status === 'review') || (c.conflict && !c.conflict.resolving && c.status === 'review');
+  return isInterrupted(c) || (c.questions || []).length || (c.permissions || []).length || (c.awaitingReply && c.status === 'review') || (c.conflict && !c.conflict.resolving && c.status === 'review');
 }
 
 // ボードのカード用（短く）。1問だけの単一選択なら、その場で答えられる
@@ -214,6 +218,7 @@ function cardHtml(c) {
       ${c.skill ? `<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">⚡ /${esc(c.skill)}</span></div>` : ''}
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
       ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(c.lastMessage)}</div>` : ''}
+      ${isInterrupted(c) ? `<div class="int-quick"><button class="btn small primary" data-resume="${c.id}" title="中断したところから続けます">▶ 再開</button></div>` : ''}
       ${questionCompactHtml(c)}
       ${permissionBlock(c, true)}
       <div class="card-meta">
@@ -225,6 +230,7 @@ function cardHtml(c) {
 
 function renderBoard() {
   const { settings, cards } = state.board;
+  renderInterruptBanner();
   $('repoBtn').textContent = settings.repoPath ? `📁 ${settings.repoPath}` : '📁 リポジトリを選ぶ';
   $('baseInfo').textContent = settings.repoPath ? `ベース: ${settings.baseBranch || 'チェックアウト中のブランチ'}` : '';
   const running = cards.filter((c) => c.status === 'running').length;
@@ -251,6 +257,12 @@ function renderBoard() {
 
 // ボード上のクリック・ドラッグ（イベント委譲）
 $('board').addEventListener('click', (e) => {
+  const rs = e.target.closest('[data-resume]');
+  if (rs) {
+    e.stopPropagation();
+    run(() => api.resume(rs.dataset.resume), '再開しました');
+    return;
+  }
   const qp = e.target.closest('[data-qpick], [data-qopen]');
   if (qp) {
     e.stopPropagation();
@@ -302,6 +314,36 @@ async function answer(cardId, reqId, decision, message) {
   await run(() => api.answerPermission(cardId, reqId, decision, message), decision === 'deny' ? '拒否しました' : '許可しました');
 }
 
+// ---- アプリの終了で中断されたタスク ----
+function interruptedBoxHtml(c) {
+  const it = c.interrupted;
+  const how = it.kind === 'queued' ? '待機中だった指示を、そのままもう一度渡して始めます。' : c.sessionId ? '同じ会話の続きとして、中断したところから作業を続けてもらいます。' : '最後に渡した指示で、もう一度始めます。';
+  return `<div class="int-box">
+    <b>⏸ アプリの終了で中断されました</b>${it.at ? `<span class="muted small">（${esc(new Date(it.at).toLocaleString())}）</span>` : ''}
+    <p class="small">${esc(how)}別の指示で続けたいときは、下の欄から追加指示を送ってください。</p>
+    <div class="cf-actions"><button class="btn primary" data-act="resume">▶ 再開</button><button class="btn ghost" data-act="dismissInterrupted" title="再開せずに、中断の表示だけ消します">再開しない</button></div>
+  </div>`;
+}
+
+// 前回の終了で中断されたタスクがあれば、ボードの上に「すべて再開」を出す
+function renderInterruptBanner() {
+  const el = $('interruptBanner');
+  const list = state.board.cards.filter(isInterrupted);
+  if (!list.length || state.interruptDismissed) {
+    el.classList.add('hidden');
+    return;
+  }
+  el.innerHTML = `<span>⏸ 前回アプリを終了したときに、<b>${list.length} 件</b>のタスクが中断されました。</span>
+    <button class="btn small primary" id="resumeAllBtn">▶ すべて再開</button>
+    <button class="btn small ghost" id="interruptLater">あとで</button>`;
+  el.classList.remove('hidden');
+  $('resumeAllBtn').onclick = () => run(() => api.resumeAll().then((n) => `${n} 件のタスクを再開しました`)).then((m) => m && toast(m, 'ok'));
+  $('interruptLater').onclick = () => {
+    state.interruptDismissed = true;
+    renderInterruptBanner();
+  };
+}
+
 // ---------------- 詳細パネル ----------------
 
 async function select(id) {
@@ -329,12 +371,13 @@ function closeDetail() {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply]);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.interrupted]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
   const btns = [
-    s === 'todo' && `<button class="btn primary" data-act="start">▶ 開始</button>`,
+    isInterrupted(c) && `<button class="btn primary" data-act="resume" title="中断したところから続けます">▶ 再開</button>`,
+    s === 'todo' && !isInterrupted(c) && `<button class="btn primary" data-act="start">▶ 開始</button>`,
     (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">■ 停止</button>`,
     (s === 'review' || s === 'failed') && c.worktreePath &&
       (state.board.settings.integration === 'pr'
@@ -359,7 +402,7 @@ function renderDetailHead() {
       ${c.costUsd ? `<dt>コスト</dt><dd>$${c.costUsd.toFixed(3)}</dd>` : ''}
       ${(c.alwaysAllow || []).length ? `<dt>常に許可</dt><dd>${c.alwaysAllow.map(esc).join(', ')}</dd>` : ''}
     </dl>
-    ${c.error ? `<div class="d-error">${esc(c.error)}</div>` : ''}
+    ${isInterrupted(c) ? interruptedBoxHtml(c) : c.error ? `<div class="d-error">${esc(c.error)}</div>` : ''}
     ${conflictBoxHtml(c)}
     ${questionFormHtml(c)}
     ${c.awaitingReply && (s === 'review' || s === 'failed') ? `<div class="d-awaiting"><b>💬 Claude が質問しています</b><p>${esc(String(c.lastText || '').slice(-600))}</p><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>` : ''}
@@ -421,6 +464,8 @@ $('detailHead').addEventListener('click', async (e) => {
   const c = card(state.selected);
   if (!act || !c) return;
   if (act === 'start') run(() => api.start(c.id));
+  if (act === 'resume') run(() => api.resume(c.id), '再開しました');
+  if (act === 'dismissInterrupted') run(() => api.dismissInterrupted(c.id));
   if (act === 'stop') run(() => api.stop(c.id));
   if (act === 'open') run(() => api.open(c.id));
   if (act === 'merge') openMerge(c);

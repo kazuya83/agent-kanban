@@ -127,6 +127,64 @@ test('停止すると保留中の承認は拒否され、レビューに戻る',
   }
 });
 
+test('アプリの終了で中断 → 次の起動で「中断」になり、再開すると続きから動く（待機中だったものも）', async () => {
+  const { tmp, store, agents } = setup();
+  const server = new PermissionServer((p, s) => agents.requestPermission(p, s));
+  await server.start();
+  agents.setPermissionEndpoint(server.port, server.token);
+  let server2;
+  try {
+    const a = agents.createCard({ title: 'running one', prompt: '1つ目' });
+    const b = agents.createCard({ title: 'queued one', prompt: '2つ目' });
+    agents.start(a.id);
+    agents.start(b.id);
+    await waitFor(() => a.permissions.length === 1 && a.sessionId);
+    assert.deepStrictEqual(agents.activeCount(), { running: 1, queued: 1 });
+    await agents.shutdown();
+    assert.strictEqual(a.status, 'running', '終了中は状態を変えずに保存する');
+    assert.strictEqual(b.status, 'queued', '終了中は待機中のカードを起動しない');
+    assert.throws(() => agents.send(a.id, 'x'));
+
+    // 次の起動
+    const store2 = new Store(path.join(tmp, 'data', 'board.json'));
+    const agents2 = new AgentManager(store2, agents.opts);
+    server2 = new PermissionServer((p, s) => agents2.requestPermission(p, s));
+    await server2.start();
+    agents2.setPermissionEndpoint(server2.port, server2.token);
+    const a2 = store2.card(a.id);
+    const b2 = store2.card(b.id);
+    assert.strictEqual(a2.status, 'failed');
+    assert.strictEqual(a2.interrupted.kind, 'running');
+    assert.match(a2.error, /再開/);
+    assert.strictEqual(b2.status, 'todo');
+    assert.strictEqual(b2.interrupted.kind, 'queued');
+    assert.strictEqual(agents2.interruptedCards().length, 2);
+
+    assert.strictEqual(agents2.resumeAll(), 2);
+    assert.ok(!a2.interrupted && !b2.interrupted);
+    await waitFor(() => a2.permissions.length === 1);
+    agents2.answerPermission(a2.id, a2.permissions[0].id, 'allow');
+    await waitFor(() => a2.status === 'review');
+    assert.ok(a2.logs.some((l) => l.kind === 'user' && /再開/.test(l.text)));
+    await waitFor(() => b2.permissions.length === 1);
+    agents2.answerPermission(b2.id, b2.permissions[0].id, 'allow');
+    await waitFor(() => b2.status === 'review');
+    assert.match(await agents2.diff(b2.id), /2つ目/);
+    assert.throws(() => agents2.resume(b2.id), /中断されていません/);
+
+    // 再開しない: 中断の表示だけ消す
+    a2.interrupted = { at: Date.now(), kind: 'running', prompt: 'x' };
+    a2.status = 'failed';
+    a2.error = agents2.store.card(a2.id).error;
+    agents2.dismissInterrupted(a2.id);
+    assert.strictEqual(a2.interrupted, null);
+    store2.flush();
+  } finally {
+    server.close();
+    server2?.close();
+  }
+});
+
 test('claude が見つからないとエラー列に入る', async () => {
   const { store, agents } = setup();
   store.settings.claudePath = '/nonexistent/claude';
