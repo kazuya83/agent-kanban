@@ -74,8 +74,8 @@ async function deleteBranch(repo, branch) {
   await git(repo, ['branch', '-D', branch]).catch(() => {});
 }
 
-async function isDirty(repo) {
-  const out = await git(repo, ['status', '--porcelain', '--untracked-files=no']);
+async function isDirty(repo, { untracked = false } = {}) {
+  const out = await git(repo, ['status', '--porcelain', untracked ? '--untracked-files=normal' : '--untracked-files=no']);
   return out.trim().length > 0;
 }
 

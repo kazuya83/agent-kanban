@@ -87,6 +87,8 @@ app.whenReady().then(async () => {
   agents.setPermissionEndpoint(permServer.port, permServer.token);
 
   agents.on('changed', notifyBoard);
+  // 作った PR がマージされたら、タスクを完了にする（1分ごとに GitHub で確かめる）
+  agents.watchPullRequests(60000);
   agents.on('log', (id, entry) => send('card:log', { id, entry }));
   // 質問・回答待ちも、承認と同じように通知する
   const notify = (card, title, body) => {

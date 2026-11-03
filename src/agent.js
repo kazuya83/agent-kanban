@@ -179,6 +179,7 @@ class AgentManager extends EventEmitter {
    */
   async shutdown(timeoutMs = 10000) {
     this.shuttingDown = true;
+    this.unwatchPullRequests();
     const runs = [...(this.runs || new Map()).values()];
     for (const [id, child] of this.procs) {
       const c = this.store.card(id);
@@ -221,8 +222,8 @@ class AgentManager extends EventEmitter {
   issueStatusKey(c) {
     if (c.status === 'running' || c.status === 'queued') return 'inProgress';
     if (c.status === 'review' || c.status === 'failed') return 'inReview';
-    // PR を作って片付けただけのときは、まだ取り込まれていないので In review のまま（PR がマージされると GitHub 側で Done になる）
-    if (c.status === 'done') return c.mergedInto && c.mergedInto.length ? 'done' : 'inReview';
+    // PR を作って片付けただけのときは、まだ取り込まれていないので In review のまま（PR のマージを見つけたら Done にする）
+    if (c.status === 'done') return (c.mergedInto && c.mergedInto.length) || c.prMergedAt ? 'done' : 'inReview';
     return null;
   }
 
@@ -523,6 +524,9 @@ class AgentManager extends EventEmitter {
     if (c.reopenFrom !== undefined) {
       // 前の PR はもう片付いたものとして、次は新しい PR を作る
       c.prUrl = null;
+      c.prState = null;
+      c.prMergedAt = null;
+      c.prCheckError = null;
       c.finalDiff = null;
       delete c.reopenBase;
       delete c.reopenFrom;
@@ -1110,6 +1114,9 @@ class AgentManager extends EventEmitter {
       this.log(c, 'system', pr.created ? `PR を作成しました: ${pr.url}` : `開いている PR を更新しました: ${pr.url}`);
       c.prUrl = pr.url;
       c.prBase = base;
+      c.prState = 'OPEN';
+      c.prMergedAt = null;
+      c.prCheckError = null;
 
       const finalDiff = await git.diff(c.worktreePath, c.baseCommit);
       if (opts.keep === false) {
@@ -1125,6 +1132,124 @@ class AgentManager extends EventEmitter {
       return { url: pr.url, created: pr.created };
     } finally {
       this.merging.delete(id);
+    }
+  }
+
+  // ---------- 作った PR のマージを見張る ----------
+
+  // テストで差し替えられるようにメソッドにしておく
+  pullRequestState(c) {
+    return ghCli.pullRequestState({ url: c.prUrl, cwd: c.worktreePath || c.repoPath, gh: this.opts.ghPath });
+  }
+
+  // 一定の間隔で、作った PR がマージされたかを確かめる
+  watchPullRequests(intervalMs = 60000) {
+    this.unwatchPullRequests();
+    this.checkPullRequests().catch(() => {});
+    this.prTimer = setInterval(() => this.checkPullRequests().catch(() => {}), intervalMs);
+    this.prTimer.unref?.();
+  }
+
+  unwatchPullRequests() {
+    if (this.prTimer) clearInterval(this.prTimer);
+    this.prTimer = null;
+  }
+
+  /**
+   * PR を作ったタスクについて、GitHub で PR の状態を確かめる。マージされていれば完了にする
+   * （worktree に PR に入っていない変更が残っているときは、消さずにレビュー中のまま残す）
+   * @returns {Promise<number>} 完了にしたタスクの数
+   */
+  async checkPullRequests() {
+    if (this.checkingPrs) return this.checkingPrs;
+    const run = (async () => {
+      let n = 0;
+      const list = this.store.cards.filter((c) => c.prUrl && !c.prMergedAt && ['review', 'failed', 'done'].includes(c.status));
+      for (const c of list) {
+        if (this.shuttingDown) break;
+        try {
+          if (await this.checkPullRequest(c)) n++;
+        } catch (err) {
+          if (!this.store.card(c.id)) continue;
+          if (c.prCheckError !== err.message) this.log(c, 'error', `PR の状態を確かめられませんでした: ${err.message}`);
+          c.prCheckError = err.message;
+          this.store.save();
+        }
+      }
+      return n;
+    })();
+    this.checkingPrs = run;
+    try {
+      return await run;
+    } finally {
+      this.checkingPrs = null;
+    }
+  }
+
+  async checkPullRequest(c) {
+    const url = c.prUrl;
+    const pr = await this.pullRequestState(c);
+    // 確かめているあいだに、消された・別の PR に変わった・動き出したときは何もしない
+    if (!this.store.card(c.id) || c.prUrl !== url || c.prMergedAt || !['review', 'failed', 'done'].includes(c.status)) return false;
+    c.prCheckError = null;
+    if (pr.state !== 'MERGED') {
+      if (c.prState !== pr.state) {
+        if (pr.state === 'CLOSED') this.log(c, 'system', `PR はマージされずに閉じられました: ${url}`);
+        c.prState = pr.state;
+        this.changed(c);
+      }
+      return false;
+    }
+
+    const base = pr.baseRefName || c.prBase;
+    c.prState = 'MERGED';
+    c.prMergedAt = Date.parse(pr.mergedAt) || Date.now();
+    if (base) {
+      c.mergedInto = [...new Set([...(c.mergedInto || []), base])];
+      c.lastMergeTarget = base;
+    }
+    this.log(c, 'system', `PR がマージされました${base ? `（${base}）` : ''}: ${url}`);
+
+    if (c.status !== 'done' && c.worktreePath) {
+      if (this.merging?.has(c.id)) {
+        this.changed(c);
+        return false;
+      }
+      const keep = await this.unmergedWork(c, pr.headRefOid);
+      if (!this.store.card(c.id) || !['review', 'failed'].includes(c.status)) return false;
+      if (keep) {
+        this.log(c, 'system', `worktree に PR に入っていない変更（${keep}）があるので、タスクはレビュー中のまま残します。不要なら「破棄」、続きは追加指示か PR の作成で進められます`);
+        this.changed(c);
+        return false;
+      }
+      const top = c.repoPath;
+      const finalDiff = await git.diff(c.worktreePath, c.baseCommit).catch(() => '');
+      await git.removeWorktree(top, c.worktreePath);
+      await git.deleteBranch(top, c.branch);
+      c.finalDiff = truncate(finalDiff, 300000);
+      c.worktreePath = null;
+    }
+    c.status = 'done';
+    c.error = null;
+    c.interrupted = null;
+    c.mergedAt = c.prMergedAt;
+    this.changed(c);
+    return true;
+  }
+
+  // worktree に、マージされた PR に入っていない作業が残っていれば、その説明を返す（なければ null）
+  async unmergedWork(c, headRefOid) {
+    const wt = c.worktreePath;
+    if (!fs.existsSync(wt)) return null;
+    try {
+      if (await git.mergeInProgress(wt)) return 'コンフリクトの解消中';
+      if (await git.isDirty(wt, { untracked: true })) return '未コミットの変更';
+      if (!headRefOid) return 'PR の最後のコミットが分からない';
+      const ahead = await git.countCommits(c.repoPath, `${headRefOid}..${c.branch}`);
+      return ahead > 0 ? `PR にないコミット ${ahead} 件` : null;
+    } catch {
+      // PR の最後のコミットが手元にないなど。消してよいか分からないので残す
+      return 'PR と手元のブランチを比べられない';
     }
   }
 
