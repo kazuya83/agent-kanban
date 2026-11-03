@@ -167,6 +167,7 @@ app.whenReady().then(async () => {
   handle('sessions:list', () => require('./src/sessions').listSessions(store.settings.repoPath));
   handle('card:logs', (id) => agents.logs(id));
   handle('card:diff', (id) => agents.diff(id));
+  handle('card:worktree', (id) => agents.worktree(id));
   handle('card:merge', ({ id, target, createNew, keep }) => agents.merge(id, { target, createNew, keep }));
   handle('card:discard', (id) => agents.discard(id));
   handle('card:permission', ({ id, reqId, decision, message }) => agents.answerPermission(id, reqId, decision, message));

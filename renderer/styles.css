@@ -274,3 +274,52 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .sk-desc { font-size: 12px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .card-skill-row { margin: 2px 0 4px; overflow: hidden; }
 .card-skill-row .skill-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+/* worktree タブ */
+.wt-toolbar { padding: 8px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.wt-toolbar .btn { margin-left: auto; }
+.wt { padding-top: 10px; padding-bottom: 6px; }
+.wt h4 { margin: 14px 0 6px; font-size: 12.5px; }
+.wt h4:first-child { margin-top: 0; }
+.wt code { font-family: var(--mono); font-size: 11.5px; }
+.wt .add, .wt-toolbar .add { color: var(--ok); }
+.wt .del, .wt-toolbar .del { color: var(--err); }
+.wt-meta { display: grid; grid-template-columns: 70px 1fr; gap: 3px 10px; margin: 0; font-size: 12px; }
+.wt-meta dt { color: var(--muted); }
+.wt-meta dd { margin: 0; word-break: break-all; }
+.wt-graph { list-style: none; margin: 0; padding: 0; }
+.wt-graph li { position: relative; padding: 4px 0 10px 26px; font-size: 12.5px; word-break: break-word; }
+.wt-graph li::before { content: ''; position: absolute; left: 7px; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+.wt-graph li:first-child::before { top: 10px; }
+.wt-graph li:last-child::before { bottom: calc(100% - 10px); }
+.wt-graph .g-dot { position: absolute; left: 2px; top: 6px; width: 12px; height: 12px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); }
+.wt-graph .g-commit .g-dot { background: var(--accent); }
+.wt-graph .g-base .g-dot { border-color: var(--muted); background: var(--muted); }
+.wt-graph .g-base::before { background: var(--muted); }
+.wt-graph .g-behind::before { background: repeating-linear-gradient(var(--warn) 0 4px, transparent 4px 8px); }
+.wt-graph .g-behind .g-dot { border-color: var(--warn); background: var(--warn); }
+.wt-graph .g-wip .g-dot { border-style: dashed; border-color: var(--warn); }
+.wt-graph .g-wip.live .g-dot { border-color: var(--run); animation: wt-pulse 1.4s ease-in-out infinite; }
+@keyframes wt-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--run) 30%, transparent); } }
+.g-tag { font-size: 10.5px; padding: 0 7px; border-radius: 999px; background: var(--line); color: var(--muted); }
+.g-tag.wip { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+.g-wip.live .g-tag.wip { background: color-mix(in srgb, var(--run) 20%, transparent); color: var(--run); }
+.wt-files { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.wt-files li { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 12px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.wt-files li:last-child { border-bottom: 0; }
+.wt-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11.5px; }
+.wt-time { font-size: 11px; white-space: nowrap; }
+.wt-nums { font-family: var(--mono); font-size: 11px; white-space: nowrap; min-width: 70px; text-align: right; }
+.wt-bar { display: inline-flex; width: 60px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--panel-2); flex: none; }
+.wt-bar .a { background: var(--ok); }
+.wt-bar .d { background: var(--err); }
+.wt-fs { font-size: 10.5px; padding: 0 6px; border-radius: 4px; flex: none; min-width: 34px; text-align: center; }
+.wt-fs.fa, .wt-fs.fn { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+.wt-fs.fm { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+.wt-fs.fd { background: color-mix(in srgb, var(--err) 20%, transparent); color: var(--err); }
+.wt-empty { padding: 2px 0; }
+.wt-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.wt-list li { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+.wt-list li.me { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.wt-list li[data-card] { cursor: pointer; }
+.wt-list li[data-card]:hover { background: var(--panel-2); }
+.wt-l-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
