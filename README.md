@@ -65,7 +65,24 @@ irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | i
 
 最新版をダウンロードして `%LOCALAPPDATA%\Programs\Claude Agent Kanban` に入れ、スタートメニューとデスクトップにショートカットを作って起動します。管理者権限はいりません。
 
-アップデートするときも、同じコマンドをもう一度実行するだけです。
+### アップデート（最新版にする）
+
+インストールと同じコマンドで、[Releases](https://github.com/kazuya83/agent-kanban/releases) の最新版に入れ替わります。ボードやタスクのデータはそのまま残ります。アプリを起動中なら、終了してから実行してください（Windows は自動で終了します）。
+
+**Mac / Linux**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash
+```
+
+**Windows**（PowerShell）
+
+```powershell
+irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
+```
+
+> 直後に古い版が入るときは、GitHub 側のキャッシュ（最大5分）が残っています。少し待ってからもう一度実行してください。
+
 
 <details>
 <summary>バージョンを指定する・アンインストールする</summary>
