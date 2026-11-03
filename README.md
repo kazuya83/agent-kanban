@@ -32,17 +32,59 @@ Claude Code のタスクをカンバンボードで管理するデスクトッ�
 - **マージ / 破棄**: ボタン1つでベースブランチにマージ（`--no-ff`）するか、worktree とブランチをまとめて削除します
 - **同時実行数の上限**: 上限を超えたカードは待機中になり、空きができると順番に起動します
 
-## ダウンロード
+## インストール
+
+### コマンドでインストール（おすすめ）
+
+**Mac / Linux**（ターミナルで実行）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash
+```
+
+- Mac: Apple Silicon か Intel かを見分けて、`/Applications` にインストールします。署名していないアプリで出る警告も、自動で出ないようにします
+- Linux: `~/.local/bin/agent-kanban` に AppImage を置き、アプリのメニューにも登録します
+
+**Windows**（PowerShell で実行）
+
+```powershell
+irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
+```
+
+最新のインストーラーをダウンロードして画面を出さずにインストールし、そのまま起動します。スタートメニューにも「Agent Kanban」が追加されます。
+
+アップデートするときも、同じコマンドをもう一度実行するだけです。
+
+<details>
+<summary>バージョンを指定する・アンインストールする</summary>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | AGENT_KANBAN_VERSION=0.1.0 bash
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash -s -- --uninstall
+```
+
+```powershell
+$env:AGENT_KANBAN_VERSION = "0.1.0"; irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
+```
+
+Windows でアンインストールするときは、「設定 → アプリ」から「Agent Kanban」を削除します。
+
+</details>
+
+### ファイルをダウンロードしてインストール
 
 [Releases](https://github.com/kazuya83/agent-kanban/releases) から、使っている OS のファイルをダウンロードします。
 
 | OS | ファイル | 使い方 |
 | --- | --- | --- |
-| Windows | `Agent Kanban-x.y.z-win-setup.exe` | インストーラー。ダブルクリックしてインストールします |
-| Windows | `Agent Kanban-x.y.z-win-portable.exe` | インストールせず、そのまま起動できます |
-| Mac（Apple Silicon: M1〜） | `Agent Kanban-x.y.z-mac-arm64.dmg` | 開いて、アプリを「アプリケーション」にドラッグします |
-| Mac（Intel） | `Agent Kanban-x.y.z-mac-x64.dmg` | 同上 |
-| Linux | `Agent Kanban-x.y.z-linux-x86_64.AppImage` | 実行権限を付けて起動します |
+| Windows | `agent-kanban-x.y.z-win-setup.exe` | インストーラー。ダブルクリックしてインストールします |
+| Windows | `agent-kanban-x.y.z-win-portable.exe` | インストールせず、そのまま起動できます |
+| Mac（Apple Silicon: M1〜） | `agent-kanban-x.y.z-mac-arm64.dmg` | 開いて、アプリを「アプリケーション」にドラッグします |
+| Mac（Intel） | `agent-kanban-x.y.z-mac-x64.dmg` | 同上 |
+| Linux | `agent-kanban-x.y.z-linux-x86_64.AppImage` | 実行権限を付けて起動します |
 
 > **初めて起動するときの注意**
 > 開発元の証明書で署名していないので、OS の警告が出ます。

@@ -21,7 +21,7 @@
   "build": {
     "appId": "dev.agentkanban.app",
     "productName": "Agent Kanban",
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactName": "agent-kanban-${version}-${os}-${arch}.${ext}",
     "files": ["main.js", "preload.js", "src/**", "renderer/**"],
     "asarUnpack": ["src/permission-mcp.js"],
     "directories": {
@@ -36,7 +36,7 @@
       "gatekeeperAssess": false
     },
     "dmg": {
-      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+      "artifactName": "agent-kanban-${version}-mac-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -48,10 +48,10 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "${productName}-${version}-win-setup.${ext}"
+      "artifactName": "agent-kanban-${version}-win-setup.${ext}"
     },
     "portable": {
-      "artifactName": "${productName}-${version}-win-portable.${ext}"
+      "artifactName": "agent-kanban-${version}-win-portable.${ext}"
     },
     "linux": {
       "target": ["AppImage"],
