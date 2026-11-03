@@ -114,7 +114,8 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           /bin/bash --version | head -n1
-          /bin/bash ./install.sh
+          # Same as a user would run: curl ... | bash  (pinned to this commit)
+          curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/install.sh" | /bin/bash
           if [ "$RUNNER_OS" = "macOS" ]; then
             test -d "/Applications/Claude Agent Kanban.app" || test -d "$HOME/Applications/Claude Agent Kanban.app"
           else
@@ -128,7 +129,8 @@ jobs:
           AGENT_KANBAN_NO_LAUNCH: '1'
         run: |
           $PSVersionTable.PSVersion
-          Get-Content -Raw -Encoding UTF8 ./install.ps1 | Invoke-Expression
+          # Same as a user would run: irm <raw url> | iex  (pinned to this commit)
+          irm "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/install.ps1" | iex
           $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter 'Claude Agent Kanban.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $exe) { throw 'インストールされた exe が見つかりません' }
+          if (-not $exe) { throw 'installed exe not found' }
           Write-Host "OK: $($exe.FullName)"
