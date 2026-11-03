@@ -218,12 +218,12 @@ const Q = ['-c', 'core.quotepath=false'];
 // ベースコミットからの差分（コミット済み＋未コミット＋未追跡ファイル）
 // index を触らないので、エージェントの実行中に呼んでも安全
 async function diff(wt, baseCommit) {
-  let out = await git(wt, ['diff', baseCommit]);
+  let out = await git(wt, [...Q, 'diff', baseCommit]);
   const untracked = (await git(wt, [...Q, 'ls-files', '--others', '--exclude-standard']))
     .split('\n')
     .filter(Boolean);
   for (const file of untracked.slice(0, 200)) {
-    out += await git(wt, ['diff', '--no-index', '--', '/dev/null', file], { allowExitCodes: [1] }).catch(() => '');
+    out += await git(wt, [...Q, 'diff', '--no-index', '--', '/dev/null', file], { allowExitCodes: [1] }).catch(() => '');
   }
   return out;
 }
