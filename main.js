@@ -49,7 +49,7 @@ function send(channel, payload) {
 }
 
 function boardState() {
-  return { settings: store.settings, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath) };
+  return { settings: store.settings, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath) };
 }
 
 let boardTimer = null;
@@ -90,34 +90,19 @@ app.whenReady().then(async () => {
   // 作った PR がマージされたら、タスクを完了にする（1分ごとに GitHub で確かめる）
   agents.watchPullRequests(60000);
   agents.on('log', (id, entry) => send('card:log', { id, entry }));
-  // 質問・回答待ちも、承認と同じように通知する
-  const notify = (card, title, body) => {
+  // 通知（右上のベルに貯まるもの）は、デスクトップ通知でも知らせる
+  agents.on('notification', (n) => {
+    notifyBoard();
     if (Notification.isSupported()) {
-      const n = new Notification({ title, body: String(body).slice(0, 200) });
-      n.on('click', () => {
+      const dn = new Notification({ title: n.title, body: String(n.body || '').slice(0, 200) });
+      dn.on('click', () => {
         if (win) {
           win.show();
           win.focus();
-          send('card:focus', card.id);
+          send('card:focus', n.cardId);
         }
       });
-      n.show();
-    }
-    if (win && !win.isFocused()) win.flashFrame(true);
-  };
-  agents.on('question', (card, qs) => notify(card, `質問: ${card.title}`, qs.map((q) => q.question).join(' / ')));
-  agents.on('awaiting', (card) => notify(card, `回答待ち: ${card.title}`, card.lastText || 'Claude が質問しています'));
-  agents.on('permission', (card, req) => {
-    if (Notification.isSupported()) {
-      const n = new Notification({ title: `承認待ち: ${card.title}`, body: `${req.toolName}  ${req.summary}`.slice(0, 200) });
-      n.on('click', () => {
-        if (win) {
-          win.show();
-          win.focus();
-          send('card:focus', card.id);
-        }
-      });
-      n.show();
+      dn.show();
     }
     if (win && !win.isFocused()) win.flashFrame(true);
   });
@@ -150,8 +135,9 @@ app.whenReady().then(async () => {
     };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone'];
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
+    if (patch && 'suggestSkillsOnDone' in patch) patch = { ...patch, suggestSkillsOnDone: !!patch.suggestSkillsOnDone };
     if (patch && 'issueStatusSync' in patch) patch = { ...patch, issueStatusSync: !!patch.issueStatusSync };
     if (patch && 'statusFieldName' in patch) patch = { ...patch, statusFieldName: String(patch.statusFieldName || '').trim() };
     if (patch && 'statusMapping' in patch) {
@@ -212,6 +198,9 @@ app.whenReady().then(async () => {
   handle('card:stop', (id) => agents.stop(id));
   handle('card:send', ({ id, message, skill }) => agents.send(id, message, skill));
   handle('card:suggestSkills', ({ id }) => agents.suggestSkills(id));
+  handle('notifications:read', ({ ids } = {}) => agents.readNotifications(store.settings.repoPath, ids));
+  handle('notifications:clear', ({ ids } = {}) => agents.clearNotifications(store.settings.repoPath, ids));
+  handle('notifications:act', ({ id }) => agents.actNotification(id));
   handle('skills:list', () => require('./src/skills').listSkills(store.settings.repoPath));
   handle('card:btw', ({ id, text }) => agents.btw(id, text));
   handle('card:setSession', ({ id, session }) => agents.setSession(id, session));

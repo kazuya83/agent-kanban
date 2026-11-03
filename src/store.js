@@ -16,12 +16,15 @@ const DEFAULT_SETTINGS = {
   statusFieldName: '', // Projects で変える項目（単一選択）の名前。空なら「Status」
   statusMapping: { inProgress: '', inReview: '', done: '' }, // 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空なら名前から自動で探す
   pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
+  suggestSkillsOnDone: true, // タスクが完了したら「スキルにしませんか？」と通知する
 };
+
+const MAX_NOTIFICATIONS = 200;
 
 class Store {
   constructor(file) {
     this.file = file;
-    this.data = { settings: { ...DEFAULT_SETTINGS }, cards: [], removedCost: {} };
+    this.data = { settings: { ...DEFAULT_SETTINGS }, cards: [], removedCost: {}, notifications: [] };
     this.timer = null;
     this.load();
   }
@@ -33,6 +36,7 @@ class Store {
       this.data.settings.statusMapping = { ...DEFAULT_SETTINGS.statusMapping, ...(this.data.settings.statusMapping || {}) };
       this.data.cards = Array.isArray(raw.cards) ? raw.cards : [];
       this.data.removedCost = raw.removedCost && typeof raw.removedCost === 'object' ? raw.removedCost : {};
+      this.data.notifications = Array.isArray(raw.notifications) ? raw.notifications : [];
     } catch {
       /* 初回起動 */
     }
@@ -57,6 +61,17 @@ class Store {
 
   get cards() {
     return this.data.cards;
+  }
+
+  get notifications() {
+    return this.data.notifications;
+  }
+
+  // 通知を足す（新しいものが先頭）。古いものから捨てる
+  addNotification(n) {
+    this.data.notifications.unshift(n);
+    if (this.data.notifications.length > MAX_NOTIFICATIONS) this.data.notifications.length = MAX_NOTIFICATIONS;
+    return n;
   }
 
   card(id) {
@@ -85,4 +100,4 @@ class Store {
   }
 }
 
-module.exports = { Store, DEFAULT_SETTINGS };
+module.exports = { Store, DEFAULT_SETTINGS, MAX_NOTIFICATIONS };
