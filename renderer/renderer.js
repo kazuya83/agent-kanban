@@ -4,9 +4,9 @@ const COLUMNS = [
   { key: 'running', label: '実行中', statuses: ['queued', 'running'] },
   { key: 'review', label: 'レビュー', statuses: ['review', 'failed'] },
   { key: 'done', label: '完了', statuses: ['done'] },
-  // タスクに紐づかない会話（worktree を作らず、リポジトリのフォルダでそのまま話す）
-  { key: 'chat', label: '💬 会話', chat: true },
 ];
+// タスクに紐づかない会話（worktree を作らず、リポジトリのフォルダでそのまま話す）はボードのレーンには出さず、
+// 「💬 会話」ボタンから一覧を開き、選んだ会話はモーダルで表示する
 const STATUS_LABEL = { todo: '未着手', queued: '待機中', running: '実行中', review: 'レビュー待ち', failed: 'エラー', done: 'マージ済み' };
 const CHAT_STATUS_LABEL = { todo: '未開始', queued: '待機中', running: '返答中', review: '返事済み', failed: 'エラー', done: '終了' };
 const isChat = (c) => !!c && c.kind === 'chat';
@@ -294,6 +294,7 @@ function renderBoard() {
   $('costInfo').classList.toggle('hidden', !settings.repoPath);
   $('costInfo').textContent = `合計 $${total.toFixed(2)}`;
   renderNotifications();
+  renderChatBtn();
   $('runInfo').innerHTML = `実行中 ${running}/${settings.maxParallel || 1}${queued ? ` ・ 待機 ${queued}` : ''}${waiting ? ` ・ <b class="warn">あなたの対応待ち ${waiting}</b>` : ''}`;
 
   if (!settings.repoPath) {
@@ -303,18 +304,36 @@ function renderBoard() {
   }
   $('board').innerHTML = COLUMNS.map((col) => {
     const list = cards
-      .filter((c) => (col.chat ? isChat(c) : !isChat(c) && col.statuses.includes(c.status)))
-      .sort((a, b) => (needsYou(b) ? 1 : 0) - (needsYou(a) ? 1 : 0) || b.createdAt - a.createdAt);
+      .filter((c) => !isChat(c) && col.statuses.includes(c.status))
+      .sort(byAttention);
     return `
-      <section class="column ${col.chat ? 'chat-col' : ''}" data-col="${col.key}">
+      <section class="column" data-col="${col.key}">
         <header><span>${col.label}</span><span class="count">${list.length}</span></header>
-        <div class="cards">${list.map(cardHtml).join('') || `<div class="col-empty">${col.key === 'todo' ? '「＋ 新しいタスク」から追加' : col.chat ? '「💬 会話」から、タスクを作らずに Claude と話せます' : 'なし'}</div>`}</div>
+        <div class="cards">${list.map(cardHtml).join('') || `<div class="col-empty">${col.key === 'todo' ? '「＋ 新しいタスク」から追加' : 'なし'}</div>`}</div>
       </section>`;
   }).join('');
 }
 
+// 対応が必要なものを上に、あとは新しい順
+function byAttention(a, b) {
+  return (needsYou(b) ? 1 : 0) - (needsYou(a) ? 1 : 0) || b.createdAt - a.createdAt;
+}
+
+// 「💬 会話」ボタン: 会話の数と、返事を待っている会話があるかを出す
+function renderChatBtn() {
+  const chats = state.board.cards.filter(isChat);
+  const waiting = chats.filter(needsYou).length;
+  const n = $('chatCount');
+  n.textContent = String(waiting || chats.length);
+  n.classList.toggle('hidden', !chats.length);
+  n.classList.toggle('warn', !!waiting);
+  $('chatBtn').title = waiting ? `あなたの対応を待っている会話が ${waiting} 件あります` : 'タスクを作らずに、このリポジトリについて Claude と話します';
+  if (state.chatListOpen) drawChatList();
+}
+
 // ボード上のクリック・ドラッグ（イベント委譲）
-$('board').addEventListener('click', (e) => {
+$('board').addEventListener('click', boardClick);
+function boardClick(e) {
   const rs = e.target.closest('[data-resume]');
   if (rs) {
     e.stopPropagation();
@@ -346,7 +365,7 @@ $('board').addEventListener('click', (e) => {
   }
   const el = e.target.closest('.card');
   if (el) select(el.dataset.id);
-});
+}
 $('board').addEventListener('dragstart', (e) => {
   const el = e.target.closest('.card');
   if (el) e.dataTransfer.setData('text/plain', el.dataset.id);
@@ -407,6 +426,11 @@ function renderInterruptBanner() {
 async function select(id) {
   state.selected = id;
   state.headSig = '';
+  if (state.chatListOpen) closeModal();
+  // 会話はボードの横ではなく、画面の中央にモーダルで開く
+  const chatModal = isChat(card(id));
+  $('detail').classList.toggle('as-modal', chatModal);
+  $('detailBackdrop').classList.toggle('hidden', !chatModal);
   $('detail').classList.remove('hidden');
   $('followInput').value = '';
   state.followSkill = null;
@@ -436,6 +460,8 @@ function updateTabsFor(c) {
 function closeDetail() {
   state.selected = null;
   $('detail').classList.add('hidden');
+  $('detail').classList.remove('as-modal');
+  $('detailBackdrop').classList.add('hidden');
   renderBoard();
 }
 
@@ -581,10 +607,14 @@ document.querySelectorAll('#tabs .tab').forEach((t) =>
   }),
 );
 
+// Claude の返事やあなたの指示は Markdown として整えて表示する（ツールの出力などはそのまま）
+const MD_KINDS = new Set(['text', 'user', 'question', 'result']);
 function logEntryHtml(e) {
   const time = new Date(e.t).toLocaleTimeString();
   const sk = e.skill ? `<span class="skill-chip small">⚡ /${esc(e.skill)}</span> ` : '';
-  return `<div class="log k-${e.kind}"><span class="log-k">${LOG_LABEL[e.kind] || e.kind}</span><span class="log-t">${time}</span><div class="log-x">${sk}${esc(e.text)}</div></div>`;
+  const md = MD_KINDS.has(e.kind) && typeof Markdown !== 'undefined';
+  const body = md ? `<div class="md">${sk ? `<div>${sk}</div>` : ''}${Markdown.render(e.text)}</div>` : `${sk}${esc(e.text)}`;
+  return `<div class="log k-${e.kind}${md ? ' log-md' : ''}"><span class="log-k">${LOG_LABEL[e.kind] || e.kind}</span><span class="log-t">${time}</span><div class="log-x">${body}</div></div>`;
 }
 
 // ---------------- 差分タブ（GitHub 風: 左にファイルツリー、右にファイルごとの差分） ----------------
@@ -993,12 +1023,14 @@ $('followInput').addEventListener('keydown', (e) => {
 // ---------------- モーダル ----------------
 
 function openModal(html, onReady) {
+  state.chatListOpen = false;
   $('modalBox').innerHTML = html;
   $('modal').classList.remove('hidden');
   onReady?.();
 }
 function closeModal() {
   $('modal').classList.add('hidden');
+  state.chatListOpen = false;
 }
 $('modal').addEventListener('mousedown', (e) => {
   if (e.target === $('modal')) closeModal();
@@ -1044,6 +1076,33 @@ function newTask(opts = {}) {
     },
   );
 }
+
+// 「💬 会話」ボタン: 会話の一覧を出す（会話がまだなければ、すぐに新しい会話を始める）
+function openChats() {
+  if (!state.board.settings.repoPath) return chooseRepo();
+  if (!state.board.cards.some(isChat)) return newChat();
+  openModal('<div id="chatList"></div>');
+  state.chatListOpen = true;
+  drawChatList();
+}
+
+function drawChatList() {
+  const box = $('chatList');
+  if (!box) return;
+  const chats = state.board.cards.filter(isChat).sort(byAttention);
+  box.innerHTML = `<h2>💬 会話</h2>
+    <p class="muted small">タスクを作らずに、このリポジトリについて Claude と話した会話です。選ぶと開きます。</p>
+    <div class="chat-list">${chats.map(cardHtml).join('') || '<div class="col-empty">会話はまだありません</div>'}</div>
+    <div class="modal-actions"><button class="btn ghost" id="chatListClose">閉じる</button><button class="btn primary" id="chatListNew">＋ 新しい会話</button></div>`;
+  $('chatListClose').onclick = closeModal;
+  $('chatListNew').onclick = newChat;
+}
+
+// 会話の一覧の中のカードも、ボードと同じように操作できる（承認・質問への回答・再開・開く）
+$('modalBox').addEventListener('click', (e) => {
+  if (!state.chatListOpen || !e.target.closest('.chat-list')) return;
+  boardClick(e);
+});
 
 // タスクに紐づかない会話を始める（worktree を作らず、リポジトリのフォルダでそのまま話す）
 function newChat() {
@@ -1497,7 +1556,8 @@ async function chooseRepo() {
 
 $('repoBtn').onclick = chooseRepo;
 $('newBtn').onclick = () => newTask();
-$('chatBtn').onclick = newChat;
+$('chatBtn').onclick = openChats;
+$('detailBackdrop').addEventListener('mousedown', closeDetail);
 $('issueBtn').onclick = () => openIssueModal();
 $('settingsBtn').onclick = openSettings;
 
@@ -1722,6 +1782,20 @@ api.onBoard((board) => {
     }
   }
 });
+// ログの中のリンクはブラウザで開く
+$('detailBody').addEventListener('click', (e) => {
+  const a = e.target.closest('.md-link');
+  if (!a) return;
+  e.preventDefault();
+  const url = a.dataset.url;
+  // 安全のため、ブラウザで開けるのは GitHub の URL だけ（main.js と同じ条件）。それ以外はコピーする
+  if (/^https:\/\/([a-z0-9-]+\.)?github\.com\//.test(url)) return run(() => api.openExternal(url));
+  navigator.clipboard?.writeText(url).then(
+    () => toast('GitHub 以外のリンクは開けないので、URL をコピーしました', 'ok'),
+    () => toast('GitHub 以外のリンクは開けません'),
+  );
+});
+
 api.onLog(({ id, entry }) => {
   if (!state.logs.has(id)) return;
   state.logs.get(id).push(entry);
