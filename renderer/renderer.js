@@ -4,8 +4,12 @@ const COLUMNS = [
   { key: 'running', label: '実行中', statuses: ['queued', 'running'] },
   { key: 'review', label: 'レビュー', statuses: ['review', 'failed'] },
   { key: 'done', label: '完了', statuses: ['done'] },
+  // タスクに紐づかない会話（worktree を作らず、リポジトリのフォルダでそのまま話す）
+  { key: 'chat', label: '💬 会話', chat: true },
 ];
 const STATUS_LABEL = { todo: '未着手', queued: '待機中', running: '実行中', review: 'レビュー待ち', failed: 'エラー', done: 'マージ済み' };
+const CHAT_STATUS_LABEL = { todo: '未開始', queued: '待機中', running: '返答中', review: '返事済み', failed: 'エラー', done: '終了' };
+const isChat = (c) => !!c && c.kind === 'chat';
 const LOG_LABEL = { question: '質問', user: 'あなた', text: 'Claude', tool: 'ツール', tool_result: '結果', tool_error: '結果(エラー)', system: 'システム', result: '完了', error: 'エラー', stderr: 'stderr', permission: '承認' };
 const PERMISSION_MODES = [
   ['default', '毎回確認する（すべての操作をカードで承認）'],
@@ -120,7 +124,7 @@ function badgeFor(c) {
   if ((c.permissions || []).length) return ['waiting', '承認待ち'];
   if (c.conflict && !c.conflict.resolving && c.status !== 'running' && c.status !== 'queued') return ['conflict', 'コンフリクト'];
   if (c.awaitingReply && (c.status === 'review' || c.status === 'failed')) return ['awaiting', '回答待ち'];
-  return [c.status, STATUS_LABEL[c.status]];
+  return [c.status, (isChat(c) ? CHAT_STATUS_LABEL : STATUS_LABEL)[c.status]];
 }
 function needsYou(c) {
   return isInterrupted(c) || (c.questions || []).length || (c.permissions || []).length || (c.awaitingReply && c.status === 'review') || (c.conflict && !c.conflict.resolving && c.status === 'review');
@@ -245,7 +249,7 @@ function cardHtml(c) {
   const [bcls, blabel] = badgeFor(c);
   const since = c.status === 'running' ? c.startedAt : null;
   return `
-    <div class="card s-${c.status} ${waiting ? (bcls === 'waiting' ? 'waiting' : bcls === 'conflict' ? 'conflicting' : 'asking') : ''} ${state.selected === c.id ? 'selected' : ''}" draggable="${c.status === 'todo'}" data-id="${c.id}">
+    <div class="card s-${c.status} ${isChat(c) ? 'chat' : ''} ${waiting ? (bcls === 'waiting' ? 'waiting' : bcls === 'conflict' ? 'conflicting' : 'asking') : ''} ${state.selected === c.id ? 'selected' : ''}" draggable="${c.status === 'todo' && !isChat(c)}" data-id="${c.id}">
       <div class="card-top">
         <span class="badge b-${bcls}">${blabel}</span>
         ${since ? `<span class="elapsed" data-since="${since}">${elapsed(since)}</span>` : ''}
@@ -269,8 +273,9 @@ function renderBoard() {
   renderInterruptBanner();
   $('repoBtn').textContent = settings.repoPath ? `📁 ${settings.repoPath}` : '📁 リポジトリを選ぶ';
   $('baseInfo').textContent = settings.repoPath ? `ベース: ${settings.baseBranch || 'チェックアウト中のブランチ'}` : '';
-  const running = cards.filter((c) => c.status === 'running').length;
-  const queued = cards.filter((c) => c.status === 'queued').length;
+  // 会話は同時実行数に数えない
+  const running = cards.filter((c) => c.status === 'running' && !isChat(c)).length;
+  const queued = cards.filter((c) => c.status === 'queued' && !isChat(c)).length;
   const waiting = cards.filter((c) => needsYou(c)).length;
   const total = Number(state.board.totalCostUsd) || 0;
   $('costInfo').classList.toggle('hidden', !settings.repoPath);
@@ -285,12 +290,12 @@ function renderBoard() {
   }
   $('board').innerHTML = COLUMNS.map((col) => {
     const list = cards
-      .filter((c) => col.statuses.includes(c.status))
+      .filter((c) => (col.chat ? isChat(c) : !isChat(c) && col.statuses.includes(c.status)))
       .sort((a, b) => (needsYou(b) ? 1 : 0) - (needsYou(a) ? 1 : 0) || b.createdAt - a.createdAt);
     return `
-      <section class="column" data-col="${col.key}">
+      <section class="column ${col.chat ? 'chat-col' : ''}" data-col="${col.key}">
         <header><span>${col.label}</span><span class="count">${list.length}</span></header>
-        <div class="cards">${list.map(cardHtml).join('') || `<div class="col-empty">${col.key === 'todo' ? '「＋ 新しいタスク」から追加' : 'なし'}</div>`}</div>
+        <div class="cards">${list.map(cardHtml).join('') || `<div class="col-empty">${col.key === 'todo' ? '「＋ 新しいタスク」から追加' : col.chat ? '「💬 会話」から、タスクを作らずに Claude と話せます' : 'なし'}</div>`}</div>
       </section>`;
   }).join('');
 }
@@ -395,11 +400,24 @@ async function select(id) {
   renderBoard();
   renderDetailHead();
   updateBtwTab(card(id));
+  updateTabsFor(card(id));
   if (!state.logs.has(id)) {
     const logs = await run(() => api.logs(id));
     state.logs.set(id, logs || []);
   }
   renderDetailBody();
+}
+
+// 会話には worktree も差分もないので、そのタブは隠す
+function updateTabsFor(c) {
+  const chat = isChat(c);
+  document.querySelectorAll('#tabs .tab').forEach((t) => {
+    if (t.dataset.tab === 'worktree' || t.dataset.tab === 'diff') t.classList.toggle('hidden', chat);
+  });
+  if (chat && (state.tab === 'worktree' || state.tab === 'diff')) {
+    state.tab = 'log';
+    document.querySelectorAll('#tabs .tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === 'log'));
+  }
 }
 
 function closeDetail() {
@@ -415,7 +433,14 @@ function renderDetailHead() {
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
-  const btns = [
+  const chat = isChat(c);
+  const btns = chat ? [
+    isInterrupted(c) && `<button class="btn primary" data-act="resume" title="中断したところから続けます">▶ 再開</button>`,
+    (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">■ 停止</button>`,
+    c.sessionId && s !== 'running' && s !== 'queued' &&
+      `<button class="btn" data-act="toTask" title="この会話の続きとして、worktree で作業するタスクを作ります（会話はそのまま残ります）">📝 タスクにする</button>`,
+    `<button class="btn danger" data-act="discard">削除</button>`,
+  ].filter(Boolean) : [
     isInterrupted(c) && `<button class="btn primary" data-act="resume" title="中断したところから続けます">▶ 再開</button>`,
     s === 'todo' && !isInterrupted(c) && `<button class="btn primary" data-act="start">▶ 開始</button>`,
     (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">■ 停止</button>`,
@@ -435,6 +460,7 @@ function renderDetailHead() {
     <dl class="d-meta">
       ${c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''}
       ${sessionRowHtml(c)}
+      ${chat ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（worktree は作りません）</span></dd>` : ''}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
       ${c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''}
       ${c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}${c.prState === 'MERGED' ? '（マージ済み）' : c.prState === 'CLOSED' ? '（閉じられました）' : ''}</dd>` : ''}
@@ -467,7 +493,8 @@ function renderDetailHead() {
   drawFollowSkill();
   $('followBtn').disabled = !canFollow;
   $('followInput').placeholder =
-    canFollow && c.awaitingReply ? 'Claude への回答を書く（Ctrl/⌘ + Enter で送信）'
+    chat ? (canFollow ? 'メッセージを送る（Ctrl/⌘ + Enter で送信）。同じ会話の続きとして話せます' : '返事が来たら、続きを話せます')
+    : canFollow && c.awaitingReply ? 'Claude への回答を書く（Ctrl/⌘ + Enter で送信）'
     : s === 'done' ? '完了したタスクの続きを話す（Ctrl/⌘ + Enter で送信）。同じ場所に worktree を作り直して、同じ会話の続きから動きます'
     : canFollow ? '追加の指示を送る（Ctrl/⌘ + Enter で送信）。同じセッションの続きとして動きます'
     : s === 'todo' ? '開始すると、終わったあとに追加の指示を送れます'
@@ -515,6 +542,14 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'open') run(() => api.open(c.id));
   if (act === 'merge') openMerge(c);
   if (act === 'pr') openPr(c);
+  if (act === 'toTask') newTask({ fromChat: c });
+  if (act === 'discard' && isChat(c)) {
+    if (confirm(`会話「${c.title}」をボードから削除しますか？\n（Claude Code の会話の記録は残るので、あとで「既存の会話」から引き継げます）`)) {
+      await runBusy('削除しています…', () => api.discard(c.id), '削除しました');
+      closeDetail();
+    }
+    return;
+  }
   if (act === 'discard') {
     const msg = c.status === 'done' ? `「${c.title}」をボードから削除しますか？` : `「${c.title}」を破棄しますか？\nworktree とブランチ ${c.branch || ''} も削除され、元に戻せません。`;
     if (confirm(msg)) {
@@ -871,7 +906,7 @@ async function renderDetailBody() {
   const body = $('detailBody');
   if (state.tab === 'log') {
     const logs = state.logs.get(c.id) || [];
-    body.innerHTML = logs.length ? logs.map(logEntryHtml).join('') : '<div class="muted pad">まだログはありません。「開始」を押すと Claude が動き出します。</div>';
+    body.innerHTML = logs.length ? logs.map(logEntryHtml).join('') : `<div class="muted pad">${isChat(c) ? 'まだ会話はありません。' : 'まだログはありません。「開始」を押すと Claude が動き出します。'}</div>`;
     body.scrollTop = body.scrollHeight;
   } else if (state.tab === 'diff') {
     await renderDiff(c);
@@ -961,10 +996,12 @@ document.addEventListener('keydown', (e) => {
   else if (state.selected) closeDetail();
 });
 
-function newTask() {
+function newTask(opts = {}) {
   if (!state.board.settings.repoPath) return chooseRepo();
+  const from = opts.fromChat;
   openModal(
     `<h2>新しいタスク</h2>
+     ${from ? `<p class="muted small">会話「${esc(from.title)}」の続きとして、タスクを始めます（会話の内容を Claude が引き継ぎます。会話そのものはそのまま残ります）。</p>` : ''}
      <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
      <div class="field"><span>Claude への指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></div>
      ${sessionFieldHtml('n')}
@@ -973,7 +1010,8 @@ function newTask() {
      <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">作成（Ctrl/⌘ + Enter）</button></div>`,
     () => {
       $('nPrompt').focus();
-      fillSessionField('n');
+      if (from) $('nPrompt').value = 'ここまでの会話の内容をもとに、作業を進めてください。';
+      fillSessionField('n', from ? { id: from.sessionId, title: `会話: ${from.title}` } : undefined);
       let skill = state.board.settings.defaultSkill || null;
       const drawSkill = () => renderSkillSlot('nSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
@@ -987,6 +1025,39 @@ function newTask() {
       $('nOk').onclick = submit;
       $('nCancel').onclick = closeModal;
       $('nPrompt').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit();
+      });
+    },
+  );
+}
+
+// タスクに紐づかない会話を始める（worktree を作らず、リポジトリのフォルダでそのまま話す）
+function newChat() {
+  if (!state.board.settings.repoPath) return chooseRepo();
+  openModal(
+    `<h2>💬 会話を始める</h2>
+     <p class="muted small">タスクを作らずに、このリポジトリについて Claude と話せます（質問・調べもの・相談など）。worktree やブランチは作らず、コミットやマージもしません。</p>
+     <div class="field"><span>メッセージ</span><div id="cSkill" class="skill-slot"></div><textarea id="cMsg" rows="6" placeholder="例: このリポジトリの全体の構成を教えて"></textarea></div>
+     <label class="field"><span>タイトル（省略するとメッセージの1行目）</span><input id="cTitle" /></label>
+     ${sessionFieldHtml('c')}
+     <p class="muted small">会話はリポジトリのフォルダ（手元の作業中のファイル）でそのまま動くので、ファイルの変更やコマンドは毎回カードで確かめます。作業してほしくなったら、詳細画面の「📝 タスクにする」で会話の続きからタスクを作れます。</p>
+     <div class="modal-actions"><button class="btn ghost" id="cCancel">キャンセル</button><button class="btn primary" id="cOk">話しかける（Ctrl/⌘ + Enter）</button></div>`,
+    () => {
+      $('cMsg').focus();
+      fillSessionField('c');
+      let skill = null;
+      const drawSkill = () => renderSkillSlot('cSkill', skill, (v) => ((skill = v), drawSkill()));
+      drawSkill();
+      const submit = async () => {
+        const id = await runBusy('会話を始めています…', () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: readSessionField('c'), skill }));
+        if (id) {
+          closeModal();
+          select(id);
+        }
+      };
+      $('cOk').onclick = submit;
+      $('cCancel').onclick = closeModal;
+      $('cMsg').addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit();
       });
     },
@@ -1075,8 +1146,13 @@ function sessionFieldHtml(idp) {
     <label class="check small"><input type="checkbox" id="${idp}AllSessions" /> ほかのフォルダの会話も表示</label></label>`;
 }
 
-async function fillSessionField(idp, selectedId) {
+async function fillSessionField(idp, selected) {
   const list = (await api.listSessions().catch(() => [])) || [];
+  const selectedId = selected && typeof selected === 'object' ? selected.id : selected;
+  // 選んでおきたい会話が一覧にまだ出ていなければ（保存の直後など）、先頭に足しておく
+  if (selected && typeof selected === 'object' && selected.id && !list.some((x) => x.id === selected.id)) {
+    list.unshift({ id: selected.id, title: selected.title || selected.id, updatedAt: Date.now(), related: true });
+  }
   const sel = $(`${idp}Session`);
   if (!sel) return;
   const render = () => {
@@ -1402,7 +1478,8 @@ async function chooseRepo() {
 }
 
 $('repoBtn').onclick = chooseRepo;
-$('newBtn').onclick = newTask;
+$('newBtn').onclick = () => newTask();
+$('chatBtn').onclick = newChat;
 $('issueBtn').onclick = () => openIssueModal();
 $('settingsBtn').onclick = openSettings;
 

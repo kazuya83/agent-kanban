@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   createCard: (p) => call('card:create', p),
   updateCard: (p) => call('card:update', p),
   createFromIssues: (p) => call('card:createFromIssues', p),
+  createChat: (p) => call('chat:create', p),
   repoGithub: () => call('repo:github'),
   openExternal: (url) => call('open:external', url),
   ghStatus: () => call('gh:status'),
