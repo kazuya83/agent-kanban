@@ -729,6 +729,7 @@ class AgentManager extends EventEmitter {
       c.prState = null;
       c.prMergedAt = null;
       c.prCheckError = null;
+      c.prMergeable = null;
       c.finalDiff = null;
       delete c.reopenBase;
       delete c.reopenFrom;
@@ -1389,6 +1390,10 @@ class AgentManager extends EventEmitter {
       c.prState = 'OPEN';
       c.prMergedAt = null;
       c.prCheckError = null;
+      // push したので、コンフリクトしているかは GitHub でもう一度確かめる
+      c.prMergeable = null;
+      if (c.conflictResolved && c.conflictResolved.pr) c.conflictResolved = null;
+      if (c.conflict && c.conflict.pr) c.conflict = null;
 
       const finalDiff = await git.diff(c.worktreePath, c.baseCommit);
       if (opts.keep === false) {
@@ -1466,11 +1471,14 @@ class AgentManager extends EventEmitter {
     if (!this.store.card(c.id) || c.prUrl !== url || c.prMergedAt || !['review', 'failed', 'done'].includes(c.status)) return false;
     c.prCheckError = null;
     if (pr.state !== 'MERGED') {
+      let changed = false;
       if (c.prState !== pr.state) {
         if (pr.state === 'CLOSED') this.log(c, 'system', `PR はマージされずに閉じられました: ${url}`);
         c.prState = pr.state;
-        this.changed(c);
+        changed = true;
       }
+      if (this.updatePrConflict(c, pr)) changed = true;
+      if (changed) this.changed(c);
       return false;
     }
 
@@ -1511,6 +1519,55 @@ class AgentManager extends EventEmitter {
     else this.notify(c, 'done', `PR がマージされました: ${c.title}`, url);
     this.changed(c);
     return true;
+  }
+
+  /**
+   * 開いている PR がマージ先とコンフリクトしていたら、カードに出して解消の導線を作る。
+   * コンフリクトがなくなったら（GitHub 上で解消された・マージ先が戻ったなど）、まだ手をつけていなければ消す。
+   * @returns {boolean} カードを変えたら true
+   */
+  updatePrConflict(c, pr) {
+    const before = c.prMergeable || null;
+    const now = pr.state === 'OPEN' ? pr.mergeable || null : null;
+    // GitHub が計算中（UNKNOWN）のときは、前の状態のままにしておく
+    if (now === 'UNKNOWN') return false;
+    let changed = before !== now;
+    c.prMergeable = now;
+    const base = pr.baseRefName || c.prBase;
+    const active = c.conflict && (c.conflict.manual || c.conflict.resolving);
+    if (now === 'CONFLICTING' && before !== 'CONFLICTING') {
+      // 新しくコンフリクトした。worktree があればアプリの中で解消できる
+      if (c.worktreePath && ['review', 'failed'].includes(c.status) && base && !(c.conflict && !c.conflict.pr)) {
+        if (!active) this.raisePrConflict(c, base);
+        this.log(c, 'error', `PR が ${base} とコンフリクトしています。「Claude に解消してもらう」か「自分で解消する」で直して、PR を更新してください: ${c.prUrl}`);
+        this.notify(c, 'conflict', `PR がコンフリクトしています: ${c.title}`, c.prUrl);
+      } else if (!c.worktreePath) {
+        this.log(c, 'error', `PR が ${base || 'マージ先'} とコンフリクトしています（worktree を片付けたので、GitHub 上で解消してください）: ${c.prUrl}`);
+      }
+      changed = true;
+    } else if (now !== 'CONFLICTING' && c.conflict && c.conflict.pr && !active) {
+      // もうコンフリクトしていない（PR が閉じられた・ほかで解消された）
+      c.conflict = null;
+      changed = true;
+    }
+    return changed;
+  }
+
+  raisePrConflict(c, base) {
+    c.conflict = { target: base, files: [], pr: true, push: true, keep: true, at: Date.now() };
+    c.conflictResolved = null;
+  }
+
+  // 閉じたコンフリクトの案内を、もう一度出す（PR がコンフリクトしているあいだだけ）
+  reopenPrConflict(id) {
+    const c = this.must(id);
+    if (!c.prUrl || c.prState !== 'OPEN' || c.prMergeable !== 'CONFLICTING') throw new Error('PR はコンフリクトしていません');
+    if (!c.worktreePath) throw new Error('worktree がないので、アプリの中では解消できません。GitHub 上で解消してください');
+    if (!['review', 'failed'].includes(c.status)) throw new Error('実行中は解消を始められません');
+    if (c.conflict) return c.conflict;
+    this.raisePrConflict(c, c.prBase || c.baseBranch);
+    this.changed(c);
+    return c.conflict;
   }
 
   // worktree に、マージされた PR に入っていない作業が残っていれば、その説明を返す（なければ null）
@@ -1572,9 +1629,20 @@ class AgentManager extends EventEmitter {
       files = await git.conflictFiles(wt);
     } else {
       await git.commitAll(wt, this.commitMessage(c));
-      if (c.conflict.push) await this.syncWithOrigin(c, c.repoPath, target);
-      files = await git.startMerge(wt, target);
-      this.log(c, 'system', `${target} をタスクのブランチに取り込み始めました`);
+      let ref = target;
+      if (c.conflict.pr) {
+        // PR のコンフリクトは、GitHub 上のマージ先（origin/<base>）と起きているので、それを取り込む
+        let has;
+        try {
+          has = await git.fetchBranch(c.repoPath, 'origin', target);
+        } catch (err) {
+          throw new Error(`origin の最新を取ってこられませんでした（ネットワークや GitHub のログインを確認してください）。\n${err.message}`);
+        }
+        if (!has) throw new Error(`origin に ${target} が見つかりません`);
+        ref = `origin/${target}`;
+      } else if (c.conflict.push) await this.syncWithOrigin(c, c.repoPath, target);
+      files = await git.startMerge(wt, ref);
+      this.log(c, 'system', `${ref} をタスクのブランチに取り込み始めました`);
       if (!files.length) {
         await git.finishMerge(wt);
         this.markResolved(c, 'コンフリクトなしで取り込めました');
@@ -1588,7 +1656,7 @@ class AgentManager extends EventEmitter {
       return { manual: true, path: wt };
     }
     const prompt = [
-      `ブランチ \`${target}\` をこのブランチに取り込もうとしたところ、コンフリクトが起きました（git merge は途中の状態です）。`,
+      `ブランチ \`${c.conflict.pr ? `origin/${target}` : target}\` をこのブランチに取り込もうとしたところ、コンフリクトが起きました（git merge は途中の状態です）。`,
       '',
       'コンフリクトしているファイル:',
       ...files.map((f) => `- ${f}`),
@@ -1636,9 +1704,10 @@ class AgentManager extends EventEmitter {
   }
 
   markResolved(c, msg) {
-    c.conflictResolved = { target: c.conflict.target, push: c.conflict.push, keep: c.conflict.keep };
+    const pr = !!c.conflict.pr;
+    c.conflictResolved = { target: c.conflict.target, push: c.conflict.push, keep: c.conflict.keep, ...(pr ? { pr: true } : {}) };
     c.conflict = null;
-    this.log(c, 'system', `${msg}。もう一度マージすると、コンフリクトなしでマージできます`);
+    this.log(c, 'system', pr ? `${msg}。PR を更新（push）すると、GitHub 上のコンフリクトも解消されます` : `${msg}。もう一度マージすると、コンフリクトなしでマージできます`);
     this.changed(c);
   }
 

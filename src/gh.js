@@ -169,12 +169,12 @@ async function createPullRequest({ cwd, head, base, title, body, gh: ghPath }) {
 /**
  * プルリクエストの今の状態を GitHub に聞く
  * @param {{ url: string, cwd?: string, gh?: string }} p
- * @returns {Promise<{ state: 'OPEN'|'CLOSED'|'MERGED', mergedAt: string|null, headRefOid: string|null, baseRefName: string|null }>}
+ * @returns {Promise<{ state: 'OPEN'|'CLOSED'|'MERGED', mergedAt: string|null, headRefOid: string|null, baseRefName: string|null, mergeable: 'MERGEABLE'|'CONFLICTING'|'UNKNOWN'|null }>}
  */
 async function pullRequestState({ url, cwd, gh: ghPath }) {
   const gh = ghPath || resolveCommand('gh');
   if (!gh) throw new Error('PR の状態を確かめるには GitHub CLI（gh）が必要です');
-  const r = await run(gh, ['pr', 'view', url, '--json', 'state,mergedAt,headRefOid,baseRefName'], { cwd, timeout: 30000 });
+  const r = await run(gh, ['pr', 'view', url, '--json', 'state,mergedAt,headRefOid,baseRefName,mergeable'], { cwd, timeout: 30000 });
   if (r.code !== 0) {
     const msg = (r.stderr || r.stdout).trim();
     if (/auth login|not logged/i.test(msg)) throw new Error('GitHub にログインしていません');
@@ -191,6 +191,8 @@ async function pullRequestState({ url, cwd, gh: ghPath }) {
     mergedAt: d.mergedAt || null,
     headRefOid: d.headRefOid || null,
     baseRefName: d.baseRefName || null,
+    // MERGEABLE / CONFLICTING / UNKNOWN（GitHub が計算中のときは UNKNOWN）
+    mergeable: d.mergeable ? String(d.mergeable).toUpperCase() : null,
   };
 }
 

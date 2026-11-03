@@ -184,17 +184,24 @@ function conflictBoxHtml(c) {
     else if (k.manual)
       actions = `<p class="small">タスクの worktree で、上のファイルの <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> 〜 <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code> を直してください。</p>
         <div class="cf-actions"><button class="btn" data-cact="open">フォルダを開く</button><button class="btn primary" data-cact="complete">解消した（取り込みを完了）</button><button class="btn" data-cact="agent">Claude に任せる</button><button class="btn ghost" data-cact="abort">取り込みを中止</button></div>`;
+    else if (k.pr)
+      actions = `<div class="cf-actions"><button class="btn primary" data-cact="agent">Claude に解消してもらう</button><button class="btn" data-cact="manual">自分で解消する</button>${c.prUrl ? '<button class="btn ghost" data-cact="openPr">GitHub で見る</button>' : ''}<button class="btn ghost" data-cact="dismiss">閉じる</button></div>
+        <p class="muted small">どちらも、origin/${esc(k.target)} をこのタスクのブランチに取り込んで解消します。解消できたら「PR を更新」で push すると、PR のコンフリクトがなくなります。</p>`;
     else
       actions = `<div class="cf-actions"><button class="btn primary" data-cact="agent">Claude に解消してもらう</button><button class="btn" data-cact="manual">自分で解消する</button><button class="btn ghost" data-cact="dismiss">閉じる</button></div>
         <p class="muted small">どちらも、${esc(k.target)} をこのタスクのブランチに取り込んで解消します。${esc(k.target)} 自体は解消が終わってマージするまで変わりません。</p>`;
     return `<div class="cf-box">
-      <b>⚠ ${esc(k.target)} とコンフリクトしています${k.unresolved && k.unresolved.length ? '（まだ残っています）' : ''}</b>
-      <ul class="cf-files">${files.map((f) => `<li class="mono">${esc(f)}</li>`).join('')}</ul>
+      <b>⚠ ${k.pr ? `PR が ${esc(k.target)} とコンフリクトしています` : `${esc(k.target)} とコンフリクトしています`}${k.unresolved && k.unresolved.length ? '（まだ残っています）' : ''}</b>
+      ${files.length ? `<ul class="cf-files">${files.map((f) => `<li class="mono">${esc(f)}</li>`).join('')}</ul>` : '<p class="muted small">コンフリクトしているファイルは、解消を始めると表示されます。</p>'}
       ${actions}
     </div>`;
   }
   if (c.conflictResolved && !busy && (c.status === 'review' || c.status === 'failed')) {
     const r = c.conflictResolved;
+    if (r.pr)
+      return `<div class="cf-box ok"><b>✓ origin/${esc(r.target)} を取り込んで、コンフリクトを解消しました</b>
+      <p class="small">差分タブで解消の内容を確かめてから、PR を更新（push）してください。</p>
+      <div class="cf-actions"><button class="btn primary" data-cact="pushPr">PR を更新（push）</button><button class="btn ghost" data-cact="dismiss">閉じる</button></div></div>`;
     return `<div class="cf-box ok"><b>✓ ${esc(r.target)} を取り込んで、コンフリクトを解消しました</b>
       <p class="small">差分タブで解消の内容を確かめてから、マージしてください。</p>
       <div class="cf-actions"><button class="btn primary" data-cact="remerge">${esc(r.target)} にマージ${r.push ? 'して push' : ''}</button><button class="btn ghost" data-cact="dismiss">閉じる</button></div></div>`;
@@ -216,6 +223,12 @@ async function conflictAction(c, act) {
   if (act === 'complete') return runBusy('取り込みを完了しています…', () => api.completeConflict(c.id), '取り込みを完了しました');
   if (act === 'abort') return runBusy('取り込みを中止しています…', () => api.abortConflict(c.id), '取り込みを中止しました');
   if (act === 'dismiss') return run(() => api.dismissConflict(c.id));
+  if (act === 'openPr') return c.prUrl && api.openExternal(c.prUrl);
+  if (act === 'pushPr') {
+    const res = await runBusy('PR を更新しています…', () => api.createPr(c.id, { base: c.conflictResolved.target, keep: true }));
+    if (res && res.url) toast('PR を更新しました。GitHub でコンフリクトがなくなったか確かめます', 'ok');
+    return;
+  }
   if (act === 'remerge') {
     const r = c.conflictResolved;
     const res = await runBusy(r.push ? `${r.target} にマージして push しています…` : `${r.target} にマージしています…`, () => api.merge(c.id, { target: r.target, push: r.push, keep: r.keep }));
@@ -429,7 +442,7 @@ function closeDetail() {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.interrupted]);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.interrupted]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -463,7 +476,7 @@ function renderDetailHead() {
       ${chat ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（worktree は作りません）</span></dd>` : ''}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
       ${c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''}
-      ${c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}${c.prState === 'MERGED' ? '（マージ済み）' : c.prState === 'CLOSED' ? '（閉じられました）' : ''}</dd>` : ''}
+      ${c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}${c.prState === 'MERGED' ? '（マージ済み）' : c.prState === 'CLOSED' ? '（閉じられました）' : ''}${c.prState === 'OPEN' && c.prMergeable === 'CONFLICTING' ? ` <span class="badge b-conflict">コンフリクト</span>${c.worktreePath && !c.conflict && (s === 'review' || s === 'failed') ? ' <button class="btn small" data-act="prConflict">解消する</button>' : ''}` : ''}</dd>` : ''}
       ${(c.mergedInto || []).length ? `<dt>マージ済み</dt><dd>${c.mergedInto.map((b) => esc(b) + ((c.pushedTo || []).includes(b) ? '（origin にも push 済み）' : '')).join(', ')}</dd>` : ''}
       ${c.costUsd ? `<dt>コスト</dt><dd>$${c.costUsd.toFixed(3)}</dd>` : ''}
       ${(c.alwaysAllow || []).length ? `<dt>常に許可</dt><dd>${c.alwaysAllow.map(esc).join(', ')}</dd>` : ''}
@@ -542,6 +555,7 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'open') run(() => api.open(c.id));
   if (act === 'merge') openMerge(c);
   if (act === 'pr') openPr(c);
+  if (act === 'prConflict') run(() => api.reopenPrConflict(c.id));
   if (act === 'toTask') newTask({ fromChat: c });
   if (act === 'discard' && isChat(c)) {
     if (confirm(`会話「${c.title}」をボードから削除しますか？\n（Claude Code の会話の記録は残るので、あとで「既存の会話」から引き継げます）`)) {
@@ -1590,7 +1604,7 @@ api.onGh((ev) => {
 
 // ---------------- 通知（右上のベル） ----------------
 
-const NOTIF_ICON = { permission: '🔐', question: '❓', awaiting: '💬', review: '👀', failed: '⚠️', done: '✅', skill: '💡' };
+const NOTIF_ICON = { permission: '🔐', question: '❓', awaiting: '💬', review: '👀', failed: '⚠️', done: '✅', skill: '💡', conflict: '⚔️' };
 
 function timeAgo(t) {
   const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
