@@ -30,12 +30,16 @@
         </nav>
         <div id="detailBody" class="d-body"></div>
         <div id="detailFoot" class="d-foot">
-          <textarea id="followInput" rows="2" placeholder="追加の指示を送る（Ctrl/⌘ + Enter で送信）"></textarea>
-          <button id="followBtn" class="btn primary">送信</button>
+          <div id="followSkill" class="skill-slot"></div>
+          <div class="d-foot-row">
+            <textarea id="followInput" rows="2" placeholder="追加の指示を送る（Ctrl/⌘ + Enter で送信）"></textarea>
+            <button id="followBtn" class="btn primary">送信</button>
+          </div>
         </div>
       </aside>
     </div>
     <div id="modal" class="modal hidden"><div class="modal-box" id="modalBox"></div></div>
+    <div id="skillPicker" class="modal picker hidden"><div class="modal-box wide" id="skillPickerBox"></div></div>
     <div id="toast" class="toast hidden"></div>
     <script src="renderer.js"></script>
   </body>

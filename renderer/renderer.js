@@ -82,6 +82,7 @@ function cardHtml(c) {
         ${since ? `<span class="elapsed" data-since="${since}">${elapsed(since)}</span>` : ''}
       </div>
       <div class="card-title">${c.issue ? `<a class="issue-chip" data-url="${esc(c.issue.url)}" title="Issue を開く">#${c.issue.number}</a> ${esc(c.title.replace(/^#\d+\s*/, ''))}` : esc(c.title)}</div>
+      ${c.skill ? `<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">⚡ /${esc(c.skill)}</span></div>` : ''}
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
       ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(c.lastMessage)}</div>` : ''}
       ${permissionBlock(c, true)}
@@ -168,6 +169,7 @@ async function select(id) {
   state.headSig = '';
   $('detail').classList.remove('hidden');
   $('followInput').value = '';
+  state.followSkill = null;
   renderBoard();
   renderDetailHead();
   updateBtwTab(card(id));
@@ -232,6 +234,7 @@ function renderDetailHead() {
   }
   const canFollow = s === 'review' || s === 'failed';
   $('followInput').disabled = !canFollow;
+  drawFollowSkill();
   $('followBtn').disabled = !canFollow;
   $('followInput').placeholder = canFollow ? '追加の指示を送る（Ctrl/⌘ + Enter で送信）。同じセッションの続きとして動きます' : s === 'todo' ? '開始すると、終わったあとに追加の指示を送れます' : 'エージェントの作業中は送れません';
 }
@@ -271,7 +274,8 @@ document.querySelectorAll('#tabs .tab').forEach((t) =>
 
 function logEntryHtml(e) {
   const time = new Date(e.t).toLocaleTimeString();
-  return `<div class="log k-${e.kind}"><span class="log-k">${LOG_LABEL[e.kind] || e.kind}</span><span class="log-t">${time}</span><div class="log-x">${esc(e.text)}</div></div>`;
+  const sk = e.skill ? `<span class="skill-chip small">⚡ /${esc(e.skill)}</span> ` : '';
+  return `<div class="log k-${e.kind}"><span class="log-k">${LOG_LABEL[e.kind] || e.kind}</span><span class="log-t">${time}</span><div class="log-x">${sk}${esc(e.text)}</div></div>`;
 }
 
 function diffHtml(text) {
@@ -353,19 +357,32 @@ async function renderDetailBody() {
     const editable = c.status === 'todo';
     body.innerHTML = `<div class="pad">
       <label class="field"><span>タイトル</span><input id="editTitle" value="${esc(c.title)}" ${editable ? '' : 'disabled'} /></label>
-      <label class="field"><span>最初の指示</span><textarea id="editPrompt" rows="14" ${editable ? '' : 'disabled'}>${esc(c.prompt)}</textarea></label>
+      <div class="field"><span>最初の指示</span><div id="editSkill" class="skill-slot"></div><textarea id="editPrompt" rows="14" ${editable ? '' : 'disabled'}>${esc(c.prompt)}</textarea></div>
       ${editable ? '<button class="btn primary" id="saveEdit">保存</button>' : '<p class="muted">開始後は編集できません。変更したいときは追加指示を送ってください。</p>'}
     </div>`;
-    if (editable) $('saveEdit').onclick = () => run(() => api.updateCard({ id: c.id, title: $('editTitle').value, prompt: $('editPrompt').value }), '保存しました');
+    let editSkill = c.skill || null;
+    const drawEditSkill = () => renderSkillSlot('editSkill', editSkill, (v) => ((editSkill = v), drawEditSkill()), { disabled: !editable });
+    drawEditSkill();
+    if (editable) $('saveEdit').onclick = () => run(() => api.updateCard({ id: c.id, title: $('editTitle').value, prompt: $('editPrompt').value, skill: editSkill || '' }), '保存しました');
   }
+}
+
+function drawFollowSkill() {
+  const c = card(state.selected);
+  const can = c && (c.status === 'review' || c.status === 'failed');
+  renderSkillSlot('followSkill', state.followSkill, (v) => ((state.followSkill = v), drawFollowSkill()), { disabled: !can });
 }
 
 async function sendFollow() {
   const c = card(state.selected);
   const msg = $('followInput').value.trim();
   if (!c || !msg) return;
-  const ok = await run(() => api.send(c.id, msg).then(() => true));
-  if (ok) $('followInput').value = '';
+  const ok = await run(() => api.send(c.id, msg, state.followSkill).then(() => true));
+  if (ok) {
+    $('followInput').value = '';
+    state.followSkill = null; // スキルはその1回だけ
+    drawFollowSkill();
+  }
 }
 $('followBtn').onclick = sendFollow;
 $('followInput').addEventListener('keydown', (e) => {
@@ -387,7 +404,8 @@ $('modal').addEventListener('mousedown', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (!$('modal').classList.contains('hidden')) closeModal();
+  if (!$('skillPicker').classList.contains('hidden')) $('skillPicker').classList.add('hidden');
+  else if (!$('modal').classList.contains('hidden')) closeModal();
   else if (state.selected) closeDetail();
 });
 
@@ -396,7 +414,7 @@ function newTask() {
   openModal(
     `<h2>新しいタスク</h2>
      <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
-     <label class="field"><span>Claude への指示</span><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></label>
+     <div class="field"><span>Claude への指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></div>
      ${sessionFieldHtml('n')}
      <p class="muted small">GitHub の Issue から作るときは、右上の「Issue から作成」を使ってください。</p>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
@@ -404,8 +422,11 @@ function newTask() {
     () => {
       $('nPrompt').focus();
       fillSessionField('n');
+      let skill = state.board.settings.defaultSkill || null;
+      const drawSkill = () => renderSkillSlot('nSkill', skill, (v) => ((skill = v), drawSkill()));
+      drawSkill();
       const submit = async () => {
-        const id = await run(() => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n') }));
+        const id = await run(() => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill }));
         if (id) {
           closeModal();
           select(id);
@@ -419,6 +440,72 @@ function newTask() {
     },
   );
 }
+
+// ---------------- スキル ----------------
+// スキルは1つだけ選べる。選んだスキルは、指示の入力欄の上にラベルで出す
+
+const SKILL_SRC = { project: 'プロジェクト', user: '自分用', plugin: 'プラグイン' };
+let skillCache = null;
+async function getSkills(force) {
+  if (!skillCache || force) skillCache = (await api.listSkills().catch(() => [])) || [];
+  return skillCache;
+}
+
+// 入力欄の上のラベル。value はスキル名（なければ null）
+function renderSkillSlot(slotId, value, onChange, opts = {}) {
+  const el = $(slotId);
+  if (!el) return;
+  if (opts.disabled) {
+    el.innerHTML = value ? `<span class="skill-chip off">⚡ /${esc(value)}</span>` : '';
+    return;
+  }
+  el.innerHTML = value
+    ? `<span class="skill-chip" title="このスキルを使って実行します">⚡ /${esc(value)}<button type="button" class="chip-x" title="スキルを外す">×</button></span><button type="button" class="btn small ghost skill-pick">変更</button>`
+    : `<button type="button" class="btn small ghost skill-pick">⚡ スキルを選ぶ</button>`;
+  const x = el.querySelector('.chip-x');
+  if (x) x.onclick = () => onChange(null);
+  el.querySelector('.skill-pick').onclick = () => openSkillPicker(value, onChange);
+}
+
+// カードの一覧から1つ選ぶ
+async function openSkillPicker(current, onPick) {
+  const box = $('skillPickerBox');
+  box.innerHTML = '<div class="muted pad">スキルを読み込んでいます…</div>';
+  $('skillPicker').classList.remove('hidden');
+  const skills = await getSkills(true);
+  const close = () => $('skillPicker').classList.add('hidden');
+  const cardHtmlFor = (s) => `
+    <button type="button" class="skill-card ${s.name === current ? 'selected' : ''}" data-skill="${esc(s.name)}">
+      <span class="sk-top"><b class="sk-name">/${esc(s.name)}</b><span class="sk-src src-${s.source}">${SKILL_SRC[s.source] || s.source}</span></span>
+      <span class="sk-desc">${esc(s.description || '（説明なし）')}</span>
+    </button>`;
+  const render = (q) => {
+    const k = q.trim().toLowerCase();
+    const list = k ? skills.filter((s) => (s.name + ' ' + s.description).toLowerCase().includes(k)) : skills;
+    $('skGrid').innerHTML =
+      `<button type="button" class="skill-card none ${!current ? 'selected' : ''}" data-skill=""><span class="sk-top"><b class="sk-name">スキルなし</b></span><span class="sk-desc">スキルを使わずに、指示だけで実行します</span></button>` +
+      (list.map(cardHtmlFor).join('') || '<div class="muted pad">見つかりません</div>');
+  };
+  box.innerHTML = `
+    <div class="sk-head"><h2>スキルを選ぶ</h2><button type="button" class="icon" id="skClose">✕</button></div>
+    <p class="muted small">1つだけ選べます。選んだスキルは、指示の先頭に <code>/スキル名</code> として付けて Claude に渡します。</p>
+    <input id="skSearch" placeholder="名前や説明で絞り込む" autocomplete="off" />
+    <div class="skill-grid" id="skGrid"></div>
+    ${skills.length ? '' : '<p class="muted small">使えるスキルが見つかりません。<code>.claude/skills/&lt;名前&gt;/SKILL.md</code>（このリポジトリ）か <code>~/.claude/skills/</code> に置くと、ここに出ます。</p>'}`;
+  render('');
+  $('skSearch').oninput = (e) => render(e.target.value);
+  $('skSearch').focus();
+  $('skClose').onclick = close;
+  $('skGrid').onclick = (e) => {
+    const b = e.target.closest('.skill-card');
+    if (!b) return;
+    close();
+    onPick(b.dataset.skill || null);
+  };
+}
+$('skillPicker').addEventListener('mousedown', (e) => {
+  if (e.target === $('skillPicker')) $('skillPicker').classList.add('hidden');
+});
 
 // ---------------- 会話（セッション）を選ぶ ----------------
 
@@ -506,8 +593,8 @@ function sessionRowHtml(c) {
 // ---------------- GitHub Issue から作る ----------------
 
 // Issue 番号からカードを作る（上部の枠と、詳細ダイアログの両方から使う）
-async function createFromIssues(numbers, extra, autoStart, session) {
-  const r = await run(() => api.createFromIssues({ numbers, extra, autoStart, session }));
+async function createFromIssues(numbers, extra, autoStart, session, skill) {
+  const r = await run(() => api.createFromIssues({ numbers, extra, autoStart, session, skill }));
   if (!r) return false;
   if (r.errors.length) toast(r.errors.join('\n'));
   else toast(`${r.ids.length} 件のタスクを Issue から作りました`, 'ok');
@@ -525,7 +612,7 @@ function openIssueModal(prefill = '') {
      <p class="muted small" id="nRepoInfo">リポジトリを確認しています…</p>
      <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div>
      ${sessionFieldHtml('n')}
-     <label class="field"><span>追加の指示（任意・すべての Issue に付けます）</span><textarea id="nExtra" rows="4" placeholder="例: 変更したらテストを追加して npm test で確認して"></textarea></label>
+     <div class="field"><span>追加の指示（任意・すべての Issue に付けます）</span><div id="nSkill" class="skill-slot"></div><textarea id="nExtra" rows="4" placeholder="例: 変更したらテストを追加して npm test で確認して"></textarea></div>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
      <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">Issue からタスクを作成</button></div>`,
     () => {
@@ -541,10 +628,13 @@ function openIssueModal(prefill = '') {
       );
       refreshGh();
       fillSessionField('n');
+      let skill = state.board.settings.defaultSkill || null;
+      const drawSkill = () => renderSkillSlot('nSkill', skill, (v) => ((skill = v), drawSkill()));
+      drawSkill();
       const submit = async () => {
         $('nOk').disabled = true;
         $('nOk').textContent = 'Issue を読み込んでいます…';
-        const ok = await createFromIssues($('nNumbers').value, $('nExtra').value, $('nStart').checked, readSessionField('n'));
+        const ok = await createFromIssues($('nNumbers').value, $('nExtra').value, $('nStart').checked, readSessionField('n'), skill);
         if (ok) return closeModal();
         $('nOk').disabled = false;
         $('nOk').textContent = 'Issue からタスクを作成';
@@ -623,10 +713,15 @@ async function openSettings() {
        <label class="field"><span>同時に動かす数</span><input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
        <label class="field"><span>モデル（空なら既定）</span><input id="sModel" placeholder="例: sonnet / opus" value="${esc(s.model)}" /></label>
      </div>
+     <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
+       <small>「＋ 新しいタスク」と「Issue から作成」を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath)}" /></label>
 
      <div class="modal-actions"><button class="btn ghost" id="sCancel">キャンセル</button><button class="btn primary" id="sOk">保存</button></div>`,
     () => {
+      let defSkill = s.defaultSkill || null;
+      const drawDef = () => renderSkillSlot('sSkill', defSkill, (v) => ((defSkill = v), drawDef()));
+      drawDef();
       $('sCancel').onclick = closeModal;
       $('sOk').onclick = async () => {
         const r = await run(() =>
@@ -637,6 +732,7 @@ async function openSettings() {
             maxParallel: $('sMax').value,
             model: $('sModel').value.trim(),
             claudePath: $('sClaude').value.trim() || 'claude',
+            defaultSkill: defSkill || '',
           }),
         );
         if (r) {

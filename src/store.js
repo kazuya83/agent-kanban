@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS = {
   model: '',
   claudePath: 'claude',
   maxParallel: 3,
+  defaultSkill: '', // 新しいタスクを作るときに最初から選んでおくスキル
 };
 
 class Store {

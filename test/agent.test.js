@@ -274,3 +274,25 @@ test('過去の会話の一覧（このリポジトリの会話を見分ける�
     else process.env.CLAUDE_CONFIG_DIR = old;
   }
 });
+
+test('スキルを付けて実行する（最初の指示と追加指示）', async () => {
+  const { store, agents } = setup();
+  store.settings.permissionMode = 'bypassPermissions';
+  const c = agents.createCard({ title: 'skill', prompt: 'READMEを整える', skill: '/docs-writer' });
+  assert.strictEqual(c.skill, 'docs-writer');
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  // claude には「/スキル名 指示」の形で渡る
+  assert.match(await agents.diff(c.id), /\+\/docs-writer READMEを整える/);
+  assert.strictEqual(c.logs.find((l) => l.kind === 'user').skill, 'docs-writer');
+  // 追加指示は、そのときに選んだスキルで
+  agents.send(c.id, 'テストも', 'test-writer');
+  await waitFor(() => c.status === 'review' && c.logs.filter((l) => l.kind === 'user').length === 2);
+  await waitFor(() => c.status === 'review');
+  assert.match(await agents.diff(c.id), /\+\/test-writer テストも/);
+  agents.send(c.id, 'スキルなしで');
+  await waitFor(() => c.status === 'review' && c.logs.filter((l) => l.kind === 'user').length === 3);
+  await waitFor(() => c.status === 'review');
+  assert.match(await agents.diff(c.id), /\+スキルなしで/);
+  assert.strictEqual(c.logs.filter((l) => l.kind === 'user')[2].skill, undefined);
+});

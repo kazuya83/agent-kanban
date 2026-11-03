@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const git = require('./git');
 const { resolveCommand, isWin } = require('./env');
 const github = require('./github');
+const { withSkill } = require('./skills');
 
 const MAX_LOGS = 2000;
 const MCP_SERVER_NAME = 'agent_kanban';
@@ -40,6 +41,12 @@ function toolResultText(content) {
 
 function notFoundMessage(cmd) {
   return `claude コマンドが見つかりません（${cmd}）。Claude Code をインストールするか、設定で claude のパスを指定してください。`;
+}
+
+// スキル名を整える（先頭の / は取る。空なら null）
+function cleanSkill(s) {
+  const v = String(s || '').trim().replace(/^\//, '');
+  return v || null;
 }
 
 function splitList(s) {
@@ -114,8 +121,8 @@ class AgentManager extends EventEmitter {
     this.emit('changed', card ? card.id : null);
   }
 
-  log(card, kind, text) {
-    const entry = { t: Date.now(), kind, text };
+  log(card, kind, text, extra) {
+    const entry = { t: Date.now(), kind, text, ...(extra || {}) };
     card.logs = card.logs || [];
     card.logs.push(entry);
     if (card.logs.length > MAX_LOGS) card.logs.splice(0, card.logs.length - MAX_LOGS);
@@ -124,7 +131,7 @@ class AgentManager extends EventEmitter {
 
   // ---------- カード操作 ----------
 
-  createCard({ title, prompt, issue, session }) {
+  createCard({ title, prompt, issue, session, skill }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     if (!prompt || !prompt.trim()) throw new Error('指示を入力してください');
@@ -142,6 +149,7 @@ class AgentManager extends EventEmitter {
     if (issue) card.issue = { number: issue.number, title: issue.title, url: issue.url };
     card.sessions = [];
     if (session && session.id) this.applySession(card, session);
+    card.skill = cleanSkill(skill);
     this.store.cards.push(card);
     this.changed(card);
     return card;
@@ -152,7 +160,7 @@ class AgentManager extends EventEmitter {
    * @param {{ numbers: string, extra?: string }} p  numbers は「12」「12, 15」「#12 #15」など
    * @returns {Promise<{ cards: object[], errors: string[] }>}
    */
-  async createFromIssues({ numbers, extra, session }) {
+  async createFromIssues({ numbers, extra, session, skill }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     const list = github.parseIssueNumbers(numbers);
@@ -167,7 +175,7 @@ class AgentManager extends EventEmitter {
       try {
         const issue = await this.fetchIssue(s.repoPath, n);
         if (issue.state && issue.state !== 'open') errors.push(`#${n} はクローズ済みですが、タスクを作りました`);
-        cards.push(this.createCard({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue, session }));
+        cards.push(this.createCard({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue, session, skill }));
       } catch (err) {
         errors.push(`#${n}: ${err.message}`);
       }
@@ -227,9 +235,10 @@ class AgentManager extends EventEmitter {
     return c.issue ? `agent: ${c.title.replace(/^#\d+\s*/, '')} (#${c.issue.number})` : `agent: ${c.title}`;
   }
 
-  updateCard(id, { title, prompt }) {
+  updateCard(id, { title, prompt, skill }) {
     const c = this.must(id);
     if (c.status !== 'todo') throw new Error('開始前のタスクだけ編集できます');
+    if (skill !== undefined) c.skill = cleanSkill(skill);
     if (typeof title === 'string' && title.trim()) c.title = title.trim();
     if (typeof prompt === 'string' && prompt.trim()) c.prompt = prompt.trim();
     this.changed(c);
@@ -238,16 +247,17 @@ class AgentManager extends EventEmitter {
   start(id) {
     const c = this.must(id);
     if (c.status !== 'todo') throw new Error('このタスクはもう開始しています');
-    this.log(c, 'user', c.prompt);
-    this.enqueue(c, c.prompt);
+    this.log(c, 'user', c.prompt, c.skill ? { skill: c.skill } : undefined);
+    this.enqueue(c, withSkill(c.skill, c.prompt));
   }
 
-  send(id, message) {
+  send(id, message, skill) {
     const c = this.must(id);
     if (!['review', 'failed'].includes(c.status)) throw new Error('実行中・待機中は追加指示を送れません');
     if (!message || !message.trim()) throw new Error('追加指示を入力してください');
-    this.log(c, 'user', message.trim());
-    this.enqueue(c, message.trim());
+    skill = cleanSkill(skill);
+    this.log(c, 'user', message.trim(), skill ? { skill } : undefined);
+    this.enqueue(c, withSkill(skill, message.trim()));
   }
 
   enqueue(c, prompt) {

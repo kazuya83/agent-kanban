@@ -117,7 +117,7 @@ app.whenReady().then(async () => {
     return { branches: await git.branches(repo).catch(() => []), current: await git.currentBranch(repo).catch(() => '') };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill'];
     for (const k of allowed) if (patch && k in patch) store.settings[k] = patch[k];
     store.settings.maxParallel = Math.min(10, Math.max(1, parseInt(store.settings.maxParallel, 10) || 1));
     store.save();
@@ -125,13 +125,13 @@ app.whenReady().then(async () => {
     notifyBoard();
     return store.settings;
   });
-  handle('card:create', ({ title, prompt, autoStart, session }) => {
-    const c = agents.createCard({ title, prompt, session });
+  handle('card:create', ({ title, prompt, autoStart, session, skill }) => {
+    const c = agents.createCard({ title, prompt, session, skill });
     if (autoStart) agents.start(c.id);
     return c.id;
   });
-  handle('card:createFromIssues', async ({ numbers, extra, autoStart, session }) => {
-    const { cards, errors } = await agents.createFromIssues({ numbers, extra, session });
+  handle('card:createFromIssues', async ({ numbers, extra, autoStart, session, skill }) => {
+    const { cards, errors } = await agents.createFromIssues({ numbers, extra, session, skill });
     if (autoStart) for (const c of cards) agents.start(c.id);
     return { ids: cards.map((c) => c.id), errors };
   });
@@ -157,10 +157,11 @@ app.whenReady().then(async () => {
     }),
   );
   handle('gh:cancel', () => gh.cancel());
-  handle('card:update', ({ id, title, prompt }) => agents.updateCard(id, { title, prompt }));
+  handle('card:update', ({ id, title, prompt, skill }) => agents.updateCard(id, { title, prompt, skill }));
   handle('card:start', (id) => agents.start(id));
   handle('card:stop', (id) => agents.stop(id));
-  handle('card:send', ({ id, message }) => agents.send(id, message));
+  handle('card:send', ({ id, message, skill }) => agents.send(id, message, skill));
+  handle('skills:list', () => require('./src/skills').listSkills(store.settings.repoPath));
   handle('card:btw', ({ id, text }) => agents.btw(id, text));
   handle('card:setSession', ({ id, session }) => agents.setSession(id, session));
   handle('sessions:list', () => require('./src/sessions').listSessions(store.settings.repoPath));
