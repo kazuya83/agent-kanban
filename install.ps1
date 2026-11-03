@@ -15,7 +15,7 @@ function Warn($msg) { Write-Host "警告: $msg" -ForegroundColor Yellow }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $api = if ($version -eq 'latest') { "https://api.github.com/repos/$repo/releases/latest" } else { "https://api.github.com/repos/$repo/releases/tags/v$($version.TrimStart('v'))" }
-Info "リリース情報を取得しています（$version）"
+Info "リリース情報を取得しています（${version}）"
 $release = Invoke-RestMethod -Uri $api -Headers @{ 'User-Agent' = 'agent-kanban-installer'; 'Accept' = 'application/vnd.github+json' }
 $asset = $release.assets | Where-Object { $_.name -like '*win-setup.exe' } | Select-Object -First 1
 if (-not $asset) { throw "このリリースにインストーラー（*win-setup.exe）が見つかりません" }
@@ -39,7 +39,7 @@ Info "インストールしました（$($release.tag_name)）。スタートメ
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Warn 'git が見つかりません。Git for Windows をインストールしてください: https://git-scm.com/' }
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Warn 'claude が見つかりません。Claude Code をインストールしてログインしてください: https://docs.claude.com/en/docs/claude-code' }
 
-if ($exe) {
+if ($exe -and -not $env:AGENT_KANBAN_NO_LAUNCH) {
   Info '起動します'
   Start-Process -FilePath $exe
 }

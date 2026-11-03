@@ -97,3 +97,38 @@ jobs:
             dist/*.exe
             dist/*.dmg
             dist/*.AppImage
+
+  # インストール用スクリプトを、実際の OS で最新の Release に対して試す
+  # （macOS は標準の /bin/bash 3.2、Windows は標準の Windows PowerShell 5.1 で実行する）
+  install-script:
+    needs: [test, build, release]
+    if: always() && needs.test.result == 'success' && needs.build.result == 'success' && needs.release.result != 'failure'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install.sh（macOS / Linux）
+        if: runner.os != 'Windows'
+        run: |
+          /bin/bash --version | head -n1
+          /bin/bash ./install.sh
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            test -d "/Applications/Claude Agent Kanban.app" || test -d "$HOME/Applications/Claude Agent Kanban.app"
+          else
+            test -x "$HOME/.local/bin/claude-agent-kanban"
+          fi
+          /bin/bash ./install.sh --uninstall
+      - name: install.ps1（Windows）
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          AGENT_KANBAN_NO_LAUNCH: '1'
+        run: |
+          $PSVersionTable.PSVersion
+          Get-Content -Raw -Encoding UTF8 ./install.ps1 | Invoke-Expression
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter 'Claude Agent Kanban.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw 'インストールされた exe が見つかりません' }
+          Write-Host "OK: $($exe.FullName)"
