@@ -9,6 +9,7 @@ async function call(channel, arg) {
 
 contextBridge.exposeInMainWorld('api', {
   getBoard: () => call('board:get'),
+  appInfo: () => call('app:info'),
   checkEnv: () => call('env:check'),
   chooseRepo: () => call('repo:choose'),
   repoInfo: () => call('repo:info'),

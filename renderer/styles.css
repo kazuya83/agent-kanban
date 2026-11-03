@@ -87,7 +87,9 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
   -webkit-app-region: drag;
 }
 .topbar button { -webkit-app-region: no-drag; }
-.brand { font-weight: 700; font-size: 14px; }
+.brand { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+.brand-ver { font-size: 10.5px; font-weight: 400; color: var(--muted); font-family: var(--mono); }
 .logo { color: var(--accent); }
 .repo { border: 1px dashed var(--line); background: transparent; padding: 4px 10px; border-radius: 8px; cursor: pointer; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repo:hover { border-color: var(--accent); }

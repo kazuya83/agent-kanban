@@ -1226,6 +1226,15 @@ async function checkEnv() {
   el.classList.toggle('hidden', msgs.length === 0);
 }
 
+// 左上に、いま動いているアプリのバージョンを出す
+api.appInfo().then(
+  (i) => {
+    $('appVersion').textContent = `v${i.version}${i.packaged ? '' : '（開発版）'}`;
+    $('appVersion').title = `Claude Agent Kanban v${i.version}`;
+  },
+  () => {},
+);
+
 (async () => {
   state.board = await api.getBoard();
   renderBoard();

@@ -112,6 +112,7 @@ app.whenReady().then(async () => {
   });
 
   handle('board:get', () => boardState());
+  handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
   handle('env:check', () => ({
     git: resolveCommand('git'),
     claude: resolveCommand(store.settings.claudePath || 'claude'),
