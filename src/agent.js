@@ -740,6 +740,16 @@ class AgentManager extends EventEmitter {
     return c.finalDiff || '';
   }
 
+  // worktree の作業状況（タブ「worktree」用）
+  async worktree(id) {
+    const c = this.must(id);
+    const repo = c.repoPath || this.store.settings.repoPath;
+    const others = repo && fs.existsSync(repo) ? await git.listWorktrees(repo).catch(() => []) : [];
+    const exists = !!(c.worktreePath && fs.existsSync(c.worktreePath));
+    const status = exists ? await git.worktreeStatus(c.worktreePath, c.baseCommit, c.baseBranch) : null;
+    return { exists, status, worktrees: others };
+  }
+
   /**
    * 指定したブランチにマージする
    * @param {string} id

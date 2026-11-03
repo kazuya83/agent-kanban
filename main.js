@@ -188,6 +188,7 @@ app.whenReady().then(async () => {
   handle('sessions:list', () => require('./src/sessions').listSessions(store.settings.repoPath));
   handle('card:logs', (id) => agents.logs(id));
   handle('card:diff', (id) => agents.diff(id));
+  handle('card:worktree', (id) => agents.worktree(id));
   handle('card:merge', async ({ id, target, createNew, keep, push }) => {
     // push するかどうかは覚えておき、次のマージでも同じにする
     store.settings.pushAfterMerge = !!push;
