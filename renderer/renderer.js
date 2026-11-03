@@ -390,6 +390,7 @@ async function openSettings() {
         if (r) {
           closeModal();
           toast('保存しました', 'ok');
+          checkEnv();
         }
       };
     },
@@ -433,7 +434,20 @@ setInterval(() => {
   document.querySelectorAll('.elapsed[data-since]').forEach((el) => (el.textContent = elapsed(Number(el.dataset.since))));
 }, 1000);
 
+// git / claude が見つからないときは画面上部に案内を出す
+async function checkEnv() {
+  const env = await run(() => api.checkEnv());
+  if (!env) return;
+  const msgs = [];
+  if (!env.git) msgs.push(`git が見つかりません。${env.platform === 'win32' ? 'Git for Windows（https://git-scm.com/）' : env.platform === 'darwin' ? 'ターミナルで xcode-select --install を実行するか Homebrew で git' : 'git'} をインストールしてから、アプリを再起動してください。`);
+  if (!env.claude) msgs.push('claude コマンドが見つかりません。Claude Code をインストールしてログインするか、⚙ 設定で claude のフルパスを指定してください（ターミナルで which claude、Windows なら where claude で調べられます）。');
+  const el = $('envBanner');
+  el.innerHTML = msgs.map((m) => `<div>⚠ ${esc(m)}</div>`).join('');
+  el.classList.toggle('hidden', msgs.length === 0);
+}
+
 (async () => {
   state.board = await api.getBoard();
   renderBoard();
+  checkEnv();
 })();

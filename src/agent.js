@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const git = require('./git');
+const { resolveCommand, isWin } = require('./env');
 
 const MAX_LOGS = 2000;
 const MCP_SERVER_NAME = 'agent_kanban';
@@ -34,6 +35,10 @@ function toolResultText(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map((c) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
   return '';
+}
+
+function notFoundMessage(cmd) {
+  return `claude コマンドが見つかりません（${cmd}）。Claude Code をインストールするか、設定で claude のパスを指定してください。`;
 }
 
 function splitList(s) {
@@ -272,12 +277,18 @@ class AgentManager extends EventEmitter {
     const prompt = c.pendingPrompt || '';
     c.pendingPrompt = null;
     const cmd = s.claudePath || 'claude';
-    const isWin = process.platform === 'win32';
-    const child = spawn(cmd, isWin ? args.map((a) => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)) : args, {
+    const resolved = resolveCommand(cmd);
+    if (!resolved) {
+      throw Object.assign(new Error(notFoundMessage(cmd)), { code: 'ENOENT' });
+    }
+    // Windows の .cmd / .bat はシェル経由でしか起動できない。.exe は直接起動する
+    const useShell = isWin && /\.(cmd|bat)$/i.test(resolved);
+    const quote = (a) => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
+    const child = spawn(useShell ? quote(resolved) : resolved, useShell ? args.map(quote) : args, {
       cwd: c.worktreePath,
       // 承認待ちの MCP ツール呼び出しがタイムアウトしないようにする
       env: { ...process.env, MCP_TOOL_TIMEOUT: '86400000' },
-      shell: isWin, // Windows では claude.cmd を起動するため
+      shell: useShell,
       windowsHide: true,
     });
     this.procs.set(c.id, child);
@@ -322,7 +333,7 @@ class AgentManager extends EventEmitter {
         c.status = 'failed';
         c.error =
           spawnError.code === 'ENOENT'
-            ? `claude コマンドが見つかりません（${cmd}）。Claude Code をインストールするか、設定で claude のパスを指定してください。`
+            ? notFoundMessage(cmd)
             : spawnError.message;
         this.log(c, 'error', c.error);
       } else if (c.stopRequested) {

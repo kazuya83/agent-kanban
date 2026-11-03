@@ -32,13 +32,34 @@ Claude Code のタスクをカンバンボードで管理するデスクトッ�
 - **マージ / 破棄**: ボタン1つでベースブランチにマージ（`--no-ff`）するか、worktree とブランチをまとめて削除します
 - **同時実行数の上限**: 上限を超えたカードは待機中になり、空きができると順番に起動します
 
-## 必要なもの
+## ダウンロード
+
+[Releases](https://github.com/kazuya83/agent-kanban/releases) から、使っている OS のファイルをダウンロードします。
+
+| OS | ファイル | 使い方 |
+| --- | --- | --- |
+| Windows | `Agent Kanban-x.y.z-win-setup.exe` | インストーラー。ダブルクリックしてインストールします |
+| Windows | `Agent Kanban-x.y.z-win-portable.exe` | インストールせず、そのまま起動できます |
+| Mac（Apple Silicon: M1〜） | `Agent Kanban-x.y.z-mac-arm64.dmg` | 開いて、アプリを「アプリケーション」にドラッグします |
+| Mac（Intel） | `Agent Kanban-x.y.z-mac-x64.dmg` | 同上 |
+| Linux | `Agent Kanban-x.y.z-linux-x86_64.AppImage` | 実行権限を付けて起動します |
+
+> **初めて起動するときの注意**
+> 開発元の証明書で署名していないので、OS の警告が出ます。
+> - **Mac**: 「開発元を検証できません」と出たら、アプリを右クリックして「開く」を選びます。それでも開けないときは、ターミナルで `xattr -cr "/Applications/Agent Kanban.app"` を実行してください
+> - **Windows**: 「Windows によって PC が保護されました」と出たら、「詳細情報」→「実行」を押します
+
+アプリとは別に、**git** と **Claude Code**（ログイン済み）が必要です。アプリは、ターミナルの PATH にある `claude` を自動で探します。見つからないときは、画面の上に案内が出ます（⚙ 設定でフルパスを指定することもできます）。
+
+## ソースから動かす
+
+### 必要なもの
 
 - Node.js 20 以上
 - git
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) をインストールし、ログインしておく（`claude` コマンドが使えれば OK）
 
-## 起動
+### 起動
 
 ```bash
 npm install
@@ -53,7 +74,33 @@ npm start
 3. 承認待ちになったら、カードの「許可」を押します
 4. レビュー列に移ったら、差分を確認して「マージ」か「破棄」を押します
 
-配布用のアプリを作る場合は `npm run dist` を実行します（electron-builder を使います）。
+### アプリをビルドする
+
+```bash
+npm run dist:mac
+```
+
+```bash
+npm run dist:win
+```
+
+```bash
+npm run dist:linux
+```
+
+`dist/` に出力されます。Mac 用は macOS 上で、Windows 用は Windows 上でビルドしてください（Linux から Windows 用をビルドするには Wine が必要です）。
+
+GitHub Actions でも自動でビルドします（`.github/workflows/build.yml`）。
+- **main に push したとき**: 3つの OS でビルドし、Actions の実行結果ページの「Artifacts」から、できたファイルをダウンロードできます
+- **`v` から始まるタグを push したとき**: ビルドして、[Releases](https://github.com/kazuya83/agent-kanban/releases) に添付します
+
+```bash
+git tag v0.1.0
+```
+
+```bash
+git push origin v0.1.0
+```
 
 ## 設定（⚙）
 

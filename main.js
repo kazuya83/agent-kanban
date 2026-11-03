@@ -5,6 +5,11 @@ const { Store } = require('./src/store');
 const { AgentManager } = require('./src/agent');
 const { PermissionServer } = require('./src/permission-server');
 const git = require('./src/git');
+const { fixPath, resolveCommand } = require('./src/env');
+
+// Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
+fixPath();
+if (process.platform === 'win32') app.setAppUserModelId('dev.agentkanban.app'); // Windows の通知に必要
 
 let win = null;
 let store;
@@ -90,6 +95,11 @@ app.whenReady().then(async () => {
   });
 
   handle('board:get', () => boardState());
+  handle('env:check', () => ({
+    git: resolveCommand('git'),
+    claude: resolveCommand(store.settings.claudePath || 'claude'),
+    platform: process.platform,
+  }));
   handle('repo:choose', async () => {
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: 'git リポジトリを選択' });
     if (r.canceled || !r.filePaths[0]) return null;
