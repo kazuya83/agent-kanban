@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash
 #
-# バージョンを指定する:  curl -fsSL ... | AGENT_KANBAN_VERSION=0.1.0 bash
+# バージョンを指定する:  curl -fsSL ... | AGENT_KANBAN_VERSION=0.1.1 bash
 # アンインストール:      curl -fsSL ... | bash -s -- --uninstall
 set -euo pipefail
 
@@ -52,23 +52,28 @@ case "${os}" in
   *) die "対応していない OS です: ${os}（Windows は install.ps1 を使ってください）" ;;
 esac
 
-# リリース情報から、ダウンロードする URL を探す
-if [ "${VERSION}" = "latest" ]; then
-  api="https://api.github.com/repos/${REPO}/releases/latest"
-else
-  api="https://api.github.com/repos/${REPO}/releases/tags/v${VERSION#v}"
-fi
+# ダウンロードする URL を決める
+# GitHub API は使わない（未ログインだと回数制限で 403 になることがあるため）。
+# 最新版は github.com/.../releases/latest のリダイレクト先（.../releases/tag/v0.1.2）から調べる
 info "リリース情報を取得しています（${VERSION}）"
-json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "${api}")" || die "リリースが見つかりません: ${api}"
-url="$(printf '%s' "${json}" | grep -o '"browser_download_url": *"[^"]*"' | sed 's/.*"\(https[^"]*\)"/\1/' | grep -F -- "${pattern}" | head -n1 || true)"
-[ -n "${url}" ] || die "このリリースに ${pattern} が見つかりません"
-tag="$(printf '%s' "${json}" | grep -o '"tag_name": *"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')"
+if [ "${VERSION}" = "latest" ]; then
+  final="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest")" || die "最新のリリースを調べられませんでした"
+  tag="${final##*/}"
+else
+  tag="v${VERSION#v}"
+fi
+case "${tag}" in
+  v[0-9]*) ;;
+  *) die "リリースが見つかりません（${tag}）" ;;
+esac
+name="claude-agent-kanban-${tag#v}-${pattern}"
+url="https://github.com/${REPO}/releases/download/${tag}/${name}"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 file="${tmp}/$(basename "${url}")"
 info "ダウンロードしています: $(basename "${url}")"
-curl -fL --progress-bar -o "${file}" "${url}"
+curl -fL --progress-bar -o "${file}" "${url}" || die "ダウンロードできませんでした: ${url}（バージョン ${tag} があるか、https://github.com/${REPO}/releases で確認してください）"
 
 case "${os}" in
   Darwin)

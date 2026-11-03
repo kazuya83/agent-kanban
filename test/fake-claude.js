@@ -115,7 +115,9 @@ async function turn(prompt, sessionId) {
 
 (async () => {
   startInput();
-  const sessionId = opt('--resume') || 'sess-fake-1';
+  // --fork-session なら、引き継いだ会話から新しい ID の会話を作る（本物と同じ）
+  const resumed = opt('--resume');
+  const sessionId = resumed ? (args.includes('--fork-session') ? `fork-of-${resumed}` : resumed) : `sess-new-${process.pid}`;
   out({ type: 'system', subtype: 'init', session_id: sessionId, model: 'fake-model', permissionMode: opt('--permission-mode') });
   // 本物と同じく、stdin が閉じられるまで次のメッセージを待って処理する
   for (;;) {

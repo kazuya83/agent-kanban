@@ -2,7 +2,7 @@
 #
 #   irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
 #
-# バージョンを指定する:  $env:AGENT_KANBAN_VERSION = "0.1.1"; irm ... | iex
+# バージョンを指定する:  $env:AGENT_KANBAN_VERSION = "0.1.2"; irm ... | iex
 # アンインストール:      $env:AGENT_KANBAN_UNINSTALL = "1"; irm ... | iex
 #
 # インストーラー（setup.exe）は使わず、zip を %LOCALAPPDATA%\Programs\Claude Agent Kanban に展開して
@@ -40,18 +40,32 @@ if ($env:AGENT_KANBAN_UNINSTALL) {
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$api = if ($version -eq 'latest') { "https://api.github.com/repos/$repo/releases/latest" } else { "https://api.github.com/repos/$repo/releases/tags/v$($version.TrimStart('v'))" }
+# GitHub API は使わない（未ログインだと回数制限で 403 になることがあるため）。
+# 最新版は github.com/.../releases/latest のリダイレクト先（.../releases/tag/v0.1.2）から調べる
 Info "リリース情報を取得しています（${version}）"
-$release = Invoke-RestMethod -Uri $api -Headers @{ 'User-Agent' = 'claude-agent-kanban-installer'; 'Accept' = 'application/vnd.github+json' }
-$asset = $release.assets | Where-Object { $_.name -like '*win-x64.zip' } | Select-Object -First 1
-if (-not $asset) { throw "このリリース（$($release.tag_name)）に Windows 用の zip がありません。v0.1.1 以降を指定してください" }
+if ($version -eq 'latest') {
+  $resp = Invoke-WebRequest -Uri "https://github.com/$repo/releases/latest" -Method Head -UseBasicParsing
+  # Windows PowerShell 5.1 と PowerShell 7 で、最終的な URL の取り方が違う
+  $final = if ($resp.BaseResponse.ResponseUri) { $resp.BaseResponse.ResponseUri.AbsoluteUri } else { $resp.BaseResponse.RequestMessage.RequestUri.AbsoluteUri }
+  $tag = ($final.TrimEnd('/') -split '/')[-1]
+} else {
+  $tag = "v$($version.TrimStart('v'))"
+}
+if ($tag -notmatch '^v\d') { throw "リリースが見つかりません（$tag）" }
+$tagNum = $tag.TrimStart('v')
+$assetName = "claude-agent-kanban-$tagNum-win-x64.zip"
+$assetUrl = "https://github.com/$repo/releases/download/$tag/$assetName"
 
 $tmpDir = Join-Path $env:TEMP ("claude-agent-kanban-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmpDir | Out-Null
 try {
-  $zip = Join-Path $tmpDir $asset.name
-  Info "ダウンロードしています: $($asset.name)（$([math]::Round($asset.size / 1MB)) MB）"
-  Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip -UseBasicParsing
+  $zip = Join-Path $tmpDir $assetName
+  Info "ダウンロードしています: $assetName"
+  try {
+    Invoke-WebRequest -Uri $assetUrl -OutFile $zip -UseBasicParsing
+  } catch {
+    throw "ダウンロードできませんでした: $assetUrl（バージョン $tag に Windows 用の zip があるか、https://github.com/$repo/releases で確認してください。zip は v0.1.1 以降にあります）"
+  }
   Unblock-File -Path $zip
 
   Info '展開しています…'
@@ -88,7 +102,7 @@ foreach ($lnkPath in @($startMenuLnk, $desktopLnk)) {
   }
 }
 
-Info "インストールしました: $dest（$($release.tag_name)）"
+Info "インストールしました: $dest（$tag）"
 Info "スタートメニューとデスクトップの「$appName」から起動できます。"
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Warn 'git が見つかりません。Git for Windows をインストールしてください: https://git-scm.com/' }

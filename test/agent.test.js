@@ -67,7 +67,7 @@ test('承認→レビュー→追加指示→マージ、拒否→破棄、同�
     agents.answerPermission(a.id, a.permissions[0].id, 'allow');
 
     await waitFor(() => a.status === 'review');
-    assert.strictEqual(a.sessionId, 'sess-fake-1');
+    assert.match(a.sessionId, /^sess-new-/);
     const d = await agents.diff(a.id);
     assert.match(d, /ファイルを作って/);
     assert.ok(a.logs.some((l) => l.kind === 'system' && /コミット/.test(l.text)));
@@ -199,5 +199,78 @@ test('btw: 実行中のエージェントにメッセージを送ると、今の
     assert.match(await agents.diff(b.id), /待機中の追加/);
   } finally {
     delete process.env.FAKE_SLEEP;
+  }
+});
+
+test('会話（セッション）: 既存の会話を引き継ぐ・新しい会話にする・カードの会話に戻る', async () => {
+  const { store, agents } = setup();
+  store.settings.permissionMode = 'bypassPermissions';
+  const c = agents.createCard({ title: 'sess', prompt: '続きから', session: { mode: 'resume', id: 'ext-1', title: 'ターミナルでの会話' } });
+  assert.strictEqual(c.sessionId, 'ext-1');
+  assert.strictEqual(c.forkNext, true);
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  // 元の会話はフォークされ、新しい ID の会話になる
+  assert.strictEqual(c.sessionId, 'fork-of-ext-1');
+  assert.strictEqual(c.forkNext, false);
+  assert.deepStrictEqual(c.sessions.map((x) => [x.id, x.origin]), [['ext-1', 'imported'], ['fork-of-ext-1', 'task']]);
+  assert.strictEqual(c.sessions[0].forkedTo, 'fork-of-ext-1');
+
+  // 新しい会話に切り替えて追加指示
+  agents.setSession(c.id, { mode: 'new' });
+  assert.strictEqual(c.sessionId, null);
+  agents.send(c.id, '新しい会話で');
+  await waitFor(() => c.status === 'review' && c.sessionId);
+  const fresh = c.sessionId;
+  assert.match(fresh, /^sess-new-/);
+  assert.strictEqual(c.sessions.length, 3);
+
+  // カードの最初の会話に戻る（自分の会話なのでフォークしない）
+  agents.setSession(c.id, { mode: 'resume', id: 'fork-of-ext-1' });
+  assert.strictEqual(c.forkNext, false);
+  agents.send(c.id, '最初の会話に戻って');
+  await waitFor(() => c.status === 'review' && c.logs.some((l) => l.kind === 'user' && l.text === '最初の会話に戻って') && c.sessionId === 'fork-of-ext-1');
+  assert.strictEqual(c.sessions.length, 3, '同じ会話は増えない');
+
+  // 実行中は切り替えられない
+  process.env.FAKE_SLEEP = '600';
+  try {
+    agents.send(c.id, 'もう一度');
+    await waitFor(() => c.status === 'running');
+    assert.throws(() => agents.setSession(c.id, { mode: 'new' }), /切り替えられません/);
+    await waitFor(() => c.status === 'review');
+  } finally {
+    delete process.env.FAKE_SLEEP;
+  }
+});
+
+test('過去の会話の一覧（このリポジトリの会話を見分ける）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-sess-'));
+  const proj = path.join(tmp, 'projects');
+  const repo = path.join(tmp, 'my-app');
+  const w = (dir, id, lines) => {
+    fs.mkdirSync(path.join(proj, dir), { recursive: true });
+    fs.writeFileSync(path.join(proj, dir, `${id}.jsonl`), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  };
+  w('a', 'aaa', [{ type: 'user', cwd: repo, message: { role: 'user', content: '<command-name>/clear</command-name>' } }, { type: 'user', cwd: repo, message: { role: 'user', content: 'ログイン画面を直して' } }]);
+  w('b', 'bbb', [{ type: 'user', cwd: `${repo}.worktrees/x1`, message: { role: 'user', content: [{ type: 'text', text: 'タスクの会話' }] } }]);
+  w('c', 'ccc', [{ type: 'user', cwd: path.join(tmp, 'other'), message: { role: 'user', content: 'ほかのプロジェクト' } }]);
+  w('d', 'ddd', [{ type: 'summary', summary: '要約つき' }, { type: 'user', cwd: repo, message: { role: 'user', content: 'x' } }]);
+  w('e', 'eee', [{ type: 'attachment' }]); // 中身なし → 出さない
+  const old = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = tmp;
+  try {
+    const { listSessions } = require('../src/sessions');
+    const list = listSessions(repo);
+    const byId = Object.fromEntries(list.map((s) => [s.id, s]));
+    assert.deepStrictEqual(Object.keys(byId).sort(), ['aaa', 'bbb', 'ccc', 'ddd']);
+    assert.strictEqual(byId.aaa.title, 'ログイン画面を直して');
+    assert.strictEqual(byId.ddd.title, '要約つき');
+    assert.strictEqual(byId.aaa.related, true);
+    assert.strictEqual(byId.bbb.related, true, 'タスク用 worktree の会話も関係あり');
+    assert.strictEqual(byId.ccc.related, false);
+  } finally {
+    if (old === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = old;
   }
 });

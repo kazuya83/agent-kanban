@@ -124,7 +124,7 @@ class AgentManager extends EventEmitter {
 
   // ---------- カード操作 ----------
 
-  createCard({ title, prompt, issue }) {
+  createCard({ title, prompt, issue, session }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     if (!prompt || !prompt.trim()) throw new Error('指示を入力してください');
@@ -140,6 +140,8 @@ class AgentManager extends EventEmitter {
       logs: [],
     };
     if (issue) card.issue = { number: issue.number, title: issue.title, url: issue.url };
+    card.sessions = [];
+    if (session && session.id) this.applySession(card, session);
     this.store.cards.push(card);
     this.changed(card);
     return card;
@@ -150,7 +152,7 @@ class AgentManager extends EventEmitter {
    * @param {{ numbers: string, extra?: string }} p  numbers は「12」「12, 15」「#12 #15」など
    * @returns {Promise<{ cards: object[], errors: string[] }>}
    */
-  async createFromIssues({ numbers, extra }) {
+  async createFromIssues({ numbers, extra, session }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     const list = github.parseIssueNumbers(numbers);
@@ -165,7 +167,7 @@ class AgentManager extends EventEmitter {
       try {
         const issue = await this.fetchIssue(s.repoPath, n);
         if (issue.state && issue.state !== 'open') errors.push(`#${n} はクローズ済みですが、タスクを作りました`);
-        cards.push(this.createCard({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue }));
+        cards.push(this.createCard({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue, session }));
       } catch (err) {
         errors.push(`#${n}: ${err.message}`);
       }
@@ -177,6 +179,48 @@ class AgentManager extends EventEmitter {
   // テストで差し替えられるようにメソッドにしておく
   fetchIssue(repoPath, n, opts) {
     return github.fetchIssue(repoPath, n, opts);
+  }
+
+  // ---------- 会話（セッション） ----------
+
+  // 起動時に claude から届いたセッション ID を、このカードの会話として記録する
+  recordSession(c, id) {
+    c.sessionId = id;
+    c.forkNext = false;
+    c.sessions = c.sessions || [];
+    if (!c.sessions.some((x) => x.id === id)) {
+      const from = c.sessions.find((x) => x.origin === 'imported' && !x.forkedTo);
+      if (from) from.forkedTo = id;
+      c.sessions.push({ id, at: Date.now(), origin: 'task', label: truncate(String(c.lastPromptSent || c.prompt).split('\n')[0], 60), from: from ? from.id : undefined });
+    }
+  }
+
+  applySession(c, session) {
+    if (!session || session.mode === 'new' || !session.id) {
+      c.sessionId = null;
+      c.forkNext = false;
+      return;
+    }
+    c.sessions = c.sessions || [];
+    const own = c.sessions.find((x) => x.id === session.id && x.origin === 'task');
+    c.sessionId = session.id;
+    c.forkNext = !own; // ほかの会話はフォーク、このカードの会話はそのまま続ける
+    if (!own && !c.sessions.some((x) => x.id === session.id)) {
+      c.sessions.push({ id: session.id, at: Date.now(), origin: 'imported', label: truncate(session.title || '', 60) });
+    }
+  }
+
+  /**
+   * 次に動かすときの会話を選ぶ
+   * @param {{ mode: 'new' | 'resume', id?: string, title?: string }} session
+   */
+  setSession(id, session) {
+    const c = this.must(id);
+    if (c.status === 'running' || c.status === 'queued') throw new Error('実行中・待機中は会話を切り替えられません');
+    this.applySession(c, session);
+    const label = !c.sessionId ? '新しい会話' : c.forkNext ? `既存の会話（${(session.title || session.id).slice(0, 40)}）を引き継ぐ` : `このカードの会話 ${c.sessionId.slice(0, 8)}`;
+    this.log(c, 'system', `次の実行は「${label}」で始めます`);
+    this.changed(c);
   }
 
   commitMessage(c) {
@@ -314,9 +358,12 @@ class AgentManager extends EventEmitter {
     const mcpConfig = this.writeMcpConfig(c);
     if (mcpConfig) args.push('--mcp-config', mcpConfig, '--permission-prompt-tool', PERMISSION_TOOL);
     if (c.sessionId) args.push('--resume', c.sessionId);
+    // 既存の会話を引き継ぐときは、元の会話を変えないようにフォークする（新しい ID になる）
+    if (c.sessionId && c.forkNext) args.push('--fork-session');
 
     const prompt = c.pendingPrompt || '';
     c.pendingPrompt = null;
+    c.lastPromptSent = prompt;
     for (const m of c.btw || []) if (m.state === 'queued') m.state = 'delivered';
     const cmd = s.claudePath || 'claude';
     const resolved = resolveCommand(cmd);
@@ -416,7 +463,7 @@ class AgentManager extends EventEmitter {
     switch (ev.type) {
       case 'system':
         if (ev.subtype === 'init') {
-          if (ev.session_id) c.sessionId = ev.session_id;
+          if (ev.session_id) this.recordSession(c, ev.session_id);
           this.log(c, 'system', `セッション開始（モデル: ${ev.model || '不明'} / 権限モード: ${ev.permissionMode || '不明'}）`);
           this.changed(c);
         }

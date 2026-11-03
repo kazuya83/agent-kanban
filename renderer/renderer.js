@@ -187,7 +187,7 @@ function closeDetail() {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto]);
+  const sig = JSON.stringify([c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.sessionId, c.forkNext, c.sessions]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -206,6 +206,7 @@ function renderDetailHead() {
     </div>
     <dl class="d-meta">
       ${c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''}
+      ${sessionRowHtml(c)}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
       ${c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''}
       ${(c.mergedInto || []).length ? `<dt>マージ済み</dt><dd>${c.mergedInto.map(esc).join(', ')}</dd>` : ''}
@@ -216,6 +217,19 @@ function renderDetailHead() {
     ${permissionBlock(c, false)}
     <div class="d-actions">${btns.join('')}</div>`;
   $('closeDetail').onclick = closeDetail;
+  const ds = $('dSession');
+  if (ds) {
+    ds.onchange = async () => {
+      const v = ds.value;
+      if (v === '__pick__') {
+        state.headSig = '';
+        renderDetailHead();
+        return openSessionPicker(c);
+      }
+      const sess = v === '__new__' ? { mode: 'new' } : { mode: 'resume', id: v };
+      await run(() => api.setSession(c.id, sess), v === '__new__' ? '次は新しい会話で始めます' : '次はこの会話の続きで始めます');
+    };
+  }
   const canFollow = s === 'review' || s === 'failed';
   $('followInput').disabled = !canFollow;
   $('followBtn').disabled = !canFollow;
@@ -383,13 +397,15 @@ function newTask() {
     `<h2>新しいタスク</h2>
      <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
      <label class="field"><span>Claude への指示</span><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></label>
-     <p class="muted small">GitHub の Issue から作るときは、画面上部の「GitHub Issue から作る」に番号を入れてください。</p>
+     ${sessionFieldHtml('n')}
+     <p class="muted small">GitHub の Issue から作るときは、右上の「Issue から作成」を使ってください。</p>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
      <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">作成（Ctrl/⌘ + Enter）</button></div>`,
     () => {
       $('nPrompt').focus();
+      fillSessionField('n');
       const submit = async () => {
-        const id = await run(() => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked }));
+        const id = await run(() => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n') }));
         if (id) {
           closeModal();
           select(id);
@@ -404,11 +420,94 @@ function newTask() {
   );
 }
 
+// ---------------- 会話（セッション）を選ぶ ----------------
+
+function fmtTime(ms) {
+  const d = new Date(ms);
+  const same = new Date().toDateString() === d.toDateString();
+  return same ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// 「新しい会話」か「既存の会話を引き継ぐ」を選ぶ欄
+function sessionFieldHtml(idp) {
+  return `<label class="field"><span>会話（セッション）</span>
+    <select id="${idp}Session"><option value="">新しい会話で始める</option><option disabled>過去の会話を読み込んでいます…</option></select>
+    <small>過去の Claude Code の会話を選ぶと、その続きとして始めます（元の会話はそのまま残ります）。</small>
+    <label class="check small"><input type="checkbox" id="${idp}AllSessions" /> ほかのフォルダの会話も表示</label></label>`;
+}
+
+async function fillSessionField(idp, selectedId) {
+  const list = (await api.listSessions().catch(() => [])) || [];
+  const sel = $(`${idp}Session`);
+  if (!sel) return;
+  const render = () => {
+    const all = $(`${idp}AllSessions`) && $(`${idp}AllSessions`).checked;
+    const related = list.filter((x) => x.related);
+    const others = all ? list.filter((x) => !x.related).slice(0, 60) : [];
+    const opt = (x) => `<option value="${esc(x.id)}" ${x.id === selectedId ? 'selected' : ''}>${esc(fmtTime(x.updatedAt))}  ${esc(x.title.slice(0, 70))}${all && !x.related ? `  — ${esc(x.cwd)}` : ''}</option>`;
+    sel.innerHTML = `<option value="">新しい会話で始める</option>
+      ${related.length ? `<optgroup label="このリポジトリの会話">${related.map(opt).join('')}</optgroup>` : '<option disabled>（このリポジトリの過去の会話はありません）</option>'}
+      ${others.length ? `<optgroup label="ほかのフォルダの会話">${others.map(opt).join('')}</optgroup>` : ''}`;
+  };
+  sel._list = list;
+  render();
+  const cb = $(`${idp}AllSessions`);
+  if (cb) cb.onchange = render;
+}
+
+function readSessionField(idp) {
+  const sel = $(`${idp}Session`);
+  if (!sel || !sel.value) return { mode: 'new' };
+  const x = (sel._list || []).find((s) => s.id === sel.value);
+  return { mode: 'resume', id: sel.value, title: x ? x.title : '' };
+}
+
+// 詳細画面から「既存の会話から選ぶ…」
+function openSessionPicker(c) {
+  openModal(
+    `<h2>既存の会話を引き継ぐ</h2>
+     <p class="muted small">「${esc(c.title)}」の次の実行を、選んだ会話の続きとして始めます。</p>
+     ${sessionFieldHtml('p')}
+     <div class="modal-actions"><button class="btn ghost" id="pCancel">キャンセル</button><button class="btn primary" id="pOk">この会話を使う</button></div>`,
+    () => {
+      fillSessionField('p');
+      $('pCancel').onclick = closeModal;
+      $('pOk').onclick = async () => {
+        const sess = readSessionField('p');
+        const ok = await run(() => api.setSession(c.id, sess).then(() => true));
+        if (ok) {
+          closeModal();
+          toast(sess.mode === 'new' ? '次は新しい会話で始めます' : '次はこの会話の続きで始めます', 'ok');
+        }
+      };
+    },
+  );
+}
+
+// 詳細画面の「会話」欄
+function sessionRowHtml(c) {
+  const busy = c.status === 'running' || c.status === 'queued';
+  const own = (c.sessions || []).filter((x) => x.origin === 'task');
+  const imported = (c.sessions || []).find((x) => x.origin === 'imported' && x.id === c.sessionId && c.forkNext);
+  const opts = [
+    `<option value="__new__" ${!c.sessionId ? 'selected' : ''}>新しい会話で始める</option>`,
+    ...own.map((x, i) => {
+      const src = x.from && (c.sessions || []).find((y) => y.id === x.from);
+      const label = src ? `← 引き継ぎ: ${src.label || src.id.slice(0, 8)}` : x.label || '';
+      return `<option value="${esc(x.id)}" ${x.id === c.sessionId && !c.forkNext ? 'selected' : ''}>会話 ${i + 1}（${esc(fmtTime(x.at))}） ${esc(label)}</option>`;
+    }),
+    imported ? `<option value="${esc(imported.id)}" selected>引き継ぐ: ${esc(imported.label || imported.id.slice(0, 8))}</option>` : '',
+    `<option value="__pick__">既存の会話から選ぶ…</option>`,
+  ].join('');
+  return `<dt>会話</dt><dd><select id="dSession" class="d-session" ${busy ? 'disabled title="実行中は切り替えられません"' : ''}>${opts}</select>
+</dd>`;
+}
+
 // ---------------- GitHub Issue から作る ----------------
 
 // Issue 番号からカードを作る（上部の枠と、詳細ダイアログの両方から使う）
-async function createFromIssues(numbers, extra, autoStart) {
-  const r = await run(() => api.createFromIssues({ numbers, extra, autoStart }));
+async function createFromIssues(numbers, extra, autoStart, session) {
+  const r = await run(() => api.createFromIssues({ numbers, extra, autoStart, session }));
   if (!r) return false;
   if (r.errors.length) toast(r.errors.join('\n'));
   else toast(`${r.ids.length} 件のタスクを Issue から作りました`, 'ok');
@@ -416,55 +515,16 @@ async function createFromIssues(numbers, extra, autoStart) {
   return true;
 }
 
-// 上部の「GitHub Issue から作る」枠
-async function refreshIssueBar() {
-  const bar = $('issueBar');
-  const hasRepo = !!state.board.settings.repoPath;
-  bar.classList.toggle('hidden', !hasRepo);
-  if (!hasRepo) return;
-  const [g, st] = await Promise.all([api.repoGithub().catch(() => null), api.ghStatus().catch(() => null)]);
-  const repoEl = $('ibRepo');
-  const ghEl = $('ibGh');
-  if (!g || !g.slug) {
-    repoEl.textContent = 'origin が GitHub ではないため使えません';
-    repoEl.className = 'ib-repo bad';
-  } else {
-    repoEl.textContent = `${g.slug.owner}/${g.slug.repo}`;
-    repoEl.className = 'ib-repo';
-  }
-  if (!st) {
-    ghEl.textContent = '';
-  } else if (st.installed && st.loggedIn) {
-    ghEl.innerHTML = `<span class="ok">✓ gh: ${esc(st.user || 'ログイン済み')}</span>`;
-  } else {
-    ghEl.innerHTML = `<a class="ib-link warn-text" id="ibSetup">${st.installed ? 'gh にログインする' : 'gh をインストールする'}</a>`;
-    $('ibSetup').onclick = () => openIssueModal($('ibNumbers').value);
-  }
-}
-
-async function submitIssueBar() {
-  const v = $('ibNumbers').value;
-  if (!v.trim()) {
-    $('ibNumbers').focus();
-    return toast('Issue 番号を入力してください（例: 12 または 12, 15）');
-  }
-  $('ibCreate').disabled = true;
-  $('ibCreate').textContent = '読み込み中…';
-  const ok = await createFromIssues(v, '', $('ibStart').checked);
-  $('ibCreate').disabled = false;
-  $('ibCreate').textContent = 'Issue からタスクを作成';
-  if (ok) $('ibNumbers').value = '';
-}
-
-// 詳細ダイアログ（追加の指示を付ける・gh を準備する）
+// Issue から作成するダイアログ（Issue 番号・会話・追加の指示・gh の準備）
 function openIssueModal(prefill = '') {
   if (!state.board.settings.repoPath) return chooseRepo();
   openModal(
-    `<h2>GitHub Issue からタスクを作る</h2>
+    `<h2>Issue から作成</h2>
      <label class="field"><span>Issue 番号（複数ならカンマかスペースで区切る。1つの Issue が1枚のカードになり、並列で動きます）</span>
        <input id="nNumbers" placeholder="例: 12 または 12, 15, 18" inputmode="numeric" value="${esc(prefill)}" /></label>
      <p class="muted small" id="nRepoInfo">リポジトリを確認しています…</p>
      <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div>
+     ${sessionFieldHtml('n')}
      <label class="field"><span>追加の指示（任意・すべての Issue に付けます）</span><textarea id="nExtra" rows="4" placeholder="例: 変更したらテストを追加して npm test で確認して"></textarea></label>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
      <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">Issue からタスクを作成</button></div>`,
@@ -480,10 +540,11 @@ function openIssueModal(prefill = '') {
         () => {},
       );
       refreshGh();
+      fillSessionField('n');
       const submit = async () => {
         $('nOk').disabled = true;
         $('nOk').textContent = 'Issue を読み込んでいます…';
-        const ok = await createFromIssues($('nNumbers').value, $('nExtra').value, $('nStart').checked);
+        const ok = await createFromIssues($('nNumbers').value, $('nExtra').value, $('nStart').checked, readSessionField('n'));
         if (ok) return closeModal();
         $('nOk').disabled = false;
         $('nOk').textContent = 'Issue からタスクを作成';
@@ -594,15 +655,12 @@ async function chooseRepo() {
     closeDetail();
     state.board = await api.getBoard();
     renderBoard();
-    refreshIssueBar();
   }
 }
 
 $('repoBtn').onclick = chooseRepo;
 $('newBtn').onclick = newTask;
-$('ibCreate').onclick = submitIssueBar;
-$('ibMore').onclick = () => openIssueModal($('ibNumbers').value);
-$('ibNumbers').addEventListener('keydown', (e) => e.key === 'Enter' && submitIssueBar());
+$('issueBtn').onclick = () => openIssueModal();
 $('settingsBtn').onclick = openSettings;
 
 // ---------------- gh（GitHub CLI）の案内 ----------------
@@ -666,7 +724,7 @@ function renderGh(st) {
     return;
   }
   el.className = 'gh-panel ok';
-  el.innerHTML = `✓ gh で GitHub にログインしています${st.user ? `（<b>${esc(st.user)}</b>）` : ''}`;
+  el.innerHTML = `<span>✓ gh で GitHub にログインしています${st.user ? `（<b>${esc(st.user)}</b>）` : ''}</span>`;
 }
 
 async function ghAction(kind) {
@@ -680,7 +738,6 @@ async function ghAction(kind) {
     ghState.code = null;
     toast(kind === 'install' ? 'gh をインストールしました' : 'GitHub にログインしました', 'ok');
     renderGh(st);
-    refreshIssueBar();
     // インストールが終わったら、続けてログインも案内する
     if (kind === 'install' && st && st.installed && !st.loggedIn) toast('続けて「GitHub にログイン」を押してください', 'ok');
   } catch (err) {
@@ -750,5 +807,4 @@ async function checkEnv() {
   state.board = await api.getBoard();
   renderBoard();
   checkEnv();
-  refreshIssueBar();
 })();

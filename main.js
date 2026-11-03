@@ -125,13 +125,13 @@ app.whenReady().then(async () => {
     notifyBoard();
     return store.settings;
   });
-  handle('card:create', ({ title, prompt, autoStart }) => {
-    const c = agents.createCard({ title, prompt });
+  handle('card:create', ({ title, prompt, autoStart, session }) => {
+    const c = agents.createCard({ title, prompt, session });
     if (autoStart) agents.start(c.id);
     return c.id;
   });
-  handle('card:createFromIssues', async ({ numbers, extra, autoStart }) => {
-    const { cards, errors } = await agents.createFromIssues({ numbers, extra });
+  handle('card:createFromIssues', async ({ numbers, extra, autoStart, session }) => {
+    const { cards, errors } = await agents.createFromIssues({ numbers, extra, session });
     if (autoStart) for (const c of cards) agents.start(c.id);
     return { ids: cards.map((c) => c.id), errors };
   });
@@ -162,6 +162,8 @@ app.whenReady().then(async () => {
   handle('card:stop', (id) => agents.stop(id));
   handle('card:send', ({ id, message }) => agents.send(id, message));
   handle('card:btw', ({ id, text }) => agents.btw(id, text));
+  handle('card:setSession', ({ id, session }) => agents.setSession(id, session));
+  handle('sessions:list', () => require('./src/sessions').listSessions(store.settings.repoPath));
   handle('card:logs', (id) => agents.logs(id));
   handle('card:diff', (id) => agents.diff(id));
   handle('card:merge', ({ id, target, createNew, keep }) => agents.merge(id, { target, createNew, keep }));
