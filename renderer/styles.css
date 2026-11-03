@@ -99,8 +99,9 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 
 /* レイアウト */
 .layout { flex: 1; display: flex; min-height: 0; }
-.board { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(170px, 1fr)); gap: 12px; padding: 14px; overflow: auto; min-width: 0; }
+.board { flex: 1; display: grid; grid-template-columns: repeat(5, minmax(170px, 1fr)); gap: 12px; padding: 14px; overflow: auto; min-width: 0; }
 .column { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; min-height: 0; }
+.column.chat-col { border-style: dashed; }
 .column.drop { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
 .column > header { display: flex; justify-content: space-between; padding: 10px 12px; font-weight: 600; border-bottom: 1px solid var(--line); }
 .count { color: var(--muted); font-weight: 400; }
