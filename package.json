@@ -1,0 +1,25 @@
+{
+  "name": "agent-kanban",
+  "version": "0.1.0",
+  "description": "Claude Code のタスクをカンバンで管理し、git worktree ごとに並列実行するデスクトップアプリ",
+  "main": "main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "dev.agent-kanban.app",
+    "productName": "Agent Kanban",
+    "files": ["main.js", "preload.js", "src/**", "renderer/**"],
+    "asarUnpack": ["src/permission-mcp.js"],
+    "mac": { "target": "dmg" },
+    "win": { "target": "nsis" },
+    "linux": { "target": "AppImage" }
+  }
+}
