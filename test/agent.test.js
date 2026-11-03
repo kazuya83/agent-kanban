@@ -99,7 +99,12 @@ test('承認→レビュー→追加指示→マージ、拒否→破棄、同�
 
     // 2枚目を破棄 → worktree とブランチが消える
     const wt = b.worktreePath;
+    const before = store.totalCost(repo);
+    assert.ok(before > 0);
+    assert.strictEqual(before, store.cards.reduce((s, c) => s + (c.costUsd || 0), 0));
     await agents.discard(b.id);
+    // 削除したタスクの分も合計金額に残る
+    assert.strictEqual(store.totalCost(repo), before);
     assert.ok(!fs.existsSync(wt));
     assert.ok(!g('branch').toString().includes(b.branch));
     assert.strictEqual(store.card(b.id), undefined);

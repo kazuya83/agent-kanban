@@ -272,6 +272,9 @@ function renderBoard() {
   const running = cards.filter((c) => c.status === 'running').length;
   const queued = cards.filter((c) => c.status === 'queued').length;
   const waiting = cards.filter((c) => needsYou(c)).length;
+  const total = Number(state.board.totalCostUsd) || 0;
+  $('costInfo').classList.toggle('hidden', !settings.repoPath);
+  $('costInfo').textContent = `合計 $${total.toFixed(2)}`;
   $('runInfo').innerHTML = `実行中 ${running}/${settings.maxParallel || 1}${queued ? ` ・ 待機 ${queued}` : ''}${waiting ? ` ・ <b class="warn">あなたの対応待ち ${waiting}</b>` : ''}`;
 
   if (!settings.repoPath) {

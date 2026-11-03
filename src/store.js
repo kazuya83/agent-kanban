@@ -19,7 +19,7 @@ const DEFAULT_SETTINGS = {
 class Store {
   constructor(file) {
     this.file = file;
-    this.data = { settings: { ...DEFAULT_SETTINGS }, cards: [] };
+    this.data = { settings: { ...DEFAULT_SETTINGS }, cards: [], removedCost: {} };
     this.timer = null;
     this.load();
   }
@@ -29,6 +29,7 @@ class Store {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       this.data.settings = { ...DEFAULT_SETTINGS, ...(raw.settings || {}) };
       this.data.cards = Array.isArray(raw.cards) ? raw.cards : [];
+      this.data.removedCost = raw.removedCost && typeof raw.removedCost === 'object' ? raw.removedCost : {};
     } catch {
       /* 初回起動 */
     }
@@ -59,8 +60,25 @@ class Store {
     return this.data.cards.find((c) => c.id === id);
   }
 
+  // 削除したタスクで使った金額も合計に残すため、リポジトリごとに足し込んでおく
   removeCard(id) {
+    const c = this.card(id);
+    if (c && c.costUsd) {
+      const key = c.repoPath || '';
+      this.data.removedCost[key] = (Number(this.data.removedCost[key]) || 0) + c.costUsd;
+    }
     this.data.cards = this.data.cards.filter((c) => c.id !== id);
+  }
+
+  // そのリポジトリで使った金額の合計（USD）。削除したタスクの分も含む
+  totalCost(repoPath) {
+    const live = this.data.cards
+      .filter((c) => !repoPath || c.repoPath === repoPath)
+      .reduce((sum, c) => sum + (Number(c.costUsd) || 0), 0);
+    const removed = repoPath
+      ? Number(this.data.removedCost[repoPath]) || 0
+      : Object.values(this.data.removedCost).reduce((sum, v) => sum + (Number(v) || 0), 0);
+    return live + removed;
   }
 }
 
