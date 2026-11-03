@@ -83,13 +83,31 @@ case "${os}" in
     hdiutil attach "${file}" -nobrowse -quiet -mountpoint "${mnt}"
     src="$(find "${mnt}" -maxdepth 1 -name '*.app' | head -n1)"
     [ -n "${src}" ] || { hdiutil detach "${mnt}" -quiet || true; die "dmg の中にアプリが見つかりません"; }
-    if pgrep -x "${APP_NAME}" >/dev/null 2>&1; then warn "${APP_NAME} が起動中です。終了してから使い直してください。"; fi
+    # 起動したまま入れ替えると、裏で動いている古いアプリの画面が壊れるので、先に終了してもらう
+    relaunch=""
+    if pgrep -x "${APP_NAME}" >/dev/null 2>&1; then
+      info "${APP_NAME} が起動中なので、終了してから入れ替えます（実行中のタスクがあれば、アプリに確認が出ます）"
+      osascript -e "tell application \"${APP_NAME}\" to quit" >/dev/null 2>&1 || true
+      for _ in $(seq 1 30); do
+        pgrep -x "${APP_NAME}" >/dev/null 2>&1 || break
+        sleep 1
+      done
+      if pgrep -x "${APP_NAME}" >/dev/null 2>&1; then
+        hdiutil detach "${mnt}" -quiet || true
+        die "${APP_NAME} が終了しませんでした。アプリを終了してから（⌘Q）、もう一度実行してください"
+      fi
+      relaunch=1
+    fi
     rm -rf "${dest}/${APP_NAME}.app"
     cp -R "${src}" "${dest}/"
     hdiutil detach "${mnt}" -quiet || true
     # 署名していないアプリなので、ダウンロード時に付く「隔離」の印を外す
     xattr -dr com.apple.quarantine "${dest}/${APP_NAME}.app" 2>/dev/null || true
     info "インストールしました: ${dest}/${APP_NAME}.app（${tag}）"
+    if [ -n "${relaunch}" ]; then
+      info "${APP_NAME} を起動し直します"
+      open -a "${dest}/${APP_NAME}.app" || true
+    fi
     run_hint="open -a \"${APP_NAME}\""
     ;;
   Linux)

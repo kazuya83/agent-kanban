@@ -162,6 +162,18 @@ jobs:
             npm install --prefix /tmp/pw --no-save --no-package-lock playwright-core@1.48.2 >/dev/null
             ls -la "$APP/Contents/Resources" | head
             NODE_PATH=/tmp/pw/node_modules node test/smoke-packaged.js "$APP/Contents/MacOS/Claude Agent Kanban" smoke-installed.png
+            # 起動したまま更新しても、アプリを終了してから入れ替え、起動し直すこと（入れ替えると古いプロセスの画面が壊れるため）
+            open -a "$APP"
+            for _ in $(seq 1 20); do pgrep -x "Claude Agent Kanban" >/dev/null && break; sleep 1; done
+            before=$(pgrep -x "Claude Agent Kanban" | head -n1)
+            echo "running before update: pid $before"
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/install.sh" | /bin/bash
+            sleep 8
+            after=$(pgrep -x "Claude Agent Kanban" | head -n1 || true)
+            echo "running after update: pid $after"
+            test -n "$before" && test -n "$after" && test "$before" != "$after"
+            osascript -e 'tell application "Claude Agent Kanban" to quit' || true
+            sleep 3
           else
             test -x "$HOME/.local/bin/claude-agent-kanban"
           fi

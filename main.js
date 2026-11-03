@@ -11,6 +11,27 @@ const { fixPath, resolveCommand } = require('./src/env');
 fixPath();
 if (process.platform === 'win32') app.setAppUserModelId('dev.agentkanban.app'); // Windows の通知に必要
 
+// 起動したあとにアプリの中身（app.asar）が入れ替えられたか（アップデートを起動中に入れたとき）。
+// 入れ替わったまま古いプロセスで新しいウィンドウを開くと、ファイルの位置がずれて画面が壊れるので、再起動する
+const appStamp = (() => {
+  if (!app.isPackaged) return null;
+  try {
+    const st = require('original-fs').statSync(app.getAppPath()); // asar を書庫ファイルとして調べる
+    return `${st.ino}:${st.size}:${st.mtimeMs}`;
+  } catch {
+    return null;
+  }
+})();
+function appReplaced() {
+  if (!appStamp) return false;
+  try {
+    const st = require('original-fs').statSync(app.getAppPath());
+    return `${st.ino}:${st.size}:${st.mtimeMs}` !== appStamp;
+  } catch {
+    return true;
+  }
+}
+
 let win = null;
 let quitState = 'idle'; // 終了の流れ: idle → confirming → stopping → done
 let store;
@@ -246,7 +267,14 @@ app.whenReady().then(async () => {
 
   createWindow();
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length > 0) return;
+    // ウィンドウを閉じて裏で動いているあいだに新しい版が入ったら、新しい版で起動し直す
+    if (appReplaced()) {
+      app.relaunch();
+      app.quit();
+      return;
+    }
+    createWindow();
   });
 });
 
