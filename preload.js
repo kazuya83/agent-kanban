@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
   dismissInterrupted: (id) => call('card:dismissInterrupted', id),
   stop: (id) => call('card:stop', id),
   send: (id, message, skill) => call('card:send', { id, message, skill }),
+  suggestSkills: (id) => call('card:suggestSkills', { id }),
   listSkills: () => call('skills:list'),
   btw: (id, text) => call('card:btw', { id, text }),
   setSession: (id, session) => call('card:setSession', { id, session }),
