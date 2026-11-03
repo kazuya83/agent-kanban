@@ -493,25 +493,175 @@ function logEntryHtml(e) {
   return `<div class="log k-${e.kind}"><span class="log-k">${LOG_LABEL[e.kind] || e.kind}</span><span class="log-t">${time}</span><div class="log-x">${sk}${esc(e.text)}</div></div>`;
 }
 
-function diffHtml(text) {
-  if (!text.trim()) return '<div class="muted pad">まだ変更はありません</div>';
-  const lines = text.split('\n');
-  const files = lines.filter((l) => l.startsWith('diff --git')).length;
-  const add = lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length;
-  const del = lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length;
-  const shown = lines.slice(0, 8000);
-  return `<div class="diff-stat">${files} ファイル <span class="add">+${add}</span> <span class="del">-${del}</span> <button class="btn small ghost" id="refreshDiff">更新</button></div>
-    <pre class="diff">${shown
-      .map((l) => {
-        let cls = '';
-        if (l.startsWith('diff --git')) cls = 'df';
-        else if (l.startsWith('+++') || l.startsWith('---') || l.startsWith('index ') || l.startsWith('new file')) cls = 'dm';
-        else if (l.startsWith('@@')) cls = 'dh';
-        else if (l.startsWith('+')) cls = 'da';
-        else if (l.startsWith('-')) cls = 'dd';
-        return `<span class="${cls}">${esc(l) || ' '}</span>`;
-      })
-      .join('\n')}${lines.length > shown.length ? `\n… ほか ${lines.length - shown.length} 行` : ''}</pre>`;
+// ---------------- 差分タブ（GitHub 風: 左にファイルツリー、右にファイルごとの差分） ----------------
+
+const DIFF_STATUS = { A: ['追加', 'fa'], M: ['変更', 'fm'], D: ['削除', 'fd'], R: ['名前変更', 'fr'] };
+const DIFF_BIG = 600; // これより行数が多いファイルは最初は折りたたむ
+// 折りたたみ・表示状態（更新しても保つ）
+const diffUi = { cardId: null, collapsedDirs: new Set(), collapsedFiles: new Set(), openedBig: new Set(), tree: true, active: null };
+
+function diffTreeHtml(node, depth) {
+  const pad = (d) => `style="padding-left:${8 + d * 14}px"`;
+  let html = '';
+  for (const d of node.dirs) {
+    const closed = diffUi.collapsedDirs.has(d.path);
+    html += `<li class="dv-dir ${closed ? 'closed' : ''}"><div class="dv-row" data-dir="${esc(d.path)}" ${pad(depth)} title="${esc(d.path)}"><span class="dv-caret">▾</span><span class="dv-ico">📁</span><span class="dv-name">${esc(d.name)}</span></div>
+      <ul>${diffTreeHtml(d, depth + 1)}</ul></li>`;
+  }
+  for (const f of node.files) {
+    const [, cls] = DIFF_STATUS[f.file.status] || ['', 'fm'];
+    const nums = f.file.binary ? '' : `<span class="dv-n"><span class="add">+${f.file.add}</span> <span class="del">-${f.file.del}</span></span>`;
+    html += `<li><div class="dv-row dv-file ${diffUi.active === f.file.path ? 'active' : ''}" data-file="${f.index}" ${pad(depth)} title="${esc(f.file.path)}"><span class="dv-dot ${cls}"></span><span class="dv-name">${esc(f.name)}</span>${nums}</div></li>`;
+  }
+  return html;
+}
+
+function diffLinesHtml(file) {
+  if (file.binary) return '<div class="dv-note">バイナリファイルのため表示できません</div>';
+  if (!file.hunks.length) {
+    const why = file.status === 'R' ? '中身は変わらず、名前だけ変わりました' : file.meta.length ? esc(file.meta.join(' / ')) : '表示できる差分はありません';
+    return `<div class="dv-note">${why}</div>`;
+  }
+  const rows = [];
+  for (const h of file.hunks) {
+    rows.push(`<tr class="dv-hunk"><td class="ln" colspan="2"></td><td class="code">${esc(h.header)}</td></tr>`);
+    for (const l of h.lines) {
+      if (l.type === 'meta') {
+        rows.push(`<tr class="dv-meta"><td class="ln" colspan="2"></td><td class="code">${esc(l.text)}</td></tr>`);
+        continue;
+      }
+      const sign = l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' ';
+      rows.push(`<tr class="dv-${l.type}"><td class="ln">${l.oldNo ?? ''}</td><td class="ln">${l.newNo ?? ''}</td><td class="code"><span class="sg">${sign}</span>${esc(l.text)}</td></tr>`);
+    }
+  }
+  return `<table class="dv-tbl"><tbody>${rows.join('')}</tbody></table>`;
+}
+
+function diffFileHtml(file, index) {
+  const [label, cls] = DIFF_STATUS[file.status] || [file.status, 'fm'];
+  const lines = file.hunks.reduce((n, h) => n + h.lines.length, 0);
+  const big = lines > DIFF_BIG && !diffUi.openedBig.has(file.path);
+  const collapsed = diffUi.collapsedFiles.has(file.path) || big;
+  const name = file.status === 'R' && file.oldPath ? `${esc(file.oldPath)} → ${esc(file.newPath)}` : esc(file.path);
+  const nums = file.binary ? '<span class="muted">バイナリ</span>' : `<span class="add">+${file.add}</span> <span class="del">-${file.del}</span>`;
+  const body = big
+    ? `<div class="dv-note">差分が大きいので折りたたんでいます（${lines} 行）<button class="btn small ghost" data-open-big="${index}">表示する</button></div>`
+    : diffLinesHtml(file);
+  return `<section class="dv-fileblock ${collapsed ? 'collapsed' : ''}" id="dvf-${index}" data-path="${esc(file.path)}">
+    <header class="dv-fhead" data-toggle="${index}"><span class="dv-caret">▾</span><span class="wt-fs ${cls}">${label}</span><span class="dv-fpath" title="${esc(file.path)}">${name}</span><span class="dv-fnums">${nums}</span>${changeBar(file.add, file.del, Math.max(file.add + file.del, 1))}</header>
+    <div class="dv-fbody">${body}</div></section>`;
+}
+
+function diffHtml(text, files) {
+  if (!text.trim() || !files.length) return '<div class="muted pad">まだ変更はありません</div>';
+  const tree = DiffParse.buildTree(files);
+  const order = DiffParse.treeOrder(tree);
+  const add = files.reduce((n, f) => n + f.add, 0);
+  const del = files.reduce((n, f) => n + f.del, 0);
+  return `<div class="dv ${diffUi.tree ? '' : 'no-tree'}">
+    <div class="diff-stat"><button class="btn small ghost" id="toggleDiffTree" title="ファイルツリーの表示を切り替えます">☰</button>
+      <span><b>${files.length}</b> ファイル <span class="add">+${add}</span> <span class="del">-${del}</span></span>
+      <span class="spacer"></span>
+      <button class="btn small ghost" id="diffExpandAll">すべて開く</button><button class="btn small ghost" id="diffCollapseAll">すべて閉じる</button>
+      <button class="btn small ghost" id="refreshDiff">更新</button></div>
+    <div class="dv-main">
+      <nav class="dv-tree" id="diffTree"><ul>${diffTreeHtml(tree, 0)}</ul></nav>
+      <div class="dv-files" id="diffFiles">${order.map((i) => diffFileHtml(files[i], i)).join('')}</div>
+    </div></div>`;
+}
+
+function bindDiff(body, files, rerender) {
+  const filesEl = $('diffFiles');
+  if (!filesEl) return;
+  $('toggleDiffTree').onclick = () => {
+    diffUi.tree = !diffUi.tree;
+    body.querySelector('.dv').classList.toggle('no-tree', !diffUi.tree);
+  };
+  $('diffExpandAll').onclick = () => {
+    diffUi.collapsedFiles.clear();
+    files.forEach((f) => diffUi.openedBig.add(f.path));
+    rerender();
+  };
+  $('diffCollapseAll').onclick = () => {
+    files.forEach((f) => diffUi.collapsedFiles.add(f.path));
+    rerender();
+  };
+  body.querySelectorAll('.dv-row[data-dir]').forEach((el) => {
+    el.onclick = () => {
+      const p = el.dataset.dir;
+      if (diffUi.collapsedDirs.has(p)) diffUi.collapsedDirs.delete(p);
+      else diffUi.collapsedDirs.add(p);
+      el.parentElement.classList.toggle('closed');
+    };
+  });
+  const setActive = (path) => {
+    diffUi.active = path;
+    body.querySelectorAll('.dv-file').forEach((x) => x.classList.toggle('active', files[x.dataset.file].path === path));
+  };
+  body.querySelectorAll('.dv-file').forEach((el) => {
+    el.onclick = () => {
+      const f = files[el.dataset.file];
+      const sec = $(`dvf-${el.dataset.file}`);
+      if (diffUi.collapsedFiles.delete(f.path)) sec.classList.remove('collapsed');
+      setActive(f.path);
+      filesEl.scrollTop = Math.max(0, sec.offsetTop - 10);
+    };
+  });
+  body.querySelectorAll('.dv-fhead').forEach((el) => {
+    el.onclick = () => {
+      const f = files[el.dataset.toggle];
+      const sec = el.parentElement;
+      const closed = sec.classList.toggle('collapsed');
+      if (closed) diffUi.collapsedFiles.add(f.path);
+      else {
+        diffUi.collapsedFiles.delete(f.path);
+        if (!diffUi.openedBig.has(f.path) && sec.querySelector('[data-open-big]')) {
+          diffUi.openedBig.add(f.path);
+          sec.querySelector('.dv-fbody').innerHTML = diffLinesHtml(f);
+        }
+      }
+    };
+  });
+  body.querySelectorAll('[data-open-big]').forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const f = files[b.dataset.openBig];
+      diffUi.openedBig.add(f.path);
+      diffUi.collapsedFiles.delete(f.path);
+      const sec = b.closest('.dv-fileblock');
+      sec.classList.remove('collapsed');
+      sec.querySelector('.dv-fbody').innerHTML = diffLinesHtml(f);
+    };
+  });
+}
+
+async function renderDiff(c) {
+  const body = $('detailBody');
+  const same = diffUi.cardId === c.id;
+  if (!same) {
+    Object.assign(diffUi, { cardId: c.id, active: null });
+    diffUi.collapsedDirs.clear();
+    diffUi.collapsedFiles.clear();
+    diffUi.openedBig.clear();
+  }
+  const prev = same ? $('diffFiles') : null;
+  const top = prev ? prev.scrollTop : 0;
+  if (!prev) body.innerHTML = '<div class="muted pad">読み込み中…</div>';
+  const d = c.worktreePath || c.status === 'done' ? await run(() => api.diff(c.id)) : '';
+  if (state.selected !== c.id || state.tab !== 'diff') return;
+  const text = d || '';
+  const files = DiffParse.parseDiff(text);
+  let first = true;
+  const draw = () => {
+    const keep = first || !$('diffFiles') ? top : $('diffFiles').scrollTop;
+    first = false;
+    body.innerHTML = diffHtml(text, files);
+    const r = $('refreshDiff');
+    if (r) r.onclick = () => renderDiff(card(c.id) || c);
+    bindDiff(body, files, draw);
+    if ($('diffFiles')) $('diffFiles').scrollTop = keep;
+  };
+  draw();
 }
 
 // ---------------- worktree タブ ----------------
@@ -674,17 +824,13 @@ async function renderDetailBody() {
   const c = card(state.selected);
   if (!c) return;
   const body = $('detailBody');
+  $('detail').classList.toggle('wide', state.tab === 'diff');
   if (state.tab === 'log') {
     const logs = state.logs.get(c.id) || [];
     body.innerHTML = logs.length ? logs.map(logEntryHtml).join('') : '<div class="muted pad">まだログはありません。「開始」を押すと Claude が動き出します。</div>';
     body.scrollTop = body.scrollHeight;
   } else if (state.tab === 'diff') {
-    body.innerHTML = '<div class="muted pad">読み込み中…</div>';
-    const d = c.worktreePath || c.status === 'done' ? await run(() => api.diff(c.id)) : '';
-    if (state.selected !== c.id || state.tab !== 'diff') return;
-    body.innerHTML = diffHtml(d || '');
-    const r = $('refreshDiff');
-    if (r) r.onclick = renderDetailBody;
+    await renderDiff(c);
   } else if (state.tab === 'worktree') {
     await renderWorktree(c);
   } else if (state.tab === 'btw') {
