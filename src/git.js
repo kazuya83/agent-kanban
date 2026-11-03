@@ -100,6 +100,20 @@ async function merge(cwd, branch, message, target) {
   }
 }
 
+// branch を remote に push する（上流も設定する）
+async function push(cwd, branch, remote = 'origin') {
+  await git(cwd, ['push', '-u', remote, `refs/heads/${branch}:refs/heads/${branch}`]);
+}
+
+async function remoteExists(repo, remote = 'origin') {
+  try {
+    await git(repo, ['remote', 'get-url', remote]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function branchExists(repo, name) {
   try {
     await git(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`]);
@@ -289,6 +303,8 @@ module.exports = {
   commitAll,
   countCommits,
   merge,
+  push,
+  remoteExists,
   branchExists,
   checkBranchName,
   createBranch,

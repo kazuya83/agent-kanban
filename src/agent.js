@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const git = require('./git');
 const { resolveCommand, isWin } = require('./env');
 const github = require('./github');
+const ghCli = require('./gh');
 const { withSkill } = require('./skills');
 
 const MAX_LOGS = 2000;
@@ -744,6 +745,74 @@ class AgentManager extends EventEmitter {
       c.status = 'done';
       c.mergedAt = Date.now();
       this.changed(c);
+    } finally {
+      this.merging.delete(id);
+    }
+  }
+
+  // PR の既定のタイトルと本文
+  prDefaults(c) {
+    const title = c.issue ? c.title.replace(/^#\d+\s*/, '') : c.title;
+    const lines = [];
+    if (c.issue) lines.push(`Closes #${c.issue.number}`, '');
+    if (c.lastMessage) lines.push(c.lastMessage, '');
+    lines.push('---', 'Claude Agent Kanban のタスクから作成しました。');
+    return { title, body: lines.join('\n') };
+  }
+
+  /**
+   * ブランチを origin に push して、プルリクエストを作る（すでに開いている PR があれば push だけして更新する）
+   * @param {string} id
+   * @param {{ base?: string, title?: string, body?: string, keep?: boolean }} opts
+   *   base: PR のマージ先（省略時はベースブランチ）
+   *   keep: PR を作ったあとも worktree とブランチを残してタスクを続ける（既定は続ける）
+   * @returns {Promise<{ url: string, created: boolean }>}
+   */
+  async createPullRequest(id, opts = {}) {
+    const c = this.must(id);
+    if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけ PR を作れます');
+    if (!c.worktreePath) throw new Error('worktree がありません');
+    if (this.merging?.has(id)) throw new Error('処理中です');
+    const top = c.repoPath;
+    const base = String(opts.base || c.prBase || c.baseBranch || '').trim();
+    if (!base) throw new Error('PR のマージ先のブランチを指定してください');
+    if (base === c.branch) throw new Error('タスク自身のブランチには PR を作れません');
+    if (!(await git.remoteExists(top))) throw new Error('このリポジトリに origin がありません。GitHub のリポジトリを origin に設定してください');
+
+    this.merging = this.merging || new Set();
+    this.merging.add(id);
+    try {
+      await git.commitAll(c.worktreePath, this.commitMessage(c));
+      if ((await git.countCommits(top, `${base}..${c.branch}`)) === 0 && (await git.branchExists(top, base))) {
+        throw new Error(`${base} との差分がないので PR を作れません`);
+      }
+      await git.push(c.worktreePath, c.branch);
+      this.log(c, 'system', `ブランチ ${c.branch} を origin に push しました`);
+      const def = this.prDefaults(c);
+      const pr = await ghCli.createPullRequest({
+        cwd: c.worktreePath,
+        head: c.branch,
+        base,
+        title: String(opts.title || '').trim() || def.title,
+        body: opts.body != null && String(opts.body).trim() ? String(opts.body) : def.body,
+        gh: this.opts.ghPath,
+      });
+      this.log(c, 'system', pr.created ? `PR を作成しました: ${pr.url}` : `開いている PR を更新しました: ${pr.url}`);
+      c.prUrl = pr.url;
+      c.prBase = base;
+
+      const finalDiff = await git.diff(c.worktreePath, c.baseCommit);
+      if (opts.keep === false) {
+        // ブランチは origin に残っているので、ローカルの worktree とブランチは片付ける
+        await git.removeWorktree(top, c.worktreePath);
+        await git.deleteBranch(top, c.branch);
+        c.finalDiff = truncate(finalDiff, 300000);
+        c.worktreePath = null;
+        c.status = 'done';
+        c.mergedAt = Date.now();
+      }
+      this.changed(c);
+      return { url: pr.url, created: pr.created };
     } finally {
       this.merging.delete(id);
     }

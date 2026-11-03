@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS = {
   claudePath: 'claude',
   maxParallel: 3,
   defaultSkill: '', // 新しいタスクを作るときに最初から選んでおくスキル
+  integration: 'merge', // レビュー後の取り込み方: merge（ローカルで直接マージ） / pr（push してプルリクエストを作る）
 };
 
 class Store {
