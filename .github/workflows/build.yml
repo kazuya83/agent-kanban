@@ -1,10 +1,11 @@
-# Windows（exe）・macOS（dmg）・Linux（AppImage）のアプリをビルドする
-# - push / プルリクエスト: テストだけ（Mac の実行環境を無駄に使わないため）
-# - main への push で、package.json の version（例: 0.1.0）のリリースがまだなければ、
-#   3つの OS でビルドし、タグ v0.1.0 と GitHub Release を作ってファイルを添付し、インストールを確かめる
-#   → 新しいバージョンを出すときは package.json の version を上げて main に push するだけ
-# - 手動実行（Actions の「Run workflow」）: 3つの OS でビルドして「Artifacts」に置く（リリースはしない）
-# - 同じブランチに新しい push が来たら、古い実行は取り消す（最新の push だけ動かす）
+# Windows（exe）・macOS（dmg）・Linux（AppImage）のアプリをビルドして、自動でリリースする
+# - push / プルリクエスト: まずテスト
+# - main への push: 最新のリリースからアプリの中身が変わっていれば、5分待ってから
+#   バージョンを自動で上げて（0.1.8 → 0.1.9）3つの OS でビルドし、GitHub Release を作り、インストールを確かめる
+#   - 5分のあいだに次の push が来たら、前の実行は取り消す（続けてマージしても、リリースは最後の1回だけ）
+#   - 0.2.0 のように大きく上げたいときは、package.json の version をその番号にして push する
+#   - バージョンの決め方は scripts/next-version.js
+# - 手動実行（Actions の「Run workflow」）: すぐに 3つの OS でビルドして「Artifacts」に置く（リリースはしない）
 name: Build desktop apps
 
 on:
@@ -28,31 +29,42 @@ jobs:
       release: ${{ steps.ver.outputs.release }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # タグ（これまでのリリース）と、そこからの変更を見るため
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
       - run: npm ci
       - run: npm test
-      - name: リリースするか判断
+      - name: 次のバージョンと、リリースするかを決める
         id: ver
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(node -p "require('./package.json').version")
+          r=$(node scripts/next-version.js)
+          echo "$r"
+          version=$(node -e "console.log(JSON.parse(process.argv[1]).version)" "$r")
+          release=$(node -e "console.log(JSON.parse(process.argv[1]).release)" "$r")
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ] \
-             && ! gh release view "v$version" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ] && [ "$release" = "true" ]; then
             echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "v$version をリリースします"
+            echo "::notice::v$version を自動でリリースします（5分のあいだに次の push がなければ）"
           else
             echo "release=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
+  # 続けて push されたときに、リリースを最後の1回にまとめるための待ち時間。
+  # 待っているあいだに次の push が来ると、この実行は取り消される（concurrency）
+  wait:
     needs: test
-    # ビルドは、リリースするときと手動実行のときだけ
-    if: needs.test.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.test.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: sleep 300
+
+  build:
+    needs: [test, wait]
+    # ビルドは、リリースするとき（待ち時間のあと）と手動実行のときだけ
+    if: always() && needs.test.result == 'success' && (needs.wait.result == 'success' || github.event_name == 'workflow_dispatch')
     strategy:
       fail-fast: false
       matrix:
@@ -71,6 +83,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: バージョンを入れる（v${{ needs.test.outputs.version }}）
+        shell: bash
+        run: npm version "${{ needs.test.outputs.version }}" --no-git-tag-version --allow-same-version
       - name: Build
         run: npx electron-builder ${{ matrix.target }} --publish never
         env:
@@ -108,8 +123,8 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [test, build]
-    if: needs.test.outputs.release == 'true'
+    needs: [test, wait, build]
+    if: always() && needs.test.outputs.release == 'true' && needs.wait.result == 'success' && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
