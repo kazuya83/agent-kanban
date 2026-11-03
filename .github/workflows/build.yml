@@ -21,10 +21,10 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
       release: ${{ steps.ver.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm test
@@ -57,10 +57,10 @@ jobs:
             target: --linux
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - name: Build
@@ -83,13 +83,13 @@ jobs:
           else
             node test/smoke-packaged.js "dist/win-unpacked/Claude Agent Kanban.exe" smoke-built.png
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && runner.os != 'Linux'
         with:
           name: smoke-built-${{ runner.os }}
           path: smoke-*.png
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: claude-agent-kanban-${{ runner.os }}
           path: |
@@ -104,12 +104,12 @@ jobs:
     if: needs.test.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
       - run: ls -la dist
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.test.outputs.version }}
           target_commitish: ${{ github.sha }}
@@ -132,7 +132,7 @@ jobs:
         os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: install.sh（macOS / Linux）
         if: runner.os != 'Windows'
         run: |

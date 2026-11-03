@@ -188,7 +188,7 @@ $env:AGENT_KANBAN_UNINSTALL = "1"; irm https://raw.githubusercontent.com/kazuya8
 
 ### 必要なもの
 
-- Node.js 20 以上
+- Node.js 22 以上（24 推奨）
 - git
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) をインストールし、ログインしておく（`claude` コマンドが使えれば OK）
 
