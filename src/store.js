@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   maxParallel: 3,
   defaultSkill: '', // 新しいタスクを作るときに最初から選んでおくスキル
   integration: 'merge', // レビュー後の取り込み方: merge（ローカルで直接マージ） / pr（push してプルリクエストを作る）
+  issueStatusSync: true, // Issue から作ったタスクの列に合わせて、GitHub Projects の Status（In progress / In review / Done）を変える
   pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
 };
 

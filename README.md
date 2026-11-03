@@ -63,6 +63,20 @@ Claude Code のタスクをカンバンボードで管理するデスクトッ�
 ### 直接マージか PR 作成かを選ぶ
 設定の「レビュー後の取り込み方」で、**直接マージする**（ローカルで `git merge`）か **PR を作成する**（origin に push して `gh pr create`）かを選べます。PR にすると、レビュー中のカードのボタンが「PR を作成…」になり、base ブランチ・タイトル・本文を決めて PR を作れます（Issue から作ったタスクには `Closes #番号` が入ります）。追加指示で直したあとにもう一度押すと、同じ PR に push して更新します。PR の作成には gh のインストールとログインが必要です。
 
+### Issue のステータスを自動で変える
+Issue から作ったタスクは、カードの列に合わせて、Issue が入っている **GitHub Projects の Status** を自動で変えます。
+
+| カード | Status |
+| --- | --- |
+| 実行中・待機中 | In progress |
+| レビュー（エラーを含む） | In review |
+| マージして完了 | Done |
+
+- PR を作って片付けたとき（まだマージしていない）は In review のままです。PR がマージされて Issue が閉じると、GitHub の Projects の設定で Done になります
+- Status の選択肢は、名前で探します（`In Progress` `🏗 In progress` `in-progress` `進行中` なども同じものとして扱います）。当てはまる選択肢がない Project は変えません
+- gh に **project の権限** が必要です。設定画面の「Projects の権限を追加」を押すと、ブラウザで追加できます（ターミナルなら `gh auth refresh -h github.com -s project`）
+- 設定の「Issue のステータスを自動で変える」で切ることもできます
+
 ## できること
 
 - **カードを作るとすぐに動き出す**: ブランチ `agent/<名前>-<id>` と worktree（`<リポジトリ>.worktrees/<id>`）を自動で作り、その中で `claude -p` を起動します

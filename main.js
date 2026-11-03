@@ -148,8 +148,9 @@ app.whenReady().then(async () => {
     };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync'];
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
+    if (patch && 'issueStatusSync' in patch) patch = { ...patch, issueStatusSync: !!patch.issueStatusSync };
     for (const k of allowed) if (patch && k in patch) store.settings[k] = patch[k];
     store.settings.maxParallel = Math.min(10, Math.max(1, parseInt(store.settings.maxParallel, 10) || 1));
     store.save();
@@ -184,6 +185,12 @@ app.whenReady().then(async () => {
   handle('gh:install', () => gh.install((line) => send('gh:event', { type: 'line', line })));
   handle('gh:login', () =>
     gh.login((ev) => {
+      if (ev.type === 'code') shell.openExternal(ev.url).catch(() => {});
+      send('gh:event', ev);
+    }),
+  );
+  handle('gh:addProjectScope', () =>
+    gh.addProjectScope((ev) => {
       if (ev.type === 'code') shell.openExternal(ev.url).catch(() => {});
       send('gh:event', ev);
     }),

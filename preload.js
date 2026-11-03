@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   ghStatus: () => call('gh:status'),
   ghInstall: () => call('gh:install'),
   ghLogin: () => call('gh:login'),
+  ghAddProjectScope: () => call('gh:addProjectScope'),
   ghCancel: () => call('gh:cancel'),
   onGh: (cb) => ipcRenderer.on('gh:event', (_e, d) => cb(d)),
   start: (id) => call('card:start', id),
