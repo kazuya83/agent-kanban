@@ -64,3 +64,24 @@ test('worktreeStatus: コミット・未コミット・未追跡・ベースの�
 
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+test('worktreeStatus: 日本語のファイル名がそのまま読める', async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-wt-'));
+  const g = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo });
+  g('init', '-q', '-b', 'main');
+  fs.writeFileSync(path.join(repo, 'メモ.md'), 'a\n');
+  g('add', '.');
+  g('commit', '-qm', 'init');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo }).toString().trim();
+  fs.writeFileSync(path.join(repo, 'メモ.md'), 'a\nb\n');
+  fs.writeFileSync(path.join(repo, '新規.txt'), 'x\ny\n');
+
+  const s = await git.worktreeStatus(repo, base, null);
+  const un = Object.fromEntries(s.uncommitted.map((f) => [f.path, f]));
+  assert.strictEqual(un['メモ.md'].status, 'M');
+  assert.strictEqual(un['メモ.md'].add, 1);
+  assert.strictEqual(un['新規.txt'].add, 2);
+  assert.ok(un['新規.txt'].mtime > 0);
+
+  fs.rmSync(repo, { recursive: true, force: true });
+});

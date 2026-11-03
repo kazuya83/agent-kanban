@@ -136,11 +136,14 @@ async function addWorktreeForBranch(repo, wtPath, branch) {
   await git(repo, ['worktree', 'add', wtPath, branch]);
 }
 
+// 日本語などのファイル名を "\343..." のようにエスケープさせない
+const Q = ['-c', 'core.quotepath=false'];
+
 // ベースコミットからの差分（コミット済み＋未コミット＋未追跡ファイル）
 // index を触らないので、エージェントの実行中に呼んでも安全
 async function diff(wt, baseCommit) {
   let out = await git(wt, ['diff', baseCommit]);
-  const untracked = (await git(wt, ['ls-files', '--others', '--exclude-standard']))
+  const untracked = (await git(wt, [...Q, 'ls-files', '--others', '--exclude-standard']))
     .split('\n')
     .filter(Boolean);
   for (const file of untracked.slice(0, 200)) {
@@ -218,16 +221,16 @@ async function worktreeStatus(wt, baseCommit, baseBranch) {
     baseCommit === head
       ? []
       : parseChanges(
-          await git(wt, ['diff', '--no-renames', '--numstat', baseCommit, 'HEAD']),
-          await git(wt, ['diff', '--no-renames', '--name-status', baseCommit, 'HEAD']),
+          await git(wt, [...Q, 'diff', '--no-renames', '--numstat', baseCommit, 'HEAD']),
+          await git(wt, [...Q, 'diff', '--no-renames', '--name-status', baseCommit, 'HEAD']),
         );
 
   // 未コミットの変更（HEAD → 作業ツリー）と未追跡ファイル
   const uncommitted = parseChanges(
-    await git(wt, ['diff', '--no-renames', '--numstat', 'HEAD']),
-    await git(wt, ['diff', '--no-renames', '--name-status', 'HEAD']),
+    await git(wt, [...Q, 'diff', '--no-renames', '--numstat', 'HEAD']),
+    await git(wt, [...Q, 'diff', '--no-renames', '--name-status', 'HEAD']),
   );
-  const untracked = (await git(wt, ['ls-files', '--others', '--exclude-standard'])).split('\n').filter(Boolean);
+  const untracked = (await git(wt, [...Q, 'ls-files', '--others', '--exclude-standard'])).split('\n').filter(Boolean);
   for (const file of untracked.slice(0, 500)) {
     uncommitted.push({ path: file, status: '?', del: 0, ...countLines(path.join(wt, file)) });
   }
