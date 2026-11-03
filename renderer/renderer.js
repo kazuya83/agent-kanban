@@ -24,6 +24,31 @@ const $ = (id) => document.getElementById(id);
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
+
+// カードや通知の短い文章では、Markdown の記号（見出し・太字・コード・表・リスト）を外して、ふつうの文章にする
+function plainText(md) {
+  return String(md ?? '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !/^\|?\s*:?-{3,}/.test(l)) // 表の区切り行
+    .map((l) =>
+      l
+        .replace(/^#{1,6}\s+/, '')
+        .replace(/^[-*+]\s+/, '・')
+        .replace(/^\d+\.\s+/, '')
+        .replace(/^>\s?/, '')
+        .replace(/^\||\|$/g, '')
+        .replace(/\s*\|\s*/g, ' / '),
+    )
+    .join(' ')
+    .replace(/\*\*(.+?)\*\*|__(.+?)__/g, '$1$2')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1$2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 function card(id) {
   return state.board.cards.find((c) => c.id === id);
 }
@@ -270,7 +295,7 @@ function cardHtml(c) {
       <div class="card-title">${c.issue ? `<a class="issue-chip" data-url="${esc(c.issue.url)}" title="Issue を開く">#${c.issue.number}</a> ${esc(c.title.replace(/^#\d+\s*/, ''))}` : esc(c.title)}</div>
       ${c.skill ? `<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">⚡ /${esc(c.skill)}</span></div>` : ''}
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
-      ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(c.lastMessage)}</div>` : ''}
+      ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(plainText(c.lastMessage))}</div>` : ''}
       ${isInterrupted(c) ? `<div class="int-quick"><button class="btn small primary" data-resume="${c.id}" title="中断したところから続けます">▶ 再開</button></div>` : ''}
       ${questionCompactHtml(c)}
       ${permissionBlock(c, true)}
@@ -1721,7 +1746,7 @@ function notifItemHtml(n) {
     <span class="notif-icon">${NOTIF_ICON[n.kind] || '🔔'}</span>
     <div class="notif-main">
       <div class="notif-title">${esc(n.title)}</div>
-      ${n.body ? `<div class="notif-body">${esc(n.body)}</div>` : ''}
+      ${n.body ? `<div class="notif-body">${esc(plainText(n.body))}</div>` : ''}
       <div class="notif-foot"><span class="muted small">${timeAgo(n.t)}</span>${action}</div>
     </div>
     <button class="icon notif-x" data-nclear="${esc(n.id)}" title="この通知を消す">✕</button>
