@@ -11,6 +11,7 @@ function execFileP(cmd, args, opts) {
     execFile(cmd, args, { maxBuffer: 32 * 1024 * 1024, windowsHide: true, ...opts }, (err, stdout, stderr) => {
       if (err) {
         err.stderr = stderr;
+        err.stdout = stdout;
         return reject(err);
       }
       resolve(stdout);
@@ -156,4 +157,140 @@ function buildIssuePrompt(issue, extra) {
   return lines.join('\n');
 }
 
-module.exports = { parseGithubRemote, parseIssueNumbers, repoSlug, fetchIssue, buildIssuePrompt };
+// ---------- GitHub Projects のステータス ----------
+// カードの列に合わせて、Issue が入っている Project の「Status」を In progress / In review / Done に変える
+
+const PROJECT_STATUS = {
+  inProgress: { label: 'In progress', names: ['inprogress', 'doing', 'wip', 'started', '進行中', '作業中', '対応中', '実行中'], partial: 'progress' },
+  inReview: { label: 'In review', names: ['inreview', 'review', 'reviewing', 'needsreview', 'レビュー', 'レビュー中'], partial: 'review' },
+  done: { label: 'Done', names: ['done', 'completed', 'complete', 'closed', 'finished', '完了', '済み'], partial: null },
+};
+
+// 「🏗 In Progress」「in-progress」なども同じ名前として扱う
+function normalizeStatusName(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+// Status の選択肢から、key（inProgress / inReview / done）に当たるものを選ぶ
+function pickStatusOption(options, key) {
+  const def = PROJECT_STATUS[key];
+  if (!def || !Array.isArray(options)) return null;
+  const list = options.map((o) => ({ ...o, norm: normalizeStatusName(o.name) }));
+  for (const n of def.names) {
+    const hit = list.find((o) => o.norm === n);
+    if (hit) return { id: hit.id, name: hit.name };
+  }
+  if (def.partial) {
+    const hit = list.find((o) => o.norm.includes(def.partial));
+    if (hit) return { id: hit.id, name: hit.name };
+  }
+  return null;
+}
+
+const ITEMS_QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    issue(number: $number) {
+      projectItems(first: 20) {
+        nodes {
+          id
+          project { id title closed field(name: "Status") { ... on ProjectV2SingleSelectField { id options { id name } } } }
+          fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name optionId } }
+        }
+      }
+    }
+  }
+}`;
+
+const UPDATE_MUTATION = `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+  updateProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: { singleSelectOptionId: $optionId } }) {
+    projectV2Item { id }
+  }
+}`;
+
+const SCOPE_MESSAGE =
+  'GitHub Projects のステータスを変えるには、gh に project の権限が必要です。設定の「Projects の権限を追加」を押すか、ターミナルで gh auth refresh -h github.com -s project を実行してください';
+
+async function ghGraphql(gh, cwd, query, vars) {
+  const args = ['api', 'graphql', '-f', `query=${query}`];
+  for (const [k, v] of Object.entries(vars)) args.push(typeof v === 'number' ? '-F' : '-f', `${k}=${v}`);
+  let out;
+  try {
+    out = await execFileP(gh, args, { cwd, timeout: 30000 });
+  } catch (err) {
+    const msg = `${err.stderr || ''}${err.stdout || ''}${err.message || ''}`;
+    if (/INSUFFICIENT_SCOPES|read:project|'project'/i.test(msg)) {
+      const e = new Error(SCOPE_MESSAGE);
+      e.code = 'SCOPE';
+      throw e;
+    }
+    if (/auth login|not logged/i.test(msg)) throw new Error('GitHub にログインしていません。「Issue から」の画面からログインしてください');
+    throw new Error(`GitHub API がエラーを返しました: ${String(err.stderr || err.message).trim().split('\n')[0]}`);
+  }
+  const d = JSON.parse(out);
+  if (d.errors && d.errors.length) {
+    if (d.errors.some((e) => e.type === 'INSUFFICIENT_SCOPES')) {
+      const e = new Error(SCOPE_MESSAGE);
+      e.code = 'SCOPE';
+      throw e;
+    }
+    throw new Error(`GitHub API がエラーを返しました: ${d.errors[0].message}`);
+  }
+  return d.data;
+}
+
+/**
+ * Issue が入っているすべての Project（v2）で、Status を key に当たる選択肢に変える
+ * @param {string} repoPath
+ * @param {number} number
+ * @param {'inProgress'|'inReview'|'done'} key
+ * @param {{ gh?: string }} opts
+ * @returns {Promise<{ updated: {project: string, from: string, to: string}[], unchanged: {project: string, to: string}[], skipped: {project: string, reason: string}[], projects: number }>}
+ */
+async function setIssueProjectStatus(repoPath, number, key, opts = {}) {
+  if (!PROJECT_STATUS[key]) throw new Error(`不明なステータスです: ${key}`);
+  const gh = opts.gh || resolveCommand('gh');
+  if (!gh) throw new Error('Projects のステータスを変えるには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます');
+  const slug = await repoSlug(repoPath);
+  const data = await ghGraphql(gh, repoPath, ITEMS_QUERY, { owner: slug.owner, repo: slug.repo, number: Number(number) });
+  const issue = data && data.repository && data.repository.issue;
+  if (!issue) throw new Error(`Issue #${number} が見つかりません（${slug.owner}/${slug.repo}）`);
+  const items = (issue.projectItems && issue.projectItems.nodes) || [];
+  const result = { updated: [], unchanged: [], skipped: [], projects: 0 };
+  for (const item of items) {
+    const p = item && item.project;
+    if (!p || p.closed) continue;
+    result.projects++;
+    const field = p.field;
+    if (!field || !field.id) {
+      result.skipped.push({ project: p.title, reason: 'Status の項目がありません' });
+      continue;
+    }
+    const opt = pickStatusOption(field.options, key);
+    if (!opt) {
+      result.skipped.push({ project: p.title, reason: `Status に「${PROJECT_STATUS[key].label}」に当たる選択肢がありません` });
+      continue;
+    }
+    const cur = item.fieldValueByName || {};
+    if (cur.optionId === opt.id) {
+      result.unchanged.push({ project: p.title, to: opt.name });
+      continue;
+    }
+    await ghGraphql(gh, repoPath, UPDATE_MUTATION, { projectId: p.id, itemId: item.id, fieldId: field.id, optionId: opt.id });
+    result.updated.push({ project: p.title, from: cur.name || '', to: opt.name });
+  }
+  return result;
+}
+
+module.exports = {
+  parseGithubRemote,
+  parseIssueNumbers,
+  repoSlug,
+  fetchIssue,
+  buildIssuePrompt,
+  PROJECT_STATUS,
+  normalizeStatusName,
+  pickStatusOption,
+  setIssueProjectStatus,
+};

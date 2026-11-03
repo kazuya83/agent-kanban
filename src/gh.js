@@ -42,7 +42,11 @@ async function status() {
   const r = await run(gh, ['auth', 'status', '--hostname', 'github.com']);
   const out = r.stdout + r.stderr;
   const m = out.match(/account\s+(\S+)/) || out.match(/Logged in to github\.com as\s+(\S+)/);
-  return { ...base, installed: true, loggedIn: r.code === 0, user: m ? m[1] : '' };
+  const sm = out.match(/Token scopes:\s*(.*)/);
+  const scopes = sm ? sm[1].split(',').map((x) => x.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean) : null;
+  // GH_TOKEN などで scope が出ないときは、分からない（null）にしておく
+  const hasProjectScope = scopes ? scopes.includes('project') : null // 書き換えには read:project ではなく project が要る;
+  return { ...base, installed: true, loggedIn: r.code === 0, user: m ? m[1] : '', scopes, hasProjectScope };
 }
 
 // 出力を1行ずつ onLine に渡しながらコマンドを動かす
@@ -88,17 +92,14 @@ async function install(onLine) {
   return st;
 }
 
-/**
- * ブラウザで GitHub にログインする（gh auth login --web）
- * @param {(ev: {type: 'code', code: string, url: string} | {type: 'line', line: string}) => void} onEvent
- */
-async function login(onEvent) {
+// ブラウザで確認コードを入れる流れ（ログイン・権限の追加）を動かす
+async function deviceFlow(args, onEvent) {
   const gh = resolveCommand('gh');
   if (!gh) throw new Error('gh が入っていません');
   let sentCode = false;
   const code = await stream(
     gh,
-    ['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web'],
+    args,
     (line) => {
       const m = line.match(/\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/);
       if (m && !sentCode) {
@@ -111,8 +112,28 @@ async function login(onEvent) {
     },
     { stdin: '\n' }, // 「Enter を押すとブラウザを開きます」で止まらないようにする
   );
+  return code;
+}
+
+/**
+ * ブラウザで GitHub にログインする（gh auth login --web）
+ * @param {(ev: {type: 'code', code: string, url: string} | {type: 'line', line: string}) => void} onEvent
+ */
+async function login(onEvent) {
+  const code = await deviceFlow(['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web', '--scopes', 'project'], onEvent);
   const st = await status();
   if (!st.loggedIn) throw new Error(code === 0 ? 'ログインを確認できませんでした' : `ログインに失敗しました（終了コード ${code}）`);
+  return st;
+}
+
+/**
+ * GitHub Projects のステータスを変えられるように、gh に project の権限を足す（gh auth refresh -s project）
+ * @param {(ev: {type: 'code', code: string, url: string} | {type: 'line', line: string}) => void} onEvent
+ */
+async function addProjectScope(onEvent) {
+  const code = await deviceFlow(['auth', 'refresh', '--hostname', 'github.com', '--scopes', 'project'], onEvent);
+  const st = await status();
+  if (code !== 0 || st.hasProjectScope === false) throw new Error(code === 0 ? 'project の権限を確認できませんでした' : `権限の追加に失敗しました（終了コード ${code}）`);
   return st;
 }
 
@@ -150,4 +171,4 @@ function cancel() {
   if (c && c.exitCode === null) c.kill();
 }
 
-module.exports = { status, install, login, cancel, createPullRequest, DOWNLOAD_URL, DEVICE_URL };
+module.exports = { status, install, login, addProjectScope, cancel, createPullRequest, DOWNLOAD_URL, DEVICE_URL };

@@ -1298,6 +1298,10 @@ async function openSettings() {
          <option value="pr" ${s.integration === 'pr' ? 'selected' : ''}>PR を作成する（origin に push して gh pr create）</option>
        </select>
        <small>レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。</small></label>
+     <div class="field">
+       <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> Issue のステータスを自動で変える（GitHub Projects）</label>
+       <small>Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。</small>
+       <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div></div>
      <label class="field"><span>権限モード</span>
        <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
        <small>自動で許可されない操作は、カードに「承認待ち」として表示されます。</small></label>
@@ -1316,6 +1320,7 @@ async function openSettings() {
       let defSkill = s.defaultSkill || null;
       const drawDef = () => renderSkillSlot('sSkill', defSkill, (v) => ((defSkill = v), drawDef()));
       drawDef();
+      refreshGh();
       $('sCancel').onclick = closeModal;
       $('sOk').onclick = async () => {
         const r = await run(() =>
@@ -1328,6 +1333,7 @@ async function openSettings() {
             model: $('sModel').value.trim(),
             claudePath: $('sClaude').value.trim() || 'claude',
             defaultSkill: defSkill || '',
+            issueStatusSync: $('sIssueSync').checked,
           }),
         );
         if (r) {
@@ -1414,6 +1420,16 @@ function renderGh(st) {
     $('ghRecheck').onclick = refreshGh;
     return;
   }
+  if (st.hasProjectScope === false && state.board.settings.issueStatusSync !== false) {
+    el.className = 'gh-panel gh-warn';
+    el.innerHTML = `<span>✓ gh で GitHub にログインしています${st.user ? `（<b>${esc(st.user)}</b>）` : ''}</span>
+      <p>Issue のステータス（GitHub Projects の In progress / In review / Done）を自動で変えるには、project の権限が必要です。</p>
+      <p><button class="btn primary small" id="ghScope">Projects の権限を追加</button> <span class="muted small">ブラウザが開くので、表示されたコードを入力します</span></p>
+      <div><button class="btn small ghost" id="ghRecheck">もう一度確認</button></div>${log}`;
+    $('ghScope').onclick = () => ghAction('scope');
+    $('ghRecheck').onclick = refreshGh;
+    return;
+  }
   el.className = 'gh-panel ok';
   el.innerHTML = `<span>✓ gh で GitHub にログインしています${st.user ? `（<b>${esc(st.user)}</b>）` : ''}</span>`;
 }
@@ -1424,10 +1440,10 @@ async function ghAction(kind) {
   ghState.code = null;
   renderGh(null);
   try {
-    const st = await (kind === 'install' ? api.ghInstall() : api.ghLogin());
+    const st = await (kind === 'install' ? api.ghInstall() : kind === 'scope' ? api.ghAddProjectScope() : api.ghLogin());
     ghState.busy = false;
     ghState.code = null;
-    toast(kind === 'install' ? 'gh をインストールしました' : 'GitHub にログインしました', 'ok');
+    toast(kind === 'install' ? 'gh をインストールしました' : kind === 'scope' ? 'project の権限を追加しました' : 'GitHub にログインしました', 'ok');
     renderGh(st);
     // インストールが終わったら、続けてログインも案内する
     if (kind === 'install' && st && st.installed && !st.loggedIn) toast('続けて「GitHub にログイン」を押してください', 'ok');

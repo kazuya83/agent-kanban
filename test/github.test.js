@@ -117,3 +117,137 @@ test('gh: 未ログイン → ログイン（確認コードを受け取る）�
     process.env.PATH = oldPath;
   }
 });
+
+test('Projects の Status の選択肢を選ぶ', () => {
+  const opts = [
+    { id: 't', name: 'Todo' },
+    { id: 'p', name: '🏗 In Progress' },
+    { id: 'r', name: 'In review' },
+    { id: 'd', name: 'Done' },
+  ];
+  assert.deepStrictEqual(github.pickStatusOption(opts, 'inProgress'), { id: 'p', name: '🏗 In Progress' });
+  assert.deepStrictEqual(github.pickStatusOption(opts, 'inReview'), { id: 'r', name: 'In review' });
+  assert.deepStrictEqual(github.pickStatusOption(opts, 'done'), { id: 'd', name: 'Done' });
+  assert.deepStrictEqual(github.pickStatusOption([{ id: 'x', name: 'in-progress' }], 'inProgress'), { id: 'x', name: 'in-progress' });
+  assert.deepStrictEqual(github.pickStatusOption([{ id: 'x', name: '完了' }], 'done'), { id: 'x', name: '完了' });
+  assert.strictEqual(github.pickStatusOption([{ id: 't', name: 'Todo' }], 'inReview'), null);
+});
+
+// 偽の gh（api graphql）: Issue は2つの Project に入っている。mutation は $LOG に書き出す
+function fakeGhProjects(dir, { noScope = false } = {}) {
+  const log = path.join(dir, 'mutations.jsonl');
+  const js = path.join(dir, 'gh.js');
+  fs.writeFileSync(
+    js,
+    `
+const fs = require('fs');
+const a = process.argv.slice(2);
+if (a[0] !== 'api' || a[1] !== 'graphql') process.exit(2);
+const vars = {};
+for (let i = 2; i < a.length; i += 2) { const [k, ...v] = a[i + 1].split('='); vars[k] = v.join('='); }
+if (${noScope}) {
+  console.log(JSON.stringify({ errors: [{ type: 'INSUFFICIENT_SCOPES', message: "requires one of the following scopes: ['read:project']" }] }));
+  console.error("gh: Your token has not been granted the required scopes to execute this query. requires ['read:project']");
+  process.exit(1);
+}
+if (/mutation/.test(vars.query)) {
+  fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ projectId: vars.projectId, itemId: vars.itemId, fieldId: vars.fieldId, optionId: vars.optionId }) + '\\n');
+  console.log(JSON.stringify({ data: { updateProjectV2ItemFieldValue: { projectV2Item: { id: vars.itemId } } } }));
+  process.exit(0);
+}
+const opts = [{ id: 'o-todo', name: 'Todo' }, { id: 'o-prog', name: 'In Progress' }, { id: 'o-rev', name: 'In review' }, { id: 'o-done', name: 'Done' }];
+console.log(JSON.stringify({ data: { repository: { issue: { projectItems: { nodes: [
+  { id: 'item-1', project: { id: 'P1', title: 'Board', closed: false, field: { id: 'F1', options: opts } }, fieldValueByName: { name: 'Todo', optionId: 'o-todo' } },
+  { id: 'item-2', project: { id: 'P2', title: 'Simple', closed: false, field: { id: 'F2', options: [{ id: 's-todo', name: 'Todo' }, { id: 's-done', name: 'Done' }] } }, fieldValueByName: null },
+  { id: 'item-3', project: { id: 'P3', title: 'Old', closed: true, field: { id: 'F3', options: opts } }, fieldValueByName: null },
+] } } } } }));
+`,
+  );
+  const bin = path.join(dir, process.platform === 'win32' ? 'gh.cmd' : 'gh');
+  fs.writeFileSync(bin, process.platform === 'win32' ? `@"${process.execPath}" "${js}" %*\r\n` : `#!/bin/sh\nexec "${process.execPath}" "${js}" "$@"\n`, { mode: 0o755 });
+  return { bin, log };
+}
+
+function githubRepo(tmp) {
+  const repo = path.join(tmp, 'repo');
+  fs.mkdirSync(repo);
+  const g = (...a) => execFileSync('git', a, { cwd: repo });
+  g('init', '-q', '-b', 'main');
+  g('remote', 'add', 'origin', 'https://github.com/acme/app.git');
+  return repo;
+}
+
+test('Issue が入っている Project の Status を変える', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-proj-'));
+  const repo = githubRepo(tmp);
+  const { bin, log } = fakeGhProjects(tmp);
+  const r = await github.setIssueProjectStatus(repo, 8, 'inProgress', { gh: bin });
+  assert.deepStrictEqual(r.updated, [{ project: 'Board', from: 'Todo', to: 'In Progress' }]);
+  assert.strictEqual(r.skipped.length, 1);
+  assert.match(r.skipped[0].reason, /In progress/);
+  assert.strictEqual(r.projects, 2); // クローズした Project は数えない
+  const muts = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepStrictEqual(muts, [{ projectId: 'P1', itemId: 'item-1', fieldId: 'F1', optionId: 'o-prog' }]);
+
+  const d = await github.setIssueProjectStatus(repo, 8, 'done', { gh: bin });
+  assert.deepStrictEqual(d.updated.map((u) => [u.project, u.to]), [['Board', 'Done'], ['Simple', 'Done']]);
+
+  // project の権限がないときは、権限の足し方を案内する
+  const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-proj-'));
+  const noScope = fakeGhProjects(tmp2, { noScope: true });
+  await assert.rejects(github.setIssueProjectStatus(repo, 8, 'inReview', { gh: noScope.bin }), (err) => err.code === 'SCOPE' && /gh auth refresh -h github.com -s project/.test(err.message));
+});
+
+test('カードの列に合わせて Projects の Status を変える', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-sync-'));
+  const store = new Store(path.join(tmp, 'data', 'board.json'));
+  store.settings.repoPath = tmp;
+  const agents = new AgentManager(store, { mcpScript: '', mcpDir: path.join(tmp, 'mcp'), nodeBin: process.execPath });
+  const calls = [];
+  agents.setIssueProjectStatus = async (_repo, n, key) => {
+    calls.push([n, key]);
+    return { updated: [{ project: 'Board', from: '', to: key }], unchanged: [], skipped: [], projects: 1 };
+  };
+  const c = agents.createCard({ title: '#8 自動で変える', prompt: 'やって', issue: { number: 8, title: '自動で変える', url: 'https://github.com/acme/app/issues/8' } });
+  const plain = agents.createCard({ title: 'ふつうのタスク', prompt: 'やって' });
+  const step = async (status, extra) => {
+    Object.assign(c, { status }, extra || {});
+    agents.changed(c);
+    await agents.flushIssueSync();
+  };
+  await step('todo');
+  await step('queued');
+  await step('running'); // 待機中 → 実行中 は同じ In progress なので、もう一度は変えない
+  await step('review');
+  await step('failed');
+  await step('running');
+  await step('done', { mergedInto: ['main'] });
+  assert.deepStrictEqual(calls, [[8, 'inProgress'], [8, 'inReview'], [8, 'inProgress'], [8, 'done']]);
+  assert.ok(c.logs.some((l) => /GitHub Projects「Board」で #8 のステータスを done にしました/.test(l.text)));
+
+  // PR を作って片付けただけ（マージしていない）なら In review のまま
+  calls.length = 0;
+  c.mergedInto = [];
+  await step('review');
+  calls.length = 0;
+  await step('done', { prUrl: 'https://github.com/acme/app/pull/1' });
+  assert.deepStrictEqual(calls, []);
+
+  // Issue のないカード・設定で切ったときは何もしない
+  plain.status = 'running';
+  agents.changed(plain);
+  store.settings.issueStatusSync = false;
+  c.mergedInto = ['main'];
+  await step('running');
+  await agents.flushIssueSync();
+  assert.deepStrictEqual(calls, []);
+
+  // 失敗してもカードは止めず、ログに1回だけ出す
+  store.settings.issueStatusSync = true;
+  agents.setIssueProjectStatus = async () => {
+    throw new Error('権限がありません');
+  };
+  await step('review');
+  await step('running');
+  assert.strictEqual(c.logs.filter((l) => /権限がありません/.test(l.text)).length, 1);
+});

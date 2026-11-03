@@ -212,6 +212,72 @@ class AgentManager extends EventEmitter {
   changed(card) {
     this.store.save();
     this.emit('changed', card ? card.id : null);
+    if (card) this.queueIssueSync(card);
+  }
+
+  // ---------- GitHub Projects のステータス ----------
+
+  // カードの状態に合う Projects のステータス（変えないときは null）
+  issueStatusKey(c) {
+    if (c.status === 'running' || c.status === 'queued') return 'inProgress';
+    if (c.status === 'review' || c.status === 'failed') return 'inReview';
+    // PR を作って片付けただけのときは、まだ取り込まれていないので In review のまま（PR がマージされると GitHub 側で Done になる）
+    if (c.status === 'done') return c.mergedInto && c.mergedInto.length ? 'done' : 'inReview';
+    return null;
+  }
+
+  // Issue から作ったカードの列が変わったら、Issue が入っている Project の Status を合わせる（裏で順番に動かす）
+  queueIssueSync(c) {
+    if (!c.issue || this.store.settings.issueStatusSync === false) return;
+    const key = this.issueStatusKey(c);
+    if (!key) return;
+    c.issueSync = c.issueSync || {};
+    if (c.issueSync.wanted === key) return;
+    c.issueSync.wanted = key;
+    this.issueSyncs = this.issueSyncs || new Map();
+    const prev = this.issueSyncs.get(c.id) || Promise.resolve();
+    const next = prev.then(() => this.runIssueSync(c, key));
+    this.issueSyncs.set(c.id, next);
+    next.then(() => {
+      if (this.issueSyncs.get(c.id) === next) this.issueSyncs.delete(c.id);
+    });
+  }
+
+  async runIssueSync(c, key) {
+    if (!this.store.card(c.id) || !c.issueSync || c.issueSync.wanted !== key) return; // 破棄された・もっと新しい状態がある
+    try {
+      const r = await this.setIssueProjectStatus(c.repoPath, c.issue.number, key);
+      if (!this.store.card(c.id)) return;
+      c.issueSync.synced = key;
+      c.issueSync.error = null;
+      for (const u of r.updated) this.log(c, 'system', `GitHub Projects「${u.project}」で #${c.issue.number} のステータスを ${u.to} にしました${u.from ? `（前は ${u.from}）` : ''}`);
+      for (const s of r.skipped) {
+        const msg = `GitHub Projects「${s.project}」のステータスは変えませんでした: ${s.reason}`;
+        if (c.issueSync.lastSkip !== msg) this.log(c, 'system', msg);
+        c.issueSync.lastSkip = msg;
+      }
+      if (!r.projects && !c.issueSync.noProject) {
+        c.issueSync.noProject = true;
+        this.log(c, 'system', `#${c.issue.number} はどの GitHub Projects にも入っていないので、ステータスは変えませんでした`);
+      }
+    } catch (err) {
+      if (!this.store.card(c.id)) return;
+      // 同じエラーは何度も出さない
+      if (c.issueSync.error !== err.message) this.log(c, 'error', `GitHub Projects のステータスを変えられませんでした: ${err.message}`);
+      c.issueSync.error = err.message;
+    }
+    this.store.save();
+    this.emit('changed', c.id);
+  }
+
+  // テストで差し替えられるようにメソッドにしておく
+  setIssueProjectStatus(repoPath, number, key) {
+    return github.setIssueProjectStatus(repoPath, number, key, { gh: this.opts.ghPath });
+  }
+
+  // 実行中の Projects の更新が終わるまで待つ（テスト・終了時用）
+  async flushIssueSync() {
+    while (this.issueSyncs && this.issueSyncs.size) await Promise.all([...this.issueSyncs.values()]);
   }
 
   log(card, kind, text, extra) {
