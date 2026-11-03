@@ -769,3 +769,90 @@ test('PR を作って完了したタスクの続きは、origin の前のブラ�
   assert.strictEqual(c.prUrl, null, '次は新しい PR を作る');
   assert.ok(fs.existsSync(c.worktreePath));
 });
+
+test('会話（チャット）: worktree を作らずリポジトリで話し、同時実行数に数えず、続きも話せる。マージはできない', async () => {
+  const { repo, store, agents, g } = setup();
+  const server = new PermissionServer((p, s) => agents.requestPermission(p, s));
+  await server.start();
+  agents.setPermissionEndpoint(server.port, server.token);
+  try {
+    store.settings.permissionMode = 'acceptEdits';
+    // タスクが上限（1）まで動いていても、会話はすぐに動く
+    const t = agents.createCard({ title: 'task', prompt: 'タスク' });
+    agents.start(t.id);
+    await waitFor(() => t.permissions.length === 1);
+
+    assert.throws(() => agents.createChat({ message: '  ' }), /メッセージ/);
+    const c = agents.createChat({ message: 'この構成を教えて\n詳しく' });
+    assert.strictEqual(c.kind, 'chat');
+    assert.strictEqual(c.title, 'この構成を教えて');
+    assert.strictEqual(c.status, 'running', '会話は同時実行数に数えない');
+    await waitFor(() => c.permissions.length === 1);
+    assert.ok(c.logs.some((l) => /権限モード: default/.test(l.text)), '会話はリポジトリで直接動くので、毎回確認する');
+    agents.answerPermission(c.id, c.permissions[0].id, 'allow');
+    await waitFor(() => c.status === 'review');
+    assert.ok(!c.worktreePath && !c.branch, 'worktree もブランチも作らない');
+    assert.strictEqual(c.awaitingReply, false);
+    assert.ok(!c.logs.some((l) => /コミット/.test(l.text)), 'コミットしない');
+    assert.ok(fs.readdirSync(repo).some((f) => f.startsWith('out-')), 'リポジトリのフォルダで動く');
+    assert.ok(!g('branch', '--list', 'agent/*').toString().trim().split('\n').some((b) => b.includes(c.id)));
+    const first = c.sessionId;
+    assert.ok(first);
+    assert.strictEqual(await agents.diff(c.id), '');
+    await assert.rejects(agents.merge(c.id, { target: 'main' }), /会話はマージできません/);
+    await assert.rejects(agents.createPullRequest(c.id, {}), /PR/);
+
+    // 続きを話す: 同じ会話の続き
+    agents.send(c.id, 'ありがとう');
+    await waitFor(() => c.permissions.length === 1);
+    agents.answerPermission(c.id, c.permissions[0].id, 'allow');
+    await waitFor(() => c.status === 'review');
+    assert.strictEqual(c.sessionId, first);
+
+    // 会話の続きからタスクを作る（会話はフォークして残す）
+    const t2 = agents.createCard({ title: 'from chat', prompt: '作業して', session: { mode: 'resume', id: c.sessionId, title: c.title } });
+    assert.strictEqual(t2.forkNext, true);
+
+    agents.answerPermission(t.id, t.permissions[0].id, 'allow');
+    await waitFor(() => t.status === 'review');
+
+    // 削除しても、タスクのブランチなどには触らない
+    await agents.discard(c.id);
+    assert.ok(!store.card(c.id));
+    assert.ok(fs.existsSync(t.worktreePath));
+    store.flush();
+  } finally {
+    server.close();
+  }
+});
+
+test('会話（チャット）: アプリの終了で中断 → 再開すると同じ会話の続きから', async () => {
+  const { tmp, store, agents } = setup();
+  const server = new PermissionServer((p, s) => agents.requestPermission(p, s));
+  await server.start();
+  agents.setPermissionEndpoint(server.port, server.token);
+  let server2;
+  try {
+    const c = agents.createChat({ message: 'こんにちは' });
+    await waitFor(() => c.permissions.length === 1 && c.sessionId);
+    await agents.shutdown();
+    const store2 = new Store(path.join(tmp, 'data', 'board.json'));
+    const agents2 = new AgentManager(store2, agents.opts);
+    server2 = new PermissionServer((p, s) => agents2.requestPermission(p, s));
+    await server2.start();
+    agents2.setPermissionEndpoint(server2.port, server2.token);
+    const c2 = store2.card(c.id);
+    assert.strictEqual(c2.interrupted.kind, 'running');
+    assert.doesNotMatch(c2.interrupted.prompt, /worktree/);
+    agents2.resume(c2.id);
+    await waitFor(() => c2.permissions.length === 1);
+    agents2.answerPermission(c2.id, c2.permissions[0].id, 'allow');
+    await waitFor(() => c2.status === 'review');
+    assert.strictEqual(c2.sessionId, c.sessionId);
+    assert.ok(!c2.worktreePath);
+    store2.flush();
+  } finally {
+    server.close();
+    server2?.close();
+  }
+});

@@ -171,6 +171,7 @@ app.whenReady().then(async () => {
     if (autoStart) agents.start(c.id);
     return c.id;
   });
+  handle('chat:create', ({ message, title, session, skill }) => agents.createChat({ message, title, session, skill }).id);
   handle('card:createFromIssues', async ({ numbers, extra, autoStart, session, skill }) => {
     const { cards, errors } = await agents.createFromIssues({ numbers, extra, session, skill });
     if (autoStart) for (const c of cards) agents.start(c.id);

@@ -24,6 +24,12 @@ const SKILL_SUGGEST_PROMPT = [
   '- まだファイルは作らないでください。最後に「どれを追加しますか？」と聞いてください',
 ].join('\n');
 const RESUME_PROMPT = '前回の作業は、アプリの終了で途中で中断されました。worktree の今の状態（git status / git diff など）を確かめて、中断したところから作業を続けてください。';
+const CHAT_RESUME_PROMPT = '前回の返事は、アプリの終了で途中で中断されました。中断したところから続けてください。';
+
+// タスクに紐づかない会話（チャット）か。worktree もブランチも作らず、リポジトリのフォルダでそのまま話す
+function isChat(c) {
+  return !!c && c.kind === 'chat';
+}
 
 function truncate(s, n) {
   s = String(s ?? '');
@@ -120,12 +126,13 @@ class AgentManager extends EventEmitter {
       if (c.status === 'queued') {
         // まだ claude に渡していない指示なので、そのまま渡し直せばよい
         c.interrupted = { at: now, kind: 'queued', prompt: c.pendingPrompt || withSkill(c.skill, c.prompt) };
-        c.status = c.worktreePath ? 'review' : 'todo';
+        c.status = c.worktreePath || isChat(c) ? 'review' : 'todo';
         c.error = null;
       }
       if (c.status === 'running') {
         // 会話が始まっていれば同じ会話の続きから、始まる前なら同じ指示をもう一度渡す
-        c.interrupted = { at: now, kind: 'running', prompt: c.sessionId ? RESUME_PROMPT : c.lastPromptSent || withSkill(c.skill, c.prompt) };
+        const resumePrompt = isChat(c) ? CHAT_RESUME_PROMPT : RESUME_PROMPT;
+        c.interrupted = { at: now, kind: 'running', prompt: c.sessionId ? resumePrompt : c.lastPromptSent || withSkill(c.skill, c.prompt) };
         c.status = 'failed';
         c.error = INTERRUPTED_MESSAGE;
       }
@@ -145,7 +152,7 @@ class AgentManager extends EventEmitter {
     const it = c.interrupted;
     if (!it) throw new Error('このタスクは中断されていません');
     if (c.status === 'running' || c.status === 'queued') throw new Error('このタスクはもう動いています');
-    if (it.kind === 'running') this.log(c, 'user', it.prompt === RESUME_PROMPT ? '（中断したところから再開）' : it.prompt);
+    if (it.kind === 'running') this.log(c, 'user', it.prompt === RESUME_PROMPT || it.prompt === CHAT_RESUME_PROMPT ? '（中断したところから再開）' : it.prompt);
     else this.log(c, 'system', '中断されていた指示で再開します');
     this.enqueue(c, it.prompt);
   }
@@ -317,6 +324,37 @@ class AgentManager extends EventEmitter {
   }
 
   /**
+   * タスクに紐づかない会話（チャット）を作って、すぐに話し始める。
+   * worktree もブランチも作らず、リポジトリのフォルダでそのまま Claude と話す（コミット・マージはしない）
+   * @param {{ message: string, title?: string, session?: object, skill?: string }} p
+   */
+  createChat({ message, title, session, skill }) {
+    const s = this.store.settings;
+    if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
+    const text = String(message || '').trim();
+    if (!text) throw new Error('メッセージを入力してください');
+    const card = {
+      id: crypto.randomBytes(4).toString('hex'),
+      kind: 'chat',
+      title: (title && title.trim()) || truncate(text.split('\n')[0], 40),
+      prompt: text,
+      status: 'todo',
+      repoPath: s.repoPath,
+      createdAt: Date.now(),
+      permissions: [],
+      alwaysAllow: [],
+      logs: [],
+      sessions: [],
+    };
+    if (session && session.id) this.applySession(card, session);
+    card.skill = cleanSkill(skill);
+    this.store.cards.push(card);
+    this.changed(card);
+    this.start(card.id);
+    return card;
+  }
+
+  /**
    * GitHub Issue の番号からカードを作る
    * @param {{ numbers: string, extra?: string }} p  numbers は「12」「12, 15」「#12 #15」など
    * @returns {Promise<{ cards: object[], errors: string[] }>}
@@ -458,11 +496,14 @@ class AgentManager extends EventEmitter {
   pump() {
     if (this.shuttingDown) return; // 終了中は新しく起動しない（待機中のまま保存し、次の起動で再開できるようにする）
     const max = Math.max(1, Number(this.store.settings.maxParallel) || 1);
-    let running = this.store.cards.filter((c) => c.status === 'running').length;
+    // 会話（チャット）は軽いので、同時実行数に数えずすぐに動かす（タスクが詰まっていても返事が来るように）
+    let running = this.store.cards.filter((c) => c.status === 'running' && !isChat(c)).length;
     const queued = this.store.cards.filter((c) => c.status === 'queued').sort((a, b) => a.queuedAt - b.queuedAt);
     for (const c of queued) {
-      if (running >= max) break;
-      running++;
+      if (!isChat(c)) {
+        if (running >= max) continue;
+        running++;
+      }
       c.status = 'running';
       c.startedAt = Date.now();
       this.changed(c);
@@ -483,7 +524,7 @@ class AgentManager extends EventEmitter {
   stop(id) {
     const c = this.must(id);
     if (c.status === 'queued') {
-      c.status = c.worktreePath ? 'review' : 'todo';
+      c.status = c.worktreePath || isChat(c) ? 'review' : 'todo';
       this.changed(c);
       return;
     }
@@ -559,12 +600,23 @@ class AgentManager extends EventEmitter {
     return file;
   }
 
+  // 会話（チャット）の権限モード。リポジトリのフォルダ（手元の作業中のファイル）でそのまま動くので、
+  // ファイルの変更やコマンドは毎回カードで確かめる（「計画だけ」「すべて自動で許可」を選んでいればそれに従う）
+  chatPermissionMode(mode) {
+    return mode === 'plan' || mode === 'bypassPermissions' ? mode : 'default';
+  }
+
   async launch(c) {
-    if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
+    const chat = isChat(c);
+    if (chat) {
+      if (!c.repoPath || !fs.existsSync(c.repoPath)) throw new Error(`リポジトリのフォルダが見つかりません: ${c.repoPath}`);
+    } else if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
+    const cwd = chat ? c.repoPath : c.worktreePath;
     const s = this.store.settings;
     // stdin を開いたままにして、実行中でもメッセージ（btw）を送れるようにする
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--replay-user-messages'];
-    if (s.permissionMode) args.push('--permission-mode', s.permissionMode);
+    const mode = chat ? this.chatPermissionMode(s.permissionMode) : s.permissionMode;
+    if (mode) args.push('--permission-mode', mode);
     if (s.model) args.push('--model', s.model);
     const allowed = splitList(s.allowedTools);
     if (allowed.length) args.push('--allowedTools', ...allowed);
@@ -587,7 +639,7 @@ class AgentManager extends EventEmitter {
     const useShell = isWin && /\.(cmd|bat)$/i.test(resolved);
     const quote = (a) => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
     const child = spawn(useShell ? quote(resolved) : resolved, useShell ? args.map(quote) : args, {
-      cwd: c.worktreePath,
+      cwd,
       // 承認待ちの MCP ツール呼び出しがタイムアウトしないようにする
       env: { ...process.env, MCP_TOOL_TIMEOUT: '86400000' },
       shell: useShell,
@@ -638,7 +690,7 @@ class AgentManager extends EventEmitter {
       this.denyAllPending(c.id, 'エージェントが終了しました');
       if (!this.store.card(c.id)) return; // 破棄された
       // 状態を「レビュー」にする前に、作業内容をブランチにコミットしておく
-      if (!spawnError) {
+      if (!spawnError && !chat) {
         try {
           const canCommit = await this.afterConflictRun(c);
           if (canCommit && (await git.commitAll(c.worktreePath, this.commitMessage(c)))) this.log(c, 'system', '変更を worktree のブランチにコミットしました');
@@ -667,7 +719,8 @@ class AgentManager extends EventEmitter {
       } else if (code === 0 && !run.resultError) {
         c.status = 'review';
         c.error = null;
-        c.awaitingReply = endsWithQuestion(c.lastText);
+        // 会話は返事が来たらいつでも続きを話せるので、「回答待ち」にはしない
+        c.awaitingReply = !chat && endsWithQuestion(c.lastText);
         if (c.awaitingReply) {
           this.log(c, 'question', 'Claude が質問しています。下の欄から答えると、続きから進めます');
           this.emit('awaiting', c);
@@ -937,6 +990,7 @@ class AgentManager extends EventEmitter {
 
   async diff(id) {
     const c = this.must(id);
+    if (isChat(c)) return '';
     if (c.worktreePath && fs.existsSync(c.worktreePath)) return git.diff(c.worktreePath, c.baseCommit);
     return c.finalDiff || '';
   }
@@ -944,6 +998,7 @@ class AgentManager extends EventEmitter {
   // worktree の作業状況（タブ「worktree」用）
   async worktree(id) {
     const c = this.must(id);
+    if (isChat(c)) return { exists: false, status: null, worktrees: [] };
     const repo = c.repoPath || this.store.settings.repoPath;
     const others = repo && fs.existsSync(repo) ? await git.listWorktrees(repo).catch(() => []) : [];
     const exists = !!(c.worktreePath && fs.existsSync(c.worktreePath));
@@ -962,6 +1017,7 @@ class AgentManager extends EventEmitter {
    */
   async merge(id, opts = {}) {
     const c = this.must(id);
+    if (isChat(c)) throw new Error('会話はマージできません（タスクにすると、worktree で作業してマージできます）');
     if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけマージできます');
     if (!c.worktreePath) throw new Error('worktree がありません');
     if (this.merging?.has(id)) throw new Error('マージ中です');
@@ -1084,6 +1140,7 @@ class AgentManager extends EventEmitter {
    */
   async createPullRequest(id, opts = {}) {
     const c = this.must(id);
+    if (isChat(c)) throw new Error('会話からは PR を作れません（タスクにすると、worktree で作業して PR を作れます）');
     if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけ PR を作れます');
     if (!c.worktreePath) throw new Error('worktree がありません');
     if (this.merging?.has(id)) throw new Error('処理中です');
@@ -1287,6 +1344,7 @@ class AgentManager extends EventEmitter {
    */
   async resolveConflict(id, mode) {
     const c = this.must(id);
+    if (isChat(c)) throw new Error('会話にはコンフリクトはありません');
     if (!c.conflict) throw new Error('コンフリクトはありません');
     if (!['review', 'failed'].includes(c.status)) throw new Error('実行中は解消を始められません');
     const wt = c.worktreePath;
@@ -1403,4 +1461,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT };
+module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, isChat };
