@@ -1030,6 +1030,7 @@ class AgentManager extends EventEmitter {
         if (ev.session_id) c.sessionId = ev.session_id;
         const cost = Number(ev.total_cost_usd) || 0;
         c.costUsd = (c.costUsd || 0) + cost;
+        this.store.addCost(c.repoPath, cost);
         const secs = Math.round((Number(ev.duration_ms) || 0) / 1000);
         if (ev.is_error || (ev.subtype && ev.subtype !== 'success')) {
           run.resultError = (typeof ev.result === 'string' && ev.result) || `エラー（${ev.subtype}）`;
@@ -1040,6 +1041,15 @@ class AgentManager extends EventEmitter {
         }
         this.changed(c);
         this.afterResult(c, run, !!run.resultError);
+        break;
+      }
+      case 'rate_limit_event': {
+        // 週間上限（seven_day 系）のリセット日時を覚えて、上部の週の合計金額の区切りに使う
+        const info = ev.rate_limit_info || {};
+        const resetsAt = Number(info.resetsAt) || 0;
+        if (resetsAt && /^seven_day/.test(String(info.rateLimitType || ''))) {
+          if (this.store.setWeeklyResetAt(resetsAt < 1e12 ? resetsAt * 1000 : resetsAt)) this.store.save();
+        }
         break;
       }
       default:
