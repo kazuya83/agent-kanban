@@ -13,6 +13,8 @@ const { withSkill } = require('./skills');
 const MAX_LOGS = 2000;
 const MCP_SERVER_NAME = 'agent_kanban';
 const PERMISSION_TOOL = `mcp__${MCP_SERVER_NAME}__approve`;
+const INTERRUPTED_MESSAGE = 'アプリの終了で中断されました。「▶ 再開」で中断したところから続けられます（追加指示を送っても再開できます）。';
+const RESUME_PROMPT = '前回の作業は、アプリの終了で途中で中断されました。worktree の今の状態（git status / git diff など）を確かめて、中断したところから作業を続けてください。';
 
 function truncate(s, n) {
   s = String(s ?? '');
@@ -98,19 +100,86 @@ class AgentManager extends EventEmitter {
     this.permission = { port, token };
   }
 
-  // 前回アプリを終了したときに動いていたカードを整理する
+  // 前回アプリを終了したとき（落ちたときも含む）に動いていた・待っていたカードを整理し、
+  // あとから「再開」できるように中断の情報を残す
   recoverInterrupted() {
+    const now = Date.now();
     for (const c of this.store.cards) {
       c.permissions = [];
       c.questions = [];
       if (c.conflict) c.conflict.resolving = false;
-      if (c.status === 'queued') c.status = c.worktreePath ? 'review' : 'todo';
-      if (c.status === 'running') {
-        c.status = 'failed';
-        c.error = 'アプリの終了で中断されました。追加指示を送ると続きから再開できます。';
+      if (c.status === 'queued') {
+        // まだ claude に渡していない指示なので、そのまま渡し直せばよい
+        c.interrupted = { at: now, kind: 'queued', prompt: c.pendingPrompt || withSkill(c.skill, c.prompt) };
+        c.status = c.worktreePath ? 'review' : 'todo';
+        c.error = null;
       }
+      if (c.status === 'running') {
+        // 会話が始まっていれば同じ会話の続きから、始まる前なら同じ指示をもう一度渡す
+        c.interrupted = { at: now, kind: 'running', prompt: c.sessionId ? RESUME_PROMPT : c.lastPromptSent || withSkill(c.skill, c.prompt) };
+        c.status = 'failed';
+        c.error = INTERRUPTED_MESSAGE;
+      }
+      c.pendingPrompt = null;
     }
     this.store.save();
+  }
+
+  // 中断されたタスク
+  interruptedCards(repoPath) {
+    return this.store.cards.filter((c) => c.interrupted && (!repoPath || c.repoPath === repoPath));
+  }
+
+  // 中断されたタスクを、中断したところから再開する
+  resume(id) {
+    const c = this.must(id);
+    const it = c.interrupted;
+    if (!it) throw new Error('このタスクは中断されていません');
+    if (c.status === 'running' || c.status === 'queued') throw new Error('このタスクはもう動いています');
+    if (it.kind === 'running') this.log(c, 'user', it.prompt === RESUME_PROMPT ? '（中断したところから再開）' : it.prompt);
+    else this.log(c, 'system', '中断されていた指示で再開します');
+    this.enqueue(c, it.prompt);
+  }
+
+  resumeAll(repoPath) {
+    const list = this.interruptedCards(repoPath).filter((c) => c.status !== 'running' && c.status !== 'queued');
+    for (const c of list) this.resume(c.id);
+    return list.length;
+  }
+
+  // 中断の印だけ消す（再開しない）
+  dismissInterrupted(id) {
+    const c = this.must(id);
+    c.interrupted = null;
+    if (c.status === 'failed' && c.error === INTERRUPTED_MESSAGE) c.status = 'review';
+    if (c.error === INTERRUPTED_MESSAGE) c.error = null;
+    this.changed(c);
+  }
+
+  // 実行中・待機中のタスクの数（終了するときの確認用）
+  activeCount() {
+    const running = this.store.cards.filter((c) => c.status === 'running').length;
+    const queued = this.store.cards.filter((c) => c.status === 'queued').length;
+    return { running, queued };
+  }
+
+  /**
+   * アプリを終了する前に呼ぶ。実行中の claude を止め、作業内容をブランチにコミットするまで待つ。
+   * カードの状態は「実行中」「待機中」のまま保存するので、次の起動で recoverInterrupted が「中断」にする
+   * @param {number} timeoutMs
+   */
+  async shutdown(timeoutMs = 10000) {
+    this.shuttingDown = true;
+    const runs = [...(this.runs || new Map()).values()];
+    for (const [id, child] of this.procs) {
+      const c = this.store.card(id);
+      if (c) this.log(c, 'system', 'アプリを終了するため中断しました。次に起動したときに「再開」できます');
+      this.denyAllPending(id, 'アプリを終了します');
+      killTree(child);
+    }
+    const done = Promise.all(runs.map((r) => r.done));
+    await Promise.race([done, new Promise((r) => setTimeout(r, timeoutMs).unref())]);
+    this.store.flush();
   }
 
   // ---------- 参照 ----------
@@ -276,6 +345,8 @@ class AgentManager extends EventEmitter {
   }
 
   enqueue(c, prompt) {
+    if (this.shuttingDown) throw new Error('アプリを終了しています');
+    c.interrupted = null;
     c.awaitingReply = false;
     c.lastText = '';
     c.pendingPrompt = prompt;
@@ -288,6 +359,7 @@ class AgentManager extends EventEmitter {
 
   // 同時実行数の上限まで、待機中のカードを起動する
   pump() {
+    if (this.shuttingDown) return; // 終了中は新しく起動しない（待機中のまま保存し、次の起動で再開できるようにする）
     const max = Math.max(1, Number(this.store.settings.maxParallel) || 1);
     let running = this.store.cards.filter((c) => c.status === 'running').length;
     const queued = this.store.cards.filter((c) => c.status === 'queued').sort((a, b) => a.queuedAt - b.queuedAt);
@@ -410,6 +482,7 @@ class AgentManager extends EventEmitter {
     this.procs.set(c.id, child);
     // sent: stdin に書いたメッセージ（acked = claude が受け取ったことをリプレイで確認済み）
     const run = { resultError: null, finished: false, child, sent: [], stdinClosed: false, idleTimer: null };
+    run.done = new Promise((r) => (run.markDone = r));
     this.runs = this.runs || new Map();
     this.runs.set(c.id, run);
 
@@ -435,6 +508,13 @@ class AgentManager extends EventEmitter {
     const finish = async (code, spawnError) => {
       if (run.finished) return;
       run.finished = true;
+      try {
+        await finishRun(code, spawnError);
+      } finally {
+        run.markDone();
+      }
+    };
+    const finishRun = async (code, spawnError) => {
       clearTimeout(run.idleTimer);
       if (buf.trim()) this.handleLine(c, buf.trim(), run);
       this.procs.delete(c.id);
@@ -452,6 +532,12 @@ class AgentManager extends EventEmitter {
           this.log(c, 'error', `コミットに失敗しました: ${err.message}`);
         }
         if (!this.store.card(c.id)) return;
+      }
+      if (this.shuttingDown) {
+        // アプリの終了で止めた: 「実行中」のまま保存し、次の起動で「中断」として再開できるようにする
+        c.stopRequested = false;
+        this.changed(c);
+        return;
       }
       if (spawnError) {
         c.status = 'failed';

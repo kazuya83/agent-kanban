@@ -12,6 +12,7 @@ fixPath();
 if (process.platform === 'win32') app.setAppUserModelId('dev.agentkanban.app'); // Windows の通知に必要
 
 let win = null;
+let quitState = 'idle'; // 終了の流れ: idle → confirming → stopping → done
 let store;
 let agents;
 let permServer;
@@ -33,6 +34,14 @@ function createWindow() {
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.on('closed', () => (win = null));
+  // Windows / Linux はウインドウを閉じるとアプリも終わるので、閉じる前に終了の確認を出す（キャンセルならウインドウを残す）
+  win.on('close', (e) => {
+    if (process.platform === 'darwin' || quitState === 'done' || !agents) return;
+    const { running, queued } = agents.activeCount();
+    if (!running && !queued) return;
+    e.preventDefault();
+    app.quit();
+  });
 }
 
 function send(channel, payload) {
@@ -182,6 +191,9 @@ app.whenReady().then(async () => {
   handle('gh:cancel', () => gh.cancel());
   handle('card:update', ({ id, title, prompt, skill }) => agents.updateCard(id, { title, prompt, skill }));
   handle('card:start', (id) => agents.start(id));
+  handle('card:resume', (id) => agents.resume(id));
+  handle('card:resumeAll', () => agents.resumeAll(store.settings.repoPath));
+  handle('card:dismissInterrupted', (id) => agents.dismissInterrupted(id));
   handle('card:stop', (id) => agents.stop(id));
   handle('card:send', ({ id, message, skill }) => agents.send(id, message, skill));
   handle('skills:list', () => require('./src/skills').listSkills(store.settings.repoPath));
@@ -222,8 +234,46 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', () => {
-  agents?.stopAll();
-  store?.flush();
-  permServer?.close();
+// 実行中・待機中のタスクがあるときは、終了してよいか確かめる。
+// 終了するときは claude を止めて作業内容をブランチにコミットしてから終わる（次の起動で「再開」できる）
+app.on('before-quit', (e) => {
+  if (quitState === 'done' || !agents) {
+    store?.flush();
+    permServer?.close();
+    return;
+  }
+  e.preventDefault();
+  if (quitState !== 'idle') return;
+  const { running, queued } = agents.activeCount();
+  const finish = async () => {
+    quitState = 'stopping';
+    try {
+      await agents.shutdown();
+    } catch {
+      /* 終了は続ける */
+    }
+    quitState = 'done';
+    app.quit();
+  };
+  if (!running && !queued) return finish();
+  quitState = 'confirming';
+  const parts = [running && `実行中 ${running} 件`, queued && `待機中 ${queued} 件`].filter(Boolean).join('・');
+  const opts = {
+    type: 'warning',
+    buttons: ['中断して終了', 'キャンセル'],
+    defaultId: 1,
+    cancelId: 1,
+    title: '実行中のタスクがあります',
+    message: `${parts}のタスクがあります。終了しますか？`,
+    detail: '終了すると、実行中のタスクは中断されます（それまでの変更はタスクのブランチにコミットします）。\n次にアプリを起動したとき、ボード上部の「すべて再開」やタスクの「▶ 再開」で、中断したところから続けられます。',
+  };
+  const ask = win && !win.isDestroyed() ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts);
+  ask.then(
+    ({ response }) => {
+      if (response === 0) return finish();
+      quitState = 'idle';
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    },
+    () => finish(),
+  );
 });

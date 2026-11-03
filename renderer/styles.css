@@ -360,3 +360,10 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .wt-list li[data-card] { cursor: pointer; }
 .wt-list li[data-card]:hover { background: var(--panel-2); }
 .wt-l-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* アプリの終了で中断されたタスク */
+.b-interrupted { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); font-weight: 600; }
+.int-banner { padding: 8px 16px; background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); font-size: 12.5px; display: flex; align-items: center; gap: 10px; }
+.int-box { margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); background: color-mix(in srgb, var(--warn) 8%, var(--panel)); }
+.int-box p { margin: 6px 0; }
+.int-quick { margin-top: 6px; }
