@@ -79,6 +79,23 @@ app.whenReady().then(async () => {
 
   agents.on('changed', notifyBoard);
   agents.on('log', (id, entry) => send('card:log', { id, entry }));
+  // 質問・回答待ちも、承認と同じように通知する
+  const notify = (card, title, body) => {
+    if (Notification.isSupported()) {
+      const n = new Notification({ title, body: String(body).slice(0, 200) });
+      n.on('click', () => {
+        if (win) {
+          win.show();
+          win.focus();
+          send('card:focus', card.id);
+        }
+      });
+      n.show();
+    }
+    if (win && !win.isFocused()) win.flashFrame(true);
+  };
+  agents.on('question', (card, qs) => notify(card, `質問: ${card.title}`, qs.map((q) => q.question).join(' / ')));
+  agents.on('awaiting', (card) => notify(card, `回答待ち: ${card.title}`, card.lastText || 'Claude が質問しています'));
   agents.on('permission', (card, req) => {
     if (Notification.isSupported()) {
       const n = new Notification({ title: `承認待ち: ${card.title}`, body: `${req.toolName}  ${req.summary}`.slice(0, 200) });
@@ -95,6 +112,7 @@ app.whenReady().then(async () => {
   });
 
   handle('board:get', () => boardState());
+  handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
   handle('env:check', () => ({
     git: resolveCommand('git'),
     claude: resolveCommand(store.settings.claudePath || 'claude'),
@@ -114,7 +132,11 @@ app.whenReady().then(async () => {
   handle('repo:info', async () => {
     const repo = store.settings.repoPath;
     if (!repo) return { branches: [], current: '' };
-    return { branches: await git.branches(repo).catch(() => []), current: await git.currentBranch(repo).catch(() => '') };
+    return {
+      branches: await git.branches(repo).catch(() => []),
+      current: await git.currentBranch(repo).catch(() => ''),
+      hasOrigin: await git.hasRemote(repo, 'origin').catch(() => false),
+    };
   });
   handle('settings:update', (patch) => {
     const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration'];
@@ -169,10 +191,20 @@ app.whenReady().then(async () => {
   handle('card:logs', (id) => agents.logs(id));
   handle('card:diff', (id) => agents.diff(id));
   handle('card:worktree', (id) => agents.worktree(id));
-  handle('card:merge', ({ id, target, createNew, keep }) => agents.merge(id, { target, createNew, keep }));
+  handle('card:merge', async ({ id, target, createNew, keep, push }) => {
+    // push するかどうかは覚えておき、次のマージでも同じにする
+    store.settings.pushAfterMerge = !!push;
+    store.save();
+    return agents.merge(id, { target, createNew, keep, push });
+  });
   handle('card:pr', ({ id, base, title, body, keep }) => agents.createPullRequest(id, { base, title, body, keep }));
   handle('card:discard', (id) => agents.discard(id));
+  handle('conflict:resolve', ({ id, mode }) => agents.resolveConflict(id, mode));
+  handle('conflict:complete', (id) => agents.completeConflict(id));
+  handle('conflict:abort', (id) => agents.abortConflict(id));
+  handle('conflict:dismiss', (id) => agents.dismissConflict(id));
   handle('card:permission', ({ id, reqId, decision, message }) => agents.answerPermission(id, reqId, decision, message));
+  handle('card:answer', ({ id, reqId, answers }) => agents.answerQuestion(id, reqId, answers));
   handle('card:open', async (id) => {
     const c = agents.must(id);
     if (!c.worktreePath) throw new Error('worktree がありません');

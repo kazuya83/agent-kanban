@@ -30,6 +30,7 @@ function slugify(s) {
 
 function summarizeInput(input) {
   if (!input || typeof input !== 'object') return '';
+  if (Array.isArray(input.questions)) return truncate(input.questions.map((q) => q && q.question).filter(Boolean).join(' / '), 300);
   const v = input.command ?? input.file_path ?? input.notebook_path ?? input.path ?? input.pattern ?? input.url ?? input.query ?? input.description;
   return truncate(typeof v === 'string' ? v : JSON.stringify(input), 300);
 }
@@ -48,6 +49,17 @@ function notFoundMessage(cmd) {
 function cleanSkill(s) {
   const v = String(s || '').trim().replace(/^\//, '');
   return v || null;
+}
+
+// Claude の最後の返事が、ユーザーへの質問で終わっているか
+function endsWithQuestion(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  const lines = t.split(/\n+/).filter((l) => l.trim());
+  // 「どちらにしますか？」のあとに選択肢の箇条書きが続く形もあるので、箇条書きは飛ばして見る
+  let i = lines.length - 1;
+  while (i > 0 && /^\s*([-*•・]|\d+[.)．]|[A-Za-z][.)])\s+/.test(lines[i])) i--;
+  return /[?？]\s*[)）」』*_`]*\s*$/.test(lines[i] || '');
 }
 
 function splitList(s) {
@@ -90,6 +102,8 @@ class AgentManager extends EventEmitter {
   recoverInterrupted() {
     for (const c of this.store.cards) {
       c.permissions = [];
+      c.questions = [];
+      if (c.conflict) c.conflict.resolving = false;
       if (c.status === 'queued') c.status = c.worktreePath ? 'review' : 'todo';
       if (c.status === 'running') {
         c.status = 'failed';
@@ -262,6 +276,8 @@ class AgentManager extends EventEmitter {
   }
 
   enqueue(c, prompt) {
+    c.awaitingReply = false;
+    c.lastText = '';
     c.pendingPrompt = prompt;
     c.status = 'queued';
     c.queuedAt = Date.now();
@@ -430,7 +446,8 @@ class AgentManager extends EventEmitter {
       // 状態を「レビュー」にする前に、作業内容をブランチにコミットしておく
       if (!spawnError) {
         try {
-          if (await git.commitAll(c.worktreePath, this.commitMessage(c))) this.log(c, 'system', '変更を worktree のブランチにコミットしました');
+          const canCommit = await this.afterConflictRun(c);
+          if (canCommit && (await git.commitAll(c.worktreePath, this.commitMessage(c)))) this.log(c, 'system', '変更を worktree のブランチにコミットしました');
         } catch (err) {
           this.log(c, 'error', `コミットに失敗しました: ${err.message}`);
         }
@@ -450,6 +467,11 @@ class AgentManager extends EventEmitter {
       } else if (code === 0 && !run.resultError) {
         c.status = 'review';
         c.error = null;
+        c.awaitingReply = endsWithQuestion(c.lastText);
+        if (c.awaitingReply) {
+          this.log(c, 'question', 'Claude が質問しています。下の欄から答えると、続きから進めます');
+          this.emit('awaiting', c);
+        }
       } else {
         c.status = 'failed';
         c.error = run.resultError || `claude が終了コード ${code} で終了しました`;
@@ -483,6 +505,7 @@ class AgentManager extends EventEmitter {
         for (const b of (ev.message && ev.message.content) || []) {
           if (b.type === 'text' && b.text && b.text.trim()) {
             this.log(c, 'text', b.text);
+            c.lastText = b.text.trim();
             c.lastMessage = truncate(b.text.trim(), 200);
           } else if (b.type === 'tool_use') {
             this.log(c, 'tool', `${b.name}  ${summarizeInput(b.input)}`);
@@ -603,6 +626,7 @@ class AgentManager extends EventEmitter {
     const c = this.store.card(cardId);
     if (!c) return Promise.resolve({ behavior: 'deny', message: 'タスクが見つかりません' });
     input = input && typeof input === 'object' ? input : {};
+    if (toolName === 'AskUserQuestion') return this.askQuestion(c, input, toolUseId, signal);
     if ((c.alwaysAllow || []).includes(toolName)) {
       this.log(c, 'permission', `自動で許可しました: ${toolName}  ${summarizeInput(input)}`);
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
@@ -622,11 +646,60 @@ class AgentManager extends EventEmitter {
     });
   }
 
+  // ---------- エージェントからの質問（AskUserQuestion） ----------
+
+  // 選択肢の質問を、カードの回答フォームとして出す。ユーザーが答えるまで待つ
+  askQuestion(c, input, toolUseId, signal) {
+    const questions = (Array.isArray(input.questions) ? input.questions : [])
+      .map((q) => ({
+        question: String(q.question || ''),
+        header: String(q.header || ''),
+        multiSelect: !!q.multiSelect,
+        options: (Array.isArray(q.options) ? q.options : []).map((o) => ({ label: String(o.label || ''), description: String(o.description || '') })),
+      }))
+      .filter((q) => q.question);
+    if (!questions.length) return Promise.resolve({ behavior: 'allow', updatedInput: input });
+    return new Promise((resolve) => {
+      const id = crypto.randomBytes(6).toString('hex');
+      this.pending.set(id, { cardId: c.id, toolName: 'AskUserQuestion', input, resolve, kind: 'question', questions });
+      c.questions = [...(c.questions || []), { id, toolUseId, questions, at: Date.now() }];
+      this.log(c, 'question', `質問: ${questions.map((q) => q.question).join(' / ')}`);
+      this.changed(c);
+      this.emit('question', c, questions);
+      signal?.addEventListener('abort', () => {
+        if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: '中断されました' }, null);
+      });
+    });
+  }
+
+  /**
+   * 質問に答える
+   * @param {Record<string, string>|null} answers  質問文 → 回答（複数選択は「, 」でつなぐ）。null なら答えずに続けさせる
+   */
+  answerQuestion(cardId, reqId, answers) {
+    this.must(cardId);
+    const p = this.pending.get(reqId);
+    if (!p || p.cardId !== cardId || p.kind !== 'question') throw new Error('この質問はもう終わっています');
+    if (!answers) {
+      this.settle(reqId, { behavior: 'deny', message: 'ユーザーは質問に答えずに、そのまま進めるよう求めています。妥当だと思う方法で続けてください。' }, '答えずに続ける');
+      return;
+    }
+    const clean = {};
+    for (const q of p.questions) {
+      const a = String(answers[q.question] ?? '').trim();
+      if (!a) throw new Error(`「${q.header || q.question}」に答えてください`);
+      clean[q.question] = a;
+    }
+    const c = this.store.card(cardId);
+    this.log(c, 'user', Object.entries(clean).map(([q, a]) => `${q} → ${a}`).join('\n'), { answer: true });
+    this.settle(reqId, { behavior: 'allow', updatedInput: { ...p.input, answers: clean } }, '回答しました');
+  }
+
   // decision: 'allow' | 'deny' | 'always'
   answerPermission(cardId, reqId, decision, message) {
     const c = this.must(cardId);
     const p = this.pending.get(reqId);
-    if (!p || p.cardId !== cardId) throw new Error('この承認リクエストはもう終わっています');
+    if (!p || p.cardId !== cardId || p.kind === 'question') throw new Error('この承認リクエストはもう終わっています');
     if (decision === 'always') {
       c.alwaysAllow = c.alwaysAllow || [];
       if (!c.alwaysAllow.includes(p.toolName)) c.alwaysAllow.push(p.toolName);
@@ -647,7 +720,8 @@ class AgentManager extends EventEmitter {
     const c = this.store.card(p.cardId);
     if (c) {
       c.permissions = (c.permissions || []).filter((r) => r.id !== reqId);
-      if (label) this.log(c, 'permission', `${label}: ${p.toolName}`);
+      c.questions = (c.questions || []).filter((r) => r.id !== reqId);
+      if (label) this.log(c, p.kind === 'question' ? 'question' : 'permission', p.kind === 'question' ? label : `${label}: ${p.toolName}`);
       this.changed(c);
     }
     p.resolve(result);
@@ -684,6 +758,7 @@ class AgentManager extends EventEmitter {
    *   target: マージ先（省略時はベースブランチ）
    *   createNew: target を新しく作る（ベースブランチから分岐）
    *   keep: マージ後も worktree とブランチを残してタスクを続ける
+   *   push: マージしたあと origin に push する（origin/<target> にも反映）
    */
   async merge(id, opts = {}) {
     const c = this.must(id);
@@ -694,6 +769,8 @@ class AgentManager extends EventEmitter {
     const target = String(opts.target || c.baseBranch || '').trim();
     if (!target) throw new Error('マージ先のブランチを指定してください');
     if (target === c.branch) throw new Error('タスク自身のブランチにはマージできません');
+
+    if (await git.mergeInProgress(c.worktreePath)) throw new Error('コンフリクトの解消が終わっていません。「解消した」を押すか、取り込みを中止してください');
 
     this.merging = this.merging || new Set();
     this.merging.add(id);
@@ -708,6 +785,10 @@ class AgentManager extends EventEmitter {
         throw new Error(`ブランチ ${target} が見つかりません`);
       }
 
+      // origin にも反映するときは、先に origin の最新を取ってきてローカルをそろえる
+      const remote = 'origin';
+      const remoteHas = opts.push ? await this.syncWithOrigin(c, top, target) : false;
+
       const finalDiff = await git.diff(c.worktreePath, c.baseCommit);
       const ahead = await git.countCommits(top, `${target}..${c.branch}`);
       if (ahead > 0) {
@@ -715,15 +796,34 @@ class AgentManager extends EventEmitter {
         // 自分の作業中のフォルダには触らない
         let dir = await git.worktreeForBranch(top, target);
         let temp = null;
-        if (dir) {
-          if (await git.isDirty(dir)) throw new Error(`${target} をチェックアウトしている ${dir} に未コミットの変更があります。コミットするか退避してからマージしてください。`);
-        } else {
+        if (!dir) {
           temp = path.join(path.dirname(c.worktreePath), `_merge-${c.id}-${Date.now()}`);
-          await git.addWorktreeForBranch(top, temp, target);
-          dir = temp;
+          try {
+            await git.addWorktreeForBranch(top, temp, target);
+            dir = temp;
+          } catch (err) {
+            // 「main は <フォルダ> で使われています」と断られたら、そのフォルダでマージする
+            const at = git.checkedOutAtFromError(err);
+            if (!at) throw err;
+            temp = null;
+            dir = at;
+          }
+        }
+        if (!temp) {
+          const op = await git.operationInProgress(dir);
+          if (op) throw new Error(`${target} をチェックアウトしている ${dir} で ${op} が途中です。終わらせるか中止してから、もう一度マージしてください。`);
+          if (await git.isDirty(dir)) throw new Error(`${target} をチェックアウトしている ${dir} に未コミットの変更があります。コミットするか退避してからマージしてください。`);
         }
         try {
           await git.merge(dir, c.branch, (c.issue ? `Merge agent task: ${c.title.replace(/^#\d+\s*/, '')} (#${c.issue.number})` : `Merge agent task: ${c.title}`), target);
+        } catch (err) {
+          if (!err.conflictFiles) throw err;
+          // コンフリクト: マージは中止済み。カードに出して、解消の方法を選んでもらう
+          c.conflict = { target, files: err.conflictFiles, push: !!opts.push, keep: !!opts.keep, at: Date.now() };
+          c.conflictResolved = null;
+          this.log(c, 'error', `${target} とコンフリクトしています: ${err.conflictFiles.join(', ')}`);
+          this.changed(c);
+          return { conflict: c.conflict };
         } finally {
           if (temp) await git.removeWorktree(top, temp);
         }
@@ -733,10 +833,23 @@ class AgentManager extends EventEmitter {
       }
       c.mergedInto = [...new Set([...(c.mergedInto || []), target])];
       c.lastMergeTarget = target;
+      c.conflict = null;
+      c.conflictResolved = null;
+
+      if (opts.push) {
+        try {
+          await git.push(top, remote, target, !remoteHas);
+        } catch (err) {
+          this.changed(c);
+          throw new Error(`ローカルの ${target} へのマージは済みましたが、origin への push に失敗しました。ターミナルで git push origin ${target} を試してください。\n${err.message}`);
+        }
+        this.log(c, 'system', `origin/${target} に push しました`);
+        c.pushedTo = [...new Set([...(c.pushedTo || []), target])];
+      }
 
       if (opts.keep) {
         this.changed(c);
-        return;
+        return { merged: true };
       }
       await git.removeWorktree(top, c.worktreePath);
       await git.deleteBranch(top, c.branch);
@@ -745,6 +858,7 @@ class AgentManager extends EventEmitter {
       c.status = 'done';
       c.mergedAt = Date.now();
       this.changed(c);
+      return { merged: true };
     } finally {
       this.merging.delete(id);
     }
@@ -777,7 +891,8 @@ class AgentManager extends EventEmitter {
     const base = String(opts.base || c.prBase || c.baseBranch || '').trim();
     if (!base) throw new Error('PR のマージ先のブランチを指定してください');
     if (base === c.branch) throw new Error('タスク自身のブランチには PR を作れません');
-    if (!(await git.remoteExists(top))) throw new Error('このリポジトリに origin がありません。GitHub のリポジトリを origin に設定してください');
+    if (!(await git.hasRemote(top, 'origin'))) throw new Error('このリポジトリに origin がありません。GitHub のリポジトリを origin に設定してください');
+    if (await git.mergeInProgress(c.worktreePath)) throw new Error('コンフリクトの解消が終わっていません。「解消した」を押すか、取り込みを中止してください');
 
     this.merging = this.merging || new Set();
     this.merging.add(id);
@@ -786,7 +901,7 @@ class AgentManager extends EventEmitter {
       if ((await git.countCommits(top, `${base}..${c.branch}`)) === 0 && (await git.branchExists(top, base))) {
         throw new Error(`${base} との差分がないので PR を作れません`);
       }
-      await git.push(c.worktreePath, c.branch);
+      await git.push(c.worktreePath, 'origin', c.branch, true);
       this.log(c, 'system', `ブランチ ${c.branch} を origin に push しました`);
       const def = this.prDefaults(c);
       const pr = await ghCli.createPullRequest({
@@ -818,6 +933,139 @@ class AgentManager extends EventEmitter {
     }
   }
 
+  // origin の target を取ってきて、ローカルの target を早送りでそろえる。origin に target があれば true
+  async syncWithOrigin(c, top, target) {
+    const remote = 'origin';
+    if (!(await git.hasRemote(top, remote))) throw new Error('このリポジトリには origin がありません。push せずにマージするか、origin を設定してください');
+    let has;
+    try {
+      has = await git.fetchBranch(top, remote, target);
+    } catch (err) {
+      throw new Error(`origin の最新を取ってこられませんでした（ネットワークや GitHub のログインを確認してください）。\n${err.message}`);
+    }
+    if (!has) return false;
+    const behind = await git.countCommits(top, `${target}..${remote}/${target}`);
+    const localAhead = await git.countCommits(top, `${remote}/${target}..${target}`);
+    if (behind > 0 && localAhead > 0) {
+      throw new Error(`ローカルの ${target} と origin/${target} が別々に進んでいます。先にターミナルで ${target} を origin/${target} とそろえてから（git pull など）、もう一度マージしてください`);
+    }
+    if (behind > 0) {
+      const dir = await git.worktreeForBranch(top, target);
+      if (dir && (await git.isDirty(dir))) throw new Error(`${target} をチェックアウトしている ${dir} に未コミットの変更があるため、origin の最新を取り込めません`);
+      await git.fastForward(top, target, `${remote}/${target}`, dir);
+      this.log(c, 'system', `origin/${target} の新しいコミット ${behind} 件をローカルの ${target} に取り込みました`);
+    }
+    return true;
+  }
+
+  // ---------- コンフリクトの解消 ----------
+
+  /**
+   * マージ先のブランチをタスクの worktree に取り込み、コンフリクトを解消する
+   * @param {'agent'|'manual'} mode  agent: Claude に解消してもらう / manual: 自分でエディタで直す
+   */
+  async resolveConflict(id, mode) {
+    const c = this.must(id);
+    if (!c.conflict) throw new Error('コンフリクトはありません');
+    if (!['review', 'failed'].includes(c.status)) throw new Error('実行中は解消を始められません');
+    const wt = c.worktreePath;
+    const target = c.conflict.target;
+    let files;
+    if (await git.mergeInProgress(wt)) {
+      files = await git.conflictFiles(wt);
+    } else {
+      await git.commitAll(wt, this.commitMessage(c));
+      if (c.conflict.push) await this.syncWithOrigin(c, c.repoPath, target);
+      files = await git.startMerge(wt, target);
+      this.log(c, 'system', `${target} をタスクのブランチに取り込み始めました`);
+      if (!files.length) {
+        await git.finishMerge(wt);
+        this.markResolved(c, 'コンフリクトなしで取り込めました');
+        return { resolved: true };
+      }
+    }
+    c.conflict = { ...c.conflict, files, manual: mode === 'manual', resolving: mode === 'agent', unresolved: undefined };
+    if (mode === 'manual') {
+      this.log(c, 'system', `自分で解消するモード: ${wt} の ${files.join(', ')} を直してから「解消した」を押してください`);
+      this.changed(c);
+      return { manual: true, path: wt };
+    }
+    const prompt = [
+      `ブランチ \`${target}\` をこのブランチに取り込もうとしたところ、コンフリクトが起きました（git merge は途中の状態です）。`,
+      '',
+      'コンフリクトしているファイル:',
+      ...files.map((f) => `- ${f}`),
+      '',
+      'それぞれのファイルの <<<<<<< / ======= / >>>>>>> を、両方の変更の意図を保つように解消してください。',
+      `解消したら \`git add\` してから \`git commit --no-edit\` でマージを完了してください。テストがあれば実行して確かめてください。`,
+      '最後に、どう解消したかを短くまとめてください。',
+    ].join('\n');
+    this.log(c, 'user', prompt);
+    this.enqueue(c, prompt);
+    return { agent: true };
+  }
+
+  // 自分で直したあと「解消した」
+  async completeConflict(id) {
+    const c = this.must(id);
+    if (!c.conflict) throw new Error('コンフリクトはありません');
+    const wt = c.worktreePath;
+    if (!(await git.mergeInProgress(wt))) {
+      const marked = await git.filesWithMarkers(wt, c.conflict.files);
+      if (marked.length) throw new Error(`まだコンフリクトの印（<<<<<<< など）が残っています: ${marked.join(', ')}`);
+      this.markResolved(c, 'コンフリクトを解消しました');
+      return;
+    }
+    // git add 済みでも、印が残っていればまだ
+    const marked = await git.filesWithMarkers(wt, c.conflict.files);
+    if (marked.length) throw new Error(`まだコンフリクトの印（<<<<<<< など）が残っています: ${marked.join(', ')}`);
+    await git.finishMerge(wt);
+    this.markResolved(c, 'コンフリクトを解消して、取り込みを完了しました');
+  }
+
+  async abortConflict(id) {
+    const c = this.must(id);
+    if (c.worktreePath && (await git.mergeInProgress(c.worktreePath))) await git.abortMerge(c.worktreePath);
+    if (c.conflict) c.conflict = { ...c.conflict, manual: false, resolving: false, unresolved: undefined };
+    this.log(c, 'system', '取り込みを中止しました');
+    this.changed(c);
+  }
+
+  dismissConflict(id) {
+    const c = this.must(id);
+    c.conflict = null;
+    c.conflictResolved = null;
+    this.changed(c);
+  }
+
+  markResolved(c, msg) {
+    c.conflictResolved = { target: c.conflict.target, push: c.conflict.push, keep: c.conflict.keep };
+    c.conflict = null;
+    this.log(c, 'system', `${msg}。もう一度マージすると、コンフリクトなしでマージできます`);
+    this.changed(c);
+  }
+
+  // エージェントの作業が終わったとき: コンフリクトの解消中なら、ちゃんと解消できたかを確かめる
+  async afterConflictRun(c) {
+    const wt = c.worktreePath;
+    if (!c.conflict || !c.conflict.resolving) {
+      // 取り込みの途中（自分で解消中）なら、印の残ったファイルをコミットしない
+      return !(await git.mergeInProgress(wt));
+    }
+    const inProgress = await git.mergeInProgress(wt);
+    const marked = await git.filesWithMarkers(wt, c.conflict.files);
+    const unmerged = inProgress ? await git.conflictFiles(wt) : [];
+    const left = [...new Set([...marked, ...unmerged])];
+    if (left.length) {
+      c.conflict = { ...c.conflict, resolving: false, manual: inProgress, unresolved: left };
+      this.log(c, 'error', `コンフリクトがまだ残っています: ${left.join(', ')}。もう一度 Claude に頼むか、自分で直してください`);
+      return false;
+    }
+    if (inProgress) await git.finishMerge(wt);
+    this.markResolved(c, 'Claude がコンフリクトを解消しました');
+    return true;
+  }
+
   async discard(id) {
     const c = this.must(id);
     const child = this.procs.get(id);
@@ -834,4 +1082,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, PERMISSION_TOOL };
+module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion };

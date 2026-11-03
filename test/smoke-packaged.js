@@ -17,6 +17,7 @@ try {
   const shot = process.argv[3] || 'smoke.png';
   if (!exe || !fs.existsSync(exe)) throw new Error(`実行ファイルが見つかりません: ${exe}`);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-smoke-'));
+  console.log('launching:', exe);
   const app = await electron.launch({
     executablePath: exe,
     args: process.platform === 'linux' ? ['--no-sandbox'] : [],
@@ -28,7 +29,8 @@ try {
   proc.stderr?.on('data', (d) => process.stdout.write(`[app stderr] ${d}`));
   const info = await app.evaluate(({ app: a }) => ({ appPath: a.getAppPath(), userData: a.getPath('userData'), version: a.getVersion(), packaged: a.isPackaged }));
   console.log('app:', JSON.stringify(info));
-  const win = await app.firstWindow();
+  console.log('launched; waiting for the first window…');
+  const win = await app.firstWindow({ timeout: 60000 });
   await win.waitForTimeout(4000);
   const url = win.url();
   const title = await win.title();

@@ -9,6 +9,7 @@ async function call(channel, arg) {
 
 contextBridge.exposeInMainWorld('api', {
   getBoard: () => call('board:get'),
+  appInfo: () => call('app:info'),
   checkEnv: () => call('env:check'),
   chooseRepo: () => call('repo:choose'),
   repoInfo: () => call('repo:info'),
@@ -36,7 +37,12 @@ contextBridge.exposeInMainWorld('api', {
   merge: (id, opts) => call('card:merge', { id, ...(opts || {}) }),
   createPr: (id, opts) => call('card:pr', { id, ...(opts || {}) }),
   discard: (id) => call('card:discard', id),
+  resolveConflict: (id, mode) => call('conflict:resolve', { id, mode }),
+  completeConflict: (id) => call('conflict:complete', id),
+  abortConflict: (id) => call('conflict:abort', id),
+  dismissConflict: (id) => call('conflict:dismiss', id),
   answerPermission: (id, reqId, decision, message) => call('card:permission', { id, reqId, decision, message }),
+  answerQuestion: (id, reqId, answers) => call('card:answer', { id, reqId, answers }),
   open: (id) => call('card:open', id),
   onBoard: (cb) => ipcRenderer.on('board:changed', (_e, d) => cb(d)),
   onLog: (cb) => ipcRenderer.on('card:log', (_e, d) => cb(d)),
