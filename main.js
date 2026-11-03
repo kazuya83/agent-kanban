@@ -139,7 +139,8 @@ app.whenReady().then(async () => {
     };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration'];
+    if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     for (const k of allowed) if (patch && k in patch) store.settings[k] = patch[k];
     store.settings.maxParallel = Math.min(10, Math.max(1, parseInt(store.settings.maxParallel, 10) || 1));
     store.save();
@@ -196,6 +197,7 @@ app.whenReady().then(async () => {
     store.save();
     return agents.merge(id, { target, createNew, keep, push });
   });
+  handle('card:pr', ({ id, base, title, body, keep }) => agents.createPullRequest(id, { base, title, body, keep }));
   handle('card:discard', (id) => agents.discard(id));
   handle('conflict:resolve', ({ id, mode }) => agents.resolveConflict(id, mode));
   handle('conflict:complete', (id) => agents.completeConflict(id));

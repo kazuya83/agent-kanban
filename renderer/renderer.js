@@ -329,14 +329,17 @@ function closeDetail() {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply]);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
   const btns = [
     s === 'todo' && `<button class="btn primary" data-act="start">▶ 開始</button>`,
     (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">■ 停止</button>`,
-    (s === 'review' || s === 'failed') && c.worktreePath && `<button class="btn primary" data-act="merge">⇲ マージ…</button>`,
+    (s === 'review' || s === 'failed') && c.worktreePath &&
+      (state.board.settings.integration === 'pr'
+        ? `<button class="btn primary" data-act="pr">${c.prUrl ? '⇡ PR を更新…' : '⇡ PR を作成…'}</button>`
+        : `<button class="btn primary" data-act="merge">⇲ マージ…</button>`),
     c.worktreePath && `<button class="btn ghost" data-act="open">フォルダを開く</button>`,
     `<button class="btn danger" data-act="discard">${s === 'done' ? '削除' : '破棄'}</button>`,
   ].filter(Boolean);
@@ -351,6 +354,7 @@ function renderDetailHead() {
       ${sessionRowHtml(c)}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
       ${c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''}
+      ${c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}</dd>` : ''}
       ${(c.mergedInto || []).length ? `<dt>マージ済み</dt><dd>${c.mergedInto.map((b) => esc(b) + ((c.pushedTo || []).includes(b) ? '（origin にも push 済み）' : '')).join(', ')}</dd>` : ''}
       ${c.costUsd ? `<dt>コスト</dt><dd>$${c.costUsd.toFixed(3)}</dd>` : ''}
       ${(c.alwaysAllow || []).length ? `<dt>常に許可</dt><dd>${c.alwaysAllow.map(esc).join(', ')}</dd>` : ''}
@@ -420,6 +424,7 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'stop') run(() => api.stop(c.id));
   if (act === 'open') run(() => api.open(c.id));
   if (act === 'merge') openMerge(c);
+  if (act === 'pr') openPr(c);
   if (act === 'discard') {
     const msg = c.status === 'done' ? `「${c.title}」をボードから削除しますか？` : `「${c.title}」を破棄しますか？\nworktree とブランチ ${c.branch || ''} も削除され、元に戻せません。`;
     if (confirm(msg)) {
@@ -1018,6 +1023,60 @@ async function openMerge(c) {
   );
 }
 
+// PR を作るダイアログ（設定で「PR を作成」を選んでいるとき）
+async function openPr(c) {
+  const info = (await run(() => api.repoInfo())) || { branches: [], current: '' };
+  const others = info.branches.filter((b) => b !== c.branch);
+  const normal = others.filter((b) => !b.startsWith('agent/'));
+  const agentBranches = others.filter((b) => b.startsWith('agent/'));
+  const def = c.prBase && others.includes(c.prBase) ? c.prBase : c.baseBranch;
+  const opt = (b) => `<option value="${esc(b)}" ${b === def ? 'selected' : ''}>${esc(b)}${b === c.baseBranch ? '（ベース）' : ''}</option>`;
+  const title = c.issue ? c.title.replace(/^#\d+\s*/, '') : c.title;
+  const body = [c.issue ? `Closes #${c.issue.number}\n` : '', c.lastMessage ? `${c.lastMessage}\n` : '', '---\nClaude Agent Kanban のタスクから作成しました。'].join('\n').trim();
+  const updating = !!c.prUrl;
+  openModal(
+    `<h2>${updating ? 'PR を更新' : 'PR を作成'}</h2>
+     <p class="muted">「${esc(c.title)}」のブランチ <code>${esc(c.branch)}</code> を origin に push して、${updating ? `開いている PR（${esc(c.prUrl)}）を更新します。` : 'GitHub にプルリクエストを作ります（gh を使います）。'}</p>
+     <label class="field"><span>PR のマージ先（base）</span>
+       <select id="pBase" ${updating ? 'disabled' : ''}>
+         ${normal.map(opt).join('')}
+         ${agentBranches.length ? `<optgroup label="ほかのタスクのブランチ">${agentBranches.map(opt).join('')}</optgroup>` : ''}
+       </select></label>
+     ${updating ? '' : `<label class="field"><span>タイトル</span><input id="pTitle" value="${esc(title)}" /></label>
+     <label class="field"><span>本文</span><textarea id="pBody" rows="6">${esc(body)}</textarea></label>`}
+     <label class="check"><input type="checkbox" id="pKeep" checked /> PR を作ったあともタスクを続ける（worktree とブランチを残す）</label>
+     <p class="muted small" id="pHint"></p>
+     <div class="modal-actions"><button class="btn ghost" id="pCancel">キャンセル</button><button class="btn primary" id="pOk">${updating ? 'push して更新' : 'PR を作成'}</button></div>`,
+    () => {
+      const update = () => {
+        $('pHint').textContent = $('pKeep').checked
+          ? 'レビューで直しが入ったら、追加指示を送ってからもう一度このボタンを押すと PR に反映されます。'
+          : `PR を作ったあと、ローカルの worktree とブランチ ${c.branch} を削除して「完了」にします（origin のブランチと PR は残ります）。`;
+      };
+      $('pKeep').onchange = update;
+      update();
+      $('pCancel').onclick = closeModal;
+      $('pOk').onclick = async () => {
+        $('pOk').disabled = true;
+        const r = await run(() =>
+          api.createPr(c.id, {
+            base: $('pBase').value,
+            title: $('pTitle') ? $('pTitle').value : '',
+            body: $('pBody') ? $('pBody').value : '',
+            keep: $('pKeep').checked,
+          }),
+        );
+        $('pOk').disabled = false;
+        if (r) {
+          closeModal();
+          toast(r.created ? 'PR を作成しました' : 'PR を更新しました', 'ok');
+          api.openExternal(r.url).catch(() => {});
+        }
+      };
+    },
+  );
+}
+
 async function openSettings() {
   const s = state.board.settings;
   const info = (await run(() => api.repoInfo())) || { branches: [], current: '' };
@@ -1026,6 +1085,12 @@ async function openSettings() {
      <label class="field"><span>ベースブランチ（worktree の作成元・マージ先）</span>
        <select id="sBase"><option value="">チェックアウト中のブランチ${info.current ? `（今は ${esc(info.current)}）` : ''}</option>
        ${info.branches.map((b) => `<option ${b === s.baseBranch ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
+     <label class="field"><span>レビュー後の取り込み方</span>
+       <select id="sIntegration">
+         <option value="merge" ${s.integration !== 'pr' ? 'selected' : ''}>直接マージする（ローカルで git merge）</option>
+         <option value="pr" ${s.integration === 'pr' ? 'selected' : ''}>PR を作成する（origin に push して gh pr create）</option>
+       </select>
+       <small>レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。</small></label>
      <label class="field"><span>権限モード</span>
        <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
        <small>自動で許可されない操作は、カードに「承認待ち」として表示されます。</small></label>
@@ -1049,6 +1114,7 @@ async function openSettings() {
         const r = await run(() =>
           api.updateSettings({
             baseBranch: $('sBase').value,
+            integration: $('sIntegration').value,
             permissionMode: $('sMode').value,
             allowedTools: $('sAllowed').value,
             maxParallel: $('sMax').value,

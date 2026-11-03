@@ -116,9 +116,38 @@ async function login(onEvent) {
   return st;
 }
 
+/**
+ * プルリクエストを作る。同じブランチの PR が開いていればそれを返す
+ * @param {{ cwd: string, head: string, base: string, title: string, body: string, gh?: string }} p
+ * @returns {Promise<{ url: string, number: number|null, created: boolean }>}
+ */
+async function createPullRequest({ cwd, head, base, title, body, gh: ghPath }) {
+  const gh = ghPath || resolveCommand('gh');
+  if (!gh) throw new Error('PR を作るには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます');
+  const opts = { cwd, timeout: 60000 };
+  const view = await run(gh, ['pr', 'view', head, '--json', 'url,number,state'], opts);
+  if (view.code === 0) {
+    try {
+      const d = JSON.parse(view.stdout);
+      if (String(d.state).toUpperCase() === 'OPEN' && d.url) return { url: d.url, number: d.number ?? null, created: false };
+    } catch {
+      /* 読めなければ新しく作る */
+    }
+  }
+  const r = await run(gh, ['pr', 'create', '--head', head, '--base', base, '--title', title, '--body', body], opts);
+  if (r.code !== 0) {
+    const msg = (r.stderr || r.stdout).trim();
+    if (/auth login|not logged/i.test(msg)) throw new Error('GitHub にログインしていません。「Issue から」の画面からログインしてください');
+    throw new Error(`PR を作れませんでした: ${msg}`);
+  }
+  const url = (r.stdout.match(/https:\/\/\S+\/pull\/\d+/) || [r.stdout.trim()])[0];
+  const m = url.match(/\/pull\/(\d+)/);
+  return { url, number: m ? Number(m[1]) : null, created: true };
+}
+
 function cancel() {
   const c = stream.current;
   if (c && c.exitCode === null) c.kill();
 }
 
-module.exports = { status, install, login, cancel, DOWNLOAD_URL, DEVICE_URL };
+module.exports = { status, install, login, cancel, createPullRequest, DOWNLOAD_URL, DEVICE_URL };

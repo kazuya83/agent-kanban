@@ -170,6 +170,59 @@ test('指定したブランチへマージ（チェックアウトしていな�
   assert.deepStrictEqual(c.mergedInto, ['develop', 'release/1.0']);
 });
 
+test('設定が PR のとき: origin に push して PR を作り、2回目は既存の PR を更新する', async () => {
+  const { tmp, repo, store, agents, g } = setup();
+  store.settings.permissionMode = 'bypassPermissions';
+  store.settings.integration = 'pr';
+  const remote = path.join(tmp, 'remote.git');
+  execFileSync('git', ['init', '-q', '--bare', remote]);
+  g('remote', 'add', 'origin', remote);
+  g('push', '-q', 'origin', 'main');
+
+  // 偽の gh: 呼ばれた引数を記録し、pr view は2回目以降だけ OPEN の PR を返す
+  const ghLog = path.join(tmp, 'gh.log');
+  const ghBin = path.join(tmp, 'gh');
+  fs.writeFileSync(
+    ghBin,
+    `#!/bin/sh\necho "$@" >> "${ghLog}"\nif [ "$1 $2" = "pr view" ]; then\n  if grep -q "^pr create" "${ghLog}"; then echo '{"url":"https://github.com/o/r/pull/7","number":7,"state":"OPEN"}'; exit 0; fi\n  echo 'no pull requests found' >&2; exit 1\nfi\nif [ "$1 $2" = "pr create" ]; then echo 'https://github.com/o/r/pull/7'; exit 0; fi\nexit 1\n`,
+    { mode: 0o755 },
+  );
+  agents.opts.ghPath = ghBin;
+
+  const c = agents.createCard({ title: 'pr task', prompt: 'PR向け' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  const mainBefore = g('rev-parse', 'main').toString().trim();
+
+  const r = await agents.createPullRequest(c.id, { title: 'My PR' });
+  assert.deepStrictEqual(r, { url: 'https://github.com/o/r/pull/7', created: true });
+  assert.strictEqual(c.prUrl, 'https://github.com/o/r/pull/7');
+  assert.strictEqual(c.prBase, 'main');
+  assert.strictEqual(c.status, 'review', '既定では続ける');
+  assert.strictEqual(g('rev-parse', 'main').toString().trim(), mainBefore, 'main にはマージしない');
+  const pushed = execFileSync('git', ['rev-parse', `refs/heads/${c.branch}`], { cwd: remote }).toString().trim();
+  assert.strictEqual(pushed, g('rev-parse', c.branch).toString().trim());
+  const log = fs.readFileSync(ghLog, 'utf8');
+  assert.match(log, new RegExp(`pr create --head ${c.branch} --base main --title My PR`));
+
+  // 2回目: 既存の PR に push するだけ。続けないので完了になる
+  const r2 = await agents.createPullRequest(c.id, { keep: false });
+  assert.strictEqual(r2.created, false);
+  assert.strictEqual((fs.readFileSync(ghLog, 'utf8').match(/^pr create/gm) || []).length, 1);
+  assert.strictEqual(c.status, 'done');
+  assert.strictEqual(c.worktreePath, null);
+  assert.ok(execFileSync('git', ['branch', '--list', c.branch], { cwd: remote }).toString().includes(c.branch), 'origin のブランチは残る');
+});
+
+test('PR: origin がないとエラー', async () => {
+  const { store, agents } = setup();
+  store.settings.permissionMode = 'bypassPermissions';
+  const c = agents.createCard({ title: 'x', prompt: 'x' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  await assert.rejects(agents.createPullRequest(c.id), /origin/);
+});
+
 test('btw: 実行中のエージェントにメッセージを送ると、今の作業に反映される', async () => {
   const { store, agents } = setup();
   store.settings.permissionMode = 'bypassPermissions';
