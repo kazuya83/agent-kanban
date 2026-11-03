@@ -272,6 +272,92 @@ test('設定が PR のとき: origin に push して PR を作り、2回目は�
   assert.ok(execFileSync('git', ['branch', '--list', c.branch], { cwd: remote }).toString().includes(c.branch), 'origin のブランチは残る');
 });
 
+// PR を作ったタスクを用意する（gh は偽物、PR の状態は pullRequestState を差し替える）
+async function setupPr(title) {
+  const ctx = setup();
+  const { tmp, store, agents, g } = ctx;
+  store.settings.permissionMode = 'bypassPermissions';
+  const remote = path.join(tmp, 'remote.git');
+  execFileSync('git', ['init', '-q', '--bare', remote]);
+  g('remote', 'add', 'origin', remote);
+  g('push', '-q', 'origin', 'main');
+  const ghBin = path.join(tmp, 'gh');
+  fs.writeFileSync(ghBin, `#!/bin/sh\nif [ "$1 $2" = "pr create" ]; then echo 'https://github.com/o/r/pull/9'; exit 0; fi\nexit 1\n`, { mode: 0o755 });
+  agents.opts.ghPath = ghBin;
+  const c = agents.createCard({ title, prompt: 'PR向け' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  await agents.createPullRequest(c.id);
+  let pr = { state: 'OPEN', mergedAt: null, headRefOid: g('rev-parse', c.branch).toString().trim(), baseRefName: 'main' };
+  agents.pullRequestState = async () => pr;
+  return { ...ctx, c, setPr: (p) => (pr = { ...pr, ...p }) };
+}
+
+test('PR がマージされたら、タスクを完了にして worktree を片付ける', async () => {
+  const { agents, c, setPr, g } = await setupPr('pr merged');
+  const wt = c.worktreePath;
+  assert.strictEqual(c.prState, 'OPEN');
+
+  assert.strictEqual(await agents.checkPullRequests(), 0, 'まだ開いている');
+  assert.strictEqual(c.status, 'review');
+
+  setPr({ state: 'MERGED', mergedAt: '2026-11-04T00:00:00Z' });
+  assert.strictEqual(await agents.checkPullRequests(), 1);
+  assert.strictEqual(c.status, 'done');
+  assert.strictEqual(c.prState, 'MERGED');
+  assert.strictEqual(c.prMergedAt, Date.parse('2026-11-04T00:00:00Z'));
+  assert.deepStrictEqual(c.mergedInto, ['main']);
+  assert.strictEqual(c.worktreePath, null);
+  assert.ok(!fs.existsSync(wt));
+  assert.strictEqual(g('branch', '--list', c.branch).toString().trim(), '');
+  assert.strictEqual(agents.issueStatusKey({ ...c, issue: { number: 1 } }), 'done');
+  // 一度マージを見つけたら、もう確かめない
+  agents.pullRequestState = async () => assert.fail('呼ばれない');
+  assert.strictEqual(await agents.checkPullRequests(), 0);
+});
+
+test('PR を作って片付けたタスクも、マージされたら Projects のステータスが Done になる', async () => {
+  const { agents, c, setPr } = await setupPr('pr closed card');
+  c.issue = { number: 5, title: 'x', url: 'u' };
+  const calls = [];
+  agents.setIssueProjectStatus = async (_r, n, key) => (calls.push(key), { projects: 1, updated: [], skipped: [] });
+  await agents.createPullRequest(c.id, { keep: false });
+  assert.strictEqual(c.status, 'done');
+  await agents.flushIssueSync();
+  assert.strictEqual(calls.at(-1), 'inReview');
+
+  setPr({ state: 'MERGED', mergedAt: '2026-11-04T00:00:00Z' });
+  assert.strictEqual(await agents.checkPullRequests(), 1);
+  await agents.flushIssueSync();
+  assert.strictEqual(calls.at(-1), 'done');
+});
+
+test('PR がマージされても、PR にない変更が worktree にあれば消さずに残す', async () => {
+  const { agents, c, setPr } = await setupPr('pr dirty');
+  fs.writeFileSync(path.join(c.worktreePath, 'extra.txt'), 'まだ PR にない\n');
+  setPr({ state: 'MERGED', mergedAt: '2026-11-04T00:00:00Z' });
+  assert.strictEqual(await agents.checkPullRequests(), 0);
+  assert.strictEqual(c.status, 'review');
+  assert.ok(fs.existsSync(path.join(c.worktreePath, 'extra.txt')));
+  assert.strictEqual(c.prState, 'MERGED');
+  assert.match(agents.logs(c.id).at(-1).text, /未コミットの変更/);
+});
+
+test('PR が閉じられたときと、状態を取れないとき', async () => {
+  const { agents, c, setPr } = await setupPr('pr closed');
+  setPr({ state: 'CLOSED' });
+  await agents.checkPullRequests();
+  assert.strictEqual(c.prState, 'CLOSED');
+  assert.strictEqual(c.status, 'review');
+  agents.pullRequestState = async () => {
+    throw new Error('network down');
+  };
+  await agents.checkPullRequests();
+  await agents.checkPullRequests();
+  assert.strictEqual(agents.logs(c.id).filter((l) => /network down/.test(l.text)).length, 1, '同じエラーは1回だけ');
+  assert.strictEqual(c.status, 'review');
+});
+
 test('PR: origin がないとエラー', async () => {
   const { store, agents } = setup();
   store.settings.permissionMode = 'bypassPermissions';

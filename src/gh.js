@@ -166,9 +166,37 @@ async function createPullRequest({ cwd, head, base, title, body, gh: ghPath }) {
   return { url, number: m ? Number(m[1]) : null, created: true };
 }
 
+/**
+ * プルリクエストの今の状態を GitHub に聞く
+ * @param {{ url: string, cwd?: string, gh?: string }} p
+ * @returns {Promise<{ state: 'OPEN'|'CLOSED'|'MERGED', mergedAt: string|null, headRefOid: string|null, baseRefName: string|null }>}
+ */
+async function pullRequestState({ url, cwd, gh: ghPath }) {
+  const gh = ghPath || resolveCommand('gh');
+  if (!gh) throw new Error('PR の状態を確かめるには GitHub CLI（gh）が必要です');
+  const r = await run(gh, ['pr', 'view', url, '--json', 'state,mergedAt,headRefOid,baseRefName'], { cwd, timeout: 30000 });
+  if (r.code !== 0) {
+    const msg = (r.stderr || r.stdout).trim();
+    if (/auth login|not logged/i.test(msg)) throw new Error('GitHub にログインしていません');
+    throw new Error(msg || 'PR の状態を取れませんでした');
+  }
+  let d;
+  try {
+    d = JSON.parse(r.stdout);
+  } catch {
+    throw new Error('PR の状態を読めませんでした');
+  }
+  return {
+    state: String(d.state || '').toUpperCase(),
+    mergedAt: d.mergedAt || null,
+    headRefOid: d.headRefOid || null,
+    baseRefName: d.baseRefName || null,
+  };
+}
+
 function cancel() {
   const c = stream.current;
   if (c && c.exitCode === null) c.kill();
 }
 
-module.exports = { status, install, login, addProjectScope, cancel, createPullRequest, DOWNLOAD_URL, DEVICE_URL };
+module.exports = { status, install, login, addProjectScope, cancel, createPullRequest, pullRequestState, DOWNLOAD_URL, DEVICE_URL };
