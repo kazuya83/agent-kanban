@@ -1486,7 +1486,7 @@ async function openSettings() {
      <div class="field">
        <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> Issue のステータスを自動で変える（GitHub Projects）</label>
        <small>Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。</small>
-       <div class="status-map">
+       <div class="status-map" id="sStatusMap" ${s.issueStatusSync !== false ? '' : 'hidden'}>
          <label class="field"><span>変える項目（Project の単一選択フィールド名。空なら Status）</span><input id="sStatusField" placeholder="Status" value="${esc(s.statusFieldName || '')}" /></label>
          <div class="row">
            <label class="field"><span>実行中 →</span><input id="sMapProgress" placeholder="自動（In progress など）" value="${esc((s.statusMapping || {}).inProgress || '')}" /></label>
@@ -1515,6 +1515,8 @@ async function openSettings() {
       let defSkill = s.defaultSkill || null;
       const drawDef = () => renderSkillSlot('sSkill', defSkill, (v) => ((defSkill = v), drawDef()));
       drawDef();
+      // 「Issue のステータスを自動で変える」にチェックがあるときだけ、項目名と選択肢の指定を出す
+      $('sIssueSync').onchange = () => ($('sStatusMap').hidden = !$('sIssueSync').checked);
       refreshGh();
       $('sCancel').onclick = closeModal;
       $('sOk').onclick = async () => {
