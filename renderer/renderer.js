@@ -48,6 +48,42 @@ async function run(fn, okMsg) {
   }
 }
 
+// マージや push など時間のかかる操作のあいだ、画面全体にローディングを出す。
+// 終わるまでほかの操作（二重クリック・ダイアログを閉じるなど）を受け付けない。
+const busyState = { count: 0, msgs: [] };
+function isBusy() {
+  return busyState.count > 0;
+}
+async function withBusy(msg, fn) {
+  busyState.count++;
+  busyState.msgs.push(msg);
+  $('busyMsg').textContent = msg;
+  $('busy').classList.remove('hidden');
+  document.activeElement?.blur?.();
+  try {
+    return await fn();
+  } finally {
+    busyState.count--;
+    busyState.msgs.splice(busyState.msgs.lastIndexOf(msg), 1);
+    if (busyState.count) $('busyMsg').textContent = busyState.msgs[busyState.msgs.length - 1];
+    else $('busy').classList.add('hidden');
+  }
+}
+// 処理中はキー入力も止める（Enter での二重送信などを防ぐ）
+document.addEventListener(
+  'keydown',
+  (e) => {
+    if (!isBusy()) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  },
+  true,
+);
+// run() にローディング表示を付けたもの
+function runBusy(msg, fn, okMsg) {
+  return withBusy(msg, () => run(fn, okMsg));
+}
+
 // ---------------- ボード ----------------
 
 function permissionBlock(c, compact) {
@@ -163,9 +199,9 @@ function conflictBoxHtml(c) {
 }
 
 async function conflictAction(c, act) {
-  if (act === 'agent') return run(() => api.resolveConflict(c.id, 'agent'), 'Claude に解消を頼みました');
+  if (act === 'agent') return runBusy('Claude に解消を頼んでいます…', () => api.resolveConflict(c.id, 'agent'), 'Claude に解消を頼みました');
   if (act === 'manual') {
-    const r = await run(() => api.resolveConflict(c.id, 'manual'));
+    const r = await runBusy('コンフリクトした状態を作っています…', () => api.resolveConflict(c.id, 'manual'));
     if (r && r.manual) {
       toast('worktree にコンフリクトした状態を作りました。エディタで直してください', 'ok');
       run(() => api.open(c.id));
@@ -173,12 +209,12 @@ async function conflictAction(c, act) {
     return;
   }
   if (act === 'open') return run(() => api.open(c.id));
-  if (act === 'complete') return run(() => api.completeConflict(c.id), '取り込みを完了しました');
-  if (act === 'abort') return run(() => api.abortConflict(c.id), '取り込みを中止しました');
+  if (act === 'complete') return runBusy('取り込みを完了しています…', () => api.completeConflict(c.id), '取り込みを完了しました');
+  if (act === 'abort') return runBusy('取り込みを中止しています…', () => api.abortConflict(c.id), '取り込みを中止しました');
   if (act === 'dismiss') return run(() => api.dismissConflict(c.id));
   if (act === 'remerge') {
     const r = c.conflictResolved;
-    const res = await run(() => api.merge(c.id, { target: r.target, push: r.push, keep: r.keep }));
+    const res = await runBusy(r.push ? `${r.target} にマージして push しています…` : `${r.target} にマージしています…`, () => api.merge(c.id, { target: r.target, push: r.push, keep: r.keep }));
     if (res && res.merged) toast(`${r.target} にマージしました${r.push ? '（origin にも push しました）' : ''}`, 'ok');
     else if (res && res.conflict) toast('まだコンフリクトしています。もう一度解消してください');
   }
@@ -260,7 +296,7 @@ $('board').addEventListener('click', (e) => {
   const rs = e.target.closest('[data-resume]');
   if (rs) {
     e.stopPropagation();
-    run(() => api.resume(rs.dataset.resume), '再開しました');
+    runBusy('再開しています…', () => api.resume(rs.dataset.resume), '再開しました');
     return;
   }
   const qp = e.target.closest('[data-qpick], [data-qopen]');
@@ -307,7 +343,7 @@ $('board').addEventListener('drop', (e) => {
   e.preventDefault();
   col.classList.remove('drop');
   const id = e.dataTransfer.getData('text/plain');
-  if (card(id)?.status === 'todo') run(() => api.start(id));
+  if (card(id)?.status === 'todo') runBusy('タスクを開始しています…', () => api.start(id));
 });
 
 async function answer(cardId, reqId, decision, message) {
@@ -337,7 +373,7 @@ function renderInterruptBanner() {
     <button class="btn small primary" id="resumeAllBtn">▶ すべて再開</button>
     <button class="btn small ghost" id="interruptLater">あとで</button>`;
   el.classList.remove('hidden');
-  $('resumeAllBtn').onclick = () => run(() => api.resumeAll().then((n) => `${n} 件のタスクを再開しました`)).then((m) => m && toast(m, 'ok'));
+  $('resumeAllBtn').onclick = () => runBusy('タスクを再開しています…', () => api.resumeAll().then((n) => `${n} 件のタスクを再開しました`)).then((m) => m && toast(m, 'ok'));
   $('interruptLater').onclick = () => {
     state.interruptDismissed = true;
     renderInterruptBanner();
@@ -470,13 +506,13 @@ $('detailHead').addEventListener('click', async (e) => {
   const act = e.target.closest('[data-act]')?.dataset.act;
   const c = card(state.selected);
   if (!act || !c) return;
-  if (act === 'start') run(() => api.start(c.id));
-  if (act === 'resume') run(() => api.resume(c.id), '再開しました');
+  if (act === 'start') runBusy('タスクを開始しています…', () => api.start(c.id));
+  if (act === 'resume') runBusy('再開しています…', () => api.resume(c.id), '再開しました');
   if (act === 'dismissInterrupted') run(() => api.dismissInterrupted(c.id));
-  if (act === 'stop') run(() => api.stop(c.id));
+  if (act === 'stop') runBusy('停止しています…', () => api.stop(c.id));
   if (act === 'suggestSkills') {
     if (c.status === 'done' && !confirm('完了したタスクの続きとして、worktree を作り直して Claude にスキルを提案してもらいます。よろしいですか？')) return;
-    run(() => api.suggestSkills(c.id), 'スキルの提案を頼みました。返事が来たら、下の欄から追加したいものを伝えてください');
+    runBusy('スキルの提案を頼んでいます…', () => api.suggestSkills(c.id), 'スキルの提案を頼みました。返事が来たら、下の欄から追加したいものを伝えてください');
   }
   if (act === 'open') run(() => api.open(c.id));
   if (act === 'merge') openMerge(c);
@@ -484,7 +520,7 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'discard') {
     const msg = c.status === 'done' ? `「${c.title}」をボードから削除しますか？` : `「${c.title}」を破棄しますか？\nworktree とブランチ ${c.branch || ''} も削除され、元に戻せません。`;
     if (confirm(msg)) {
-      await run(() => api.discard(c.id), '破棄しました');
+      await runBusy(c.status === 'done' ? '削除しています…' : 'worktree とブランチを削除しています…', () => api.discard(c.id), '破棄しました');
       closeDetail();
     }
   }
@@ -877,7 +913,7 @@ async function renderDetailBody() {
     let editSkill = c.skill || null;
     const drawEditSkill = () => renderSkillSlot('editSkill', editSkill, (v) => ((editSkill = v), drawEditSkill()), { disabled: !editable });
     drawEditSkill();
-    if (editable) $('saveEdit').onclick = () => run(() => api.updateCard({ id: c.id, title: $('editTitle').value, prompt: $('editPrompt').value, skill: editSkill || '' }), '保存しました');
+    if (editable) $('saveEdit').onclick = () => runBusy('保存しています…', () => api.updateCard({ id: c.id, title: $('editTitle').value, prompt: $('editPrompt').value, skill: editSkill || '' }), '保存しました');
   }
 }
 
@@ -945,7 +981,7 @@ function newTask() {
       const drawSkill = () => renderSkillSlot('nSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
       const submit = async () => {
-        const id = await run(() => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill }));
+        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill }));
         if (id) {
           closeModal();
           select(id);
@@ -1113,7 +1149,7 @@ function sessionRowHtml(c) {
 
 // Issue 番号からカードを作る（上部の枠と、詳細ダイアログの両方から使う）
 async function createFromIssues(numbers, extra, autoStart, session, skill) {
-  const r = await run(() => api.createFromIssues({ numbers, extra, autoStart, session, skill }));
+  const r = await runBusy('Issue を読み込んでタスクを作成しています…', () => api.createFromIssues({ numbers, extra, autoStart, session, skill }));
   if (!r) return false;
   if (r.errors.length) toast(r.errors.join('\n'));
   else toast(`${r.ids.length} 件のタスクを Issue から作りました`, 'ok');
@@ -1214,7 +1250,7 @@ async function openMerge(c) {
         $('mOk').disabled = true;
         const push = $('mPush').checked;
         $('mOk').textContent = push ? 'マージして push しています…' : 'マージしています…';
-        const res = await run(() => api.merge(c.id, { target, createNew: isNew, keep: $('mKeep').checked, push }));
+        const res = await runBusy(push ? `${target} にマージして push しています…` : `${target} にマージしています…`, () => api.merge(c.id, { target, createNew: isNew, keep: $('mKeep').checked, push }));
         $('mOk').textContent = 'マージ';
         if (res && res.conflict) {
           closeModal();
@@ -1265,7 +1301,7 @@ async function openPr(c) {
       $('pCancel').onclick = closeModal;
       $('pOk').onclick = async () => {
         $('pOk').disabled = true;
-        const r = await run(() =>
+        const r = await runBusy(updating ? 'push して PR を更新しています…' : 'push して PR を作成しています…', () =>
           api.createPr(c.id, {
             base: $('pBase').value,
             title: $('pTitle') ? $('pTitle').value : '',
@@ -1323,7 +1359,7 @@ async function openSettings() {
       refreshGh();
       $('sCancel').onclick = closeModal;
       $('sOk').onclick = async () => {
-        const r = await run(() =>
+        const r = await runBusy('設定を保存しています…', () =>
           api.updateSettings({
             baseBranch: $('sBase').value,
             integration: $('sIntegration').value,
