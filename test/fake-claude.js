@@ -151,6 +151,21 @@ async function turn(prompt, sessionId) {
 }
 
 (async () => {
+  // --output-format text は、ブランチ名を考えてもらうときの1回だけの呼び出し。
+  // FAKE_BRANCH_NAME があればそれを返し、FAKE_BRANCH_FAIL なら失敗する。なければ命名規則の行をそのまま返す
+  if (opt('--output-format') === 'text') {
+    let all = '';
+    process.stdin.setEncoding('utf8');
+    for await (const chunk of process.stdin) all += chunk;
+    if (process.env.FAKE_BRANCH_FAIL) {
+      process.stderr.write('boom\n');
+      process.exit(1);
+    }
+    const lines = all.split('\n');
+    const rule = lines[lines.indexOf('## 命名規則') + 1] || '';
+    process.stdout.write(`${process.env.FAKE_BRANCH_NAME || `\`${rule.trim()}\``}\n`);
+    process.exit(0);
+  }
   startInput();
   // --fork-session なら、引き継いだ会話から新しい ID の会話を作る（本物と同じ）
   const resumed = opt('--resume');
