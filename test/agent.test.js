@@ -738,8 +738,18 @@ test('完了（マージ済み）のタスクでも会話を続けられる: 同
   assert.strictEqual(c.status, 'done');
   assert.strictEqual(fs.readdirSync(repo).filter((f) => f.startsWith('out-')).length, 2);
 
-  // スキルの提案を頼む（完了したタスクからでも）
-  agents.suggestSkills(c.id);
+  // 完了に入ったら、通知で「スキルにしませんか？」と聞く（1つのタスクで1回だけ）
+  const notes = agents.listNotifications(c.repoPath).filter((n) => n.cardId === c.id);
+  assert.ok(notes.some((n) => n.kind === 'review'), '作業が終わったらレビュー待ちの通知');
+  assert.ok(notes.filter((n) => n.kind === 'done').length >= 2, '完了の通知（マージのたび）');
+  const skillNotes = notes.filter((n) => n.kind === 'skill');
+  assert.strictEqual(skillNotes.length, 1, 'スキルの提案の通知は1回だけ');
+  assert.strictEqual(skillNotes[0].action, 'suggestSkills');
+
+  // 通知のボタンからスキルの提案を頼む（完了したタスクからでも）
+  agents.actNotification(skillNotes[0].id);
+  assert.ok(skillNotes[0].actedAt && skillNotes[0].read, '対応済み・既読になる');
+  assert.throws(() => agents.actNotification(skillNotes[0].id), /対応済み/);
   await waitFor(() => c.status === 'review');
   assert.ok(c.logs.some((l) => l.kind === 'user' && l.text === SKILL_SUGGEST_PROMPT));
   assert.match(await agents.diff(c.id), /スキル（SKILL\.md）として残しておく/);
@@ -768,6 +778,29 @@ test('PR を作って完了したタスクの続きは、origin の前のブラ�
   assert.strictEqual(c.branch, `${first}-2`);
   assert.strictEqual(c.prUrl, null, '次は新しい PR を作る');
   assert.ok(fs.existsSync(c.worktreePath));
+});
+
+test('通知: 既読・削除、設定で完了時のスキル提案を止められる', () => {
+  const { store, agents } = setup();
+  const c = agents.createCard({ title: 'n', prompt: 'x' });
+  c.sessionId = 'sess-1';
+  store.settings.suggestSkillsOnDone = false;
+  agents.completed(c);
+  assert.deepStrictEqual(agents.listNotifications(c.repoPath).map((n) => n.kind), ['done']);
+  store.settings.suggestSkillsOnDone = true;
+  agents.completed(c);
+  assert.deepStrictEqual(agents.listNotifications(c.repoPath).map((n) => n.kind), ['skill', 'done', 'done'], '新しいものが先頭');
+  assert.strictEqual(agents.listNotifications('/other').length, 0, 'ほかのリポジトリの通知は出ない');
+
+  const [first] = agents.listNotifications(c.repoPath);
+  agents.readNotifications(c.repoPath, [first.id]);
+  assert.deepStrictEqual(agents.listNotifications(c.repoPath).map((n) => n.read), [true, false, false]);
+  agents.readNotifications(c.repoPath);
+  assert.ok(agents.listNotifications(c.repoPath).every((n) => n.read));
+  agents.clearNotifications(c.repoPath, [first.id]);
+  assert.strictEqual(agents.listNotifications(c.repoPath).length, 2);
+  agents.clearNotifications(c.repoPath);
+  assert.strictEqual(agents.listNotifications(c.repoPath).length, 0);
 });
 
 test('会話（チャット）: worktree を作らずリポジトリで話し、同時実行数に数えず、続きも話せる。マージはできない', async () => {

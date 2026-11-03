@@ -280,6 +280,7 @@ function renderBoard() {
   const total = Number(state.board.totalCostUsd) || 0;
   $('costInfo').classList.toggle('hidden', !settings.repoPath);
   $('costInfo').textContent = `合計 $${total.toFixed(2)}`;
+  renderNotifications();
   $('runInfo').innerHTML = `実行中 ${running}/${settings.maxParallel || 1}${queued ? ` ・ 待機 ${queued}` : ''}${waiting ? ` ・ <b class="warn">あなたの対応待ち ${waiting}</b>` : ''}`;
 
   if (!settings.repoPath) {
@@ -447,8 +448,6 @@ function renderDetailHead() {
       (state.board.settings.integration === 'pr'
         ? `<button class="btn primary" data-act="pr">${c.prUrl ? '⇡ PR を更新…' : '⇡ PR を作成…'}</button>`
         : `<button class="btn primary" data-act="merge">⇲ マージ…</button>`),
-    (s === 'review' || s === 'failed' || s === 'done') && c.sessionId &&
-      `<button class="btn" data-act="suggestSkills" title="この会話の作業を振り返って、スキルにしておくとよいものを Claude に提案してもらいます">💡 スキルを提案</button>`,
     c.worktreePath && `<button class="btn ghost" data-act="open">フォルダを開く</button>`,
     `<button class="btn danger" data-act="discard">${s === 'done' ? '削除' : '破棄'}</button>`,
   ].filter(Boolean);
@@ -540,10 +539,6 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'resume') runBusy('再開しています…', () => api.resume(c.id), '再開しました');
   if (act === 'dismissInterrupted') run(() => api.dismissInterrupted(c.id));
   if (act === 'stop') runBusy('停止しています…', () => api.stop(c.id));
-  if (act === 'suggestSkills') {
-    if (c.status === 'done' && !confirm('完了したタスクの続きとして、worktree を作り直して Claude にスキルを提案してもらいます。よろしいですか？')) return;
-    runBusy('スキルの提案を頼んでいます…', () => api.suggestSkills(c.id), 'スキルの提案を頼みました。返事が来たら、下の欄から追加したいものを伝えてください');
-  }
   if (act === 'open') run(() => api.open(c.id));
   if (act === 'merge') openMerge(c);
   if (act === 'pr') openPr(c);
@@ -1436,6 +1431,7 @@ async function openSettings() {
      </div>
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
        <small>「＋ 新しいタスク」と「Issue から作成」を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
+     <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上の 🔔）</label>
      <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath)}" /></label>
 
      <div class="modal-actions"><button class="btn ghost" id="sCancel">キャンセル</button><button class="btn primary" id="sOk">保存</button></div>`,
@@ -1457,6 +1453,7 @@ async function openSettings() {
             claudePath: $('sClaude').value.trim() || 'claude',
             defaultSkill: defSkill || '',
             issueStatusSync: $('sIssueSync').checked,
+            suggestSkillsOnDone: $('sSuggestSkills').checked,
             statusFieldName: $('sStatusField').value.trim(),
             statusMapping: { inProgress: $('sMapProgress').value.trim(), inReview: $('sMapReview').value.trim(), done: $('sMapDone').value.trim() },
           }),
@@ -1585,6 +1582,101 @@ api.onGh((ev) => {
   if (ev.type === 'code') ghState.code = ev;
   else if (ev.type === 'line') ghState.lines.push(ev.line);
   if (ghState.busy) renderGh(null);
+});
+
+// ---------------- 通知（右上のベル） ----------------
+
+const NOTIF_ICON = { permission: '🔐', question: '❓', awaiting: '💬', review: '👀', failed: '⚠️', done: '✅', skill: '💡' };
+
+function timeAgo(t) {
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return 'たった今';
+  if (s < 3600) return `${Math.floor(s / 60)}分前`;
+  if (s < 86400) return `${Math.floor(s / 3600)}時間前`;
+  return new Date(t).toLocaleString();
+}
+
+function notifItemHtml(n) {
+  const alive = !!card(n.cardId);
+  const action =
+    n.action && !n.actedAt && alive
+      ? `<button class="btn small primary" data-nact="${esc(n.id)}">${esc(n.actionLabel || '実行')}</button>`
+      : n.action && n.actedAt ? '<span class="muted small">対応済み</span>' : '';
+  return `<div class="notif-item ${n.read ? '' : 'unread'} k-${esc(n.kind)}" data-nid="${esc(n.id)}" data-card="${alive ? esc(n.cardId) : ''}">
+    <span class="notif-icon">${NOTIF_ICON[n.kind] || '🔔'}</span>
+    <div class="notif-main">
+      <div class="notif-title">${esc(n.title)}</div>
+      ${n.body ? `<div class="notif-body">${esc(n.body)}</div>` : ''}
+      <div class="notif-foot"><span class="muted small">${timeAgo(n.t)}</span>${action}</div>
+    </div>
+    <button class="icon notif-x" data-nclear="${esc(n.id)}" title="この通知を消す">✕</button>
+  </div>`;
+}
+
+function renderNotifications() {
+  const list = state.board.notifications || [];
+  const unread = list.filter((n) => !n.read).length;
+  $('notifCount').textContent = unread > 99 ? '99+' : String(unread);
+  $('notifCount').classList.toggle('hidden', !unread);
+  const panel = $('notifPanel');
+  if (panel.classList.contains('hidden')) return;
+  panel.innerHTML = `
+    <div class="notif-head"><b>通知</b><span class="spacer"></span>
+      ${unread ? '<button class="btn small ghost" data-nall="read">すべて既読</button>' : ''}
+      ${list.length ? '<button class="btn small ghost" data-nall="clear">すべて消す</button>' : ''}
+    </div>
+    <div class="notif-list">${list.length ? list.map(notifItemHtml).join('') : '<p class="muted pad">通知はまだありません</p>'}</div>`;
+}
+
+function closeNotifications() {
+  const panel = $('notifPanel');
+  if (panel.classList.contains('hidden')) return;
+  panel.classList.add('hidden');
+  // 開いているあいだに見た通知は既読にする
+  const ids = (state.board.notifications || []).filter((n) => !n.read).map((n) => n.id);
+  if (ids.length) run(() => api.readNotifications(ids));
+}
+
+$('notifBtn').onclick = (e) => {
+  e.stopPropagation();
+  const panel = $('notifPanel');
+  if (!panel.classList.contains('hidden')) return closeNotifications();
+  panel.classList.remove('hidden');
+  renderNotifications();
+};
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('.notif-wrap')) closeNotifications();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeNotifications();
+});
+$('notifPanel').addEventListener('click', async (e) => {
+  const all = e.target.closest('[data-nall]');
+  if (all) {
+    if (all.dataset.nall === 'read') run(() => api.readNotifications());
+    else run(() => api.clearNotifications());
+    return;
+  }
+  const x = e.target.closest('[data-nclear]');
+  if (x) return run(() => api.clearNotifications([x.dataset.nclear]));
+  const act = e.target.closest('[data-nact]');
+  if (act) {
+    const n = (state.board.notifications || []).find((v) => v.id === act.dataset.nact);
+    const c = n && card(n.cardId);
+    if (n && n.action === 'suggestSkills' && c && c.status === 'done' && !confirm('完了したタスクの続きとして、worktree を作り直して Claude にスキルを提案してもらいます。よろしいですか？')) return;
+    const ok = await runBusy('スキルの提案を頼んでいます…', () => api.actNotification(act.dataset.nact).then(() => true), 'スキルの提案を頼みました。返事が来たら、下の欄から追加したいものを伝えてください');
+    if (ok && c) {
+      closeNotifications();
+      select(c.id);
+    }
+    return;
+  }
+  const item = e.target.closest('.notif-item');
+  if (item && item.dataset.card) {
+    run(() => api.readNotifications([item.dataset.nid]));
+    closeNotifications();
+    select(item.dataset.card);
+  }
 });
 
 // ---------------- 更新の受信 ----------------

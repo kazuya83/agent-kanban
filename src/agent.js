@@ -297,6 +297,80 @@ class AgentManager extends EventEmitter {
     this.emit('log', card.id, entry);
   }
 
+  // ---------- 通知（右上のベル） ----------
+
+  /**
+   * 通知を足す。右上の通知一覧に出し、'notification' イベントでデスクトップ通知にも使う
+   * @param {object} c カード
+   * @param {string} kind permission / question / awaiting / review / failed / done / skill
+   */
+  notify(c, kind, title, body, extra) {
+    const n = {
+      id: crypto.randomBytes(5).toString('hex'),
+      t: Date.now(),
+      repoPath: c.repoPath || '',
+      cardId: c.id,
+      cardTitle: c.title,
+      kind,
+      title,
+      body: truncate(String(body || '').trim(), 600),
+      read: false,
+      ...(extra || {}),
+    };
+    this.store.addNotification(n);
+    this.store.save();
+    this.emit('notification', n, c);
+    return n;
+  }
+
+  listNotifications(repoPath) {
+    return this.store.notifications.filter((n) => !repoPath || n.repoPath === repoPath);
+  }
+
+  // 既読にする（ids を省くと、そのリポジトリの通知をすべて）
+  readNotifications(repoPath, ids) {
+    const set = Array.isArray(ids) ? new Set(ids) : null;
+    for (const n of this.listNotifications(repoPath)) if (!set || set.has(n.id)) n.read = true;
+    this.store.save();
+    this.emit('changed', null);
+  }
+
+  // 通知を消す（ids を省くと、そのリポジトリの通知をすべて）
+  clearNotifications(repoPath, ids) {
+    const set = Array.isArray(ids) ? new Set(ids) : null;
+    this.store.data.notifications = this.store.notifications.filter((n) => (repoPath && n.repoPath !== repoPath) || (set && !set.has(n.id)));
+    this.store.save();
+    this.emit('changed', null);
+  }
+
+  // 通知のボタン（「スキルを提案してもらう」など）を押したとき
+  actNotification(id) {
+    const n = this.store.notifications.find((x) => x.id === id);
+    if (!n) throw new Error('通知が見つかりません');
+    if (!n.action || n.actedAt) throw new Error('この通知はもう対応済みです');
+    if (n.action === 'suggestSkills') this.suggestSkills(n.cardId);
+    else throw new Error(`知らない操作です: ${n.action}`);
+    n.actedAt = Date.now();
+    n.read = true;
+    this.store.save();
+    this.emit('changed', n.cardId);
+  }
+
+  // タスクが「完了」に入ったときに呼ぶ。完了の通知と、スキルにしませんか？の通知を出す
+  completed(c) {
+    const body = (c.mergedInto || []).length ? `${c.mergedInto.join(', ')} に取り込みました` : c.prUrl ? `PR を作って片付けました: ${c.prUrl}` : 'タスクを完了にしました';
+    this.notify(c, 'done', `完了: ${c.title}`, body);
+    if (this.store.settings.suggestSkillsOnDone === false || !c.sessionId || c.skillSuggestNotified) return;
+    c.skillSuggestNotified = true;
+    this.notify(
+      c,
+      'skill',
+      `スキルにしませんか？: ${c.title}`,
+      'このタスクの作業を振り返って、次から同じような作業を速く・確実にできるスキル（SKILL.md）を Claude に提案してもらえます。',
+      { action: 'suggestSkills', actionLabel: '💡 スキルを提案してもらう' },
+    );
+  }
+
   // ---------- カード操作 ----------
 
   createCard({ title, prompt, issue, session, skill }) {
@@ -463,6 +537,12 @@ class AgentManager extends EventEmitter {
   // スキルにしておくとよいものを、同じ会話の続きで提案してもらう
   suggestSkills(id) {
     this.send(id, SKILL_SUGGEST_PROMPT);
+    for (const n of this.store.notifications) {
+      if (n.cardId === id && n.action === 'suggestSkills' && !n.actedAt) {
+        n.actedAt = Date.now();
+        n.read = true;
+      }
+    }
   }
 
   /**
@@ -724,11 +804,16 @@ class AgentManager extends EventEmitter {
         if (c.awaitingReply) {
           this.log(c, 'question', 'Claude が質問しています。下の欄から答えると、続きから進めます');
           this.emit('awaiting', c);
+          this.notify(c, 'awaiting', `回答待ち: ${c.title}`, c.lastText || 'Claude が質問しています');
+        } else {
+          if (isChat(c)) this.notify(c, 'awaiting', `返事: ${c.title}`, c.lastText || 'Claude が返事をしました');
+          else this.notify(c, 'review', `レビュー待ち: ${c.title}`, c.lastText || '作業が終わりました。差分を確かめてください');
         }
       } else {
         c.status = 'failed';
         c.error = run.resultError || `claude が終了コード ${code} で終了しました`;
       }
+      if (c.status === 'failed') this.notify(c, 'failed', `失敗: ${c.title}`, c.error);
       c.stopRequested = false;
       c.finishedAt = Date.now();
       this.changed(c);
@@ -893,6 +978,7 @@ class AgentManager extends EventEmitter {
       this.log(c, 'permission', `承認待ち: ${toolName}  ${req.summary}`);
       this.changed(c);
       this.emit('permission', c, req);
+      this.notify(c, 'permission', `承認待ち: ${c.title}`, `${toolName}  ${req.summary}`);
       signal?.addEventListener('abort', () => {
         if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: '中断されました' }, null);
       });
@@ -919,6 +1005,7 @@ class AgentManager extends EventEmitter {
       this.log(c, 'question', `質問: ${questions.map((q) => q.question).join(' / ')}`);
       this.changed(c);
       this.emit('question', c, questions);
+      this.notify(c, 'question', `質問: ${c.title}`, questions.map((q) => q.question).join(' / '));
       signal?.addEventListener('abort', () => {
         if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: '中断されました' }, null);
       });
@@ -1113,6 +1200,7 @@ class AgentManager extends EventEmitter {
       c.worktreePath = null;
       c.status = 'done';
       c.mergedAt = Date.now();
+      this.completed(c);
       this.changed(c);
       return { merged: true };
     } finally {
@@ -1185,6 +1273,7 @@ class AgentManager extends EventEmitter {
         c.worktreePath = null;
         c.status = 'done';
         c.mergedAt = Date.now();
+        this.completed(c);
       }
       this.changed(c);
       return { url: pr.url, created: pr.created };
@@ -1287,10 +1376,13 @@ class AgentManager extends EventEmitter {
       c.finalDiff = truncate(finalDiff, 300000);
       c.worktreePath = null;
     }
+    const wasDone = c.status === 'done';
     c.status = 'done';
     c.error = null;
     c.interrupted = null;
     c.mergedAt = c.prMergedAt;
+    if (!wasDone) this.completed(c);
+    else this.notify(c, 'done', `PR がマージされました: ${c.title}`, url);
     this.changed(c);
     return true;
   }
