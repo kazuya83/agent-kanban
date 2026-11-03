@@ -14,10 +14,18 @@
       <div class="spacer"></div>
       <span id="runInfo" class="pill"></span>
       <button id="settingsBtn" class="btn ghost">⚙ 設定</button>
-      <button id="issueBtn" class="btn">＃ Issue から</button>
       <button id="newBtn" class="btn primary">＋ 新しいタスク</button>
     </header>
     <div id="envBanner" class="env-banner hidden"></div>
+    <section id="issueBar" class="issue-bar hidden" aria-label="GitHub Issue から作る">
+      <span class="ib-title"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13ZM8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg> GitHub Issue から作る</span>
+      <span id="ibRepo" class="ib-repo"></span>
+      <input id="ibNumbers" class="ib-input" placeholder="Issue 番号（例: 12 または 12, 15, 18）" inputmode="numeric" autocomplete="off" />
+      <label class="check ib-check"><input type="checkbox" id="ibStart" checked /> すぐ開始</label>
+      <button id="ibCreate" class="btn primary">Issue からタスクを作成</button>
+      <button id="ibMore" class="btn ghost small">詳細…</button>
+      <span id="ibGh" class="ib-gh"></span>
+    </section>
     <div class="layout">
       <main id="board" class="board"></main>
       <aside id="detail" class="detail hidden">
@@ -26,6 +34,7 @@
           <button data-tab="log" class="tab active">ログ</button>
           <button data-tab="diff" class="tab">差分</button>
           <button data-tab="prompt" class="tab">指示</button>
+          <button data-tab="btw" class="tab" id="btwTab" title="実行中のエージェントに、作業を止めずにメッセージを送ります">btw</button>
         </nav>
         <div id="detailBody" class="d-body"></div>
         <div id="detailFoot" class="d-foot">

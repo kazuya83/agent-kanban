@@ -305,7 +305,8 @@ class AgentManager extends EventEmitter {
   async launch(c) {
     if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
     const s = this.store.settings;
-    const args = ['-p', '--output-format', 'stream-json', '--verbose'];
+    // stdin を開いたままにして、実行中でもメッセージ（btw）を送れるようにする
+    const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--replay-user-messages'];
     if (s.permissionMode) args.push('--permission-mode', s.permissionMode);
     if (s.model) args.push('--model', s.model);
     const allowed = splitList(s.allowedTools);
@@ -316,6 +317,7 @@ class AgentManager extends EventEmitter {
 
     const prompt = c.pendingPrompt || '';
     c.pendingPrompt = null;
+    for (const m of c.btw || []) if (m.state === 'queued') m.state = 'delivered';
     const cmd = s.claudePath || 'claude';
     const resolved = resolveCommand(cmd);
     if (!resolved) {
@@ -332,7 +334,10 @@ class AgentManager extends EventEmitter {
       windowsHide: true,
     });
     this.procs.set(c.id, child);
-    const run = { resultError: null, finished: false };
+    // sent: stdin に書いたメッセージ（acked = claude が受け取ったことをリプレイで確認済み）
+    const run = { resultError: null, finished: false, child, sent: [], stdinClosed: false, idleTimer: null };
+    this.runs = this.runs || new Map();
+    this.runs.set(c.id, run);
 
     let buf = '';
     child.stdout.setEncoding('utf8');
@@ -351,13 +356,17 @@ class AgentManager extends EventEmitter {
       if (t) this.log(c, 'stderr', truncate(t, 2000));
     });
     child.stdin.on('error', () => {});
-    child.stdin.end(prompt);
+    this.writeMessage(run, prompt, null);
 
     const finish = async (code, spawnError) => {
       if (run.finished) return;
       run.finished = true;
+      clearTimeout(run.idleTimer);
       if (buf.trim()) this.handleLine(c, buf.trim(), run);
       this.procs.delete(c.id);
+      this.runs.delete(c.id);
+      // 受け取られないまま終わった btw は「届かなかった」にする
+      for (const m of c.btw || []) if (m.state === 'sent') m.state = 'lost';
       this.denyAllPending(c.id, 'エージェントが終了しました');
       if (!this.store.card(c.id)) return; // 破棄された
       // 状態を「レビュー」にする前に、作業内容をブランチにコミットしておく
@@ -425,6 +434,10 @@ class AgentManager extends EventEmitter {
         this.changed(c);
         break;
       case 'user': {
+        if (ev.isReplay) {
+          this.onReplay(c, run, ev);
+          break;
+        }
         const content = ev.message && Array.isArray(ev.message.content) ? ev.message.content : [];
         for (const b of content) {
           if (b.type === 'tool_result') this.log(c, b.is_error ? 'tool_error' : 'tool_result', truncate(toolResultText(b.content), 1500));
@@ -444,11 +457,86 @@ class AgentManager extends EventEmitter {
           this.log(c, 'result', `完了しました（${secs}秒 / $${cost.toFixed(3)}）`);
         }
         this.changed(c);
+        this.afterResult(c, run, !!run.resultError);
         break;
       }
       default:
         break;
     }
+  }
+
+  // ---------- 実行中のメッセージ（btw） ----------
+
+  // stream-json の1行として stdin に書く
+  writeMessage(run, text, btwId) {
+    run.sent.push({ text, btwId, acked: false });
+    run.child.stdin.write(`${JSON.stringify({ type: 'user', message: { role: 'user', content: text } })}\n`);
+  }
+
+  // claude がメッセージを受け取ると、--replay-user-messages で同じ内容が返ってくる
+  onReplay(c, run, ev) {
+    const content = ev.message && ev.message.content;
+    const text = typeof content === 'string' ? content : Array.isArray(content) ? content.filter((b) => b.type === 'text').map((b) => b.text).join('') : '';
+    const m = run.sent.find((x) => !x.acked && x.text === text) || run.sent.find((x) => !x.acked);
+    if (!m) return;
+    m.acked = true;
+    if (m.btwId) {
+      const b = (c.btw || []).find((x) => x.id === m.btwId);
+      if (b) {
+        b.state = 'delivered';
+        b.deliveredAt = Date.now();
+        this.log(c, 'system', 'btw のメッセージを Claude が受け取りました');
+        this.changed(c);
+      }
+    }
+  }
+
+  // 1ターン終わったとき: まだ受け取られていない btw がなければ stdin を閉じて終わらせる。
+  // あれば、claude がそれを次のターンとして処理するのを待つ
+  afterResult(c, run, isError) {
+    clearTimeout(run.idleTimer);
+    const waiting = run.sent.some((x) => !x.acked);
+    if (!waiting || isError) return this.closeInput(run);
+    // 念のため、しばらく何も起きなければ閉じる
+    run.idleTimer = setTimeout(() => this.closeInput(run), 15000);
+  }
+
+  closeInput(run) {
+    if (run.stdinClosed) return;
+    run.stdinClosed = true;
+    clearTimeout(run.idleTimer);
+    try {
+      run.child.stdin.end();
+    } catch {
+      /* もう閉じている */
+    }
+  }
+
+  /**
+   * 実行中のエージェントにメッセージを送る（btw）。今の作業にそのまま反映される。
+   * 待機中なら、開始するときの指示に付け足す
+   */
+  btw(id, text) {
+    const c = this.must(id);
+    text = String(text || '').trim();
+    if (!text) throw new Error('メッセージを入力してください');
+    const entry = { id: crypto.randomBytes(4).toString('hex'), text, at: Date.now(), state: 'sent' };
+    const wrapped = `（作業中のユーザーからの追加メッセージ）\n${text}`;
+    if (c.status === 'queued') {
+      c.pendingPrompt = `${c.pendingPrompt || ''}\n\n${wrapped}`;
+      entry.state = 'queued';
+    } else {
+      const run = this.runs && this.runs.get(id);
+      if (c.status !== 'running' || !run || run.finished || run.stdinClosed) {
+        throw new Error('btw はエージェントの実行中だけ送れます。終わったあとは下の「追加指示」を使ってください');
+      }
+      clearTimeout(run.idleTimer);
+      this.writeMessage(run, wrapped, entry.id);
+    }
+    c.btw = [...(c.btw || []), entry];
+    this.log(c, 'user', `btw: ${text}`);
+    this.changed(c);
+    return entry;
   }
 
   // ---------- 承認（--permission-prompt-tool） ----------

@@ -170,6 +170,7 @@ async function select(id) {
   $('followInput').value = '';
   renderBoard();
   renderDetailHead();
+  updateBtwTab(card(id));
   if (!state.logs.has(id)) {
     const logs = await run(() => api.logs(id));
     state.logs.set(id, logs || []);
@@ -280,6 +281,22 @@ function diffHtml(text) {
       .join('\n')}${lines.length > shown.length ? `\n… ほか ${lines.length - shown.length} 行` : ''}</pre>`;
 }
 
+const BTW_STATE = { sent: '送信済み', delivered: '反映済み', queued: '開始時に渡します', lost: '届きませんでした' };
+function btwListHtml(c) {
+  const list = c.btw || [];
+  if (!list.length) return '<div class="muted small">まだ送っていません</div>';
+  return list
+    .map((m) => `<div class="btw-item"><div class="btw-text">${esc(m.text)}</div><div class="btw-meta"><span class="btw-st st-${m.state}">${BTW_STATE[m.state] || m.state}</span> ${new Date(m.at).toLocaleTimeString()}</div></div>`)
+    .join('');
+}
+
+function updateBtwTab(c) {
+  const n = (c && c.btw ? c.btw.length : 0);
+  $('btwTab').textContent = n ? `btw (${n})` : 'btw';
+  const live = c && (c.status === 'running' || c.status === 'queued');
+  $('btwTab').classList.toggle('live', !!live);
+}
+
 async function renderDetailBody() {
   const c = card(state.selected);
   if (!c) return;
@@ -295,6 +312,29 @@ async function renderDetailBody() {
     body.innerHTML = diffHtml(d || '');
     const r = $('refreshDiff');
     if (r) r.onclick = renderDetailBody;
+  } else if (state.tab === 'btw') {
+    const live = c.status === 'running' || c.status === 'queued';
+    body.innerHTML = `<div class="pad btw">
+      <p class="muted small">エージェントの作業を止めずに、メッセージを送れます（例:「テストも書いて」「その API は使わないで」）。Claude は今の作業の途中で読み、そのまま反映します。</p>
+      <div id="btwList" class="btw-list">${btwListHtml(c)}</div>
+      <textarea id="btwInput" rows="3" placeholder="${live ? 'btw: …（Ctrl/⌘ + Enter で送信）' : 'エージェントが実行中のときに送れます'}" ${live ? '' : 'disabled'}></textarea>
+      <div class="btw-actions"><span class="muted small">${live ? (c.status === 'queued' ? '待機中なので、開始するときの指示に付け足します' : '送ると、すぐに実行中のエージェントに届きます') : c.status === 'todo' ? '開始すると送れるようになります' : '作業が終わったあとは、下の「追加指示」を使ってください'}</span>
+        <button class="btn primary" id="btwSend" ${live ? '' : 'disabled'}>送信</button></div>
+    </div>`;
+    const send = async () => {
+      const text = $('btwInput').value.trim();
+      if (!text) return;
+      const ok = await run(() => api.btw(c.id, text).then(() => true));
+      if (ok) {
+        $('btwInput').value = '';
+        $('btwInput').focus();
+      }
+    };
+    $('btwSend').onclick = send;
+    $('btwInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send();
+    });
+    if (live) $('btwInput').focus();
   } else {
     const editable = c.status === 'todo';
     body.innerHTML = `<div class="pad">
@@ -337,35 +377,99 @@ document.addEventListener('keydown', (e) => {
   else if (state.selected) closeDetail();
 });
 
-function newTask(mode = 'manual') {
+function newTask() {
   if (!state.board.settings.repoPath) return chooseRepo();
   openModal(
     `<h2>新しいタスク</h2>
-     <nav class="mtabs"><button class="mtab" data-mode="manual">手で書く</button><button class="mtab" data-mode="issue">GitHub Issue から</button></nav>
-     <div id="nManual">
-       <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
-       <label class="field"><span>Claude への指示</span><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></label>
-     </div>
-     <div id="nIssue" class="hidden">
-       <label class="field"><span>Issue 番号（複数ならカンマかスペースで区切る。1つの Issue が1枚のカードになり、並列で動きます）</span>
-         <input id="nNumbers" placeholder="例: 12 または 12, 15, 18" inputmode="numeric" /></label>
-       <p class="muted small" id="nRepoInfo">リポジトリを確認しています…</p>
-       <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div>
-       <label class="field"><span>追加の指示（任意・すべての Issue に付けます）</span><textarea id="nExtra" rows="4" placeholder="例: 変更したらテストを追加して npm test で確認して"></textarea></label>
-     </div>
+     <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
+     <label class="field"><span>Claude への指示</span><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></label>
+     <p class="muted small">GitHub の Issue から作るときは、画面上部の「GitHub Issue から作る」に番号を入れてください。</p>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
      <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">作成（Ctrl/⌘ + Enter）</button></div>`,
     () => {
-      let current = mode;
-      const setMode = (m) => {
-        current = m;
-        document.querySelectorAll('.mtab').forEach((t) => t.classList.toggle('active', t.dataset.mode === m));
-        $('nManual').classList.toggle('hidden', m !== 'manual');
-        $('nIssue').classList.toggle('hidden', m !== 'issue');
-        (m === 'issue' ? $('nNumbers') : $('nPrompt')).focus();
+      $('nPrompt').focus();
+      const submit = async () => {
+        const id = await run(() => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked }));
+        if (id) {
+          closeModal();
+          select(id);
+        }
       };
-      document.querySelectorAll('.mtab').forEach((t) => (t.onclick = () => setMode(t.dataset.mode)));
-      setMode(mode);
+      $('nOk').onclick = submit;
+      $('nCancel').onclick = closeModal;
+      $('nPrompt').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit();
+      });
+    },
+  );
+}
+
+// ---------------- GitHub Issue から作る ----------------
+
+// Issue 番号からカードを作る（上部の枠と、詳細ダイアログの両方から使う）
+async function createFromIssues(numbers, extra, autoStart) {
+  const r = await run(() => api.createFromIssues({ numbers, extra, autoStart }));
+  if (!r) return false;
+  if (r.errors.length) toast(r.errors.join('\n'));
+  else toast(`${r.ids.length} 件のタスクを Issue から作りました`, 'ok');
+  if (r.ids.length === 1) select(r.ids[0]);
+  return true;
+}
+
+// 上部の「GitHub Issue から作る」枠
+async function refreshIssueBar() {
+  const bar = $('issueBar');
+  const hasRepo = !!state.board.settings.repoPath;
+  bar.classList.toggle('hidden', !hasRepo);
+  if (!hasRepo) return;
+  const [g, st] = await Promise.all([api.repoGithub().catch(() => null), api.ghStatus().catch(() => null)]);
+  const repoEl = $('ibRepo');
+  const ghEl = $('ibGh');
+  if (!g || !g.slug) {
+    repoEl.textContent = 'origin が GitHub ではないため使えません';
+    repoEl.className = 'ib-repo bad';
+  } else {
+    repoEl.textContent = `${g.slug.owner}/${g.slug.repo}`;
+    repoEl.className = 'ib-repo';
+  }
+  if (!st) {
+    ghEl.textContent = '';
+  } else if (st.installed && st.loggedIn) {
+    ghEl.innerHTML = `<span class="ok">✓ gh: ${esc(st.user || 'ログイン済み')}</span>`;
+  } else {
+    ghEl.innerHTML = `<a class="ib-link warn-text" id="ibSetup">${st.installed ? 'gh にログインする' : 'gh をインストールする'}</a>`;
+    $('ibSetup').onclick = () => openIssueModal($('ibNumbers').value);
+  }
+}
+
+async function submitIssueBar() {
+  const v = $('ibNumbers').value;
+  if (!v.trim()) {
+    $('ibNumbers').focus();
+    return toast('Issue 番号を入力してください（例: 12 または 12, 15）');
+  }
+  $('ibCreate').disabled = true;
+  $('ibCreate').textContent = '読み込み中…';
+  const ok = await createFromIssues(v, '', $('ibStart').checked);
+  $('ibCreate').disabled = false;
+  $('ibCreate').textContent = 'Issue からタスクを作成';
+  if (ok) $('ibNumbers').value = '';
+}
+
+// 詳細ダイアログ（追加の指示を付ける・gh を準備する）
+function openIssueModal(prefill = '') {
+  if (!state.board.settings.repoPath) return chooseRepo();
+  openModal(
+    `<h2>GitHub Issue からタスクを作る</h2>
+     <label class="field"><span>Issue 番号（複数ならカンマかスペースで区切る。1つの Issue が1枚のカードになり、並列で動きます）</span>
+       <input id="nNumbers" placeholder="例: 12 または 12, 15, 18" inputmode="numeric" value="${esc(prefill)}" /></label>
+     <p class="muted small" id="nRepoInfo">リポジトリを確認しています…</p>
+     <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div>
+     <label class="field"><span>追加の指示（任意・すべての Issue に付けます）</span><textarea id="nExtra" rows="4" placeholder="例: 変更したらテストを追加して npm test で確認して"></textarea></label>
+     <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
+     <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">Issue からタスクを作成</button></div>`,
+    () => {
+      $('nNumbers').focus();
       api.repoGithub().then(
         (g) => {
           const el = $('nRepoInfo');
@@ -378,34 +482,16 @@ function newTask(mode = 'manual') {
       refreshGh();
       const submit = async () => {
         $('nOk').disabled = true;
-        if (current === 'issue') {
-          $('nOk').textContent = 'Issue を読み込んでいます…';
-          const r = await run(() => api.createFromIssues({ numbers: $('nNumbers').value, extra: $('nExtra').value, autoStart: $('nStart').checked }));
-          if (r) {
-            closeModal();
-            if (r.errors.length) toast(r.errors.join('\n'));
-            else toast(`${r.ids.length} 件のタスクを作りました`, 'ok');
-            if (r.ids.length === 1) select(r.ids[0]);
-            return;
-          }
-        } else {
-          const id = await run(() => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked }));
-          if (id) {
-            closeModal();
-            select(id);
-            return;
-          }
-        }
+        $('nOk').textContent = 'Issue を読み込んでいます…';
+        const ok = await createFromIssues($('nNumbers').value, $('nExtra').value, $('nStart').checked);
+        if (ok) return closeModal();
         $('nOk').disabled = false;
-        $('nOk').textContent = '作成（Ctrl/⌘ + Enter）';
+        $('nOk').textContent = 'Issue からタスクを作成';
       };
       $('nOk').onclick = submit;
       $('nCancel').onclick = closeModal;
-      for (const id of ['nPrompt', 'nExtra', 'nNumbers']) {
-        $(id).addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || id === 'nNumbers')) submit();
-        });
-      }
+      $('nNumbers').addEventListener('keydown', (e) => e.key === 'Enter' && submit());
+      $('nExtra').addEventListener('keydown', (e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && submit());
     },
   );
 }
@@ -508,12 +594,15 @@ async function chooseRepo() {
     closeDetail();
     state.board = await api.getBoard();
     renderBoard();
+    refreshIssueBar();
   }
 }
 
 $('repoBtn').onclick = chooseRepo;
-$('newBtn').onclick = () => newTask('manual');
-$('issueBtn').onclick = () => newTask('issue');
+$('newBtn').onclick = newTask;
+$('ibCreate').onclick = submitIssueBar;
+$('ibMore').onclick = () => openIssueModal($('ibNumbers').value);
+$('ibNumbers').addEventListener('keydown', (e) => e.key === 'Enter' && submitIssueBar());
 $('settingsBtn').onclick = openSettings;
 
 // ---------------- gh（GitHub CLI）の案内 ----------------
@@ -591,6 +680,7 @@ async function ghAction(kind) {
     ghState.code = null;
     toast(kind === 'install' ? 'gh をインストールしました' : 'GitHub にログインしました', 'ok');
     renderGh(st);
+    refreshIssueBar();
     // インストールが終わったら、続けてログインも案内する
     if (kind === 'install' && st && st.installed && !st.loggedIn) toast('続けて「GitHub にログイン」を押してください', 'ok');
   } catch (err) {
@@ -612,7 +702,20 @@ api.onGh((ev) => {
 api.onBoard((board) => {
   state.board = board;
   renderBoard();
-  if (state.selected) renderDetailHead();
+  if (state.selected) {
+    renderDetailHead();
+    const c = card(state.selected);
+    if (c) {
+      updateBtwTab(c);
+      if (state.tab === 'btw') {
+        const list = $('btwList');
+        if (list) list.innerHTML = btwListHtml(c);
+        // 実行中かどうかが変わったら作り直す
+        const live = c.status === 'running' || c.status === 'queued';
+        if ($('btwInput') && $('btwInput').disabled === live) renderDetailBody();
+      }
+    }
+  }
 });
 api.onLog(({ id, entry }) => {
   if (!state.logs.has(id)) return;
@@ -647,4 +750,5 @@ async function checkEnv() {
   state.board = await api.getBoard();
   renderBoard();
   checkEnv();
+  refreshIssueBar();
 })();

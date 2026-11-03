@@ -161,6 +161,7 @@ app.whenReady().then(async () => {
   handle('card:start', (id) => agents.start(id));
   handle('card:stop', (id) => agents.stop(id));
   handle('card:send', ({ id, message }) => agents.send(id, message));
+  handle('card:btw', ({ id, text }) => agents.btw(id, text));
   handle('card:logs', (id) => agents.logs(id));
   handle('card:diff', (id) => agents.diff(id));
   handle('card:merge', ({ id, target, createNew, keep }) => agents.merge(id, { target, createNew, keep }));

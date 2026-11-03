@@ -169,3 +169,35 @@ test('指定したブランチへマージ（チェックアウトしていな�
   assert.strictEqual(g('rev-parse', 'main').toString().trim(), mainBefore, 'main は触らない');
   assert.deepStrictEqual(c.mergedInto, ['develop', 'release/1.0']);
 });
+
+test('btw: 実行中のエージェントにメッセージを送ると、今の作業に反映される', async () => {
+  const { store, agents } = setup();
+  store.settings.permissionMode = 'bypassPermissions';
+  store.settings.maxParallel = 1;
+  process.env.FAKE_SLEEP = '800';
+  try {
+    const a = agents.createCard({ title: 'btw-a', prompt: '作業A' });
+    const b = agents.createCard({ title: 'btw-b', prompt: '作業B' });
+    assert.throws(() => agents.btw(a.id, 'まだ'), /実行中だけ/);
+    agents.start(a.id);
+    agents.start(b.id); // 上限1なので待機
+    await waitFor(() => a.sessionId); // 実行中
+    agents.btw(a.id, 'テストも書いて');
+    assert.strictEqual(a.btw[0].state, 'sent');
+    agents.btw(b.id, '待機中の追加'); // 待機中 → 開始時の指示に付け足す
+    assert.strictEqual(b.btw[0].state, 'queued');
+
+    await waitFor(() => a.status === 'review');
+    assert.strictEqual(a.btw[0].state, 'delivered');
+    assert.match(a.lastMessage, /btw: （作業中のユーザーからの追加メッセージ）\nテストも書いて/);
+    const d = await agents.diff(a.id);
+    assert.match(d, /テストも書いて/, '作業内容（ファイル）にも反映');
+    assert.throws(() => agents.btw(a.id, 'もう終わった'), /追加指示/);
+
+    await waitFor(() => b.status === 'review');
+    assert.strictEqual(b.btw[0].state, 'delivered');
+    assert.match(await agents.diff(b.id), /待機中の追加/);
+  } finally {
+    delete process.env.FAKE_SLEEP;
+  }
+});
