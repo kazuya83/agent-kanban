@@ -889,3 +889,42 @@ test('会話（チャット）: アプリの終了で中断 → 再開すると�
     server2?.close();
   }
 });
+
+test('ブランチの命名規則（自然言語）: Claude が考えた名前で worktree を作る。ぶつかれば番号、失敗ならいつもの名前', async () => {
+  const { store, agents, g } = setup();
+  store.settings.permissionMode = 'bypassPermissions';
+  store.settings.branchNamingRule = 'feature/my-task';
+  const a = agents.createCard({ title: 'A', prompt: 'a' });
+  agents.start(a.id);
+  await waitFor(() => a.status === 'review');
+  assert.strictEqual(a.branch, 'feature/my-task');
+  assert.ok(g('branch', '--list', 'feature/my-task').toString().includes('feature/my-task'));
+
+  const b = agents.createCard({ title: 'B', prompt: 'b' });
+  agents.start(b.id);
+  await waitFor(() => b.status === 'review');
+  assert.strictEqual(b.branch, 'feature/my-task-2', '同じ名前がもうあれば番号を付ける');
+
+  process.env.FAKE_BRANCH_FAIL = '1';
+  try {
+    const c = agents.createCard({ title: 'Fallback', prompt: 'c' });
+    agents.start(c.id);
+    await waitFor(() => c.status === 'review');
+    assert.strictEqual(c.branch, `agent/fallback-${c.id}`);
+    assert.ok(c.logs.some((l) => l.kind === 'error' && /命名規則/.test(l.text)));
+  } finally {
+    delete process.env.FAKE_BRANCH_FAIL;
+  }
+});
+
+test('cleanBranchName / buildBranchNamePrompt', () => {
+  const { cleanBranchName, buildBranchNamePrompt } = require('../src/agent');
+  assert.strictEqual(cleanBranchName('`feature/12-add login`'), 'feature/12-add-login');
+  assert.strictEqual(cleanBranchName('ブランチ名:\n"fix/日本語-bug..x"'), 'fix/bug.x');
+  assert.strictEqual(cleanBranchName('```\nfeat/x.lock\n```'), 'feat/x');
+  assert.strictEqual(cleanBranchName(''), '');
+  const p = buildBranchNamePrompt('feature/<番号>-<英語>', { id: 'ab12', title: '#3 ログイン', prompt: 'やって', issue: { number: 3, title: 'ログイン' } });
+  assert.match(p, /feature\/<番号>-<英語>/);
+  assert.match(p, /Issue 番号: 3/);
+  assert.match(p, /タスク ID: ab12/);
+});
