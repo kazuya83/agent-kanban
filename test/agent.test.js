@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { Store } = require('../src/store');
-const { AgentManager } = require('../src/agent');
+const { AgentManager, SKILL_SUGGEST_PROMPT } = require('../src/agent');
 const { PermissionServer } = require('../src/permission-server');
 
 const FAKE = path.join(__dirname, 'fake-claude.js');
@@ -618,4 +618,63 @@ test('マージ先のフォルダで rebase が途中なら、わかりやすく
   const p = g('rev-parse', '--git-path', 'rebase-merge').toString().trim();
   fs.mkdirSync(path.isAbsolute(p) ? p : path.join(repo, p), { recursive: true });
   await assert.rejects(agents.merge(c.id, { target: 'main' }), /rebase が途中です/);
+});
+
+test('完了（マージ済み）のタスクでも会話を続けられる: 同じ場所に worktree を作り直して同じ会話の続きから動く', async () => {
+  const { repo, agents, g } = setup();
+  const c = agents.createCard({ title: 'reopen', prompt: '最初の作業' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  const sess = c.sessionId;
+  const wt = c.worktreePath;
+  const firstBranch = c.branch;
+  await agents.merge(c.id);
+  assert.strictEqual(c.status, 'done');
+  assert.ok(!fs.existsSync(wt));
+
+  // 完了したタスクに追加指示を送る
+  agents.send(c.id, 'スキルを追加して');
+  await waitFor(() => c.status === 'review');
+  assert.strictEqual(c.worktreePath, wt, '前と同じ場所に作り直す（会話がフォルダごとに保存されているため）');
+  assert.strictEqual(c.sessionId, sess, '同じ会話の続き（--resume）');
+  assert.strictEqual(c.branch, firstBranch, 'マージ後に消したブランチ名をそのまま使う');
+  assert.strictEqual(c.baseCommit, g('rev-parse', 'main').toString().trim(), 'マージ先の最新から始める');
+  assert.match(await agents.diff(c.id), /スキルを追加して/);
+  assert.doesNotMatch(await agents.diff(c.id), /最初の作業/, '前の作業はもう取り込み済みなので差分に出ない');
+
+  // もう一度マージできる
+  await agents.merge(c.id);
+  assert.strictEqual(c.status, 'done');
+  assert.strictEqual(fs.readdirSync(repo).filter((f) => f.startsWith('out-')).length, 2);
+
+  // スキルの提案を頼む（完了したタスクからでも）
+  agents.suggestSkills(c.id);
+  await waitFor(() => c.status === 'review');
+  assert.ok(c.logs.some((l) => l.kind === 'user' && l.text === SKILL_SUGGEST_PROMPT));
+  assert.match(await agents.diff(c.id), /スキル（SKILL\.md）として残しておく/);
+});
+
+test('PR を作って完了したタスクの続きは、origin の前のブランチとぶつからない名前のブランチで動く', async () => {
+  const { tmp, store, agents, g } = setup();
+  store.settings.integration = 'pr';
+  const remote = path.join(tmp, 'remote.git');
+  execFileSync('git', ['init', '-q', '--bare', remote]);
+  g('remote', 'add', 'origin', remote);
+  g('push', '-q', 'origin', 'main');
+  const ghBin = path.join(tmp, 'gh');
+  fs.writeFileSync(ghBin, `#!/bin/sh\nif [ "$1 $2" = "pr view" ]; then echo 'no pull requests found' >&2; exit 1; fi\nif [ "$1 $2" = "pr create" ]; then echo 'https://github.com/o/r/pull/9'; exit 0; fi\nexit 1\n`, { mode: 0o755 });
+  agents.opts.ghPath = ghBin;
+
+  const c = agents.createCard({ title: 'pr reopen', prompt: 'PR向け' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  const first = c.branch;
+  await agents.createPullRequest(c.id, { keep: false });
+  assert.strictEqual(c.status, 'done');
+
+  agents.send(c.id, '続き');
+  await waitFor(() => c.status === 'review');
+  assert.strictEqual(c.branch, `${first}-2`);
+  assert.strictEqual(c.prUrl, null, '次は新しい PR を作る');
+  assert.ok(fs.existsSync(c.worktreePath));
 });

@@ -383,6 +383,8 @@ function renderDetailHead() {
       (state.board.settings.integration === 'pr'
         ? `<button class="btn primary" data-act="pr">${c.prUrl ? '⇡ PR を更新…' : '⇡ PR を作成…'}</button>`
         : `<button class="btn primary" data-act="merge">⇲ マージ…</button>`),
+    (s === 'review' || s === 'failed' || s === 'done') && c.sessionId &&
+      `<button class="btn" data-act="suggestSkills" title="この会話の作業を振り返って、スキルにしておくとよいものを Claude に提案してもらいます">💡 スキルを提案</button>`,
     c.worktreePath && `<button class="btn ghost" data-act="open">フォルダを開く</button>`,
     `<button class="btn danger" data-act="discard">${s === 'done' ? '削除' : '破棄'}</button>`,
   ].filter(Boolean);
@@ -422,11 +424,16 @@ function renderDetailHead() {
       await run(() => api.setSession(c.id, sess), v === '__new__' ? '次は新しい会話で始めます' : '次はこの会話の続きで始めます');
     };
   }
-  const canFollow = s === 'review' || s === 'failed';
+  const canFollow = canSendFollow(c);
   $('followInput').disabled = !canFollow;
   drawFollowSkill();
   $('followBtn').disabled = !canFollow;
-  $('followInput').placeholder = canFollow && c.awaitingReply ? 'Claude への回答を書く（Ctrl/⌘ + Enter で送信）' : canFollow ? '追加の指示を送る（Ctrl/⌘ + Enter で送信）。同じセッションの続きとして動きます' : s === 'todo' ? '開始すると、終わったあとに追加の指示を送れます' : 'エージェントの作業中は送れません';
+  $('followInput').placeholder =
+    canFollow && c.awaitingReply ? 'Claude への回答を書く（Ctrl/⌘ + Enter で送信）'
+    : s === 'done' ? '完了したタスクの続きを話す（Ctrl/⌘ + Enter で送信）。同じ場所に worktree を作り直して、同じ会話の続きから動きます'
+    : canFollow ? '追加の指示を送る（Ctrl/⌘ + Enter で送信）。同じセッションの続きとして動きます'
+    : s === 'todo' ? '開始すると、終わったあとに追加の指示を送れます'
+    : 'エージェントの作業中は送れません';
 }
 
 $('detailHead').addEventListener('input', (e) => {
@@ -467,6 +474,10 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'resume') run(() => api.resume(c.id), '再開しました');
   if (act === 'dismissInterrupted') run(() => api.dismissInterrupted(c.id));
   if (act === 'stop') run(() => api.stop(c.id));
+  if (act === 'suggestSkills') {
+    if (c.status === 'done' && !confirm('完了したタスクの続きとして、worktree を作り直して Claude にスキルを提案してもらいます。よろしいですか？')) return;
+    run(() => api.suggestSkills(c.id), 'スキルの提案を頼みました。返事が来たら、下の欄から追加したいものを伝えてください');
+  }
   if (act === 'open') run(() => api.open(c.id));
   if (act === 'merge') openMerge(c);
   if (act === 'pr') openPr(c);
@@ -724,9 +735,14 @@ async function renderDetailBody() {
   }
 }
 
+// 追加指示を送れる状態か（完了したタスクにも送れる。送ると worktree を作り直して続きから動く）
+function canSendFollow(c) {
+  return !!c && (c.status === 'review' || c.status === 'failed' || c.status === 'done');
+}
+
 function drawFollowSkill() {
   const c = card(state.selected);
-  const can = c && (c.status === 'review' || c.status === 'failed');
+  const can = canSendFollow(c);
   renderSkillSlot('followSkill', state.followSkill, (v) => ((state.followSkill = v), drawFollowSkill()), { disabled: !can });
 }
 
