@@ -1,4 +1,4 @@
-# Agent Kanban のインストーラー（Windows）
+# Claude Agent Kanban のインストーラー（Windows）
 #
 #   irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
 #
@@ -31,10 +31,10 @@ $p = Start-Process -FilePath $tmp -ArgumentList '/S' -Wait -PassThru
 Remove-Item $tmp -Force -ErrorAction SilentlyContinue
 if ($p.ExitCode -ne 0) { throw "インストーラーが終了コード $($p.ExitCode) で終了しました" }
 
-$exe = @('agent-kanban', 'Agent Kanban') |
-  ForEach-Object { Join-Path $env:LOCALAPPDATA "Programs\$_\Agent Kanban.exe" } |
+$exe = @('agent-kanban', 'claude-agent-kanban', 'Claude Agent Kanban') |
+  ForEach-Object { Join-Path $env:LOCALAPPDATA "Programs\$_\Claude Agent Kanban.exe" } |
   Where-Object { Test-Path $_ } | Select-Object -First 1
-Info "インストールしました（$($release.tag_name)）。スタートメニューの「Agent Kanban」から起動できます。"
+Info "インストールしました（$($release.tag_name)）。スタートメニューの「Claude Agent Kanban」から起動できます。"
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Warn 'git が見つかりません。Git for Windows をインストールしてください: https://git-scm.com/' }
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Warn 'claude が見つかりません。Claude Code をインストールしてログインしてください: https://docs.claude.com/en/docs/claude-code' }

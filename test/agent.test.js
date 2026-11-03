@@ -135,3 +135,37 @@ test('claude が見つからないとエラー列に入る', async () => {
   await waitFor(() => c.status === 'failed');
   assert.match(c.error, /見つかりません/);
 });
+
+test('指定したブランチへマージ（チェックアウトしていないブランチ・続ける・新しいブランチ）', async () => {
+  const { repo, store, agents, g } = setup();
+  store.settings.permissionMode = 'bypassPermissions'; // 承認なし（MCP なし）で走らせる
+  g('branch', 'develop');
+  const c = agents.createCard({ title: 'feature', prompt: 'develop向け' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+
+  // develop はどこにもチェックアウトしていない → 一時 worktree でマージ。main と作業フォルダは変わらない
+  const mainBefore = g('rev-parse', 'main').toString().trim();
+  await agents.merge(c.id, { target: 'develop', keep: true });
+  assert.strictEqual(c.status, 'review', 'keep なのでレビューに残る');
+  assert.ok(fs.existsSync(c.worktreePath));
+  assert.strictEqual(g('rev-parse', 'main').toString().trim(), mainBefore);
+  assert.match(g('log', '--oneline', 'develop').toString(), /Merge agent task: feature/);
+  assert.ok(!g('worktree', 'list').toString().includes('_merge-'), '一時 worktree は消える');
+  assert.deepStrictEqual(c.mergedInto, ['develop']);
+
+  // 存在しないブランチはエラー
+  await assert.rejects(agents.merge(c.id, { target: 'nope' }), /見つかりません/);
+
+  // チェックアウト中のブランチ（main）に未コミットの変更があるとエラー
+  fs.writeFileSync(path.join(repo, 'README.md'), 'dirty\n');
+  await assert.rejects(agents.merge(c.id, { target: 'main' }), /未コミット/);
+  g('checkout', '--', 'README.md');
+
+  // 新しいブランチを作ってマージ → 完了
+  await agents.merge(c.id, { target: 'release/1.0', createNew: true });
+  assert.strictEqual(c.status, 'done');
+  assert.match(g('log', '--oneline', 'release/1.0').toString(), /Merge agent task: feature/);
+  assert.strictEqual(g('rev-parse', 'main').toString().trim(), mainBefore, 'main は触らない');
+  assert.deepStrictEqual(c.mergedInto, ['develop', 'release/1.0']);
+});

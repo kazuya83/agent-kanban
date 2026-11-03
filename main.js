@@ -22,7 +22,7 @@ function createWindow() {
     height: 900,
     minWidth: 960,
     minHeight: 600,
-    title: 'Agent Kanban',
+    title: 'Claude Agent Kanban',
     backgroundColor: '#0f1115',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -136,7 +136,7 @@ app.whenReady().then(async () => {
   handle('card:send', ({ id, message }) => agents.send(id, message));
   handle('card:logs', (id) => agents.logs(id));
   handle('card:diff', (id) => agents.diff(id));
-  handle('card:merge', (id) => agents.merge(id));
+  handle('card:merge', ({ id, target, createNew, keep }) => agents.merge(id, { target, createNew, keep }));
   handle('card:discard', (id) => agents.discard(id));
   handle('card:permission', ({ id, reqId, decision, message }) => agents.answerPermission(id, reqId, decision, message));
   handle('card:open', async (id) => {

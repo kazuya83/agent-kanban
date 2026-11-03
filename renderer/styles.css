@@ -208,3 +208,5 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .toast.ok { border-color: var(--ok); }
 
 .env-banner { padding: 8px 16px; background: color-mix(in srgb, var(--warn) 15%, var(--panel)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); color: var(--text); font-size: 12.5px; display: flex; flex-direction: column; gap: 2px; }
+.small { font-size: 12px; }
+.modal-box code { font-family: var(--mono); font-size: 12px; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }

@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld('api', {
   send: (id, message) => call('card:send', { id, message }),
   logs: (id) => call('card:logs', id),
   diff: (id) => call('card:diff', id),
-  merge: (id) => call('card:merge', id),
+  merge: (id, opts) => call('card:merge', { id, ...(opts || {}) }),
   discard: (id) => call('card:discard', id),
   answerPermission: (id, reqId, decision, message) => call('card:permission', { id, reqId, decision, message }),
   open: (id) => call('card:open', id),

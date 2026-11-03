@@ -180,14 +180,14 @@ function closeDetail() {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow]);
+  const sig = JSON.stringify([c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
   const btns = [
     s === 'todo' && `<button class="btn primary" data-act="start">▶ 開始</button>`,
     (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">■ 停止</button>`,
-    (s === 'review' || s === 'failed') && c.worktreePath && `<button class="btn primary" data-act="merge">⇲ ${esc(c.baseBranch)} にマージ</button>`,
+    (s === 'review' || s === 'failed') && c.worktreePath && `<button class="btn primary" data-act="merge">⇲ マージ…</button>`,
     c.worktreePath && `<button class="btn ghost" data-act="open">フォルダを開く</button>`,
     `<button class="btn danger" data-act="discard">${s === 'done' ? '削除' : '破棄'}</button>`,
   ].filter(Boolean);
@@ -200,6 +200,7 @@ function renderDetailHead() {
     <dl class="d-meta">
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
       ${c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''}
+      ${(c.mergedInto || []).length ? `<dt>マージ済み</dt><dd>${c.mergedInto.map(esc).join(', ')}</dd>` : ''}
       ${c.costUsd ? `<dt>コスト</dt><dd>$${c.costUsd.toFixed(3)}</dd>` : ''}
       ${(c.alwaysAllow || []).length ? `<dt>常に許可</dt><dd>${c.alwaysAllow.map(esc).join(', ')}</dd>` : ''}
     </dl>
@@ -226,9 +227,7 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'start') run(() => api.start(c.id));
   if (act === 'stop') run(() => api.stop(c.id));
   if (act === 'open') run(() => api.open(c.id));
-  if (act === 'merge') {
-    if (confirm(`「${c.title}」の変更を ${c.baseBranch} にマージして、worktree を削除しますか？`)) await run(() => api.merge(c.id), 'マージしました');
-  }
+  if (act === 'merge') openMerge(c);
   if (act === 'discard') {
     const msg = c.status === 'done' ? `「${c.title}」をボードから削除しますか？` : `「${c.title}」を破棄しますか？\nworktree とブランチ ${c.branch || ''} も削除され、元に戻せません。`;
     if (confirm(msg)) {
@@ -351,6 +350,55 @@ function newTask() {
       $('nPrompt').addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit();
       });
+    },
+  );
+}
+
+// マージ先を選ぶダイアログ
+async function openMerge(c) {
+  const info = (await run(() => api.repoInfo())) || { branches: [], current: '' };
+  const others = info.branches.filter((b) => b !== c.branch);
+  const normal = others.filter((b) => !b.startsWith('agent/'));
+  const agentBranches = others.filter((b) => b.startsWith('agent/'));
+  const def = c.lastMergeTarget && others.includes(c.lastMergeTarget) ? c.lastMergeTarget : c.baseBranch;
+  const opt = (b) => `<option value="${esc(b)}" ${b === def ? 'selected' : ''}>${esc(b)}${b === c.baseBranch ? '（ベース）' : ''}${b === info.current ? '（チェックアウト中）' : ''}</option>`;
+  openModal(
+    `<h2>マージ</h2>
+     <p class="muted">「${esc(c.title)}」のブランチ <code>${esc(c.branch)}</code> を、選んだブランチにマージします（--no-ff）。</p>
+     <label class="field"><span>マージ先のブランチ</span>
+       <select id="mTarget">
+         ${normal.map(opt).join('')}
+         ${agentBranches.length ? `<optgroup label="ほかのタスクのブランチ">${agentBranches.map(opt).join('')}</optgroup>` : ''}
+         <option value="__new__">＋ 新しいブランチを作ってマージ…</option>
+       </select></label>
+     <label class="field hidden" id="mNewWrap"><span>新しいブランチの名前（${esc(c.baseBranch)} から作ります）</span><input id="mNew" placeholder="例: feature/login-improvements" /></label>
+     <label class="check"><input type="checkbox" id="mKeep" /> マージ後もタスクを続ける（worktree とブランチを残す）</label>
+     <p class="muted small" id="mHint"></p>
+     <div class="modal-actions"><button class="btn ghost" id="mCancel">キャンセル</button><button class="btn primary" id="mOk">マージ</button></div>`,
+    () => {
+      const update = () => {
+        const isNew = $('mTarget').value === '__new__';
+        $('mNewWrap').classList.toggle('hidden', !isNew);
+        const t = isNew ? $('mNew').value.trim() || '（新しいブランチ）' : $('mTarget').value;
+        $('mHint').textContent = $('mKeep').checked
+          ? `${t} にマージしたあとも、このタスクはレビュー列に残ります。続けて追加指示を送ったり、別のブランチにマージしたりできます。`
+          : `${t} にマージしたあと、worktree とブランチ ${c.branch} を削除して「完了」にします。`;
+        if (isNew) $('mNew').focus();
+      };
+      $('mTarget').onchange = update;
+      $('mKeep').onchange = update;
+      $('mNew').oninput = update;
+      update();
+      $('mCancel').onclick = closeModal;
+      $('mOk').onclick = async () => {
+        const isNew = $('mTarget').value === '__new__';
+        const target = isNew ? $('mNew').value.trim() : $('mTarget').value;
+        if (!target) return toast('ブランチ名を入力してください');
+        $('mOk').disabled = true;
+        const ok = await run(() => api.merge(c.id, { target, createNew: isNew, keep: $('mKeep').checked }).then(() => true), `${target} にマージしました`);
+        $('mOk').disabled = false;
+        if (ok) closeModal();
+      };
     },
   );
 }

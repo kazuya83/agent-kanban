@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Agent Kanban のインストーラー（macOS / Linux）
+# Claude Agent Kanban のインストーラー（macOS / Linux）
 #
 #   curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash
 #
@@ -8,7 +8,7 @@
 set -euo pipefail
 
 REPO="kazuya83/agent-kanban"
-APP_NAME="Agent Kanban"
+APP_NAME="Claude Agent Kanban"
 VERSION="${AGENT_KANBAN_VERSION:-latest}"
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -29,7 +29,7 @@ if [ "${1:-}" = "--uninstall" ]; then
         [ -d "$d/$APP_NAME.app" ] && { rm -rf "$d/$APP_NAME.app"; info "$d/$APP_NAME.app を削除しました"; }
       done ;;
     Linux)
-      rm -f "$HOME/.local/bin/agent-kanban" "$HOME/.local/share/applications/agent-kanban.desktop" "$HOME/.local/share/icons/agent-kanban.png"
+      rm -f "$HOME/.local/bin/claude-agent-kanban" "$HOME/.local/share/applications/claude-agent-kanban.desktop" "$HOME/.local/share/icons/claude-agent-kanban.png"
       info "削除しました" ;;
   esac
   info "ボードのデータ（userData フォルダ）は残しています。不要なら手動で削除してください。"
@@ -90,19 +90,19 @@ case "$os" in
   Linux)
     bin="$HOME/.local/bin"
     mkdir -p "$bin" "$HOME/.local/share/applications" "$HOME/.local/share/icons"
-    install -m 755 "$file" "$bin/agent-kanban"
-    curl -fsSL -o "$HOME/.local/share/icons/agent-kanban.png" "https://raw.githubusercontent.com/$REPO/main/build/icon.png" || true
-    cat > "$HOME/.local/share/applications/agent-kanban.desktop" <<EOF
+    install -m 755 "$file" "$bin/claude-agent-kanban"
+    curl -fsSL -o "$HOME/.local/share/icons/claude-agent-kanban.png" "https://raw.githubusercontent.com/$REPO/main/build/icon.png" || true
+    cat > "$HOME/.local/share/applications/claude-agent-kanban.desktop" <<EOF
 [Desktop Entry]
 Name=$APP_NAME
-Exec=$bin/agent-kanban %U
-Icon=$HOME/.local/share/icons/agent-kanban.png
+Exec=$bin/claude-agent-kanban %U
+Icon=$HOME/.local/share/icons/claude-agent-kanban.png
 Type=Application
 Categories=Development;
 EOF
-    info "インストールしました: $bin/agent-kanban（$tag）"
+    info "インストールしました: $bin/claude-agent-kanban（$tag）"
     case ":$PATH:" in *":$bin:"*) ;; *) warn "$bin が PATH に入っていません。シェルの設定に追加してください。" ;; esac
-    run_hint="agent-kanban"
+    run_hint="claude-agent-kanban"
     ;;
 esac
 

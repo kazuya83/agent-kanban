@@ -481,28 +481,77 @@ class AgentManager extends EventEmitter {
     return c.finalDiff || '';
   }
 
-  async merge(id) {
+  /**
+   * 指定したブランチにマージする
+   * @param {string} id
+   * @param {{ target?: string, createNew?: boolean, keep?: boolean }} opts
+   *   target: マージ先（省略時はベースブランチ）
+   *   createNew: target を新しく作る（ベースブランチから分岐）
+   *   keep: マージ後も worktree とブランチを残してタスクを続ける
+   */
+  async merge(id, opts = {}) {
     const c = this.must(id);
     if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけマージできます');
     if (!c.worktreePath) throw new Error('worktree がありません');
+    if (this.merging?.has(id)) throw new Error('マージ中です');
     const top = c.repoPath;
-    await git.commitAll(c.worktreePath, `agent: ${c.title}`);
-    const cur = await git.currentBranch(top);
-    if (cur !== c.baseBranch) {
-      throw new Error(`メインのリポジトリが ${c.baseBranch} ではなく ${cur} になっています。${c.baseBranch} に切り替えてからマージしてください。`);
+    const target = String(opts.target || c.baseBranch || '').trim();
+    if (!target) throw new Error('マージ先のブランチを指定してください');
+    if (target === c.branch) throw new Error('タスク自身のブランチにはマージできません');
+
+    this.merging = this.merging || new Set();
+    this.merging.add(id);
+    try {
+      await git.commitAll(c.worktreePath, `agent: ${c.title}`);
+      if (opts.createNew) {
+        await git.checkBranchName(top, target);
+        if (await git.branchExists(top, target)) throw new Error(`ブランチ ${target} はもうあります。一覧から選んでください`);
+        await git.createBranch(top, target, c.baseBranch);
+        this.log(c, 'system', `ブランチ ${target} を ${c.baseBranch} から作成しました`);
+      } else if (!(await git.branchExists(top, target))) {
+        throw new Error(`ブランチ ${target} が見つかりません`);
+      }
+
+      const finalDiff = await git.diff(c.worktreePath, c.baseCommit);
+      const ahead = await git.countCommits(top, `${target}..${c.branch}`);
+      if (ahead > 0) {
+        // target をチェックアウトしている場所でマージする。どこにもなければ一時的な worktree を使い、
+        // 自分の作業中のフォルダには触らない
+        let dir = await git.worktreeForBranch(top, target);
+        let temp = null;
+        if (dir) {
+          if (await git.isDirty(dir)) throw new Error(`${target} をチェックアウトしている ${dir} に未コミットの変更があります。コミットするか退避してからマージしてください。`);
+        } else {
+          temp = path.join(path.dirname(c.worktreePath), `_merge-${c.id}-${Date.now()}`);
+          await git.addWorktreeForBranch(top, temp, target);
+          dir = temp;
+        }
+        try {
+          await git.merge(dir, c.branch, `Merge agent task: ${c.title}`, target);
+        } finally {
+          if (temp) await git.removeWorktree(top, temp);
+        }
+        this.log(c, 'system', `${target} にマージしました`);
+      } else {
+        this.log(c, 'system', `${target} にはもう取り込まれているので、マージする変更はありませんでした`);
+      }
+      c.mergedInto = [...new Set([...(c.mergedInto || []), target])];
+      c.lastMergeTarget = target;
+
+      if (opts.keep) {
+        this.changed(c);
+        return;
+      }
+      await git.removeWorktree(top, c.worktreePath);
+      await git.deleteBranch(top, c.branch);
+      c.finalDiff = truncate(finalDiff, 300000);
+      c.worktreePath = null;
+      c.status = 'done';
+      c.mergedAt = Date.now();
+      this.changed(c);
+    } finally {
+      this.merging.delete(id);
     }
-    if (await git.isDirty(top)) throw new Error('メインのリポジトリに未コミットの変更があります。コミットするか退避してからマージしてください。');
-    const finalDiff = await git.diff(c.worktreePath, c.baseCommit);
-    const ahead = await git.countCommits(top, `${c.baseBranch}..${c.branch}`);
-    if (ahead > 0) await git.merge(top, c.branch, `Merge agent task: ${c.title}`);
-    this.log(c, 'system', ahead > 0 ? `${c.baseBranch} にマージしました` : 'マージする変更はありませんでした');
-    await git.removeWorktree(top, c.worktreePath);
-    await git.deleteBranch(top, c.branch);
-    c.finalDiff = truncate(finalDiff, 300000);
-    c.worktreePath = null;
-    c.status = 'done';
-    c.mergedAt = Date.now();
-    this.changed(c);
   }
 
   async discard(id) {

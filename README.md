@@ -1,4 +1,4 @@
-# Agent Kanban
+# Claude Agent Kanban
 
 Claude Code のタスクをカンバンボードで管理するデスクトップアプリ（Electron）です。タスクごとに **git worktree** を作り、複数のエージェントを **並列** に動かします。許可が必要な操作は **カード上でそのまま承認** できます。
 
@@ -15,9 +15,14 @@ Claude Code のタスクをカンバンボードで管理するデスクトッ�
 ![詳細パネル：承認待ちの内容とログ](docs/detail-permission.png)
 
 ### 詳細パネル（差分・マージ）
-レビュー列のカードでは、ベースブランチからの差分を見てからマージできます。
+レビュー列のカードでは、ベースブランチからの差分を見てからマージできます。マージ先は、好きなブランチを選べます（新しく作ることもできます）。
 
 ![詳細パネル：差分タブとマージボタン](docs/detail-diff.png)
+
+### マージ先を選ぶ
+「マージ…」を押すと、マージ先のブランチを選べます。新しいブランチを作ったり、マージしたあともタスクを続けたりもできます。
+
+![マージ先のブランチを選ぶダイアログ](docs/merge-dialog.png)
 
 ## できること
 
@@ -29,7 +34,10 @@ Claude Code のタスクをカンバンボードで管理するデスクトッ�
   - 差分: ベースブランチからの git diff
   - 指示: 最初の指示（開始前なら編集できます）
   - 追加指示: 同じセッションの続きとして動きます（`--resume`）
-- **マージ / 破棄**: ボタン1つでベースブランチにマージ（`--no-ff`）するか、worktree とブランチをまとめて削除します
+- **マージ / 破棄**: 好きなブランチにマージ（`--no-ff`）するか、worktree とブランチをまとめて削除します
+  - マージ先は一覧から選ぶか、その場で新しいブランチを作れます（初期値はベースブランチ）
+  - マージ先をどこにもチェックアウトしていなければ、一時的な worktree の中でマージするので、手元の作業フォルダは変わりません
+  - 「マージ後もタスクを続ける」を選ぶと、worktree とブランチを残したままにします。たとえば `develop` に入れて確かめてから、あとで `main` にもマージできます
 - **同時実行数の上限**: 上限を超えたカードは待機中になり、空きができると順番に起動します
 
 ## インストール
@@ -43,7 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.
 ```
 
 - Mac: Apple Silicon か Intel かを見分けて、`/Applications` にインストールします。署名していないアプリで出る警告も、自動で出ないようにします
-- Linux: `~/.local/bin/agent-kanban` に AppImage を置き、アプリのメニューにも登録します
+- Linux: `~/.local/bin/claude-agent-kanban` に AppImage を置き、アプリのメニューにも登録します
 
 **Windows**（PowerShell で実行）
 
@@ -51,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.
 irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
 ```
 
-最新のインストーラーをダウンロードして画面を出さずにインストールし、そのまま起動します。スタートメニューにも「Agent Kanban」が追加されます。
+最新のインストーラーをダウンロードして画面を出さずにインストールし、そのまま起動します。スタートメニューにも「Claude Agent Kanban」が追加されます。
 
 アップデートするときも、同じコマンドをもう一度実行するだけです。
 
@@ -70,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.
 $env:AGENT_KANBAN_VERSION = "0.1.0"; irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
 ```
 
-Windows でアンインストールするときは、「設定 → アプリ」から「Agent Kanban」を削除します。
+Windows でアンインストールするときは、「設定 → アプリ」から「Claude Agent Kanban」を削除します。
 
 </details>
 
@@ -80,15 +88,15 @@ Windows でアンインストールするときは、「設定 → アプリ」�
 
 | OS | ファイル | 使い方 |
 | --- | --- | --- |
-| Windows | `agent-kanban-x.y.z-win-setup.exe` | インストーラー。ダブルクリックしてインストールします |
-| Windows | `agent-kanban-x.y.z-win-portable.exe` | インストールせず、そのまま起動できます |
-| Mac（Apple Silicon: M1〜） | `agent-kanban-x.y.z-mac-arm64.dmg` | 開いて、アプリを「アプリケーション」にドラッグします |
-| Mac（Intel） | `agent-kanban-x.y.z-mac-x64.dmg` | 同上 |
-| Linux | `agent-kanban-x.y.z-linux-x86_64.AppImage` | 実行権限を付けて起動します |
+| Windows | `claude-agent-kanban-x.y.z-win-setup.exe` | インストーラー。ダブルクリックしてインストールします |
+| Windows | `claude-agent-kanban-x.y.z-win-portable.exe` | インストールせず、そのまま起動できます |
+| Mac（Apple Silicon: M1〜） | `claude-agent-kanban-x.y.z-mac-arm64.dmg` | 開いて、アプリを「アプリケーション」にドラッグします |
+| Mac（Intel） | `claude-agent-kanban-x.y.z-mac-x64.dmg` | 同上 |
+| Linux | `claude-agent-kanban-x.y.z-linux-x86_64.AppImage` | 実行権限を付けて起動します |
 
 > **初めて起動するときの注意**
 > 開発元の証明書で署名していないので、OS の警告が出ます。
-> - **Mac**: 「開発元を検証できません」と出たら、アプリを右クリックして「開く」を選びます。それでも開けないときは、ターミナルで `xattr -cr "/Applications/Agent Kanban.app"` を実行してください
+> - **Mac**: 「開発元を検証できません」と出たら、アプリを右クリックして「開く」を選びます。それでも開けないときは、ターミナルで `xattr -cr "/Applications/Claude Agent Kanban.app"` を実行してください
 > - **Windows**: 「Windows によって PC が保護されました」と出たら、「詳細情報」→「実行」を押します
 
 アプリとは別に、**git** と **Claude Code**（ログイン済み）が必要です。アプリは、ターミナルの PATH にある `claude` を自動で探します。見つからないときは、画面の上に案内が出ます（⚙ 設定でフルパスを指定することもできます）。
@@ -114,7 +122,7 @@ npm start
 1. 「リポジトリを選ぶ」から、作業させたい git リポジトリを選びます（コミットが1つ以上必要です）
 2. 「＋ 新しいタスク」から指示を書いて作成します
 3. 承認待ちになったら、カードの「許可」を押します
-4. レビュー列に移ったら、差分を確認して「マージ」か「破棄」を押します
+4. レビュー列に移ったら、差分を確認して「マージ」（マージ先のブランチを選びます）か「破棄」を押します
 
 ### アプリをビルドする
 
@@ -133,22 +141,16 @@ npm run dist:linux
 `dist/` に出力されます。Mac 用は macOS 上で、Windows 用は Windows 上でビルドしてください（Linux から Windows 用をビルドするには Wine が必要です）。
 
 GitHub Actions でも自動でビルドします（`.github/workflows/build.yml`）。
-- **main に push したとき**: 3つの OS でビルドし、Actions の実行結果ページの「Artifacts」から、できたファイルをダウンロードできます
-- **`v` から始まるタグを push したとき**: ビルドして、[Releases](https://github.com/kazuya83/agent-kanban/releases) に添付します
+- **push したとき**: 3つの OS でビルドし、Actions の実行結果ページの「Artifacts」から、できたファイルをダウンロードできます
+- **main に push したとき**: `package.json` の `version` のリリースがまだなければ、タグ（例: `v0.1.0`）と [Release](https://github.com/kazuya83/agent-kanban/releases) を自動で作り、ファイルを添付します
 
-```bash
-git tag v0.1.0
-```
-
-```bash
-git push origin v0.1.0
-```
+新しいバージョンを出すときは、`package.json` の `version` を上げて main に push するだけです。インストール用のコマンドは、いつも最新の Release を入れます。
 
 ## 設定（⚙）
 
 | 項目 | 説明 |
 | --- | --- |
-| ベースブランチ | worktree の作成元で、マージ先にもなるブランチ。空ならチェックアウト中のブランチ |
+| ベースブランチ | worktree の作成元。マージ先の初期値にもなります。空ならチェックアウト中のブランチ |
 | 権限モード | `acceptEdits`（ファイル編集は自動、コマンドは承認）がおすすめ。`default` にすると、すべての操作をカードで承認します |
 | 最初から許可しておくツール | `--allowedTools` に渡します。例: `Bash(npm test:*), WebSearch` |
 | 同時に動かす数 | 1〜10 |
@@ -177,7 +179,7 @@ Electron メインプロセス
 
 ## 注意
 
-- マージするときは、メインのリポジトリでベースブランチをチェックアウトし、未コミットの変更がない状態にしておいてください。コンフリクトしたらマージを中止して、そのことを知らせます
+- マージ先のブランチをどこかでチェックアウトしている場合は、そのフォルダに未コミットの変更がない状態にしておいてください。コンフリクトしたらマージを中止して、そのことを知らせます
 - アプリを終了すると、実行中のエージェントも止まります。次に起動したときはエラー列に入っているので、追加指示を送れば続きから再開できます
 
 ## 開発

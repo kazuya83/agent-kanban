@@ -20,8 +20,8 @@
   },
   "build": {
     "appId": "dev.agentkanban.app",
-    "productName": "Agent Kanban",
-    "artifactName": "agent-kanban-${version}-${os}-${arch}.${ext}",
+    "productName": "Claude Agent Kanban",
+    "artifactName": "claude-agent-kanban-${version}-${os}-${arch}.${ext}",
     "files": ["main.js", "preload.js", "src/**", "renderer/**"],
     "asarUnpack": ["src/permission-mcp.js"],
     "directories": {
@@ -36,7 +36,7 @@
       "gatekeeperAssess": false
     },
     "dmg": {
-      "artifactName": "agent-kanban-${version}-mac-${arch}.${ext}"
+      "artifactName": "claude-agent-kanban-${version}-mac-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -48,10 +48,10 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "agent-kanban-${version}-win-setup.${ext}"
+      "artifactName": "claude-agent-kanban-${version}-win-setup.${ext}"
     },
     "portable": {
-      "artifactName": "agent-kanban-${version}-win-portable.${ext}"
+      "artifactName": "claude-agent-kanban-${version}-win-portable.${ext}"
     },
     "linux": {
       "target": ["AppImage"],

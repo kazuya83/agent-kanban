@@ -50,7 +50,7 @@ async function identityArgs(cwd) {
   } catch {
     /* 未設定 */
   }
-  return ['-c', 'user.name=Agent Kanban', '-c', 'user.email=agent-kanban@localhost'];
+  return ['-c', 'user.name=Claude Agent Kanban', '-c', 'user.email=agent-kanban@localhost'];
 }
 
 async function addWorktree(repo, wtPath, branch, baseCommit) {
@@ -90,13 +90,50 @@ async function countCommits(repo, range) {
   return parseInt((await git(repo, ['rev-list', '--count', range])).trim(), 10) || 0;
 }
 
-async function merge(repo, branch, message) {
+// cwd でチェックアウトしているブランチに branch をマージする
+async function merge(cwd, branch, message, target) {
   try {
-    await git(repo, [...(await identityArgs(repo)), 'merge', '--no-ff', '-m', message, branch]);
+    await git(cwd, [...(await identityArgs(cwd)), 'merge', '--no-ff', '-m', message, branch]);
   } catch (err) {
-    await git(repo, ['merge', '--abort']).catch(() => {});
-    throw new Error(`マージでコンフリクトが起きたため中止しました。追加指示で ${branch} を最新のベースに合わせるよう頼むか、手動でマージしてください。\n${err.message}`);
+    await git(cwd, ['merge', '--abort']).catch(() => {});
+    throw new Error(`${target || 'マージ先'} へのマージでコンフリクトが起きたため中止しました。追加指示で「${target || 'マージ先'} を取り込んでコンフリクトを解消して」と頼むか、手動でマージしてください。\n${err.message}`);
   }
+}
+
+async function branchExists(repo, name) {
+  try {
+    await git(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function checkBranchName(repo, name) {
+  try {
+    await git(repo, ['check-ref-format', '--branch', name]);
+  } catch {
+    throw new Error(`「${name}」はブランチ名に使えません`);
+  }
+}
+
+async function createBranch(repo, name, startPoint) {
+  await git(repo, ['branch', name, startPoint]);
+}
+
+// branch をチェックアウトしている worktree のパス（なければ null）
+async function worktreeForBranch(repo, branch) {
+  const out = await git(repo, ['worktree', 'list', '--porcelain']);
+  let current = null;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) current = line.slice('worktree '.length);
+    else if (line === `branch refs/heads/${branch}`) return current;
+  }
+  return null;
+}
+
+async function addWorktreeForBranch(repo, wtPath, branch) {
+  await git(repo, ['worktree', 'add', wtPath, branch]);
 }
 
 // ベースコミットからの差分（コミット済み＋未コミット＋未追跡ファイル）
@@ -125,5 +162,10 @@ module.exports = {
   commitAll,
   countCommits,
   merge,
+  branchExists,
+  checkBranchName,
+  createBranch,
+  worktreeForBranch,
+  addWorktreeForBranch,
   diff,
 };
