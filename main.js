@@ -49,7 +49,7 @@ function send(channel, payload) {
 }
 
 function boardState() {
-  return { settings: store.settings, cards: agents.publicCards(store.settings.repoPath) };
+  return { settings: store.settings, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath) };
 }
 
 let boardTimer = null;

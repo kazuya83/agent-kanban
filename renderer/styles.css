@@ -95,6 +95,7 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .repo:hover { border-color: var(--accent); }
 .spacer { flex: 1; }
 .pill { background: var(--panel-2); border: 1px solid var(--line); padding: 3px 10px; border-radius: 999px; color: var(--muted); }
+.pill.cost { font-family: var(--mono); color: var(--text); }
 
 /* レイアウト */
 .layout { flex: 1; display: flex; min-height: 0; }
