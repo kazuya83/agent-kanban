@@ -86,6 +86,49 @@ function splitList(s) {
     .filter(Boolean);
 }
 
+// 設定の「ブランチの命名規則」（自然言語）から、Claude にブランチ名を考えてもらうときの指示
+function buildBranchNamePrompt(rule, c) {
+  const lines = [
+    'git のブランチ名を1つだけ考えてください。次の「命名規則」に従ってください。',
+    '',
+    '## 命名規則',
+    String(rule).trim(),
+    '',
+    '## タスク',
+    `- タイトル: ${c.issue ? c.issue.title : c.title}`,
+  ];
+  if (c.issue) lines.push(`- GitHub Issue 番号: ${c.issue.number}`);
+  lines.push(`- タスク ID: ${c.id}`, `- 指示（抜粋）: ${truncate(String(c.prompt || '').replace(/\s+/g, ' '), 400)}`);
+  lines.push(
+    '',
+    '## 出力のルール',
+    '- ブランチ名だけを1行で出力してください（説明・引用符・コードブロックは付けない）',
+    '- 使える文字は英小文字・数字・「-」「_」「/」「.」だけにしてください。日本語のタイトルは短い英語にしてください',
+    '- 命名規則に書かれていないことは、短く分かりやすい名前にしてください',
+  );
+  return lines.join('\n');
+}
+
+// Claude の返事からブランチ名を取り出して、使えない文字を落とす
+function cleanBranchName(text) {
+  const line = String(text || '')
+    .split('\n')
+    .map((l) => l.trim().replace(/^`+|`+$/g, '').replace(/^["'「]+|["'」]+$/g, '').trim())
+    .filter((l) => l && !l.startsWith('```'))
+    .pop();
+  if (!line) return '';
+  return line
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Za-z0-9._/-]+/g, '')
+    .replace(/\/{2,}/g, '/')
+    .replace(/-{2,}/g, '-')
+    .replace(/\.{2,}/g, '.')
+    .replace(/\/[-.]+/g, '/')
+    .replace(/^[-./]+|[-./]+$/g, '')
+    .replace(/\.lock$/, '')
+    .slice(0, 100);
+}
+
 function killTree(child) {
   if (!child || child.exitCode !== null) return;
   if (process.platform === 'win32') {
@@ -633,6 +676,24 @@ class AgentManager extends EventEmitter {
     if (base === 'HEAD') throw new Error('ベースブランチが決まりません（detached HEAD）。設定でベースブランチを指定してください');
     const baseCommit = await git.revParse(top, base);
     let branch = c.issue ? `agent/issue-${c.issue.number}-${c.id}` : `agent/${slugify(c.title)}-${c.id}`;
+    const rule = String(this.store.settings.branchNamingRule || '').trim();
+    if (rule) {
+      // 続きのときは前と同じ名前から番号を付けていく
+      const prev = c.reopenFrom !== undefined && c.namedBranch ? c.namedBranch : null;
+      try {
+        const named = prev || (await this.generateBranchName(c, rule, top));
+        await git.checkBranchName(top, named);
+        branch = named;
+        c.namedBranch = named;
+      } catch (err) {
+        this.log(c, 'error', `命名規則からブランチ名を決められなかったので、いつもの名前にします: ${err.message}`);
+      }
+    }
+    if (c.namedBranch && branch === c.namedBranch && c.reopenFrom === undefined) {
+      // 命名規則の名前がもう使われていたら、番号を付けてぶつからないようにする
+      const stem = branch;
+      for (let n = 2; await git.branchExists(top, branch); n++) branch = `${stem}-${n}`;
+    }
     if (c.reopenFrom !== undefined) {
       // 続きのときは、前のブランチ（origin に PR として残っていることもある）とぶつからない名前にする
       const stem = branch;
@@ -655,6 +716,48 @@ class AgentManager extends EventEmitter {
     }
     this.log(c, 'system', `worktree を作成しました: ${wt}（ブランチ ${branch} / ベース ${base}）`);
     this.changed(c);
+  }
+
+  /**
+   * 設定の命名規則（自然言語）に従ったブランチ名を、claude に1回だけ聞いて決める
+   * @returns {Promise<string>}
+   */
+  generateBranchName(c, rule, cwd) {
+    const s = this.store.settings;
+    const cmd = s.claudePath || 'claude';
+    const resolved = resolveCommand(cmd);
+    if (!resolved) return Promise.reject(new Error(notFoundMessage(cmd)));
+    this.log(c, 'system', '命名規則に従ってブランチ名を考えてもらっています…');
+    const args = ['-p', '--output-format', 'text', '--permission-mode', 'default'];
+    if (s.model) args.push('--model', s.model);
+    const useShell = isWin && /\.(cmd|bat)$/i.test(resolved);
+    const quote = (a) => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
+    return new Promise((resolve, reject) => {
+      const child = spawn(useShell ? quote(resolved) : resolved, useShell ? args.map(quote) : args, { cwd, shell: useShell, windowsHide: true });
+      let out = '';
+      let err = '';
+      const timer = setTimeout(() => {
+        killTree(child);
+        reject(new Error('時間がかかりすぎました'));
+      }, 120000);
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', (d) => (out += d));
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (d) => (err += d));
+      child.stdin.on('error', () => {});
+      child.on('error', (e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (code !== 0) return reject(new Error(truncate(err.trim() || out.trim() || `claude が終了コード ${code} で終わりました`, 300)));
+        const name = cleanBranchName(out);
+        if (!name) return reject(new Error('ブランチ名が返ってきませんでした'));
+        resolve(name);
+      });
+      child.stdin.end(buildBranchNamePrompt(rule, c));
+    });
   }
 
   writeMcpConfig(c) {
@@ -1553,4 +1656,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, isChat };
+module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, isChat, cleanBranchName, buildBranchNamePrompt };

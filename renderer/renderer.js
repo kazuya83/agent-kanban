@@ -1407,6 +1407,9 @@ async function openSettings() {
          <option value="pr" ${s.integration === 'pr' ? 'selected' : ''}>PR を作成する（origin に push して gh pr create）</option>
        </select>
        <small>レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。</small></label>
+     <label class="field"><span>ブランチの命名規則（自然言語で書けます）</span>
+       <textarea id="sBranchRule" rows="2" placeholder="例: feature/<Issue番号>-<内容を表す短い英語> にする。Issue がないときは feature/<内容を表す短い英語>">${esc(s.branchNamingRule || '')}</textarea>
+       <small>書いておくと、タスクの開始時に Claude がこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。</small></label>
      <div class="field">
        <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> Issue のステータスを自動で変える（GitHub Projects）</label>
        <small>Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。</small>
@@ -1446,6 +1449,7 @@ async function openSettings() {
           api.updateSettings({
             baseBranch: $('sBase').value,
             integration: $('sIntegration').value,
+            branchNamingRule: $('sBranchRule').value.trim(),
             permissionMode: $('sMode').value,
             allowedTools: $('sAllowed').value,
             maxParallel: $('sMax').value,
