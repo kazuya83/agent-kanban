@@ -299,6 +299,146 @@ function diffHtml(text) {
       .join('\n')}${lines.length > shown.length ? `\n… ほか ${lines.length - shown.length} 行` : ''}</pre>`;
 }
 
+// ---------------- worktree タブ ----------------
+
+const FILE_STATUS = { A: ['追加', 'fa'], M: ['変更', 'fm'], D: ['削除', 'fd'], '?': ['新規', 'fn'], T: ['種類変更', 'fm'] };
+function ago(t) {
+  if (!t) return '';
+  const ms = typeof t === 'number' ? t : Date.parse(t);
+  if (!ms) return '';
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (s < 60) return `${s}秒前`;
+  if (s < 3600) return `${Math.floor(s / 60)}分前`;
+  if (s < 86400) return `${Math.floor(s / 3600)}時間前`;
+  return `${Math.floor(s / 86400)}日前`;
+}
+
+function changeBar(add, del, max) {
+  const w = (n) => (max ? Math.max(n ? 2 : 0, Math.round((n / max) * 60)) : 0);
+  return `<span class="wt-bar"><span class="a" style="width:${w(add)}px"></span><span class="d" style="width:${w(del)}px"></span></span>`;
+}
+
+function fileListHtml(files, { showTime } = {}) {
+  if (!files.length) return '<div class="muted small wt-empty">なし</div>';
+  const max = Math.max(...files.map((f) => f.add + f.del), 1);
+  // 新しく触ったファイルが上に来るようにする（未コミットのみ）
+  const list = showTime ? [...files].sort((a, b) => (b.mtime || 0) - (a.mtime || 0)) : files;
+  return `<ul class="wt-files">${list
+    .map((f) => {
+      const [label, cls] = FILE_STATUS[f.status] || [f.status, 'fm'];
+      const slash = f.path.lastIndexOf('/');
+      const dir = slash >= 0 ? f.path.slice(0, slash + 1) : '';
+      const name = f.path.slice(slash + 1);
+      const nums = f.binary ? '<span class="muted">バイナリ</span>' : `<span class="add">+${f.add}</span> <span class="del">-${f.del}</span>`;
+      return `<li title="${esc(f.path)}"><span class="wt-fs ${cls}">${label}</span><span class="wt-path"><span class="muted">${esc(dir)}</span>${esc(name)}</span>
+        ${showTime && f.mtime ? `<span class="wt-time muted">${ago(f.mtime)}</span>` : ''}<span class="wt-nums">${nums}</span>${changeBar(f.add, f.del, max)}</li>`;
+    })
+    .join('')}</ul>`;
+}
+
+function sumChanges(files) {
+  return files.reduce((s, f) => ({ add: s.add + f.add, del: s.del + f.del }), { add: 0, del: 0 });
+}
+
+function worktreeHtml(c, data) {
+  const refresh = '<button class="btn small ghost" id="refreshWt">更新</button>';
+  const others = worktreeListHtml(c, data.worktrees || []);
+  if (!data.exists) {
+    const why =
+      c.status === 'done'
+        ? 'マージが終わったので worktree は片付けられました。'
+        : c.status === 'todo'
+          ? 'まだ worktree はありません。「開始」を押すと、このタスク専用の worktree とブランチが作られます。'
+          : 'worktree が見つかりません（削除された可能性があります）。';
+    return `<div class="wt-toolbar"><span class="muted">${esc(why)}</span>${refresh}</div>${c.branch ? `<div class="pad small muted">ブランチ: <code>${esc(c.branch)}</code></div>` : ''}${others}`;
+  }
+  const s = data.status;
+  const live = c.status === 'running' || c.status === 'queued';
+  const cs = sumChanges(s.committed);
+  const us = sumChanges(s.uncommitted);
+  const latest = s.uncommitted.reduce((m, f) => Math.max(m, f.mtime || 0), 0);
+
+  // ベース → コミット → 未コミット をつないだ縦のグラフ
+  const nodes = [];
+  if (s.behind > 0) nodes.push(`<li class="g-behind"><span class="g-dot"></span><div><b>${esc(s.baseBranch)}</b> はその後 <b>${s.behind}</b> コミット進んでいます<div class="muted small">マージ時にコンフリクトが起きることがあります</div></div></li>`);
+  nodes.push(`<li class="g-base"><span class="g-dot"></span><div><span class="g-tag">ベース</span> <code>${esc(s.base.short)}</code> ${esc(s.base.subject)}<div class="muted small">${esc(s.baseBranch || '')} から分岐 ${ago(s.base.date)}</div></div></li>`);
+  for (const k of s.commits) {
+    nodes.push(`<li class="g-commit"><span class="g-dot"></span><div><code>${esc(k.sha.slice(0, 7))}</code> ${esc(k.subject)}<div class="muted small">${k.files} ファイル <span class="add">+${k.add}</span> <span class="del">-${k.del}</span> · ${ago(k.date)}</div></div></li>`);
+  }
+  if (s.uncommitted.length) {
+    nodes.push(`<li class="g-wip ${live ? 'live' : ''}"><span class="g-dot"></span><div><span class="g-tag wip">${live ? '作業中' : '未コミット'}</span> ${s.uncommitted.length} ファイル <span class="add">+${us.add}</span> <span class="del">-${us.del}</span>${latest ? `<div class="muted small">最後の編集 ${ago(latest)}</div>` : ''}</div></li>`);
+  } else if (live) {
+    nodes.push(`<li class="g-wip live"><span class="g-dot"></span><div><span class="g-tag wip">作業中</span> <span class="muted">まだファイルの変更はありません</span></div></li>`);
+  }
+  nodes.reverse(); // 新しいものを上に
+
+  return `<div class="wt-toolbar">
+      <span class="wt-sum"><b>${s.commits.length}</b> コミット · <b>${s.committed.length}</b> ファイル(コミット済み) · <b>${s.uncommitted.length}</b> ファイル(未コミット)</span>
+      ${live ? '<span class="muted small">自動で更新中</span>' : ''}${refresh}</div>
+    <div class="pad wt">
+      <dl class="wt-meta">
+        <dt>場所</dt><dd><code>${esc(s.path)}</code></dd>
+        <dt>ブランチ</dt><dd><code>${esc(s.branch)}</code> ← <code>${esc(s.baseBranch || s.base.short)}</code></dd>
+        <dt>HEAD</dt><dd><code>${esc(s.head.short)}</code> ${esc(s.head.subject)}</dd>
+      </dl>
+      <h4>流れ</h4>
+      <ul class="wt-graph">${nodes.join('')}</ul>
+      <h4>未コミットの変更 <span class="muted small">${s.uncommitted.length ? `+${us.add} -${us.del}` : ''}</span></h4>
+      ${fileListHtml(s.uncommitted, { showTime: true })}
+      ${s.untrackedTruncated ? `<div class="muted small">ほか ${s.untrackedTruncated} 個の新規ファイルは省略しました</div>` : ''}
+      <h4>コミット済みの変更（ベースから） <span class="muted small">${s.committed.length ? `+${cs.add} -${cs.del}` : ''}</span></h4>
+      ${fileListHtml(s.committed)}
+    </div>${others}`;
+}
+
+// 同じリポジトリで並列に動いている worktree の一覧
+function worktreeListHtml(c, list) {
+  if (!list.length) return '';
+  const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const byPath = new Map(state.board.cards.filter((x) => x.worktreePath).map((x) => [norm(x.worktreePath), x]));
+  return `<div class="pad wt"><h4>このリポジトリの worktree（${list.length}）</h4><ul class="wt-list">${list
+    .map((w) => {
+      const owner = byPath.get(norm(w.path));
+      const me = owner && owner.id === c.id;
+      const label = w.main ? '<span class="g-tag">メイン</span>' : owner ? `<span class="badge b-${owner.status}">${STATUS_LABEL[owner.status]}</span>` : '<span class="badge">ほか</span>';
+      return `<li class="${me ? 'me' : ''}" ${owner && !me ? `data-card="${esc(owner.id)}"` : ''}>${label}
+        <span class="wt-l-title">${owner ? esc(owner.title) : esc(w.path.split(/[\\/]/).pop())}${me ? ' <span class="muted small">（このタスク）</span>' : ''}</span>
+        <code class="muted small">${esc(w.branch || (w.detached ? 'detached' : ''))}</code></li>`;
+    })
+    .join('')}</ul></div>`;
+}
+
+let wtLoading = false;
+async function renderWorktree(c, { quiet } = {}) {
+  const body = $('detailBody');
+  if (!quiet) body.innerHTML = '<div class="muted pad">読み込み中…</div>';
+  wtLoading = true;
+  let data;
+  try {
+    data = quiet ? await api.worktree(c.id).catch(() => null) : await run(() => api.worktree(c.id));
+  } finally {
+    wtLoading = false;
+  }
+  if (state.selected !== c.id || state.tab !== 'worktree') return;
+  if (!data) {
+    if (!quiet) body.innerHTML = '<div class="muted pad">worktree の状況を読み込めませんでした</div>';
+    return;
+  }
+  const top = body.scrollTop;
+  body.innerHTML = worktreeHtml(card(c.id) || c, data);
+  body.scrollTop = top;
+  const r = $('refreshWt');
+  if (r) r.onclick = () => renderWorktree(card(c.id) || c);
+  body.querySelectorAll('.wt-list li[data-card]').forEach((li) => (li.onclick = () => select(li.dataset.card)));
+}
+
+// 実行中は worktree タブを自動で更新する
+setInterval(() => {
+  if (state.tab !== 'worktree' || !state.selected || wtLoading || document.hidden) return;
+  const c = card(state.selected);
+  if (c && (c.status === 'running' || c.status === 'queued') && c.worktreePath) renderWorktree(c, { quiet: true });
+}, 4000);
+
 const BTW_STATE = { sent: '送信済み', delivered: '反映済み', queued: '開始時に渡します', lost: '届きませんでした' };
 function btwListHtml(c) {
   const list = c.btw || [];
@@ -330,6 +470,8 @@ async function renderDetailBody() {
     body.innerHTML = diffHtml(d || '');
     const r = $('refreshDiff');
     if (r) r.onclick = renderDetailBody;
+  } else if (state.tab === 'worktree') {
+    await renderWorktree(c);
   } else if (state.tab === 'btw') {
     const live = c.status === 'running' || c.status === 'queued';
     body.innerHTML = `<div class="pad btw">
@@ -860,6 +1002,11 @@ api.onBoard((board) => {
     const c = card(state.selected);
     if (c) {
       updateBtwTab(c);
+      // 実行が終わった・マージしたなど状態が変わったら worktree タブを読み直す
+      if (state.tab === 'worktree' && state.wtStatus !== `${c.id}:${c.status}:${c.worktreePath || ''}`) {
+        if (state.wtStatus) renderWorktree(c, { quiet: true });
+      }
+      state.wtStatus = `${c.id}:${c.status}:${c.worktreePath || ''}`;
       if (state.tab === 'btw') {
         const list = $('btwList');
         if (list) list.innerHTML = btwListHtml(c);

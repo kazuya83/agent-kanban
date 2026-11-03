@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('api', {
   listSessions: () => call('sessions:list'),
   logs: (id) => call('card:logs', id),
   diff: (id) => call('card:diff', id),
+  worktree: (id) => call('card:worktree', id),
   merge: (id, opts) => call('card:merge', { id, ...(opts || {}) }),
   discard: (id) => call('card:discard', id),
   answerPermission: (id, reqId, decision, message) => call('card:permission', { id, reqId, decision, message }),
