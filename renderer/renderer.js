@@ -835,7 +835,6 @@ async function renderDetailBody() {
   const c = card(state.selected);
   if (!c) return;
   const body = $('detailBody');
-  $('detail').classList.toggle('wide', state.tab === 'diff');
   if (state.tab === 'log') {
     const logs = state.logs.get(c.id) || [];
     body.innerHTML = logs.length ? logs.map(logEntryHtml).join('') : '<div class="muted pad">まだログはありません。「開始」を押すと Claude が動き出します。</div>';
@@ -1523,6 +1522,43 @@ api.appInfo().then(
   },
   () => {},
 );
+
+// 右側の詳細パネルは、左端をドラッグして幅を変えられる（タブを切り替えても幅は変わらない）
+(function setupDetailResize() {
+  const KEY = 'detailWidth';
+  const panel = $('detail');
+  const handle = $('detailResizer');
+  const MIN = 360;
+  const clamp = (w) => Math.max(MIN, Math.min(w, window.innerWidth - 240));
+  const apply = (w) => panel.style.setProperty('--detail-w', `${Math.round(w)}px`);
+  const saved = Number(localStorage.getItem(KEY));
+  if (saved > 0) apply(clamp(saved));
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add('dragging');
+    document.body.classList.add('resizing');
+    const startX = e.clientX;
+    const startW = panel.getBoundingClientRect().width;
+    const move = (ev) => apply(clamp(startW + (startX - ev.clientX)));
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      handle.classList.remove('dragging');
+      document.body.classList.remove('resizing');
+      localStorage.setItem(KEY, String(Math.round(panel.getBoundingClientRect().width)));
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+  handle.addEventListener('dblclick', () => {
+    panel.style.removeProperty('--detail-w');
+    localStorage.removeItem(KEY);
+  });
+})();
 
 (async () => {
   state.board = await api.getBoard();
