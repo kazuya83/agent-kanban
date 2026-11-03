@@ -81,7 +81,7 @@ function cardHtml(c) {
         <span class="badge b-${waiting ? 'waiting' : c.status}">${waiting ? '承認待ち' : STATUS_LABEL[c.status]}</span>
         ${since ? `<span class="elapsed" data-since="${since}">${elapsed(since)}</span>` : ''}
       </div>
-      <div class="card-title">${esc(c.title)}</div>
+      <div class="card-title">${c.issue ? `<a class="issue-chip" data-url="${esc(c.issue.url)}" title="Issue を開く">#${c.issue.number}</a> ${esc(c.title.replace(/^#\d+\s*/, ''))}` : esc(c.title)}</div>
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
       ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(c.lastMessage)}</div>` : ''}
       ${permissionBlock(c, true)}
@@ -125,6 +125,12 @@ $('board').addEventListener('click', (e) => {
     e.stopPropagation();
     const p = btn.closest('.perm');
     answer(p.dataset.card, p.dataset.req, btn.dataset.decision, '');
+    return;
+  }
+  const chip = e.target.closest('.issue-chip');
+  if (chip) {
+    e.stopPropagation();
+    run(() => api.openExternal(chip.dataset.url));
     return;
   }
   const el = e.target.closest('.card');
@@ -198,6 +204,7 @@ function renderDetailHead() {
       <button class="icon" id="closeDetail" title="閉じる">✕</button>
     </div>
     <dl class="d-meta">
+      ${c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
       ${c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''}
       ${(c.mergedInto || []).length ? `<dt>マージ済み</dt><dd>${c.mergedInto.map(esc).join(', ')}</dd>` : ''}
@@ -215,6 +222,8 @@ function renderDetailHead() {
 }
 
 $('detailHead').addEventListener('click', async (e) => {
+  const chip = e.target.closest('.issue-chip');
+  if (chip) return run(() => api.openExternal(chip.dataset.url));
   const dec = e.target.closest('[data-decision]');
   if (dec) {
     const p = dec.closest('.perm');
@@ -328,28 +337,75 @@ document.addEventListener('keydown', (e) => {
   else if (state.selected) closeDetail();
 });
 
-function newTask() {
+function newTask(mode = 'manual') {
   if (!state.board.settings.repoPath) return chooseRepo();
   openModal(
     `<h2>新しいタスク</h2>
-     <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
-     <label class="field"><span>Claude への指示</span><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></label>
+     <nav class="mtabs"><button class="mtab" data-mode="manual">手で書く</button><button class="mtab" data-mode="issue">GitHub Issue から</button></nav>
+     <div id="nManual">
+       <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
+       <label class="field"><span>Claude への指示</span><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></label>
+     </div>
+     <div id="nIssue" class="hidden">
+       <label class="field"><span>Issue 番号（複数ならカンマかスペースで区切る。1つの Issue が1枚のカードになり、並列で動きます）</span>
+         <input id="nNumbers" placeholder="例: 12 または 12, 15, 18" inputmode="numeric" /></label>
+       <p class="muted small" id="nRepoInfo">リポジトリを確認しています…</p>
+       <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div>
+       <label class="field"><span>追加の指示（任意・すべての Issue に付けます）</span><textarea id="nExtra" rows="4" placeholder="例: 変更したらテストを追加して npm test で確認して"></textarea></label>
+     </div>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
      <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">作成（Ctrl/⌘ + Enter）</button></div>`,
     () => {
-      $('nPrompt').focus();
+      let current = mode;
+      const setMode = (m) => {
+        current = m;
+        document.querySelectorAll('.mtab').forEach((t) => t.classList.toggle('active', t.dataset.mode === m));
+        $('nManual').classList.toggle('hidden', m !== 'manual');
+        $('nIssue').classList.toggle('hidden', m !== 'issue');
+        (m === 'issue' ? $('nNumbers') : $('nPrompt')).focus();
+      };
+      document.querySelectorAll('.mtab').forEach((t) => (t.onclick = () => setMode(t.dataset.mode)));
+      setMode(mode);
+      api.repoGithub().then(
+        (g) => {
+          const el = $('nRepoInfo');
+          if (!el) return;
+          if (!g || !g.slug) el.textContent = '⚠ このリポジトリの origin が GitHub ではないため、Issue を読み込めません。';
+          else el.textContent = `${g.slug.owner}/${g.slug.repo} の Issue を読み込みます。`;
+        },
+        () => {},
+      );
+      refreshGh();
       const submit = async () => {
-        const id = await run(() => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked }));
-        if (id) {
-          closeModal();
-          select(id);
+        $('nOk').disabled = true;
+        if (current === 'issue') {
+          $('nOk').textContent = 'Issue を読み込んでいます…';
+          const r = await run(() => api.createFromIssues({ numbers: $('nNumbers').value, extra: $('nExtra').value, autoStart: $('nStart').checked }));
+          if (r) {
+            closeModal();
+            if (r.errors.length) toast(r.errors.join('\n'));
+            else toast(`${r.ids.length} 件のタスクを作りました`, 'ok');
+            if (r.ids.length === 1) select(r.ids[0]);
+            return;
+          }
+        } else {
+          const id = await run(() => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked }));
+          if (id) {
+            closeModal();
+            select(id);
+            return;
+          }
         }
+        $('nOk').disabled = false;
+        $('nOk').textContent = '作成（Ctrl/⌘ + Enter）';
       };
       $('nOk').onclick = submit;
       $('nCancel').onclick = closeModal;
-      $('nPrompt').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit();
-      });
+      for (const id of ['nPrompt', 'nExtra', 'nNumbers']) {
+        $(id).addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || id === 'nNumbers')) submit();
+        });
+      }
     },
   );
 }
@@ -421,6 +477,7 @@ async function openSettings() {
        <label class="field"><span>モデル（空なら既定）</span><input id="sModel" placeholder="例: sonnet / opus" value="${esc(s.model)}" /></label>
      </div>
      <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath)}" /></label>
+
      <div class="modal-actions"><button class="btn ghost" id="sCancel">キャンセル</button><button class="btn primary" id="sOk">保存</button></div>`,
     () => {
       $('sCancel').onclick = closeModal;
@@ -455,8 +512,100 @@ async function chooseRepo() {
 }
 
 $('repoBtn').onclick = chooseRepo;
-$('newBtn').onclick = newTask;
+$('newBtn').onclick = () => newTask('manual');
+$('issueBtn').onclick = () => newTask('issue');
 $('settingsBtn').onclick = openSettings;
+
+// ---------------- gh（GitHub CLI）の案内 ----------------
+// 入っていなければインストール、ログインしていなければログインまで、この画面からできるようにする
+
+const ghState = { busy: false, lines: [], code: null };
+
+async function refreshGh() {
+  const st = await api.ghStatus().catch(() => null);
+  renderGh(st);
+  return st;
+}
+
+function renderGh(st) {
+  const el = $('ghPanel');
+  if (!el) return;
+  const log = ghState.lines.length ? `<pre class="gh-log">${esc(ghState.lines.slice(-8).join('\n'))}</pre>` : '';
+  if (ghState.busy && ghState.code) {
+    el.className = 'gh-panel gh-warn';
+    el.innerHTML = `<b>ブラウザで GitHub にログインしてください</b>
+      <p>開いたページに、次のコードを入力します。</p>
+      <div class="gh-code"><code>${esc(ghState.code.code)}</code><button class="btn small" id="ghCopy">コピー</button><button class="btn small ghost" id="ghOpen">ページを開く</button></div>
+      <p class="muted small">ログインが終わると、自動でこの画面に戻ります。</p>${log}
+      <button class="btn small ghost" id="ghCancel">やめる</button>`;
+    $('ghCopy').onclick = () => navigator.clipboard.writeText(ghState.code.code).then(() => toast('コピーしました', 'ok'));
+    $('ghOpen').onclick = () => run(() => api.openExternal(ghState.code.url));
+    $('ghCancel').onclick = () => api.ghCancel();
+    return;
+  }
+  if (ghState.busy) {
+    el.className = 'gh-panel';
+    el.innerHTML = `<b>処理しています…</b>${log}`;
+    return;
+  }
+  if (!st) {
+    el.className = 'gh-panel';
+    el.textContent = 'gh の状態を確認できませんでした';
+    return;
+  }
+  if (!st.installed) {
+    el.className = 'gh-panel gh-warn';
+    el.innerHTML = `<b>gh（GitHub CLI）が入っていません</b>
+      <p>Issue を読み込むのに使います（private リポジトリの Issue も読めるようになります）。</p>
+      ${st.installer
+        ? `<button class="btn primary small" id="ghInstall">gh をインストールする</button> <span class="muted small">${esc(st.installer)} で <code>${esc(st.installLabel)}</code> を実行します</span>`
+        : `<button class="btn primary small" id="ghDownload">ダウンロードページを開く</button> <span class="muted small">インストールしたら「もう一度確認」を押してください</span>`}
+      <div><button class="btn small ghost" id="ghRecheck">もう一度確認</button></div>${log}
+      <p class="muted small">public リポジトリなら、gh がなくても読み込めます。</p>`;
+    if ($('ghInstall')) $('ghInstall').onclick = () => ghAction('install');
+    if ($('ghDownload')) $('ghDownload').onclick = () => run(() => api.openExternal(st.downloadUrl));
+    $('ghRecheck').onclick = refreshGh;
+    return;
+  }
+  if (!st.loggedIn) {
+    el.className = 'gh-panel gh-warn';
+    el.innerHTML = `<b>gh は入っていますが、GitHub にログインしていません</b>
+      <p><button class="btn primary small" id="ghLogin">GitHub にログイン</button> <span class="muted small">ブラウザが開くので、表示されたコードを入力します</span></p>
+      <div><button class="btn small ghost" id="ghRecheck">もう一度確認</button></div>${log}`;
+    $('ghLogin').onclick = () => ghAction('login');
+    $('ghRecheck').onclick = refreshGh;
+    return;
+  }
+  el.className = 'gh-panel ok';
+  el.innerHTML = `✓ gh で GitHub にログインしています${st.user ? `（<b>${esc(st.user)}</b>）` : ''}`;
+}
+
+async function ghAction(kind) {
+  ghState.busy = true;
+  ghState.lines = [];
+  ghState.code = null;
+  renderGh(null);
+  try {
+    const st = await (kind === 'install' ? api.ghInstall() : api.ghLogin());
+    ghState.busy = false;
+    ghState.code = null;
+    toast(kind === 'install' ? 'gh をインストールしました' : 'GitHub にログインしました', 'ok');
+    renderGh(st);
+    // インストールが終わったら、続けてログインも案内する
+    if (kind === 'install' && st && st.installed && !st.loggedIn) toast('続けて「GitHub にログイン」を押してください', 'ok');
+  } catch (err) {
+    ghState.busy = false;
+    ghState.code = null;
+    toast(err.message);
+    refreshGh();
+  }
+}
+
+api.onGh((ev) => {
+  if (ev.type === 'code') ghState.code = ev;
+  else if (ev.type === 'line') ghState.lines.push(ev.line);
+  if (ghState.busy) renderGh(null);
+});
 
 // ---------------- 更新の受信 ----------------
 

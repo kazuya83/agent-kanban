@@ -73,6 +73,7 @@ jobs:
           name: claude-agent-kanban-${{ runner.os }}
           path: |
             dist/*.exe
+            dist/*.zip
             dist/*.dmg
             dist/*.AppImage
           if-no-files-found: error
@@ -95,6 +96,7 @@ jobs:
           generate_release_notes: true
           files: |
             dist/*.exe
+            dist/*.zip
             dist/*.dmg
             dist/*.AppImage
 
@@ -134,3 +136,8 @@ jobs:
           $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter 'Claude Agent Kanban.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $exe) { throw 'installed exe not found' }
           Write-Host "OK: $($exe.FullName)"
+          if (-not (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Claude Agent Kanban.lnk'))) { throw 'start menu shortcut not found' }
+          $env:AGENT_KANBAN_UNINSTALL = '1'
+          irm "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/install.ps1" | iex
+          if (Test-Path "$env:LOCALAPPDATA\Programs\Claude Agent Kanban") { throw 'uninstall failed' }
+          Write-Host 'uninstall OK'

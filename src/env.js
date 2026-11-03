@@ -16,6 +16,7 @@ function extraDirs() {
       path.join(process.env.APPDATA || path.join(h, 'AppData', 'Roaming'), 'npm'), // npm install -g
       path.join(h, '.claude', 'local'),
       'C:\\Program Files\\Git\\cmd',
+      'C:\\Program Files\\GitHub CLI', // winget install GitHub.cli
       'C:\\Program Files\\nodejs',
     ];
   }

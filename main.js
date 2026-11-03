@@ -130,6 +130,33 @@ app.whenReady().then(async () => {
     if (autoStart) agents.start(c.id);
     return c.id;
   });
+  handle('card:createFromIssues', async ({ numbers, extra, autoStart }) => {
+    const { cards, errors } = await agents.createFromIssues({ numbers, extra });
+    if (autoStart) for (const c of cards) agents.start(c.id);
+    return { ids: cards.map((c) => c.id), errors };
+  });
+  handle('repo:github', async () => {
+    const repo = store.settings.repoPath;
+    if (!repo) return null;
+    const { repoSlug } = require('./src/github');
+    const slug = await repoSlug(repo).catch(() => null);
+    return { slug, gh: !!resolveCommand('gh') };
+  });
+  handle('open:external', async (url) => {
+    if (!/^https:\/\/([a-z0-9-]+\.)?github\.com\//.test(String(url))) throw new Error('開けない URL です');
+    await shell.openExternal(url);
+  });
+  // gh（GitHub CLI）: 状態の確認・インストール・ログイン
+  const gh = require('./src/gh');
+  handle('gh:status', () => gh.status());
+  handle('gh:install', () => gh.install((line) => send('gh:event', { type: 'line', line })));
+  handle('gh:login', () =>
+    gh.login((ev) => {
+      if (ev.type === 'code') shell.openExternal(ev.url).catch(() => {});
+      send('gh:event', ev);
+    }),
+  );
+  handle('gh:cancel', () => gh.cancel());
   handle('card:update', ({ id, title, prompt }) => agents.updateCard(id, { title, prompt }));
   handle('card:start', (id) => agents.start(id));
   handle('card:stop', (id) => agents.stop(id));

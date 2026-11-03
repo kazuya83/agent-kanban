@@ -1,6 +1,6 @@
 {
   "name": "agent-kanban",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Claude Code のタスクをカンバンで管理し、git worktree ごとに並列実行するデスクトップアプリ",
   "main": "main.js",
   "license": "MIT",
@@ -41,8 +41,10 @@
     "win": {
       "target": [
         { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
-      ]
+        { "target": "portable", "arch": ["x64"] },
+        { "target": "zip", "arch": ["x64"] }
+      ],
+      "artifactName": "claude-agent-kanban-${version}-win-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,

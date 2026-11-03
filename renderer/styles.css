@@ -210,3 +210,15 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .env-banner { padding: 8px 16px; background: color-mix(in srgb, var(--warn) 15%, var(--panel)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); color: var(--text); font-size: 12.5px; display: flex; flex-direction: column; gap: 2px; }
 .small { font-size: 12px; }
 .modal-box code { font-family: var(--mono); font-size: 12px; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+.mtabs { display: flex; gap: 4px; margin: -4px 0 14px; border-bottom: 1px solid var(--line); }
+.mtab { border: 0; background: transparent; padding: 6px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+.mtab.active { color: var(--text); border-bottom-color: var(--accent); }
+.issue-chip { color: var(--accent); font-weight: 600; cursor: pointer; text-decoration: none; }
+.issue-chip:hover { text-decoration: underline; }
+.gh-panel { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 12.5px; background: var(--panel-2); display: flex; flex-direction: column; gap: 6px; }
+.gh-panel p { margin: 0; }
+.gh-panel.gh-warn { border-color: color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 8%, var(--panel)); }
+.gh-panel.ok { border-color: color-mix(in srgb, var(--ok) 50%, transparent); color: var(--ok); }
+.gh-code { display: flex; gap: 8px; align-items: center; }
+.gh-code code { font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: 2px; padding: 4px 10px; background: var(--bg); border-radius: 6px; }
+.gh-log { font-family: var(--mono); font-size: 11px; background: var(--bg); padding: 6px 8px; border-radius: 6px; max-height: 120px; overflow: auto; margin: 0; white-space: pre-wrap; }

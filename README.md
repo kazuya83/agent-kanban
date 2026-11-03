@@ -27,6 +27,10 @@ Claude Code のタスクをカンバンボードで管理するデスクトッ�
 ## できること
 
 - **カードを作るとすぐに動き出す**: ブランチ `agent/<名前>-<id>` と worktree（`<リポジトリ>.worktrees/<id>`）を自動で作り、その中で `claude -p` を起動します
+- **GitHub Issue からタスクを作る**: 「＃ Issue から」に番号を入れるだけで、Issue のタイトル・本文・ラベル・コメントから Claude への指示を作ります。`12, 15, 18` のように複数入れると、1つの Issue が1枚のカードになって並列で動きます
+  - ブランチは `agent/issue-12-…`、コミットメッセージには `(#12)` が付きます。カードの `#12` を押すと Issue のページが開きます
+  - Issue は **gh（GitHub CLI）** で読み込みます。gh が入っていなければ、その画面の「gh をインストールする」から入れられます（Mac は Homebrew、Windows は winget）。ログインしていなければ「GitHub にログイン」を押すと、ブラウザが開いて確認コードが表示されるので、それを入力するだけです
+  - public リポジトリなら、gh がなくても読み込めます
 - **列は自動で移動**: Todo → 実行中（待機中を含む）→ レビュー（エラーを含む）→ 完了
 - **カード上で承認**: 許可が必要な操作は、カードに「承認待ち」として表示されます。その場で **許可 / 拒否 / このタスクでは常に許可** を選べます。デスクトップ通知も出ます
 - **詳細パネル**: カードをクリックすると開きます。中身は次のとおりです
@@ -59,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.
 irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
 ```
 
-最新のインストーラーをダウンロードして画面を出さずにインストールし、そのまま起動します。スタートメニューにも「Claude Agent Kanban」が追加されます。
+最新版をダウンロードして `%LOCALAPPDATA%\Programs\Claude Agent Kanban` に入れ、スタートメニューとデスクトップにショートカットを作って起動します。管理者権限はいりません。
 
 アップデートするときも、同じコマンドをもう一度実行するだけです。
 
@@ -67,7 +71,7 @@ irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | i
 <summary>バージョンを指定する・アンインストールする</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | AGENT_KANBAN_VERSION=0.1.0 bash
+curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | AGENT_KANBAN_VERSION=0.1.1 bash
 ```
 
 ```bash
@@ -75,10 +79,14 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.
 ```
 
 ```powershell
-$env:AGENT_KANBAN_VERSION = "0.1.0"; irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
+$env:AGENT_KANBAN_VERSION = "0.1.1"; irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
 ```
 
-Windows でアンインストールするときは、「設定 → アプリ」から「Claude Agent Kanban」を削除します。
+```powershell
+$env:AGENT_KANBAN_UNINSTALL = "1"; irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
+```
+
+（setup.exe で入れた場合は、「設定 → アプリ」から「Claude Agent Kanban」を削除します。）
 
 </details>
 
@@ -90,6 +98,7 @@ Windows でアンインストールするときは、「設定 → アプリ」�
 | --- | --- | --- |
 | Windows | `claude-agent-kanban-x.y.z-win-setup.exe` | インストーラー。ダブルクリックしてインストールします |
 | Windows | `claude-agent-kanban-x.y.z-win-portable.exe` | インストールせず、そのまま起動できます |
+| Windows | `claude-agent-kanban-x.y.z-win-x64.zip` | 展開して、中の `Claude Agent Kanban.exe` を起動します |
 | Mac（Apple Silicon: M1〜） | `claude-agent-kanban-x.y.z-mac-arm64.dmg` | 開いて、アプリを「アプリケーション」にドラッグします |
 | Mac（Intel） | `claude-agent-kanban-x.y.z-mac-x64.dmg` | 同上 |
 | Linux | `claude-agent-kanban-x.y.z-linux-x86_64.AppImage` | 実行権限を付けて起動します |

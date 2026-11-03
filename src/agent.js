@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const git = require('./git');
 const { resolveCommand, isWin } = require('./env');
+const github = require('./github');
 
 const MAX_LOGS = 2000;
 const MCP_SERVER_NAME = 'agent_kanban';
@@ -123,7 +124,7 @@ class AgentManager extends EventEmitter {
 
   // ---------- カード操作 ----------
 
-  createCard({ title, prompt }) {
+  createCard({ title, prompt, issue }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     if (!prompt || !prompt.trim()) throw new Error('指示を入力してください');
@@ -138,9 +139,48 @@ class AgentManager extends EventEmitter {
       alwaysAllow: [],
       logs: [],
     };
+    if (issue) card.issue = { number: issue.number, title: issue.title, url: issue.url };
     this.store.cards.push(card);
     this.changed(card);
     return card;
+  }
+
+  /**
+   * GitHub Issue の番号からカードを作る
+   * @param {{ numbers: string, extra?: string }} p  numbers は「12」「12, 15」「#12 #15」など
+   * @returns {Promise<{ cards: object[], errors: string[] }>}
+   */
+  async createFromIssues({ numbers, extra }) {
+    const s = this.store.settings;
+    if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
+    const list = github.parseIssueNumbers(numbers);
+    const cards = [];
+    const errors = [];
+    for (const n of list) {
+      const dup = this.store.cards.find((c) => c.repoPath === s.repoPath && c.issue && c.issue.number === n && c.status !== 'done');
+      if (dup) {
+        errors.push(`#${n}: もうタスクがあります（「${dup.title}」）`);
+        continue;
+      }
+      try {
+        const issue = await this.fetchIssue(s.repoPath, n);
+        if (issue.state && issue.state !== 'open') errors.push(`#${n} はクローズ済みですが、タスクを作りました`);
+        cards.push(this.createCard({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue }));
+      } catch (err) {
+        errors.push(`#${n}: ${err.message}`);
+      }
+    }
+    if (!cards.length) throw new Error(errors.join('\n'));
+    return { cards, errors };
+  }
+
+  // テストで差し替えられるようにメソッドにしておく
+  fetchIssue(repoPath, n, opts) {
+    return github.fetchIssue(repoPath, n, opts);
+  }
+
+  commitMessage(c) {
+    return c.issue ? `agent: ${c.title.replace(/^#\d+\s*/, '')} (#${c.issue.number})` : `agent: ${c.title}`;
   }
 
   updateCard(id, { title, prompt }) {
@@ -230,7 +270,7 @@ class AgentManager extends EventEmitter {
     const base = this.store.settings.baseBranch || (await git.currentBranch(top));
     if (base === 'HEAD') throw new Error('ベースブランチが決まりません（detached HEAD）。設定でベースブランチを指定してください');
     const baseCommit = await git.revParse(top, base);
-    const branch = `agent/${slugify(c.title)}-${c.id}`;
+    const branch = c.issue ? `agent/issue-${c.issue.number}-${c.id}` : `agent/${slugify(c.title)}-${c.id}`;
     const wt = path.join(path.dirname(top), `${path.basename(top)}.worktrees`, c.id);
     fs.mkdirSync(path.dirname(wt), { recursive: true });
     await git.addWorktree(top, wt, branch, baseCommit);
@@ -323,7 +363,7 @@ class AgentManager extends EventEmitter {
       // 状態を「レビュー」にする前に、作業内容をブランチにコミットしておく
       if (!spawnError) {
         try {
-          if (await git.commitAll(c.worktreePath, `agent: ${c.title}`)) this.log(c, 'system', '変更を worktree のブランチにコミットしました');
+          if (await git.commitAll(c.worktreePath, this.commitMessage(c))) this.log(c, 'system', '変更を worktree のブランチにコミットしました');
         } catch (err) {
           this.log(c, 'error', `コミットに失敗しました: ${err.message}`);
         }
@@ -502,7 +542,7 @@ class AgentManager extends EventEmitter {
     this.merging = this.merging || new Set();
     this.merging.add(id);
     try {
-      await git.commitAll(c.worktreePath, `agent: ${c.title}`);
+      await git.commitAll(c.worktreePath, this.commitMessage(c));
       if (opts.createNew) {
         await git.checkBranchName(top, target);
         if (await git.branchExists(top, target)) throw new Error(`ブランチ ${target} はもうあります。一覧から選んでください`);
@@ -527,7 +567,7 @@ class AgentManager extends EventEmitter {
           dir = temp;
         }
         try {
-          await git.merge(dir, c.branch, `Merge agent task: ${c.title}`, target);
+          await git.merge(dir, c.branch, (c.issue ? `Merge agent task: ${c.title.replace(/^#\d+\s*/, '')} (#${c.issue.number})` : `Merge agent task: ${c.title}`), target);
         } finally {
           if (temp) await git.removeWorktree(top, temp);
         }
