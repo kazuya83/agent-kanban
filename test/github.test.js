@@ -131,6 +131,13 @@ test('Projects の Status の選択肢を選ぶ', () => {
   assert.deepStrictEqual(github.pickStatusOption([{ id: 'x', name: 'in-progress' }], 'inProgress'), { id: 'x', name: 'in-progress' });
   assert.deepStrictEqual(github.pickStatusOption([{ id: 'x', name: '完了' }], 'done'), { id: 'x', name: '完了' });
   assert.strictEqual(github.pickStatusOption([{ id: 't', name: 'Todo' }], 'inReview'), null);
+
+  // 設定で選択肢の名前を指定したら、その名前のものだけを選ぶ（記号・大文字小文字は無視、カンマで候補を複数）
+  const custom = [...opts, { id: 'q', name: '🔍 QA' }, { id: 's', name: 'Shipped' }];
+  assert.deepStrictEqual(github.pickStatusOption(custom, 'inReview', 'qa'), { id: 'q', name: '🔍 QA' });
+  assert.deepStrictEqual(github.pickStatusOption(custom, 'done', 'Released, shipped'), { id: 's', name: 'Shipped' });
+  assert.strictEqual(github.pickStatusOption(custom, 'done', 'Released'), null); // 指定した名前がなければ自動では探さない
+  assert.deepStrictEqual(github.pickStatusOption(custom, 'done', '  '), { id: 'd', name: 'Done' }); // 空なら自動
 });
 
 // 偽の gh（api graphql）: Issue は2つの Project に入っている。mutation は $LOG に書き出す
@@ -156,6 +163,7 @@ if (/mutation/.test(vars.query)) {
   process.exit(0);
 }
 const opts = [{ id: 'o-todo', name: 'Todo' }, { id: 'o-prog', name: 'In Progress' }, { id: 'o-rev', name: 'In review' }, { id: 'o-done', name: 'Done' }];
+fs.appendFileSync(${JSON.stringify(log)}.replace(/mutations/, 'queries'), JSON.stringify({ field: vars.field }) + '\\n');
 console.log(JSON.stringify({ data: { repository: { issue: { projectItems: { nodes: [
   { id: 'item-1', project: { id: 'P1', title: 'Board', closed: false, field: { id: 'F1', options: opts } }, fieldValueByName: { name: 'Todo', optionId: 'o-todo' } },
   { id: 'item-2', project: { id: 'P2', title: 'Simple', closed: false, field: { id: 'F2', options: [{ id: 's-todo', name: 'Todo' }, { id: 's-done', name: 'Done' }] } }, fieldValueByName: null },
@@ -196,6 +204,25 @@ test('Issue が入っている Project の Status を変える', async () => {
   const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-proj-'));
   const noScope = fakeGhProjects(tmp2, { noScope: true });
   await assert.rejects(github.setIssueProjectStatus(repo, 8, 'inReview', { gh: noScope.bin }), (err) => err.code === 'SCOPE' && /gh auth refresh -h github.com -s project/.test(err.message));
+});
+
+test('設定した項目名・選択肢の名前で Project のステータスを変える', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-proj-'));
+  const repo = githubRepo(tmp);
+  const { bin, log } = fakeGhProjects(tmp);
+  const r = await github.setIssueProjectStatus(repo, 8, 'inReview', { gh: bin, fieldName: 'Stage', mapping: { inReview: 'Todo' } });
+  assert.deepStrictEqual(r.updated, [{ project: 'Simple', from: '', to: 'Todo' }]);
+  assert.deepStrictEqual(r.unchanged, [{ project: 'Board', to: 'Todo' }]);
+  const queries = fs.readFileSync(log.replace(/mutations/, 'queries'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepStrictEqual(queries, [{ field: 'Stage' }]); // 指定した項目名で問い合わせる
+  // Board はもう Todo なので変えず、まだ値のない Simple だけ変える
+  assert.strictEqual(fs.readFileSync(log, 'utf8').trim().split('\n').length, 1);
+
+  // 指定した名前の選択肢がないと、理由を付けて飛ばす
+  const d = await github.setIssueProjectStatus(repo, 8, 'done', { gh: bin, mapping: { done: 'Released' } });
+  assert.deepStrictEqual(d.updated, []);
+  assert.strictEqual(d.skipped.length, 2);
+  assert.match(d.skipped[0].reason, /Released/);
 });
 
 test('カードの列に合わせて Projects の Status を変える', async () => {

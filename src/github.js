@@ -173,11 +173,29 @@ function normalizeStatusName(s) {
     .replace(/[^\p{L}\p{N}]/gu, '');
 }
 
+// 設定の「列 → 選択肢の名前」を候補の配列にする（カンマ・改行区切りで複数書ける。空なら自動で探す）
+function mappingNames(mapping) {
+  if (Array.isArray(mapping)) return mapping.map(normalizeStatusName).filter(Boolean);
+  return String(mapping || '')
+    .split(/[,、\n]/)
+    .map(normalizeStatusName)
+    .filter(Boolean);
+}
+
 // Status の選択肢から、key（inProgress / inReview / done）に当たるものを選ぶ
-function pickStatusOption(options, key) {
+// mapping（設定で指定した選択肢の名前）があれば、その名前の選択肢だけを選ぶ
+function pickStatusOption(options, key, mapping) {
   const def = PROJECT_STATUS[key];
   if (!def || !Array.isArray(options)) return null;
   const list = options.map((o) => ({ ...o, norm: normalizeStatusName(o.name) }));
+  const wanted = mappingNames(mapping);
+  if (wanted.length) {
+    for (const n of wanted) {
+      const hit = list.find((o) => o.norm === n);
+      if (hit) return { id: hit.id, name: hit.name };
+    }
+    return null;
+  }
   for (const n of def.names) {
     const hit = list.find((o) => o.norm === n);
     if (hit) return { id: hit.id, name: hit.name };
@@ -189,14 +207,14 @@ function pickStatusOption(options, key) {
   return null;
 }
 
-const ITEMS_QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
+const ITEMS_QUERY = `query($owner: String!, $repo: String!, $number: Int!, $field: String!) {
   repository(owner: $owner, name: $repo) {
     issue(number: $number) {
       projectItems(first: 20) {
         nodes {
           id
-          project { id title closed field(name: "Status") { ... on ProjectV2SingleSelectField { id options { id name } } } }
-          fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name optionId } }
+          project { id title closed field(name: $field) { ... on ProjectV2SingleSelectField { id options { id name } } } }
+          fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { name optionId } }
         }
       }
     }
@@ -245,7 +263,9 @@ async function ghGraphql(gh, cwd, query, vars) {
  * @param {string} repoPath
  * @param {number} number
  * @param {'inProgress'|'inReview'|'done'} key
- * @param {{ gh?: string }} opts
+ * @param {{ gh?: string, fieldName?: string, mapping?: {inProgress?: string, inReview?: string, done?: string} }} opts
+ *   fieldName: 変える項目（単一選択）の名前。空なら「Status」
+ *   mapping: 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空の列は名前から自動で探す
  * @returns {Promise<{ updated: {project: string, from: string, to: string}[], unchanged: {project: string, to: string}[], skipped: {project: string, reason: string}[], projects: number }>}
  */
 async function setIssueProjectStatus(repoPath, number, key, opts = {}) {
@@ -253,7 +273,9 @@ async function setIssueProjectStatus(repoPath, number, key, opts = {}) {
   const gh = opts.gh || resolveCommand('gh');
   if (!gh) throw new Error('Projects のステータスを変えるには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます');
   const slug = await repoSlug(repoPath);
-  const data = await ghGraphql(gh, repoPath, ITEMS_QUERY, { owner: slug.owner, repo: slug.repo, number: Number(number) });
+  const fieldName = String(opts.fieldName || '').trim() || 'Status';
+  const mapping = (opts.mapping && opts.mapping[key]) || '';
+  const data = await ghGraphql(gh, repoPath, ITEMS_QUERY, { owner: slug.owner, repo: slug.repo, number: Number(number), field: fieldName });
   const issue = data && data.repository && data.repository.issue;
   if (!issue) throw new Error(`Issue #${number} が見つかりません（${slug.owner}/${slug.repo}）`);
   const items = (issue.projectItems && issue.projectItems.nodes) || [];
@@ -264,12 +286,15 @@ async function setIssueProjectStatus(repoPath, number, key, opts = {}) {
     result.projects++;
     const field = p.field;
     if (!field || !field.id) {
-      result.skipped.push({ project: p.title, reason: 'Status の項目がありません' });
+      result.skipped.push({ project: p.title, reason: `「${fieldName}」の項目（単一選択）がありません` });
       continue;
     }
-    const opt = pickStatusOption(field.options, key);
+    const opt = pickStatusOption(field.options, key, mapping);
     if (!opt) {
-      result.skipped.push({ project: p.title, reason: `Status に「${PROJECT_STATUS[key].label}」に当たる選択肢がありません` });
+      const reason = mappingNames(mapping).length
+        ? `「${fieldName}」に設定した選択肢「${mapping}」がありません（${PROJECT_STATUS[key].label} 用）`
+        : `「${fieldName}」に「${PROJECT_STATUS[key].label}」に当たる選択肢がありません`;
+      result.skipped.push({ project: p.title, reason });
       continue;
     }
     const cur = item.fieldValueByName || {};
