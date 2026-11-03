@@ -14,6 +14,15 @@ const MAX_LOGS = 2000;
 const MCP_SERVER_NAME = 'agent_kanban';
 const PERMISSION_TOOL = `mcp__${MCP_SERVER_NAME}__approve`;
 const INTERRUPTED_MESSAGE = 'アプリの終了で中断されました。「▶ 再開」で中断したところから続けられます（追加指示を送っても再開できます）。';
+// 作業のあとに「スキルにしておくとよいもの」を提案してもらうときの指示
+const SKILL_SUGGEST_PROMPT = [
+  'ここまでの作業を振り返って、次から同じような作業をもっと速く・確実にできるように、Claude Code のスキル（SKILL.md）として残しておくとよさそうなものを提案してください。',
+  '',
+  '- 候補は1〜3個にしてください。それぞれ「スキル名」「何をするスキルか」「どんなときに使うか」「SKILL.md に書く手順の概要」を書いてください',
+  '- すでにあるスキル（このリポジトリの .claude/skills/ と ~/.claude/skills/）を確かめて、重ならないようにしてください',
+  '- 置き場所は、このリポジトリ用（.claude/skills/<名前>/SKILL.md）か、自分用（~/.claude/skills/<名前>/SKILL.md）のどちらがよいかも書いてください',
+  '- まだファイルは作らないでください。最後に「どれを追加しますか？」と聞いてください',
+].join('\n');
 const RESUME_PROMPT = '前回の作業は、アプリの終了で途中で中断されました。worktree の今の状態（git status / git diff など）を確かめて、中断したところから作業を続けてください。';
 
 function truncate(s, n) {
@@ -403,11 +412,31 @@ class AgentManager extends EventEmitter {
 
   send(id, message, skill) {
     const c = this.must(id);
-    if (!['review', 'failed'].includes(c.status)) throw new Error('実行中・待機中は追加指示を送れません');
+    if (!['review', 'failed', 'done'].includes(c.status)) throw new Error('実行中・待機中は追加指示を送れません');
     if (!message || !message.trim()) throw new Error('追加指示を入力してください');
     skill = cleanSkill(skill);
+    if (c.status === 'done') this.reopen(c);
     this.log(c, 'user', message.trim(), skill ? { skill } : undefined);
     this.enqueue(c, withSkill(skill, message.trim()));
+  }
+
+  // スキルにしておくとよいものを、同じ会話の続きで提案してもらう
+  suggestSkills(id) {
+    this.send(id, SKILL_SUGGEST_PROMPT);
+  }
+
+  /**
+   * 完了（マージ済み）のタスクで、会話を続けられるようにする。
+   * worktree は前と同じ場所に作り直す（claude の会話は作業フォルダごとに保存されているので、
+   * 同じ場所なら --resume でそのまま続きから話せる）。ベースはマージ先のブランチ
+   */
+  reopen(c) {
+    c.reopenBase = c.lastMergeTarget || c.prBase || c.baseBranch || null;
+    c.reopenFrom = c.branch || null;
+    c.worktreePath = null;
+    c.conflict = null;
+    c.conflictResolved = null;
+    this.log(c, 'system', `完了したタスクの続きを始めます（${c.reopenBase || 'ベースブランチ'} から worktree を作り直します）`);
   }
 
   enqueue(c, prompt) {
@@ -476,14 +505,28 @@ class AgentManager extends EventEmitter {
   async prepareWorktree(c) {
     const top = await git.toplevel(c.repoPath);
     if (!top) throw new Error(`${c.repoPath} は git リポジトリではありません`);
-    const base = this.store.settings.baseBranch || (await git.currentBranch(top));
+    const reopen = c.reopenBase && (await git.branchExists(top, c.reopenBase)) ? c.reopenBase : null;
+    const base = reopen || this.store.settings.baseBranch || (await git.currentBranch(top));
     if (base === 'HEAD') throw new Error('ベースブランチが決まりません（detached HEAD）。設定でベースブランチを指定してください');
     const baseCommit = await git.revParse(top, base);
-    const branch = c.issue ? `agent/issue-${c.issue.number}-${c.id}` : `agent/${slugify(c.title)}-${c.id}`;
+    let branch = c.issue ? `agent/issue-${c.issue.number}-${c.id}` : `agent/${slugify(c.title)}-${c.id}`;
+    if (c.reopenFrom !== undefined) {
+      // 続きのときは、前のブランチ（origin に PR として残っていることもある）とぶつからない名前にする
+      const stem = branch;
+      for (let n = 2; (c.prUrl && n === 2) || (await git.branchExists(top, branch)); n++) branch = `${stem}-${n}`;
+    }
     const wt = path.join(path.dirname(top), `${path.basename(top)}.worktrees`, c.id);
     fs.mkdirSync(path.dirname(wt), { recursive: true });
+    if (fs.existsSync(wt)) await git.removeWorktree(top, wt);
     await git.addWorktree(top, wt, branch, baseCommit);
     Object.assign(c, { worktreePath: wt, branch, baseBranch: base, baseCommit });
+    if (c.reopenFrom !== undefined) {
+      // 前の PR はもう片付いたものとして、次は新しい PR を作る
+      c.prUrl = null;
+      c.finalDiff = null;
+      delete c.reopenBase;
+      delete c.reopenFrom;
+    }
     this.log(c, 'system', `worktree を作成しました: ${wt}（ブランチ ${branch} / ベース ${base}）`);
     this.changed(c);
   }
@@ -1234,4 +1277,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion };
+module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT };

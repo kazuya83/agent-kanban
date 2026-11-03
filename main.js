@@ -203,6 +203,7 @@ app.whenReady().then(async () => {
   handle('card:dismissInterrupted', (id) => agents.dismissInterrupted(id));
   handle('card:stop', (id) => agents.stop(id));
   handle('card:send', ({ id, message, skill }) => agents.send(id, message, skill));
+  handle('card:suggestSkills', ({ id }) => agents.suggestSkills(id));
   handle('skills:list', () => require('./src/skills').listSkills(store.settings.repoPath));
   handle('card:btw', ({ id, text }) => agents.btw(id, text));
   handle('card:setSession', ({ id, session }) => agents.setSession(id, session));
