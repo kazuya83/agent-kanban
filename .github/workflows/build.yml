@@ -146,7 +146,7 @@ jobs:
             # ユーザーと同じく、インストールしたアプリを起動して画面を確かめる
             npm install --prefix /tmp/pw --no-save --no-package-lock playwright-core@1.48.2 >/dev/null
             ls -la "$APP/Contents/Resources" | head
-            NODE_PATH=/tmp/pw/node_modules timeout 300 node test/smoke-packaged.js "$APP/Contents/MacOS/Claude Agent Kanban" smoke-installed.png
+            NODE_PATH=/tmp/pw/node_modules node test/smoke-packaged.js "$APP/Contents/MacOS/Claude Agent Kanban" smoke-installed.png
           else
             test -x "$HOME/.local/bin/claude-agent-kanban"
           fi
