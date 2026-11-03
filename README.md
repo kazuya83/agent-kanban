@@ -243,8 +243,10 @@ npm run dist:linux
 `dist/` に出力されます。Mac 用は macOS 上で、Windows 用は Windows 上でビルドしてください（Linux から Windows 用をビルドするには Wine が必要です）。
 
 GitHub Actions でも自動でビルドします（`.github/workflows/build.yml`）。
-- **push したとき**: 3つの OS でビルドし、Actions の実行結果ページの「Artifacts」から、できたファイルをダウンロードできます
-- **main に push したとき**: `package.json` の `version` のリリースがまだなければ、タグ（例: `v0.1.0`）と [Release](https://github.com/kazuya83/agent-kanban/releases) を自動で作り、ファイルを添付します
+- **push したとき**: テストだけを動かします（すぐ終わります）
+- **main に push したとき**: `package.json` の `version` のリリースがまだなければ、3つの OS でビルドして、タグ（例: `v0.1.0`）と [Release](https://github.com/kazuya83/agent-kanban/releases) を自動で作り、ファイルを添付します。そのあと、Mac・Windows・Linux でインストール用のコマンドを実際に試します
+- **手動で実行したとき**（Actions の「Run workflow」）: 3つの OS でビルドして、実行結果ページの「Artifacts」にファイルを置きます（リリースはしません）
+- 同じブランチに続けて push したときは、古い実行を取り消して、最新の push だけを動かします（Mac の実行環境の順番待ちを減らすため）
 
 新しいバージョンを出すときは、`package.json` の `version` を上げて main に push するだけです。インストール用のコマンドは、いつも最新の Release を入れます。
 

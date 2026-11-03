@@ -1,8 +1,10 @@
 # Windows（exe）・macOS（dmg）・Linux（AppImage）のアプリをビルドする
-# - push / プルリクエスト / 手動実行: ビルドして Actions の「Artifacts」に置く
+# - push / プルリクエスト: テストだけ（Mac の実行環境を無駄に使わないため）
 # - main への push で、package.json の version（例: 0.1.0）のリリースがまだなければ、
-#   タグ v0.1.0 と GitHub Release を作ってファイルを添付する
+#   3つの OS でビルドし、タグ v0.1.0 と GitHub Release を作ってファイルを添付し、インストールを確かめる
 #   → 新しいバージョンを出すときは package.json の version を上げて main に push するだけ
+# - 手動実行（Actions の「Run workflow」）: 3つの OS でビルドして「Artifacts」に置く（リリースはしない）
+# - 同じブランチに新しい push が来たら、古い実行は取り消す（最新の push だけ動かす）
 name: Build desktop apps
 
 on:
@@ -13,6 +15,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -45,6 +51,8 @@ jobs:
 
   build:
     needs: test
+    # ビルドは、リリースするときと手動実行のときだけ
+    if: needs.test.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -124,8 +132,9 @@ jobs:
   # インストール用スクリプトを、実際の OS で最新の Release に対して試す
   # （macOS は標準の /bin/bash 3.2、Windows は標準の Windows PowerShell 5.1 で実行する）
   install-script:
+    # リリースしたあと、その版をインストール用スクリプトで入れて確かめる
     needs: [test, build, release]
-    if: always() && needs.test.result == 'success' && needs.build.result == 'success' && needs.release.result != 'failure'
+    if: needs.release.result == 'success'
     strategy:
       fail-fast: false
       matrix:
