@@ -87,7 +87,7 @@ git config core.hooksPath .githooks
 - **進み具合**: 「1/4 テストとビルドを始めました」→「2/4 直したところがあったので、もう一度ビルドしています」（直したときだけ）→「3/4 ビルド OK」→「4/4 Release を出すか確かめています」→「終わりました: …（公開した Release の URL か、出さなかった理由）」の順に、macOS の通知で知らせます
   - `scripts/after-merge-build.sh --status` で、動いているかどうか・今の段階・これまでの結果（新しい 10 件）を見られます（中身は `.git/build-apps/status` と `.git/build-apps/history.log`）
 - 細かいログは `.git/build-apps/logs/` に出ます。手で動かすときは `scripts/after-merge-build.sh` を実行します（同じ main で前に動かしたことがあっても動かすときは `--force`）
-- Claude Code で `/build-apps release` と頼むと、確認したうえでこの流れ（ビルド → 直す → マージ・push → Release）をその場で動かします
+- Claude Code で `/release`（または `/build-apps release`）と頼むと、確認したうえでこの流れ（ビルド → 直す → マージ・push → Release）をその場で動かします
 - 止めたいときは `git config --unset core.hooksPath` を実行します
 
 ## しくみ
