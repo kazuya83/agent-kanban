@@ -214,6 +214,12 @@ const DEFAULT_RELAY_STEPS = [
 // 競争（同じタスクを複数のエージェントで並列に解く）の初期値
 const DEFAULT_COMPETE_AGENTS = ['claude', 'codex'];
 
+// リレーと競争は排他。設定でどちらか1つだけを使う（'relay' / 'compete'。ほかの値はリレー）
+const ORCHESTRATIONS = ['relay', 'compete'];
+function cleanOrchestration(v) {
+  return ORCHESTRATIONS.includes(v) ? v : 'relay';
+}
+
 // 設定から読んだリレーの工程を整える（知らないエージェント・空の工程は落とす）
 function cleanRelaySteps(steps) {
   if (!Array.isArray(steps)) return [];
@@ -268,6 +274,8 @@ module.exports = {
   DEFAULT_RELAY_STEPS,
   DEFAULT_COMPETE_AGENTS,
   cleanRelaySteps,
+  cleanOrchestration,
+  ORCHESTRATIONS,
   cleanCompeteAgents,
   DEFAULT_ENABLED_AGENTS,
   cleanEnabledAgents,

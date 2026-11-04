@@ -1,7 +1,7 @@
 // ボードの状態を JSON ファイルに保存する
 const fs = require('fs');
 const path = require('path');
-const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isAgent, cleanEnabledAgents } = require('./providers');
+const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isAgent, cleanEnabledAgents, cleanOrchestration } = require('./providers');
 
 const DEFAULT_SETTINGS = {
   repoPath: '',
@@ -30,6 +30,7 @@ const DEFAULT_SETTINGS = {
   geminiPath: 'gemini',
   geminiModel: '',
   // ---- オーケストレーション ----
+  orchestration: 'relay', // リレーと競争は排他。使うのはどちらか1つ（'relay' / 'compete'）
   relaySteps: DEFAULT_RELAY_STEPS, // リレー: 同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ
   competeAgents: DEFAULT_COMPETE_AGENTS, // 競争: 同じタスクを、これらのエージェントで並列に解かせる
 };
@@ -67,6 +68,8 @@ function migrateSettings(settings, raw, cards) {
     for (const c of cards) if (c && c.agent) used.add(c.agent);
     settings.enabledAgents = cleanEnabledAgents([...used]);
   } else settings.enabledAgents = cleanEnabledAgents(raw.enabledAgents);
+  // リレーと競争は排他（どちらか1つ）。知らない値ならリレー
+  settings.orchestration = cleanOrchestration(settings.orchestration);
   // 「最初から選んでおくエージェント」にはリレー・競争を選べなくなったので、1つのエージェントにする
   if (!isAgent(settings.defaultAgent) || !settings.enabledAgents.includes(settings.defaultAgent)) settings.defaultAgent = settings.enabledAgents[0];
 }

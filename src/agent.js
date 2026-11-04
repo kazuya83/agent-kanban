@@ -639,6 +639,11 @@ class AgentManager extends EventEmitter {
     const mode = agent || providers.defaultAgentOf(s);
     const chat = fromChat ? this.store.card(fromChat) : null;
     const from = isChat(chat) ? chat : null;
+    // リレーと競争は排他。設定で選んでいない方は使えない
+    if ((mode === 'relay' || mode === 'compete') && providers.cleanOrchestration(s.orchestration) !== mode) {
+      const name = (m) => (m === 'relay' ? 'リレー' : '競争');
+      throw new Error(`${name(mode)}は使わない設定になっています（リレーと競争はどちらか1つだけ使えます）。⚙ 設定の「オーケストレーション」で${name(mode)}を選んでください`);
+    }
     if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from });
     if (mode === 'relay') {
       const steps = providers.cleanRelaySteps(s.relaySteps);

@@ -188,6 +188,7 @@ test('リレー: 途中の工程が失敗したら止まり、追加指示で直
 
 test('競争: 同じタスクを複数のエージェントで並列に解き、比べて1つを採用する', async () => {
   const { agents, store, g } = setup();
+  store.settings.orchestration = 'compete';
   store.settings.competeAgents = ['claude', 'codex', 'gemini'];
   const cards = agents.createTask({ title: 'race', prompt: '競争のタスク', agent: 'compete' });
   assert.deepStrictEqual(cards.map((c) => c.agent), ['claude', 'codex', 'gemini']);
@@ -222,6 +223,7 @@ test('競争: 同じタスクを複数のエージェントで並列に解き、
 
 test('競争: エージェントが2つ未満ならエラー。Issue からも競争で作れる', async () => {
   const { agents, store } = setup();
+  store.settings.orchestration = 'compete';
   store.settings.competeAgents = ['codex'];
   assert.throws(() => agents.createTask({ prompt: 'x', agent: 'compete' }), /2つ以上/);
   store.settings.competeAgents = ['codex', 'gemini'];
@@ -242,6 +244,7 @@ test('使うエージェント: チェックを付けていないエージェン
   ];
   assert.throws(() => agents.createTask({ prompt: 'x', agent: 'relay' }), /工程「テスト」の Gemini CLI は使わない設定/);
   // 競争は使うエージェントだけで（2つ未満ならエラー）
+  store.settings.orchestration = 'compete';
   store.settings.competeAgents = ['claude', 'codex', 'gemini'];
   assert.deepStrictEqual(agents.createTask({ prompt: 'x', agent: 'compete' }).map((c) => c.agent), ['claude', 'codex']);
   store.settings.enabledAgents = ['codex'];
@@ -250,6 +253,27 @@ test('使うエージェント: チェックを付けていないエージェン
   store.settings.defaultAgent = 'claude';
   assert.strictEqual(agents.createTask({ prompt: 'y' })[0].agent, 'codex');
   assert.strictEqual(agents.createChat({ message: 'y' }).agent, 'codex');
+});
+
+test('リレーと競争は排他: 設定で選んだ方だけ使え、もう片方ではタスクを作れない', async () => {
+  const { agents, store } = setup();
+  store.settings.relaySteps = [{ agent: 'codex', label: '実装', instruction: '' }];
+  store.settings.competeAgents = ['claude', 'codex'];
+  // 初期値はリレー
+  assert.strictEqual(store.settings.orchestration, 'relay');
+  assert.strictEqual(agents.createTask({ prompt: 'x', agent: 'relay' }).length, 1);
+  assert.throws(() => agents.createTask({ prompt: 'x', agent: 'compete' }), /競争は使わない設定/);
+  // 競争に切り替えると、リレーは使えない
+  store.settings.orchestration = 'compete';
+  assert.strictEqual(agents.createTask({ prompt: 'x', agent: 'compete' }).length, 2);
+  assert.throws(() => agents.createTask({ prompt: 'x', agent: 'relay' }), /リレーは使わない設定/);
+  // 1つのエージェントのタスクは、どちらを選んでいても作れる
+  assert.strictEqual(agents.createTask({ prompt: 'x', agent: 'claude' })[0].agent, 'claude');
+  // 知らない値はリレーに直す
+  const s1 = { orchestration: 'both', enabledAgents: ['claude'] };
+  migrateSettings(s1, s1, []);
+  assert.strictEqual(s1.orchestration, 'relay');
+  assert.strictEqual(providers.cleanOrchestration('compete'), 'compete');
 });
 
 test('使うエージェント: 前のバージョンの設定は、使っていたエージェントにチェックを付け、最初のエージェントからリレー・競争を外す', () => {
@@ -290,6 +314,7 @@ test('Claude 以外でも: 会話・ブランチの命名・競争の比較・�
   assert.ok(g('branch').toString().includes('feature/fake-codex-branch'));
   store.settings.branchNamingRule = '';
   // 競争の比較は、最初から選んでおくエージェントに頼む
+  store.settings.orchestration = 'compete';
   store.settings.competeAgents = ['codex', 'gemini'];
   const cards = agents.createTask({ title: 'race', prompt: '競争', agent: 'compete' });
   for (const x of cards) agents.start(x.id);
