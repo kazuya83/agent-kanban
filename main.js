@@ -160,6 +160,37 @@ app.whenReady().then(async () => {
   });
   // Windows: WSL のディストリビューション（Ubuntu など）。リポジトリを選ぶときに、その中のフォルダも選べるようにする
   handle('wsl:distros', () => (process.platform === 'win32' || process.env.AGENT_KANBAN_WSL ? wsl.listDistros() : []));
+  const { touchRecentRepo } = require('./src/store');
+  const forgetRecentRepo = (dir) => {
+    const s = String(dir || '').trim();
+    if (!s) return;
+    store.settings.recentRepoPaths = (store.settings.recentRepoPaths || []).filter((p) => p !== s);
+    store.save();
+    notifyBoard();
+  };
+  // パスが git リポジトリか調べて toplevel を返す（だめなら recent から外すこともある）
+  const resolveRepoDir = async (picked, { forgetOnMissing = false } = {}) => {
+    const fs = require('fs');
+    if (!picked) throw new Error('パスが空です');
+    if (!fs.existsSync(picked)) {
+      if (forgetOnMissing) forgetRecentRepo(picked);
+      throw new Error(`フォルダが見つかりません: ${picked}`);
+    }
+    const pw = wsl.parseWslPath(picked);
+    let top = '';
+    try {
+      top = wsl.fromLinux(picked, (await git.git(picked, ['rev-parse', '--show-toplevel'])).trim());
+    } catch (err) {
+      if (/not a git repository/i.test(err.message)) {
+        if (forgetOnMissing) forgetRecentRepo(picked);
+        throw new Error(`選んだフォルダは git リポジトリではありません（${picked}）`);
+      }
+      if (pw && /not found|No such file|127/i.test(err.message)) throw new Error(`${pw.distro}（WSL）の中に git が見つかりません。${pw.distro} のターミナルで sudo apt install git を実行してください。\n${err.message}`);
+      throw new Error(`git でフォルダを調べられませんでした（${picked}）\n${err.message}`);
+    }
+    if (!top) throw new Error(`git から答えが返ってきませんでした（${picked}）`);
+    return top;
+  };
   handle('repo:choose', async (opts = {}) => {
     const distro = opts && opts.wsl;
     const home = distro ? await wsl.homeDir(distro) : '';
@@ -169,22 +200,17 @@ app.whenReady().then(async () => {
       ...(distro ? { defaultPath: wsl.toUnc(distro, home || '/home') } : {}),
     });
     if (r.canceled || !r.filePaths[0]) return null;
-    const picked = r.filePaths[0];
-    const pw = wsl.parseWslPath(picked);
-    let top = '';
-    try {
-      top = wsl.fromLinux(picked, (await git.git(picked, ['rev-parse', '--show-toplevel'])).trim());
-    } catch (err) {
-      if (/not a git repository/i.test(err.message)) throw new Error(`選んだフォルダは git リポジトリではありません（${picked}）`);
-      if (pw && /not found|No such file|127/i.test(err.message)) throw new Error(`${pw.distro}（WSL）の中に git が見つかりません。${pw.distro} のターミナルで sudo apt install git を実行してください。\n${err.message}`);
-      throw new Error(`git でフォルダを調べられませんでした（${picked}）\n${err.message}`);
-    }
-    if (!top) throw new Error(`git から答えが返ってきませんでした（${picked}）`);
-    return openRepo(top);
+    return openRepo(await resolveRepoDir(r.filePaths[0]));
+  });
+  // 最近開いたリポジトリなど、すでにパスが分かっているものを開く（フォルダダイアログは出さない）
+  handle('repo:open', async ({ path: dir } = {}) => {
+    const picked = String(dir || '').trim();
+    return openRepo(await resolveRepoDir(picked, { forgetOnMissing: true }));
   });
   const openRepo = (dir) => {
     store.settings.repoPath = dir;
     store.settings.baseBranch = '';
+    store.settings.recentRepoPaths = touchRecentRepo(store.settings.recentRepoPaths, dir);
     store.save();
     notifyBoard();
     return dir;

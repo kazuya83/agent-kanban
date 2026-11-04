@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   appInfo: () => call('app:info'),
   checkEnv: () => call('env:check'),
   chooseRepo: (opts) => call('repo:choose', opts || {}),
+  openRepo: (dir) => call('repo:open', { path: dir }),
   wslDistros: () => call('wsl:distros'),
   repoDefaultParent: (opts) => call('repo:defaultParent', opts || {}),
   chooseRepoParent: (opts) => call('repo:chooseParent', opts || {}),
