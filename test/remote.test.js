@@ -20,6 +20,20 @@ test('遠隔で転送するチャンネルと、しないチャンネル', () =>
   assert.strictEqual(isLocalChannel('remote:connect'), true);
   assert.strictEqual(isLocalChannel('app:info'), true);
   assert.strictEqual(isLocalChannel('repo:choose'), false);
+  // チャットを開いたときの既読は画面が自動で呼ぶので、遠隔中もホストへ転送する
+  assert.strictEqual(isProxyChannel('card:markSeen'), true);
+});
+
+test('main.js の操作は、転送するか・手元で動かすか・わざと止めるかのどれかに決まっている', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const channels = [...src.matchAll(/\bhandle\('([^']+)'/g)].map((m) => m[1]);
+  assert.ok(channels.length > 20);
+  // ホストの画面にダイアログや Finder が出るだけなので、遠隔中は止める操作
+  const blocked = new Set(['repo:choose', 'repo:chooseParent', 'card:open']);
+  const unknown = channels.filter((ch) => !isProxyChannel(ch) && !isLocalChannel(ch) && !blocked.has(ch));
+  assert.deepStrictEqual(unknown, [], `遠隔中に「この操作を使えません」になる操作があります: ${unknown.join(', ')}`);
 });
 
 test('ペアリングコードで接続し、ボード操作とイベントを中継できる', async () => {
