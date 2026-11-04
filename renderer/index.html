@@ -8,17 +8,17 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="brand"><span class="logo">▦</span><span class="brand-text"><span class="brand-name">Agent Kanban</span><span id="appVersion" class="brand-ver"></span></span></div>
+      <div class="brand"><span class="logo" data-icon="logo"></span><span class="brand-text"><span class="brand-name">Agent Kanban</span><span id="appVersion" class="brand-ver"></span></span></div>
       <button id="repoBtn" class="repo" title="リポジトリを選ぶ"></button>
       <div class="spacer"></div>
       <span id="costInfo" class="pill cost hidden" title="Claude の週間上限のリセットに合わせた、今週このリポジトリのタスクで使った金額"></span>
       <span id="runInfo" class="pill"></span>
-      <button id="settingsBtn" class="btn ghost">⚙ 設定</button>
-      <button id="chatBtn" class="btn chat-btn" title="タスクを作らずに、このリポジトリについてエージェントと話します">💬 会話<span id="chatCount" class="chat-count hidden"></span></button>
-      <button id="newBtn" class="btn primary">＋ 新しいタスク</button>
+      <button id="settingsBtn" class="btn ghost"><span data-icon="settings"></span>設定</button>
+      <button id="chatBtn" class="btn chat-btn" title="タスクを作らずに、このリポジトリについてエージェントと話します"><span data-icon="chat"></span>会話<span id="chatCount" class="chat-count hidden"></span></button>
+      <button id="newBtn" class="btn primary"><span data-icon="plus"></span>新しいタスク</button>
       <button id="issueBtn" class="btn"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="vertical-align:-2px"><path fill="currentColor" d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13ZM8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg> Issue から作成</button>
       <div class="notif-wrap">
-        <button id="notifBtn" class="btn ghost notif-btn" title="通知">🔔<span id="notifCount" class="notif-count hidden"></span></button>
+        <button id="notifBtn" class="btn ghost notif-btn" title="通知"><span data-icon="bell"></span><span id="notifCount" class="notif-count hidden"></span></button>
         <div id="notifPanel" class="notif-panel hidden" role="dialog" aria-label="通知"></div>
       </div>
     </header>
@@ -51,6 +51,7 @@
     <div id="skillPicker" class="modal picker hidden"><div class="modal-box wide" id="skillPickerBox"></div></div>
     <div id="busy" class="busy hidden" role="alert" aria-live="assertive" aria-busy="true"><div class="busy-box"><span class="spinner" aria-hidden="true"></span><span id="busyMsg">処理しています…</span></div></div>
     <div id="toast" class="toast hidden"></div>
+    <script src="icons.js"></script>
     <script src="diff-parse.js"></script>
     <script src="markdown.js"></script>
     <script src="renderer.js"></script>

@@ -368,7 +368,7 @@ app.on('before-quit', (e) => {
     cancelId: 1,
     title: '実行中のタスクがあります',
     message: `${parts}のタスクがあります。終了しますか？`,
-    detail: '終了すると、実行中のタスクは中断されます（それまでの変更はタスクのブランチにコミットします）。\n次にアプリを起動したとき、ボード上部の「すべて再開」やタスクの「▶ 再開」で、中断したところから続けられます。',
+    detail: '終了すると、実行中のタスクは中断されます（それまでの変更はタスクのブランチにコミットします）。\n次にアプリを起動したとき、ボード上部の「すべて再開」やタスクの「再開」で、中断したところから続けられます。',
   };
   const ask = win && !win.isDestroyed() ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts);
   ask.then(
