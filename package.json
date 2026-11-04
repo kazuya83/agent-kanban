@@ -56,7 +56,7 @@
       "artifactName": "agent-kanban-${version}-win-portable.${ext}"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [{ "target": "AppImage", "arch": ["x64"] }],
       "category": "Development"
     }
   }
