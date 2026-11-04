@@ -459,6 +459,10 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .st-lost { color: var(--err); }
 .btw-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .tab.live::after { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--run); margin-left: 6px; vertical-align: middle; }
+.tab.attn::after { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); margin-left: 6px; vertical-align: middle; }
+/* ログの最後の、承認・質問・仕様の確認（あなたの操作が必要なもの） */
+.log-actions { padding: 0 16px 16px; }
+.log-actions > :first-child { margin-top: 0; }
 .issue-bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
 .ib-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; white-space: nowrap; }
 .ib-repo { color: var(--muted); font-size: 12px; font-family: var(--mono); }
