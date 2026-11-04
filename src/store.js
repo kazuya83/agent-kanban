@@ -70,7 +70,7 @@ function migrateSettings(settings, raw, cards) {
     for (const c of cards) if (c && c.agent) used.add(c.agent);
     settings.enabledAgents = cleanEnabledAgents([...used]);
   } else settings.enabledAgents = cleanEnabledAgents(raw.enabledAgents);
-  // Pipelineと競争は排他（どちらか1つ）。知らない値ならPipeline
+  // Pipelineと競争は排他（どちらか1つ、またはなし）。知らない値ならPipeline
   settings.orchestration = cleanOrchestration(settings.orchestration);
   // 「最初から選んでおくエージェント」にはPipeline・競争を選べなくなったので、1つのエージェントにする
   if (!isAgent(settings.defaultAgent) || !settings.enabledAgents.includes(settings.defaultAgent)) settings.defaultAgent = settings.enabledAgents[0];
