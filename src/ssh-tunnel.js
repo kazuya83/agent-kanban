@@ -45,7 +45,7 @@ const GUIDE = '詳しい手順は README の「遠隔操作」（docs/remote.md�
 const SSH_SERVER_HOWTO = 'ホストが Mac なら「システム設定 → 一般 → 共有 → リモートログイン」をオン、Windows なら「設定 → システム → オプション機能」で「OpenSSH サーバー」を追加してサービス sshd を開始';
 
 // ssh の標準エラーを、原因と直し方が分かる文にする
-function explainSshError(stderr, { host = '', user = '', sshPort = 22, spawnError = null } = {}) {
+function explainSshError(stderr, { host = '', user = '', sshPort = 22, spawnError = null, identityFile = '' } = {}) {
   if (spawnError && spawnError.code === 'ENOENT') {
     return 'ssh コマンドが見つかりません。Windows なら「設定 → システム → オプション機能」で「OpenSSH クライアント」を追加してください（ssh のフルパスを設定で指定することもできます）';
   }
@@ -64,7 +64,8 @@ function explainSshError(stderr, { host = '', user = '', sshPort = 22, spawnErro
     return `ホストの鍵が以前と違うため止めました（${host}）。ホストを入れ直したなど心当たりがあるときは、操作側のターミナルで ssh-keygen -R ${host} を実行してからもう一度接続してください`;
   }
   if (/Permission denied|Too many authentication failures|no mutual signature/i.test(text)) {
-    return `SSH の認証に失敗しました（${target}）。アプリからはパスワードを入力できないので、鍵で入れるようにしてください: 操作側の「RC設定」で「鍵を作る」を押し、出てきた公開鍵を、ホストの PC で登録します（出ているコマンドをホストで実行するか、ホストが Mac なら ~/.ssh/authorized_keys に、Windows なら C:\\Users\\<ユーザー>\\.ssh\\authorized_keys（管理者のユーザーは C:\\ProgramData\\ssh\\administrators_authorized_keys）に1行で足します）。ユーザー名がホストのログイン名と合っているかも確かめてください。${GUIDE}`;
+    const keyNote = identityFile ? `アプリが使った鍵: ${identityFile}。ターミナルで ssh -i "${identityFile}" ${user ? `${user}@` : ''}${host} exit がパスワードなしで通るか確かめてください。` : 'アプリは鍵ファイルを指定せずに接続しました（RC設定の「鍵ファイル」が空で、アプリの鍵も見つかりませんでした）。';
+    return `SSH の認証に失敗しました（${target}）。${keyNote}アプリからはパスワードを入力できないので、鍵で入れるようにしてください: 操作側の「RC設定」で「鍵を作る」を押し、出てきた公開鍵を、ホストの PC で登録します（出ているコマンドをホストで実行するか、ホストが Mac なら ~/.ssh/authorized_keys に、Windows なら C:\\Users\\<ユーザー>\\.ssh\\authorized_keys（管理者のユーザーは C:\\ProgramData\\ssh\\administrators_authorized_keys）に1行で足します）。ユーザー名がホストのログイン名と合っているかも確かめてください。${GUIDE}`;
   }
   if (/remote port forwarding failed|forwarding failed|open failed|administratively prohibited/i.test(text)) {
     return `SSH はつながりましたが、ポート転送を断られました。ホストの sshd_config（Mac は /etc/ssh/sshd_config、Windows は C:\\ProgramData\\ssh\\sshd_config）で AllowTcpForwarding が no になっていないか確かめてください`;
@@ -103,6 +104,15 @@ async function sshHostInfo({ sshPort = 22, os = require('os'), probe = (port) =>
     sshPort,
     sshServer: await probe(sshPort),
   };
+}
+
+// 鍵ファイルの場所: ~ で始まれば展開し、空なら「鍵を作る」で作ったアプリの鍵があればそれを使う
+function resolveIdentityFile(identityFile, home = require('os').homedir()) {
+  const key = require('./ssh-key');
+  const given = key.expandHome(identityFile, home);
+  if (given) return given;
+  const def = key.defaultKeyPath(home);
+  return require('fs').existsSync(def) ? def : '';
 }
 
 function sshArgs({ host, user, sshPort = 22, remotePort, localPort, identityFile }) {
@@ -152,7 +162,7 @@ class SshTunnel extends EventEmitter {
     if (/^-/.test(host) || /^-/.test(user) || /[\s@]/.test(user)) throw new Error('SSH の接続先かユーザー名が正しくありません');
     sshPort = Math.min(65535, Math.max(1, parseInt(sshPort, 10) || 22));
     const localPort = await freePort();
-    const opts = { host, user, sshPort, remotePort, localPort, identityFile: String(identityFile || '').trim() };
+    const opts = { host, user, sshPort, remotePort, localPort, identityFile: resolveIdentityFile(identityFile) };
     const child = spawn(this.command, [...this.prefixArgs, ...sshArgs(opts)], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
     this.child = child;
     this.localPort = localPort;
@@ -215,4 +225,5 @@ class SshTunnel extends EventEmitter {
   }
 }
 
-module.exports = { SshTunnel, explainSshError, isLoopbackHost, isTailscaleIp, sshHostInfo, sshArgs, freePort };
+module.exports = {
+  resolveIdentityFile, SshTunnel, explainSshError, isLoopbackHost, isTailscaleIp, sshHostInfo, sshArgs, freePort };
