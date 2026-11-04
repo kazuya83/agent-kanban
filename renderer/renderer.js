@@ -12,6 +12,15 @@ const CHAT_STATUS_LABEL = { todo: '未開始', queued: '待機中', running: '�
 const isChat = (c) => !!c && c.kind === 'chat';
 // git で管理していないフォルダのタスク（worktree・差分・マージ・PR はない）
 const isNoGit = (c) => !!c && !!c.noGit;
+// git で管理していないフォルダのタスクを「完了にする」ボタンを出すか（レビュー待ち・失敗で、質問や仕様の確認を待っていないとき）
+const canCompleteNoGit = (c) =>
+  isNoGit(c) && !isChat(c) && (c.status === 'review' || c.status === 'failed') && !c.afterDone && !isInterrupted(c) && !isSpecPending(c) && !c.awaitingReply && !(c.questions || []).length;
+const COMPLETE_TITLE = 'git で管理していないフォルダなので、マージや PR はありません。フォルダの中身を確かめてから完了にします';
+// 「完了にする」: 確かめてから完了にする（詳細の上・ボードのカード・チャットとログの最後のどこから押しても同じ）
+async function completeNoGit(c) {
+  if (!c || !confirm(`「${c.title}」を完了にしますか？\nフォルダの中身はそのまま残ります（git で管理していないので、マージや PR はありません）。`)) return;
+  await runBusy('完了にしています…', () => api.complete(c.id), '完了にしました');
+}
 const LOG_LABEL = { question: '質問', user: 'あなた', text: 'Claude', tool: 'ツール', tool_result: '結果', tool_error: '結果(エラー)', system: 'システム', result: '完了', error: 'エラー', stderr: 'stderr', permission: '承認' };
 const PERMISSION_MODES = [
   ['default', '毎回確認する（すべての操作をカードで承認）'],
@@ -392,6 +401,7 @@ function cardHtml(c) {
       ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(plainText(c.lastMessage))}</div>` : ''}
       ${isSpecPending(c) ? `<div class="card-msg card-spec">${icon('note')}内容が詰まっていないので、開発を開始できません。開いて質問に答えてください</div>` : ''}
       ${isInterrupted(c) ? `<div class="int-quick"><button class="btn small primary" data-resume="${c.id}" title="中断したところから続けます">${icon('play')}再開</button></div>` : ''}
+      ${canCompleteNoGit(c) ? `<div class="int-quick"><button class="btn small primary" data-complete="${c.id}" title="${COMPLETE_TITLE}">${icon('check')}完了にする</button></div>` : ''}
       ${questionCompactHtml(c)}
       ${permissionBlock(c, true)}
       <div class="card-meta">
@@ -671,6 +681,12 @@ function boardClick(e) {
   if (rs) {
     e.stopPropagation();
     runBusy('再開しています…', () => api.resume(rs.dataset.resume), '再開しました');
+    return;
+  }
+  const cp = e.target.closest('[data-complete]');
+  if (cp) {
+    e.stopPropagation();
+    completeNoGit(card(cp.dataset.complete));
     return;
   }
   const qp = e.target.closest('[data-qpick], [data-qopen]');
@@ -970,7 +986,7 @@ function renderDetailHead() {
     s === 'todo' && !isInterrupted(c) && `<button class="btn primary" data-act="start">${icon('play')}開始</button>`,
     (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">${icon('stop')}停止</button>`,
     (s === 'review' || s === 'failed') && isNoGit(c) &&
-      `<button class="btn primary" data-act="complete" title="git で管理していないフォルダなので、マージや PR はありません。フォルダの中身を確かめてから完了にします">${icon('check')}完了にする</button>`,
+      `<button class="btn primary" data-act="complete" title="${COMPLETE_TITLE}">${icon('check')}完了にする</button>`,
     (s === 'review' || s === 'failed') && c.worktreePath &&
       (state.board.settings.integration === 'pr'
         ? `<button class="btn primary" data-act="pr">${icon('pr')}${c.prUrl ? 'PR を更新…' : 'PR を作成…'}</button>`
@@ -1087,6 +1103,10 @@ $('detailBody').addEventListener('keydown', (e) => {
   if (c) sendReplyAnswer(form, c);
 });
 function logActionClick(e) {
+  const cp = e.target.closest('[data-complete]');
+  if (cp) return completeNoGit(card(cp.dataset.complete));
+  const op = e.target.closest('[data-act-open]');
+  if (op) return run(() => api.open(op.dataset.actOpen));
   const rq = e.target.closest('[data-rqact]');
   if (rq) {
     const form = rq.closest('.qform');
@@ -1142,7 +1162,7 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'open') run(() => api.open(c.id));
   if (act === 'merge') openMerge(c);
   if (act === 'complete') {
-    if (confirm(`「${c.title}」を完了にしますか？\nフォルダの中身はそのまま残ります（git で管理していないので、マージや PR はありません）。`)) await runBusy('完了にしています…', () => api.complete(c.id), '完了にしました');
+    await completeNoGit(c);
     return;
   }
   if (act === 'pr') openPr(c);
@@ -1244,7 +1264,15 @@ function renderChatLog(body, c, logs) {
 function logActionsHtml(c) {
   const parts = [permissionBlock(c, false)];
   if (hasChatActions(c)) parts.push(`<div class="d-awaiting"><b>${icon('question')}${esc(agentShort(agentOf(c)))} が質問しています</b><small>「チャット」タブで答えてください。</small></div>`);
+  parts.push(completeBoxHtml(c));
   return parts.join('');
+}
+// git で管理していないフォルダのタスクが終わったら、チャット・ログの最後に「完了にする」を出す
+function completeBoxHtml(c) {
+  if (!canCompleteNoGit(c)) return '';
+  return `<div class="d-complete"><b>${icon('check')}${c.status === 'failed' ? 'エージェントが失敗で終わりました' : '作業が終わりました'}</b>
+    <small>git で管理していないフォルダなので、マージや PR はありません。フォルダの中身を確かめて、よければ完了にしてください。直してほしいときは、下の欄から追加の指示を送れます。</small>
+    <div class="cf-actions"><button class="btn primary" data-complete="${c.id}" title="${COMPLETE_TITLE}">${icon('check')}完了にする</button><button class="btn ghost" data-act-open="${c.id}">フォルダを開く</button></div></div>`;
 }
 // チャットの最後に出す、あなたの操作が必要なもの（途中の質問の回答・仕様の確認・回答待ちの案内）
 function chatActionsHtml(c) {
@@ -1258,6 +1286,7 @@ function chatActionsHtml(c) {
       : c.awaitingReply && (s === 'review' || s === 'failed')
         ? `<div class="d-awaiting"><b>${icon('chat')}${who} が質問しています</b><small>このすぐ下の欄（または画面のいちばん下の入力欄）に答えを書いて送ると、同じ会話の続きから進めます。</small></div>${replyFormHtml(c)}`
         : '',
+    completeBoxHtml(c),
   ];
   return parts.join('');
 }

@@ -585,6 +585,10 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .d-awaiting { margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, #b57bff 50%, transparent); background: color-mix(in srgb, #b57bff 8%, var(--panel)); }
 .d-awaiting p { margin: 6px 0; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; }
 .d-awaiting small { color: var(--muted); }
+.d-complete { margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 8%, var(--panel)); }
+.d-complete b { display: block; }
+.d-complete small { display: block; color: var(--muted); margin: 4px 0 8px; }
+.d-complete .cf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .card-spec { color: #3fb6c9; }
 .d-spec { border-color: color-mix(in srgb, #3fb6c9 55%, transparent); background: color-mix(in srgb, #3fb6c9 8%, var(--panel)); }
 .d-spec p { max-height: 260px; }
