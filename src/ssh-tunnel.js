@@ -40,6 +40,10 @@ function canConnect(port) {
   });
 }
 
+const GUIDE = '詳しい手順は README の「遠隔操作」（docs/remote.md）にあります';
+// ホスト（作業側）で SSH サーバーをオンにする方法。ホストは Mac でも Windows でもよい
+const SSH_SERVER_HOWTO = 'ホストが Mac なら「システム設定 → 一般 → 共有 → リモートログイン」をオン、Windows なら「設定 → システム → オプション機能」で「OpenSSH サーバー」を追加してサービス sshd を開始';
+
 // ssh の標準エラーを、原因と直し方が分かる文にする
 function explainSshError(stderr, { host = '', user = '', sshPort = 22, spawnError = null } = {}) {
   if (spawnError && spawnError.code === 'ENOENT') {
@@ -48,25 +52,57 @@ function explainSshError(stderr, { host = '', user = '', sshPort = 22, spawnErro
   const text = String(stderr || '').trim();
   const target = `${user ? `${user}@` : ''}${host}:${sshPort}`;
   if (/timed out|ETIMEDOUT/i.test(text)) {
-    return `SSH の接続がタイムアウトしました（${target}）。Mac の「システム設定 → 一般 → 共有 → リモートログイン」がオンか、Tailscale が両方の PC で接続中か、IP やホスト名が合っているかを確かめてください`;
+    return `SSH の接続がタイムアウトしました（${target}）。相手から返事がないときに出ます。次を順に確かめてください: ① 両方の PC で Tailscale が「接続中」か（操作側で tailscale ping ${host} が返るか） ② IP やホスト名が、ホストの Agent Kanban の「遠隔操作」に出ている接続先と合っているか ③ ホストがスリープしていないか ④ ホストで SSH サーバーが動いているか（${SSH_SERVER_HOWTO}） ⑤ ホストのファイアウォールが SSH（${sshPort}）を止めていないか（Mac の「ステルスモード」「外部からの接続をすべてブロック」など）。${GUIDE}`;
   }
   if (/Connection refused/i.test(text)) {
-    return `SSH の接続を断られました（${target}）。Mac の「システム設定 → 一般 → 共有 → リモートログイン」をオンにしてください（SSH のポートが 22 以外ならそれも合わせてください）`;
+    return `SSH の接続を断られました（${target}）。ホストで SSH サーバーが動いていません。${SSH_SERVER_HOWTO}してください（SSH のポートが 22 以外ならそれも合わせてください）。${GUIDE}`;
   }
   if (/Could not resolve hostname|Name or service not known|No such host/i.test(text)) {
     return `SSH の接続先「${host}」が見つかりません。Tailscale の IP（100.x.x.x）か、Tailscale の管理画面に出ているマシン名を入れてください`;
   }
   if (/Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(text)) {
-    return `ホストの鍵が以前と違うため止めました（${host}）。Mac を入れ直したなど心当たりがあるときは、ターミナルで ssh-keygen -R ${host} を実行してからもう一度接続してください`;
+    return `ホストの鍵が以前と違うため止めました（${host}）。ホストを入れ直したなど心当たりがあるときは、操作側のターミナルで ssh-keygen -R ${host} を実行してからもう一度接続してください`;
   }
   if (/Permission denied|Too many authentication failures|no mutual signature/i.test(text)) {
-    return `SSH の認証に失敗しました（${target}）。アプリからはパスワードを入力できないので、鍵で入れるようにしてください: 操作側で ssh-keygen -t ed25519 を実行し、できた公開鍵（~/.ssh/id_ed25519.pub）の中身を Mac の ~/.ssh/authorized_keys に1行で足します。ユーザー名が Mac のログイン名と合っているかも確かめてください`;
+    return `SSH の認証に失敗しました（${target}）。アプリからはパスワードを入力できないので、鍵で入れるようにしてください: 操作側で ssh-keygen -t ed25519 を実行し、できた公開鍵（~/.ssh/id_ed25519.pub）の中身を、ホストが Mac なら ~/.ssh/authorized_keys に、Windows なら C:\\Users\\<ユーザー>\\.ssh\\authorized_keys（管理者のユーザーは C:\\ProgramData\\ssh\\administrators_authorized_keys）に1行で足します。ユーザー名がホストのログイン名と合っているかも確かめてください。${GUIDE}`;
   }
   if (/remote port forwarding failed|forwarding failed|open failed|administratively prohibited/i.test(text)) {
-    return `SSH はつながりましたが、ポート転送を断られました。Mac の sshd_config で AllowTcpForwarding が no になっていないか確かめてください`;
+    return `SSH はつながりましたが、ポート転送を断られました。ホストの sshd_config（Mac は /etc/ssh/sshd_config、Windows は C:\\ProgramData\\ssh\\sshd_config）で AllowTcpForwarding が no になっていないか確かめてください`;
   }
   const last = text.split(/\r?\n/).filter(Boolean).slice(-3).join(' / ');
   return `SSH トンネルを張れませんでした（${target}）${last ? `: ${last}` : ''}`;
+}
+
+// Tailscale の IP（100.64.0.0/10）か
+function isTailscaleIp(ip) {
+  const m = String(ip || '').match(/^100\.(\d+)\.\d+\.\d+$/);
+  return !!m && Number(m[1]) >= 64 && Number(m[1]) <= 127;
+}
+
+// ホスト側で、操作側に入れてもらう接続先と、SSH サーバーが動いているかを調べる
+async function sshHostInfo({ sshPort = 22, os = require('os'), probe = (port) => canConnect(port) } = {}) {
+  const ifaces = os.networkInterfaces() || {};
+  const addrs = [];
+  for (const list of Object.values(ifaces)) {
+    for (const a of list || []) {
+      if (a && (a.family === 'IPv4' || a.family === 4) && !a.internal) addrs.push(a.address);
+    }
+  }
+  let user = '';
+  try {
+    user = os.userInfo().username || '';
+  } catch {
+    /* 取れない環境もある */
+  }
+  return {
+    platform: process.platform,
+    hostname: os.hostname(),
+    user,
+    tailscaleIps: addrs.filter(isTailscaleIp),
+    otherIps: addrs.filter((a) => !isTailscaleIp(a)),
+    sshPort,
+    sshServer: await probe(sshPort),
+  };
 }
 
 function sshArgs({ host, user, sshPort = 22, remotePort, localPort, identityFile }) {
@@ -179,4 +215,4 @@ class SshTunnel extends EventEmitter {
   }
 }
 
-module.exports = { SshTunnel, explainSshError, isLoopbackHost, sshArgs, freePort };
+module.exports = { SshTunnel, explainSshError, isLoopbackHost, isTailscaleIp, sshHostInfo, sshArgs, freePort };

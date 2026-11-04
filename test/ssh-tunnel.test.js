@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
-const { SshTunnel, explainSshError, isLoopbackHost, sshArgs } = require('../src/ssh-tunnel');
+const { SshTunnel, explainSshError, isLoopbackHost, isTailscaleIp, sshHostInfo, sshArgs } = require('../src/ssh-tunnel');
 const { RemoteHost, RemoteClient } = require('../src/remote');
 
 const FAKE = path.join(__dirname, 'fake-ssh.js');
@@ -39,6 +39,46 @@ test('ssh の失敗を、直し方の分かる文にする', () => {
   assert.match(explainSshError('Host key verification failed.', { host: 'x' }), /ssh-keygen -R x/);
   assert.match(explainSshError('ssh: Could not resolve hostname macmini: No such host is known.', { host: 'macmini' }), /見つかりません/);
   assert.match(explainSshError('', { spawnError: Object.assign(new Error('x'), { code: 'ENOENT' }) }), /OpenSSH/);
+});
+
+test('ホストが Windows の場合の直し方も出す（Mac だけを前提にしない）', () => {
+  const timeout = explainSshError('ssh: connect to host 100.101.49.22 port 22: Connection timed out', { host: '100.101.49.22', user: 'kazuya' });
+  assert.match(timeout, /kazuya@100\.101\.49\.22:22/);
+  assert.match(timeout, /tailscale ping 100\.101\.49\.22/);
+  assert.match(timeout, /スリープ/);
+  assert.match(timeout, /ファイアウォール/);
+  assert.match(timeout, /リモートログイン/);
+  assert.match(timeout, /OpenSSH サーバー/);
+  assert.match(explainSshError('Connection refused', { host: 'x' }), /OpenSSH サーバー/);
+  assert.match(explainSshError('Permission denied (publickey).', { host: 'x' }), /administrators_authorized_keys/);
+});
+
+test('Tailscale の IP を見分ける', () => {
+  assert.ok(isTailscaleIp('100.101.49.22'));
+  assert.ok(isTailscaleIp('100.64.0.1'));
+  assert.ok(!isTailscaleIp('100.63.0.1'));
+  assert.ok(!isTailscaleIp('100.128.0.1'));
+  assert.ok(!isTailscaleIp('192.168.1.10'));
+});
+
+test('ホスト側で、操作側に入れる接続先と SSH サーバーの状態を返す', async () => {
+  const fakeOs = {
+    networkInterfaces: () => ({
+      lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true }],
+      en0: [{ address: '192.168.1.10', family: 'IPv4', internal: false }, { address: 'fe80::1', family: 'IPv6', internal: false }],
+      utun4: [{ address: '100.101.49.22', family: 'IPv4', internal: false }],
+    }),
+    userInfo: () => ({ username: 'kazuya' }),
+    hostname: () => 'mac-mini',
+  };
+  const ports = [];
+  const info = await sshHostInfo({ os: fakeOs, probe: async (p) => (ports.push(p), false) });
+  assert.deepStrictEqual(info.tailscaleIps, ['100.101.49.22']);
+  assert.deepStrictEqual(info.otherIps, ['192.168.1.10']);
+  assert.strictEqual(info.user, 'kazuya');
+  assert.strictEqual(info.hostname, 'mac-mini');
+  assert.strictEqual(info.sshServer, false);
+  assert.deepStrictEqual(ports, [22]);
 });
 
 test('おかしな接続先・ユーザー名は ssh に渡さない', async () => {

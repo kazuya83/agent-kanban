@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('api', {
   onLog: (cb) => ipcRenderer.on('card:log', (_e, d) => cb(d)),
   onFocus: (cb) => ipcRenderer.on('card:focus', (_e, id) => cb(id)),
   remoteStatus: () => call('remote:status'),
+  remoteHostInfo: () => call('remote:hostInfo'),
   remoteStartHost: (p) => call('remote:startHost', p || {}),
   remoteStopHost: () => call('remote:stopHost'),
   remoteRefreshPair: () => call('remote:refreshPair'),

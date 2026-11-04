@@ -2038,7 +2038,7 @@ async function openSettings() {
      <label class="check"><input type="checkbox" id="sClaudeRc" ${s.claudeRemoteControl ? 'checked' : ''} /> Claude カード起動時に公式 Remote Control（--remote-control）も付ける（claude.ai/code や Claude アプリから続けられる）</label>
 
      <h3 class="s-section">遠隔操作（SSH トンネル）</h3>
-     <small class="muted s-note">Mac mini などで作業し、別の PC（Windows など）から同じボードを操作できます。通信はアプリが 127.0.0.1 だけを待ち受けるので、先に SSH ポート転送を張ってください。</small>
+     <small class="muted s-note">作業する PC（ホスト。Mac でも Windows でも）のボードを、別の PC（クライアント）から操作できます。ホストは 127.0.0.1 だけで待ち受けるので、SSH のポート転送を通してつなぎます（手順は README の「遠隔操作」）。</small>
      <div class="remote-box" id="sRemoteBox">遠隔の状態を読み込み中…</div>
 
      <h3 class="s-section">使うエージェント</h3>
@@ -2234,6 +2234,26 @@ async function openSettings() {
           box.innerHTML = `<div class="warn">${esc(err.message)}</div>`;
           return;
         }
+        // このマシンをホストにするときの接続先（操作側に入れてもらう値）と SSH サーバーの状態
+        let hi = null;
+        if (!rs.client.connected) {
+          try {
+            hi = await api.remoteHostInfo();
+          } catch {
+            hi = null;
+          }
+        }
+        const sshServerHowto = hi?.platform === 'win32'
+          ? '「設定 → システム → オプション機能」で「OpenSSH サーバー」を追加し、管理者の PowerShell で <code>Start-Service sshd; Set-Service sshd -StartupType Automatic</code> を実行してください'
+          : hi?.platform === 'darwin'
+            ? '「システム設定 → 一般 → 共有 → リモートログイン」をオンにしてください'
+            : 'SSH サーバー（sshd）を起動してください';
+        const hostInfoBlock = hi
+          ? `<div class="remote-ssh">操作側の「SSH の接続先」: ${hi.tailscaleIps.length ? esc(hi.tailscaleIps.join(' / ')) : `${esc(hi.hostname)}（Tailscale の IP が見つかりません。Tailscale が接続中か確かめてください）`}
+ユーザー名: ${esc(hi.user || '?')}
+SSH サーバー（ポート ${esc(hi.sshPort)}）: ${hi.sshServer ? '動いています' : '動いていません'}</div>
+             ${hi.sshServer ? '' : `<div class="warn">このマシンの SSH サーバーが動いていないので、操作側からつなげません。${sshServerHowto}</div>`}`
+          : '';
         const port = rs.host.port || 17831;
         const ssh = `ssh -L ${port}:127.0.0.1:${port} <user>@<host>`;
         const hostBlock = rs.host.listening
@@ -2244,11 +2264,13 @@ async function openSettings() {
                <button class="btn small" type="button" id="rClearPairs">ペアを破棄</button>
                <button class="btn small danger" type="button" id="rStopHost">ホストを停止</button>
              </div>
-             <div><small class="muted">操作側の「クライアント」で「SSH 経由」を選び、このマシンの SSH の接続先（Tailscale の IP など）を入れて接続します。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>`
+             <div><small class="muted">操作側の「クライアント」で「SSH 経由」を選び、下の接続先とユーザー名を入れて接続します。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>
+             ${hostInfoBlock}`
           : `<div><strong>ホスト（作業側）</strong></div>
              <label class="field"><span>待ち受けポート</span><input id="rHostPort" type="number" min="1024" max="65535" value="${esc(port)}" /></label>
              <button class="btn small primary" type="button" id="rStartHost">ホストを開始（ペアリングコードを出す）</button>
-             <div><small class="muted">開始後、操作側の「クライアント」で「SSH 経由」を選び、コードで接続します（このマシンの「リモートログイン」をオンにしておいてください）。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>`;
+             <div><small class="muted">開始後、操作側の「クライアント」で「SSH 経由」を選び、下の接続先とユーザー名・コードで接続します（このマシンの SSH サーバーをオンにしておいてください）。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>
+             ${hostInfoBlock}`;
         const c = rs.client;
         const viaSsh = c.mode !== 'direct';
         const clientBlock = c.connected
@@ -2263,15 +2285,15 @@ async function openSettings() {
              </label>
              <div id="rSshFields" ${viaSsh ? '' : 'hidden'}>
                <div class="row">
-                 <label class="field"><span>SSH の接続先（Tailscale の IP・名前など）</span><input id="rSshHost" placeholder="100.x.x.x / mac-mini" value="${esc(c.sshHost || '')}" /></label>
-                 <label class="field"><span>ユーザー名（Mac のログイン名）</span><input id="rSshUser" placeholder="kazuya" value="${esc(c.sshUser || '')}" /></label>
+                 <label class="field"><span>SSH の接続先（Tailscale の IP・名前など）</span><input id="rSshHost" placeholder="100.x.x.x / マシン名" value="${esc(c.sshHost || '')}" /></label>
+                 <label class="field"><span>ユーザー名（ホストのログイン名）</span><input id="rSshUser" placeholder="kazuya" value="${esc(c.sshUser || '')}" /></label>
                  <label class="field"><span>SSH ポート</span><input id="rSshPort" type="number" min="1" max="65535" value="${esc(c.sshPort || 22)}" /></label>
                </div>
                <div class="row">
                  <label class="field"><span>鍵ファイル（空なら既定の ~/.ssh/id_*）</span><input id="rSshKey" placeholder="C:\\Users\\you\\.ssh\\id_ed25519" value="${esc(c.sshKey || '')}" /></label>
                  <label class="field"><span>ssh コマンド</span><input id="rSshPath" value="${esc(c.sshPath || 'ssh')}" /></label>
                </div>
-               <small class="muted">SSH は鍵で入れる必要があります（パスワードは入力できません）。Mac 側は「システム設定 → 一般 → 共有 → リモートログイン」をオンにしてください。</small>
+               <small class="muted">SSH は鍵で入れる必要があります（パスワードは入力できません）。ホスト側で SSH サーバーをオンにしてください（Mac は「リモートログイン」、Windows は「OpenSSH サーバー」）。接続先とユーザー名は、ホストの Agent Kanban のこの画面に出ています。</small>
              </div>
              <div class="row">
                <label class="field" id="rClientHostField" ${viaSsh ? 'hidden' : ''}><span>接続先ホスト</span><input id="rClientHost" value="${esc(c.host || '127.0.0.1')}" /></label>
