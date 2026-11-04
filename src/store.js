@@ -121,6 +121,8 @@ const DEFAULT_SETTINGS = {
   branchNamingRule: '', // ブランチの命名規則（自然言語）。空なら agent/issue-12-xxxx のようないつもの名前
   weeklyResetDay: '', // Claude の週間上限がリセットされる曜日（'0'=日〜'6'=土）。空なら claude が知らせてくる日時を使う
   weeklyResetTime: '00:00', // 週間上限がリセットされる時刻（HH:MM・ローカル時刻）。weeklyResetDay を決めたときに使う
+  autoUpdate: false, // 新しい版が出たら、実行中・待機中のタスクがないときに自動で入れ替えて起動し直す
+  updatePending: null, // 更新のために終了したときの { from, to, at }（次の起動で、更新できたかを知らせる）
   // ---- エージェント ----
   enabledAgents: DEFAULT_ENABLED_AGENTS, // 使うエージェント（チェックを付けたものだけ、コマンド・モデルを設定してタスクや会話で選べる）
   defaultAgent: 'claude', // 新しいタスク・会話で最初から選んでおくエージェント（claude / codex / gemini / cursor。Pipeline・競争はタスクを作るときに選ぶ）

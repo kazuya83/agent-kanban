@@ -12,6 +12,7 @@ const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isL
 const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
 const sshKey = require('./src/ssh-key');
 const dirBrowse = require('./src/dir-browse');
+const { Updater } = require('./src/updater');
 const fs = require('fs');
 
 // Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
@@ -48,6 +49,9 @@ let remoteHost = null;
 let remoteClient = null;
 let sshTunnel = null;
 let reconnector = null; // 前回の接続を再開する（起動時・切れたとき）
+let updater = null; // アプリの更新（新しい版を調べて、入れ替えて起動し直す）
+let updateResult = null; // 前回の起動で更新したときの結果（{ ok, from, to, log }）。画面に一度だけ知らせる
+let quittingForUpdate = false; // 更新のために終了するところ（実行中のタスクの確認は画面で済ませている）
 const localHandlers = new Map();
 
 function createWindow() {
@@ -444,6 +448,7 @@ app.whenReady().then(async () => {
 
   handle('board:get', () => withRemoteSession(boardState()));
   handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
+  setupUpdater(userData);
   handle('remote:status', () => remoteSession());
   // このマシンをホストにするとき、操作側に入れてもらう接続先と SSH サーバーの状態
   handle('remote:hostInfo', () => sshHostInfo());
@@ -928,6 +933,73 @@ app.whenReady().then(async () => {
   });
 });
 
+// ---- アプリの更新 ----
+function updateStatus() {
+  return { ...updater.status(), autoUpdate: !!store.settings.autoUpdate, lastResult: updateResult, active: agents.activeCount(), quitting: quittingForUpdate };
+}
+
+// 入れ替えのスクリプトを起動して、アプリを終了する（終了するときに実行中のタスクは止めてブランチにコミットする）
+function installUpdate() {
+  const st = updater.install();
+  store.settings.updatePending = { from: app.getVersion(), to: st.latestVersion, at: Date.now() };
+  store.save();
+  quittingForUpdate = true;
+  send('update:changed', updateStatus());
+  // 画面に「更新しています」を出してから終了する
+  setTimeout(() => app.quit(), 800);
+  return updateStatus();
+}
+
+// 「新しい版が出たら自動で更新する」: 実行中・待機中のタスクがないときだけ入れ替える（あれば、なくなるまで待つ）
+function maybeAutoUpdate() {
+  if (!store.settings.autoUpdate || quittingForUpdate || updater.status().state !== 'available') return;
+  if (remoteClient?.connected) return; // 遠隔操作中は、勝手に切らない
+  const { running, queued } = agents.activeCount();
+  if (running || queued) return;
+  try {
+    installUpdate();
+  } catch {
+    /* 次に確かめたときにもう一度 */
+  }
+}
+
+function setupUpdater(userData) {
+  const logFile = path.join(userData, 'update.log');
+  updater = new Updater({ currentVersion: app.getVersion(), packaged: app.isPackaged, logFile });
+  // 前の起動で更新したなら、その結果を一度だけ知らせる
+  const pending = store.settings.updatePending;
+  if (pending && pending.to) {
+    updateResult = { ok: app.getVersion() === pending.to, from: pending.from, to: pending.to, log: logFile };
+    store.settings.updatePending = null;
+    store.save();
+  }
+  updater.on('changed', () => {
+    send('update:changed', updateStatus());
+    maybeAutoUpdate();
+  });
+  updater.startAutoCheck();
+  // 自動で更新する設定なら、タスクが終わって手が空いたときにも入れ替える
+  setInterval(maybeAutoUpdate, 60000).unref?.();
+
+  handle('update:status', () => updateStatus());
+  handle('update:check', async () => {
+    await updater.check();
+    return updateStatus();
+  });
+  handle('update:install', () => installUpdate());
+  handle('update:setAuto', (on) => {
+    store.settings.autoUpdate = !!on;
+    store.save();
+    maybeAutoUpdate();
+    return updateStatus();
+  });
+  handle('update:dismissResult', () => {
+    updateResult = null;
+    return updateStatus();
+  });
+  handle('update:openLog', () => shell.openPath(logFile));
+}
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
@@ -965,7 +1037,7 @@ app.on('before-quit', (e) => {
     quitState = 'done';
     app.quit();
   };
-  if (!running && !queued) return finish();
+  if ((!running && !queued) || quittingForUpdate) return finish();
   quitState = 'confirming';
   const parts = [running && `実行中 ${running} 件`, queued && `待機中 ${queued} 件`].filter(Boolean).join('・');
   const opts = {

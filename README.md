@@ -102,7 +102,7 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.
 irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
 ```
 
-同じコマンドで、最新版へのアップデートもできます。バージョンの指定・アンインストール・ファイルからのインストール・初回起動の警告は [docs/install.md](docs/install.md) を見てください。
+同じコマンドで、最新版へのアップデートもできます。アプリの「設定」→「アプリの更新」の「新しいバージョンに更新」からも更新でき、「新しい版が出たら自動で更新する」にチェックを付けると、タスクが動いていないときに自動で入れ替えて起動し直します。バージョンの指定・アンインストール・ファイルからのインストール・初回起動の警告は [docs/install.md](docs/install.md) を見てください。
 
 ## 使い方
 

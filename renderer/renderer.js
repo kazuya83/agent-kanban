@@ -250,6 +250,21 @@ function specFormHtml(c) {
     <small class="muted">答えていない質問は「おまかせ」として送ります。下の欄に文章で書いて送ってもかまいません。</small>
   </div>`;
 }
+// エージェントが文章で質問してきたとき（回答フォームの JSON がないとき）に、質問のすぐ下に出す回答欄
+function replyFormHtml(c) {
+  const can = canSendFollow(c);
+  return `<div class="qform reply-qform" data-card="${c.id}">
+    <textarea class="q-note" rows="3" placeholder="${esc(agentShort(agentOf(c)))} への回答を書く（Ctrl/⌘ + Enter で送信）"${can ? '' : ' disabled'}></textarea>
+    <div class="q-actions"><button class="btn primary" data-rqact="submit"${can ? '' : ' disabled'}>回答して送る</button></div>
+  </div>`;
+}
+async function sendReplyAnswer(form, c) {
+  const box = form.querySelector('.q-note');
+  const msg = box.value.trim();
+  if (!msg) return toast('回答を書いてください');
+  const ok = await run(() => api.send(c.id, msg, null).then(() => true), '回答を送りました');
+  if (ok) box.value = '';
+}
 const SPEC_AUTO = 'おまかせ（妥当な案で決めてください）';
 // 仕様の確認フォームの答えを、エージェントに送る文章にする
 function specAnswerMessage(questions, answers, note, auto) {
@@ -1019,7 +1034,23 @@ $('detailBody').addEventListener('input', (e) => {
 $('detailBody').addEventListener('click', (e) => {
   if (e.target.closest('.log-actions')) logActionClick(e);
 });
+// 質問のすぐ下の回答欄でも、Ctrl/⌘ + Enter で送る
+$('detailBody').addEventListener('keydown', (e) => {
+  const box = e.target.closest('.reply-qform .q-note');
+  if (!box || e.key !== 'Enter' || e.isComposing || e.keyCode === 229 || e.shiftKey || !(e.metaKey || e.ctrlKey)) return;
+  e.preventDefault();
+  const form = box.closest('.qform');
+  const c = card(form.dataset.card);
+  if (c) sendReplyAnswer(form, c);
+});
 function logActionClick(e) {
+  const rq = e.target.closest('[data-rqact]');
+  if (rq) {
+    const form = rq.closest('.qform');
+    const c = card(form.dataset.card);
+    if (c) sendReplyAnswer(form, c);
+    return;
+  }
   const sq = e.target.closest('[data-sqact]');
   if (sq) {
     const form = sq.closest('.qform');
@@ -1171,7 +1202,7 @@ function chatActionsHtml(c) {
     spec
       ? `<div class="d-awaiting d-spec"><b>${icon('note')}内容が詰まっていないので、開発を開始できません</b><small>${specQuestions(c) ? 'このすぐ下のフォーム（または下の欄）' : '下の欄'}で、上の ${who} の質問に答えて仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>${specFormHtml(c)}`
       : c.awaitingReply && (s === 'review' || s === 'failed')
-        ? `<div class="d-awaiting"><b>${icon('chat')}${who} が質問しています</b><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>`
+        ? `<div class="d-awaiting"><b>${icon('chat')}${who} が質問しています</b><small>このすぐ下の欄（または画面のいちばん下の入力欄）に答えを書いて送ると、同じ会話の続きから進めます。</small></div>${replyFormHtml(c)}`
         : '',
   ];
   return parts.join('');
@@ -2874,6 +2905,7 @@ async function openSettings() {
       .join('');
   openModal(
     `<h2>設定</h2>
+     <div class="field"><span>アプリの更新</span><div id="updPanel" class="gh-panel upd-panel">${updatePanelHtml(state.update)}</div></div>
      <label class="field"><span>ベースブランチ（worktree の作成元・マージ先）</span>
        <select id="sBase">${baseOptions({ branches: [], current: '' })}</select></label>
      <label class="field"><span>レビュー後の取り込み方</span>
@@ -3084,6 +3116,7 @@ async function openSettings() {
       // 「Issue のステータスを自動で変える」にチェックがあるときだけ、項目名と選択肢の指定を出す
       $('sIssueSync').onchange = () => ($('sStatusMap').hidden = !$('sIssueSync').checked);
       refreshGh();
+      bindUpdatePanel();
       $('sCancel').onclick = closeModal;
       $('sOk').onclick = async () => {
         const on = using();
@@ -3713,6 +3746,86 @@ async function checkEnv() {
   el.innerHTML = msgs.map((m) => `<div>${icon('alert')}${esc(m)}</div>`).join('');
   el.classList.toggle('hidden', msgs.length === 0);
 }
+
+// ---- アプリの更新 ----
+// 設定の「アプリの更新」の中身（状態は main の update:status / update:changed）
+function updatePanelHtml(u) {
+  if (!u) return '<p class="muted">新しい版を確かめています…</p>';
+  const cur = `今の版: <b>v${esc(u.currentVersion)}</b>`;
+  if (!u.supported) return `<p>${cur}</p><p class="muted">${esc(u.reason)}</p>`;
+  const checked = u.checkedAt ? `（${esc(new Date(u.checkedAt).toLocaleString())} に確かめました）` : '';
+  let msg;
+  let actions = '';
+  if (u.quitting || u.state === 'installing') msg = `<p>v${esc(u.latestVersion)} に更新しています。アプリを終了して入れ替え、起動し直します…</p>`;
+  else if (u.state === 'checking') msg = '<p class="muted">新しい版を確かめています…</p>';
+  else if (u.state === 'available') {
+    msg = `<p><b>新しい版 v${esc(u.latestVersion)} があります。</b> <a href="#" id="updNotes">変更点を見る</a></p>`;
+    actions = `<button class="btn primary small" id="updInstall" type="button">新しいバージョンに更新</button>`;
+  } else if (u.state === 'preparing') msg = `<p>新しい版 v${esc(u.latestVersion)} を準備中です（この OS 向けのファイルがまだそろっていません）。しばらくしてからもう一度確かめてください。</p>`;
+  else if (u.state === 'latest') msg = `<p class="muted">最新の版です${checked}</p>`;
+  else if (u.state === 'error') msg = `<p class="upd-warn">${esc(u.error)}</p>`;
+  else msg = '';
+  const busy = u.quitting || u.state === 'installing' || u.state === 'checking';
+  if (state.updateFailedLog) msg += '<p class="upd-warn">前回の更新はできませんでした。<a href="#" id="updLog">更新の記録を開く</a></p>';
+  return `<p>${cur}</p>${msg}
+    <div class="upd-actions">${actions}<button class="btn small" id="updCheck" type="button" ${busy ? 'disabled' : ''}>新しい版を確かめる</button></div>
+    <label class="check"><input type="checkbox" id="updAuto" ${u.autoUpdate ? 'checked' : ''} /> 新しい版が出たら自動で更新する</label>
+    <small>アプリは起動したときと6時間ごとに新しい版を確かめます。自動で更新するときは、実行中・待機中のタスクがなくなるのを待ってから、アプリを終了して入れ替え、起動し直します。更新すると、手で入れたときと同じ場所（${u.platform === 'win32' ? '%LOCALAPPDATA%\\Programs\\Agent Kanban' : '/Applications または ~/.local/bin'}）に入ります。</small>`;
+}
+
+function bindUpdatePanel() {
+  const el = $('updPanel');
+  if (!el) return;
+  el.innerHTML = updatePanelHtml(state.update);
+  const u = state.update;
+  if ($('updCheck')) $('updCheck').onclick = () => run(async () => setUpdate(await api.checkUpdate()));
+  if ($('updAuto')) $('updAuto').onchange = () => run(async () => setUpdate(await api.setAutoUpdate($('updAuto').checked)), $('updAuto').checked ? '新しい版が出たら自動で更新します' : '自動で更新しないようにしました');
+  if ($('updNotes')) $('updNotes').onclick = (e) => {
+    e.preventDefault();
+    run(() => api.openExternal(u.releaseUrl));
+  };
+  if ($('updInstall')) $('updInstall').onclick = () => installUpdate();
+  if ($('updLog')) $('updLog').onclick = (e) => {
+    e.preventDefault();
+    run(() => api.openUpdateLog());
+  };
+}
+
+async function installUpdate() {
+  const u = await run(() => api.updateStatus());
+  if (!u) return;
+  const { running = 0, queued = 0 } = u.active || {};
+  const tasks = running || queued ? `\n\n${[running && `実行中 ${running} 件`, queued && `待機中 ${queued} 件`].filter(Boolean).join('・')}のタスクは中断します（それまでの変更はタスクのブランチにコミットし、起動し直したあとに「再開」で続けられます）。` : '';
+  if (!confirm(`v${u.latestVersion} に更新します。アプリを終了して新しい版に入れ替え、起動し直します（1分ほどかかります）。${tasks}\n\n更新しますか？`)) return;
+  const r = await run(() => api.installUpdate());
+  if (r) setUpdate(r);
+}
+
+function setUpdate(u) {
+  if (!u) return;
+  state.update = u;
+  if ($('updPanel')) bindUpdatePanel();
+  // 左上の版の横に、新しい版があることを出す（押すと設定を開く）
+  const badge = $('updateBadge');
+  if (badge) {
+    const on = u.supported && (u.state === 'available' || u.state === 'installing' || u.quitting);
+    badge.classList.toggle('hidden', !on);
+    badge.textContent = u.state === 'installing' || u.quitting ? '更新しています…' : `v${u.latestVersion} に更新できます`;
+  }
+}
+
+api.updateStatus().then((u) => {
+  setUpdate(u);
+  // 前の起動で更新したときの結果を一度だけ知らせる
+  const r = u.lastResult;
+  if (!r) return;
+  if (r.ok) toast(`v${r.to} に更新しました`, 'ok');
+  else toast(`v${r.to} に更新できませんでした（v${u.currentVersion} のままです）。詳しくは設定の「アプリの更新」から記録を開いて確かめてください`);
+  api.dismissUpdateResult().catch(() => {});
+  if (!r.ok) state.updateFailedLog = true;
+}, () => {});
+api.onUpdate(setUpdate);
+$('updateBadge')?.addEventListener('click', openSettings);
 
 // 左上に、いま動いているアプリのバージョンを出す
 api.appInfo().then(

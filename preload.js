@@ -10,6 +10,13 @@ async function call(channel, arg) {
 contextBridge.exposeInMainWorld('api', {
   getBoard: () => call('board:get'),
   appInfo: () => call('app:info'),
+  updateStatus: () => call('update:status'),
+  checkUpdate: () => call('update:check'),
+  installUpdate: () => call('update:install'),
+  setAutoUpdate: (on) => call('update:setAuto', !!on),
+  dismissUpdateResult: () => call('update:dismissResult'),
+  openUpdateLog: () => call('update:openLog'),
+  onUpdate: (cb) => ipcRenderer.on('update:changed', (_e, d) => cb(d)),
   checkEnv: () => call('env:check'),
   chooseRepo: (opts) => call('repo:choose', opts || {}),
   openRepo: (dir, opts) => call('repo:open', { ...(opts || {}), path: dir }),

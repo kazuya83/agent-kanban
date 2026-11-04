@@ -134,7 +134,7 @@ const PROXY_CHANNELS = new Set([
 
 // 遠隔に接続中でも、操作側のマシンで動かすチャンネル（それ以外の非転送チャンネルは接続中は使えない）
 function isLocalChannel(channel) {
-  return channel === 'app:info' || channel === 'open:external' || String(channel).startsWith('remote:');
+  return channel === 'app:info' || channel === 'open:external' || String(channel).startsWith('remote:') || String(channel).startsWith('update:');
 }
 
 function isProxyChannel(channel) {
