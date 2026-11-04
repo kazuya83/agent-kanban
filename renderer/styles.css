@@ -381,6 +381,30 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .dv-del .sg { color: var(--err); }
 .dv-hunk td { background: color-mix(in srgb, var(--run) 10%, transparent); color: var(--muted); padding-top: 3px; padding-bottom: 3px; }
 .dv-meta td { color: var(--muted); font-style: italic; }
+/* 上下・左右の切り替え */
+.dv-mode { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.dv-mode .btn { border: 0; border-radius: 0; }
+.dv-mode .btn + .btn { border-left: 1px solid var(--line); }
+.dv-mode .btn.on { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); }
+#toggleDiffFull .ic { margin-right: 0; }
+/* 左右に並べる表示: 左が元、右が変更後。長い行は折り返す */
+.dv-split { table-layout: fixed; }
+.dv-split col.c-ln { width: 48px; }
+.dv-split .ln { width: auto; min-width: 0; }
+.dv-split .code { white-space: pre-wrap; word-break: break-all; }
+.dv-split td.ln:nth-child(3) { border-left: 1px solid var(--line); }
+.dv-split td.del { background: color-mix(in srgb, var(--err) 12%, transparent); }
+.dv-split td.ln.del { background: color-mix(in srgb, var(--err) 20%, transparent); }
+.dv-split td.add { background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.dv-split td.ln.add { background: color-mix(in srgb, var(--ok) 20%, transparent); }
+.dv-split td.empty { background: color-mix(in srgb, var(--muted) 8%, transparent); }
+/* 画面に大きくモーダルで出す */
+.dv-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 8; }
+.dv.full {
+  position: fixed; z-index: 9; inset: 24px; height: auto; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+.dv.full .dv-tree { width: 280px; }
 
 /* モーダル */
 .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 10; }

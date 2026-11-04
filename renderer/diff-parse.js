@@ -158,5 +158,33 @@
     return out;
   }
 
-  return { parseDiff, buildTree, treeOrder, unquote };
+  // 左右に並べる表示用に、ハンクの行を「左（元）・右（変更後）」の組にする。
+  // 続けて消した行と足した行は、上から順に同じ段に並べる（足りない側は null）。
+  // 戻り値: [{ type: 'pair', left, right } | { type: 'meta', text }]
+  function splitRows(hunk) {
+    const rows = [];
+    let dels = [];
+    let adds = [];
+    const flush = () => {
+      const n = Math.max(dels.length, adds.length);
+      for (let i = 0; i < n; i++) rows.push({ type: 'pair', left: dels[i] || null, right: adds[i] || null });
+      dels = [];
+      adds = [];
+    };
+    for (const l of hunk.lines) {
+      if (l.type === 'del') {
+        if (adds.length) flush(); // 足した行のあとにまた消した行が来たら、別の組にする
+        dels.push(l);
+      } else if (l.type === 'add') adds.push(l);
+      else {
+        flush();
+        if (l.type === 'ctx') rows.push({ type: 'pair', left: l, right: l });
+        else rows.push({ type: 'meta', text: l.text });
+      }
+    }
+    flush();
+    return rows;
+  }
+
+  return { parseDiff, buildTree, treeOrder, unquote, splitRows };
 });

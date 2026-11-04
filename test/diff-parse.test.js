@@ -82,3 +82,36 @@ test('buildTree: フォルダごとにまとめ、子が1つのフォルダは�
   assert.deepStrictEqual(src.files.map((f) => f.name), ['main.js']);
   assert.deepStrictEqual(treeOrder(tree).map((i) => files[i].path), ['docs/img/x.png', 'src/lib/a.js', 'src/lib/b.js', 'src/main.js', 'README.md']);
 });
+
+test('splitRows: 消した行と足した行を左右の組にし、同じ行は両側に並べる', () => {
+  const { splitRows } = require('../renderer/diff-parse');
+  const [f] = parseDiff(
+    [
+      'diff --git a/x.txt b/x.txt',
+      '--- a/x.txt',
+      '+++ b/x.txt',
+      '@@ -1,5 +1,5 @@',
+      ' a',
+      '-b',
+      '-c',
+      '+B',
+      ' d',
+      '+e',
+      '-f',
+      '\\ No newline at end of file',
+    ].join('\n'),
+  );
+  const rows = splitRows(f.hunks[0]);
+  const view = rows.map((r) => (r.type === 'meta' ? ['meta', r.text] : [r.left && `${r.left.type}:${r.left.text}`, r.right && `${r.right.type}:${r.right.text}`]));
+  assert.deepStrictEqual(view, [
+    ['ctx:a', 'ctx:a'],
+    ['del:b', 'add:B'],
+    ['del:c', null],
+    ['ctx:d', 'ctx:d'],
+    [null, 'add:e'],
+    ['del:f', null],
+    ['meta', 'No newline at end of file'],
+  ]);
+  assert.strictEqual(rows[1].left.oldNo, 2);
+  assert.strictEqual(rows[1].right.newNo, 2);
+});
