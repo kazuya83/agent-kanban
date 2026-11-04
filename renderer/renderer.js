@@ -459,6 +459,27 @@ function renderRemoteInfo() {
   renderRepoBtn();
   const el = $('remoteInfo');
   const rs = state.board.remoteSession;
+  el.classList.remove('resume', 'error');
+  const target = (c) => (c.mode === 'direct' ? `${c.host}:${c.port}` : `SSH ${c.sshHost}`);
+  if (rs?.role === 'local' && rs.client?.reconnecting) {
+    // 前回の接続を裏で再開している
+    const r = rs.client.reconnecting;
+    el.classList.remove('hidden', 'host');
+    el.textContent = `前回の接続を再開中… → ${target(rs.client)}（${r.attempt}/${r.max}）`;
+    el.title = `${r.lastError ? `前回の失敗: ${r.lastError}\n` : ''}クリックで RC設定を開きます（やめることもできます）`;
+    el.onclick = () => openRemoteSettings();
+    return;
+  }
+  if (rs?.role === 'local' && rs.client?.canResume) {
+    // ワンクリックで前回の接続を再開する
+    el.classList.remove('hidden', 'host');
+    el.classList.add('resume');
+    el.classList.toggle('error', !!rs.client.resumeError);
+    el.textContent = `↻ 前回の接続を再開 → ${target(rs.client)}`;
+    el.title = `${rs.client.resumeError ? `つながりませんでした: ${rs.client.resumeError}\n` : ''}保存したトークンで、前回と同じホストにつなぎます`;
+    el.onclick = () => runBusy(rs.client.mode === 'direct' ? '前回の接続を再開しています…' : 'SSH トンネルを張って、前回の接続を再開しています…', () => api.remoteResume());
+    return;
+  }
   if (!rs || rs.role === 'local') {
     el.classList.add('hidden');
     el.textContent = '';
@@ -2138,10 +2159,23 @@ function openRemoteSettings() {
              ${hostInfoBlock}`;
         const c = rs.client;
         const viaSsh = c.mode !== 'direct';
+        const targetText = viaSsh ? `SSH 経由 ${esc(c.sshUser ? `${c.sshUser}@` : '')}${esc(c.sshHost)}（ホストのポート ${esc(c.port)}）` : `${esc(c.host)}:${esc(c.port)}`;
+        const resumeBlock = c.reconnecting
+          ? `<div class="remote-key"><div><strong>前回の接続を再開しています…</strong>（${esc(c.reconnecting.attempt)}/${esc(c.reconnecting.max)} 回目） → ${targetText}</div>
+               ${c.reconnecting.lastError ? `<small class="muted">前回の失敗: ${esc(c.reconnecting.lastError)}</small>` : ''}
+               <div><button class="btn small" type="button" id="rCancelResume">再開をやめる</button></div></div>`
+          : c.canResume
+            ? `<div class="remote-key"><div><strong>前回の接続</strong> → ${targetText}</div>
+                 ${c.resumeError ? `<div class="warn">つながりませんでした: ${esc(c.resumeError)}</div>` : ''}
+                 <div><button class="btn small primary" type="button" id="rResume">↻ 前回の接続を再開</button></div>
+                 <small class="muted">接続先を変えるときは、下の欄を直して「保存したトークンで接続」を押します。</small></div>`
+            : '';
         const clientBlock = c.connected
-          ? `<div><strong>クライアントとして接続中</strong> → ${viaSsh ? `SSH 経由 ${esc(c.sshUser ? `${c.sshUser}@` : '')}${esc(c.sshHost)}（ホストのポート ${esc(c.port)}）` : `${esc(c.host)}:${esc(c.port)}`}</div>
+          ? `<div><strong>クライアントとして接続中</strong> → ${targetText}</div>
+             <small class="muted">アプリを終了しても、次に起動したときにこの接続を自動で再開します（回線が切れたときも、つなぎ直します）。「切断」を押すと、次からは自動で再開しません。</small>
              <button class="btn small danger" type="button" id="rDisconnect">切断してローカルボードに戻る</button>`
           : `<div><strong>クライアント（操作側）</strong></div>
+             ${resumeBlock}
              <label class="field"><span>接続方法</span>
                <select id="rClientMode">
                  <option value="ssh" ${viaSsh ? 'selected' : ''}>SSH 経由（アプリがトンネルを張る・おすすめ）</option>
@@ -2225,10 +2259,14 @@ function openRemoteSettings() {
           // 鍵ファイルの欄を変えたら、その鍵を見直す
           $('rSshKey').onchange = () => drawKey();
         }
+        if ($('rResume')) $('rResume').onclick = () => busy(viaSsh ? 'SSH トンネルを張って、前回の接続を再開しています…' : '前回の接続を再開しています…', () => api.remoteResume());
+        if ($('rCancelResume')) $('rCancelResume').onclick = () => busy('再開をやめています…', () => api.remoteCancelResume());
         if ($('rDisconnect')) $('rDisconnect').onclick = () => busy('切断しています…', () => api.remoteDisconnect());
         if ($('rForgetToken')) $('rForgetToken').onclick = () => busy('トークンを消しています…', () => api.remoteForgetToken());
       };
       drawRemote();
+      // 裏での再開が始まった・つながった・あきらめたときは、開いている RC設定も描き直す
+      remoteDialogRedraw = drawRemote;
       $('rcClose').onclick = closeModal;
     },
   );
@@ -2983,10 +3021,25 @@ $('notifPanel').addEventListener('click', async (e) => {
 
 // ---------------- 更新の受信 ----------------
 
+// RC設定を開いているときの描き直し。接続の段階（接続中・再開中・失敗）が変わったときだけ呼ぶ（入力中の欄を消さないため）
+let remoteDialogRedraw = null;
+let remotePhase = '';
+const remotePhaseOf = (rs) => {
+  const c = rs?.client || {};
+  const r = c.reconnecting;
+  return [rs?.role, c.canResume, c.resumeError, r ? `${r.attempt}:${r.lastError}` : ''].join('|');
+};
+
 api.onRemote((rs) => {
   if (!state.board) state.board = { settings: {}, cards: [] };
   state.board.remoteSession = rs;
   renderRemoteInfo();
+  const phase = remotePhaseOf(rs);
+  if (phase !== remotePhase) {
+    remotePhase = phase;
+    if (remoteDialogRedraw && $('rcBox') && !isBusy()) remoteDialogRedraw();
+    else if (!$('rcBox')) remoteDialogRedraw = null;
+  }
 });
 
 api.onBoard((board) => {

@@ -126,6 +126,9 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .pill { background: var(--panel-2); border: 1px solid var(--line); padding: 3px 10px; border-radius: 999px; color: var(--muted); }
 .pill.cost { font-family: var(--mono); color: var(--text); }
 .pill.remote-pill { color: var(--run); border-color: color-mix(in srgb, var(--run) 45%, var(--line)); cursor: pointer; }
+.pill.remote-pill.resume { color: var(--muted); border-style: dashed; }
+.pill.remote-pill.resume:hover { color: var(--run); }
+.pill.remote-pill.resume.error { color: var(--warn); }
 .pill.remote-pill.host { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
 .remote-box { display: grid; gap: 12px; padding: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; margin: 8px 0 4px; }
 .remote-box .pair-code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.2em; font-weight: 600; color: var(--text); }

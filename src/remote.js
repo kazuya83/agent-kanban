@@ -262,7 +262,7 @@ class RemoteHost extends EventEmitter {
         const token = String(msg.token || '');
         const ok = [...this.tokens].some((t) => timingEqual(token, t));
         if (!ok) {
-          send(socket, { id, type: 'result', ok: false, error: 'トークンが無効です。もう一度ペアリングしてください' });
+          send(socket, { id, type: 'result', ok: false, code: 'BAD_TOKEN', error: 'トークンが無効です。もう一度ペアリングしてください' });
           return;
         }
         authed = true;
@@ -411,7 +411,11 @@ class RemoteClient extends EventEmitter {
       if (!p) return;
       this.pending.delete(msg.id);
       if (msg.ok) p.resolve(msg.data);
-      else p.reject(new Error(msg.error || '遠隔操作に失敗しました'));
+      else {
+        const err = new Error(msg.error || '遠隔操作に失敗しました');
+        if (msg.code) err.code = msg.code;
+        p.reject(err);
+      }
     }
   }
 
@@ -430,7 +434,86 @@ class RemoteClient extends EventEmitter {
   }
 }
 
+// 前回の接続を再開する（起動時・切れたとき）。間をあけて何度かつなぎ直す
+// connect() => Promise。投げたエラーに fatal: true があれば、それ以上は試さない（トークンが無効など）
+const RECONNECT_DELAYS_MS = [0, 2000, 5000, 10000, 20000, 30000];
+
+class Reconnector extends EventEmitter {
+  constructor({ connect, delays = RECONNECT_DELAYS_MS } = {}) {
+    super();
+    this.connect = connect;
+    this.delays = delays;
+    this.timer = null;
+    this.attempt = 0;
+    this.nextAt = 0;
+    this.running = false; // 試している最中
+    this.lastError = '';
+    this.gen = 0;
+  }
+
+  active() {
+    return !!this.timer || this.running;
+  }
+
+  status() {
+    if (!this.active()) return null;
+    return { attempt: this.attempt, max: this.delays.length, nextAt: this.timer ? this.nextAt : 0, lastError: this.lastError };
+  }
+
+  start() {
+    if (this.active()) return;
+    this.gen++;
+    this.attempt = 0;
+    this.lastError = '';
+    this.schedule();
+  }
+
+  cancel() {
+    this.gen++;
+    clearTimeout(this.timer);
+    this.timer = null;
+    this.running = false;
+    this.attempt = 0;
+    this.emit('changed');
+  }
+
+  schedule() {
+    const gen = this.gen;
+    const wait = this.delays[this.attempt] || 0;
+    this.nextAt = Date.now() + wait;
+    this.timer = setTimeout(async () => {
+      this.timer = null;
+      if (gen !== this.gen) return;
+      this.running = true;
+      this.attempt++;
+      this.emit('changed');
+      try {
+        await this.connect();
+        if (gen !== this.gen) return;
+        this.running = false;
+        this.lastError = '';
+        this.emit('changed');
+        this.emit('connected');
+      } catch (err) {
+        if (gen !== this.gen) return;
+        this.running = false;
+        this.lastError = (err && err.message) || String(err);
+        if (err?.fatal || this.attempt >= this.delays.length) {
+          this.emit('changed');
+          this.emit('failed', err);
+          return;
+        }
+        this.schedule();
+        this.emit('changed');
+      }
+    }, wait);
+    this.timer.unref?.();
+  }
+}
+
 module.exports = {
+  RECONNECT_DELAYS_MS,
+  Reconnector,
   DEFAULT_PORT,
   PAIR_TTL_MS,
   PROXY_CHANNELS,

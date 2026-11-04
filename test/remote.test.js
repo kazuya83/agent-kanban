@@ -1,7 +1,7 @@
 // Agent Kanban 同士の遠隔操作（ペアリング・RPC・イベント）
 const test = require('node:test');
 const assert = require('node:assert');
-const { RemoteHost, RemoteClient, DEFAULT_PORT, isProxyChannel, isLocalChannel, MAX_PAIR_FAILURES } = require('../src/remote');
+const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, MAX_PAIR_FAILURES } = require('../src/remote');
 
 test('遠隔で転送するチャンネルと、しないチャンネル', () => {
   assert.strictEqual(isProxyChannel('board:get'), true);
@@ -181,4 +181,71 @@ test('接続後のソケットエラーで例外を投げない（error の聞�
   } finally {
     await host.stop();
   }
+});
+
+test('無効なトークンで認証すると BAD_TOKEN のエラーになる（自動の再開をやめる目印）', async () => {
+  const host = new RemoteHost({ port: 0, tokens: ['good'], invoke: async () => null });
+  await host.start(0);
+  const client = new RemoteClient();
+  try {
+    await assert.rejects(client.connect({ port: host.port, token: 'bad' }), (err) => err.code === 'BAD_TOKEN');
+    const r = await client.connect({ port: host.port, token: 'good' });
+    assert.strictEqual(r.token, 'good');
+  } finally {
+    client.disconnect();
+    await host.stop();
+  }
+});
+
+test('前回の接続の再開: つながるまで間をあけて試し、つながったら止まる', async () => {
+  let calls = 0;
+  const r = new Reconnector({
+    delays: [0, 5, 5, 5],
+    connect: async () => {
+      calls++;
+      if (calls < 3) throw new Error(`だめ ${calls}`);
+    },
+  });
+  const done = new Promise((resolve) => r.once('connected', resolve));
+  r.start();
+  assert.ok(r.active());
+  await done;
+  assert.strictEqual(calls, 3);
+  assert.strictEqual(r.active(), false);
+  assert.strictEqual(r.status(), null);
+});
+
+test('前回の接続の再開: 決められた回数で、または fatal のエラーで、あきらめる', async () => {
+  let calls = 0;
+  const r = new Reconnector({ delays: [0, 1, 1], connect: async () => (calls++, Promise.reject(new Error('届かない'))) });
+  const failed = await new Promise((resolve) => {
+    r.once('failed', resolve);
+    r.start();
+  });
+  assert.strictEqual(calls, 3);
+  assert.strictEqual(failed.message, '届かない');
+  assert.strictEqual(r.active(), false);
+
+  let calls2 = 0;
+  const r2 = new Reconnector({ delays: [0, 1, 1], connect: async () => (calls2++, Promise.reject(Object.assign(new Error('トークンが無効'), { fatal: true }))) });
+  await new Promise((resolve) => {
+    r2.once('failed', resolve);
+    r2.start();
+  });
+  assert.strictEqual(calls2, 1);
+});
+
+test('前回の接続の再開: やめたら、試している最中の結果も捨てる', async () => {
+  let release;
+  const r = new Reconnector({ delays: [0, 1], connect: () => new Promise((resolve) => (release = resolve)) });
+  let connected = false;
+  r.on('connected', () => (connected = true));
+  r.start();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(r.status().attempt === 1);
+  r.cancel();
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.strictEqual(connected, false);
+  assert.strictEqual(r.active(), false);
 });

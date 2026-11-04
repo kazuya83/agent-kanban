@@ -8,7 +8,7 @@ const git = require('./src/git');
 const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
-const { RemoteHost, RemoteClient, DEFAULT_PORT, isProxyChannel, isLocalChannel } = require('./src/remote');
+const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel } = require('./src/remote');
 const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
 const sshKey = require('./src/ssh-key');
 const dirBrowse = require('./src/dir-browse');
@@ -47,6 +47,7 @@ let permServer;
 let remoteHost = null;
 let remoteClient = null;
 let sshTunnel = null;
+let reconnector = null; // 前回の接続を再開する（起動時・切れたとき）
 const localHandlers = new Map();
 
 function createWindow() {
@@ -117,6 +118,10 @@ function remoteSession() {
       sshKey: store.settings.remoteSshKey || '',
       sshPath: store.settings.remoteSshPath || 'ssh',
       tunnel: !!sshTunnel?.active(),
+      // 前回の接続先とトークンが残っていて、ワンクリックで再開できる
+      canResume: canResumeRemote(),
+      reconnecting: reconnector?.status() || null,
+      resumeError: resumeError || '',
     },
   };
 }
@@ -219,6 +224,125 @@ async function stopRemoteHost() {
   return remoteSession();
 }
 
+let resumeError = ''; // 自動の再開をあきらめたときの理由（画面に出す）
+// 裏で再開している最中に、切断や別の接続をされたら、古い試みは結果を捨てる
+let connectSeq = 0;
+let wantConnected = false;
+const cancelledError = () => Object.assign(new Error('接続を取り消しました'), { cancelled: true });
+
+function canResumeRemote() {
+  const s = store.settings;
+  if (!s.remoteClientToken || remoteClient?.connected || remoteHost?.listening()) return false;
+  return s.remoteClientMode === 'direct' ? true : !!String(s.remoteSshHost || '').trim();
+}
+
+// 保存した設定（とトークンかコード）でホストへつなぐ。ssh なら先にトンネルを張る
+async function connectRemote({ code = '' } = {}) {
+  if (remoteHost?.listening()) throw new Error('ホストとして待ち受け中は接続できません。先にホストを停止してください');
+  const s = store.settings;
+  const m = s.remoteClientMode === 'direct' ? 'direct' : 'ssh';
+  const h = s.remoteClientHost || '127.0.0.1';
+  const p = s.remoteClientPort || DEFAULT_PORT;
+  const token = s.remoteClientToken || '';
+  const seq = ++connectSeq;
+  wantConnected = true;
+  let target = { host: h, port: p };
+  if (m === 'ssh') {
+    // アプリが ssh -N -L を張り、手元の空きポート経由でホストの 127.0.0.1:p へつなぐ
+    sshTunnel?.close();
+    const tunnel = new SshTunnel({ command: sshCommand(s.remoteSshPath) });
+    sshTunnel = tunnel;
+    tunnel.on('exit', () => {
+      if (sshTunnel !== tunnel) return; // 張り直した古いトンネル
+      // トンネルが落ちたら接続も切れる。自分で切ったのでなければ、つなぎ直す
+      if (remoteClient?.connected) {
+        remoteClient.disconnect();
+        onRemoteLost();
+      }
+      notifyRemoteOnly();
+    });
+    const localPort = await tunnel.open({ host: s.remoteSshHost, user: s.remoteSshUser, sshPort: s.remoteSshPort, remotePort: p, identityFile: s.remoteSshKey });
+    if (seq !== connectSeq) {
+      if (sshTunnel === tunnel) tunnel.close();
+      throw cancelledError();
+    }
+    target = { host: '127.0.0.1', port: localPort };
+  }
+  let result;
+  try {
+    result = await remoteClient.connect({ ...target, code: code || '', token: code ? '' : token });
+  } catch (err) {
+    if (seq !== connectSeq) throw cancelledError();
+    sshTunnel?.close();
+    if (err?.code === 'BAD_TOKEN') {
+      // ホスト側でペアが破棄された。コードでペアリングし直すしかない
+      store.settings.remoteClientToken = '';
+      store.settings.remoteClientResume = false;
+      store.save();
+      const e = new Error('保存したトークンがホストで無効になっています。ホストに出ている 6 桁のコードで、もう一度ペアリングしてください');
+      e.fatal = true;
+      throw e;
+    }
+    if (m === 'ssh' && /ECONNRESET|接続が切れました|ECONNREFUSED/.test(String(err?.message))) {
+      throw new Error(`SSH はつながりましたが、ホストの Agent Kanban に届きませんでした。ホストの Agent Kanban で「ホストを開始」しているか、待ち受けポート（${p}）が合っているかを確かめてください`);
+    }
+    if (m === 'direct' && !isLoopbackHost(h) && /ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH/.test(String(err?.code || err?.message))) {
+      throw new Error(`${h}:${p} に直接つながりません。ホストは外に見せないよう 127.0.0.1 でしか待ち受けていないため、Tailscale の IP などへは直接つなげません。接続方法を「SSH 経由」にして、SSH の接続先にその IP を入れてください`);
+    }
+    throw err;
+  }
+  if (seq !== connectSeq) {
+    // つながる前に切断を押された（新しい接続の途中なら、そちらに任せる）
+    if (!wantConnected) {
+      remoteClient.disconnect();
+      sshTunnel?.close();
+    }
+    throw cancelledError();
+  }
+  if (result.token) store.settings.remoteClientToken = result.token;
+  // 次の起動時や切れたときは、この接続を再開する
+  store.settings.remoteClientResume = true;
+  store.save();
+  resumeError = '';
+  notifyRemoteOnly();
+  // 接続直後にホストのボードを取る
+  const board = await remoteClient.invoke('board:get');
+  send('board:changed', withRemoteSession(board));
+  return remoteSession();
+}
+
+// 前回の接続を再開する（起動時・切れたとき・「前回の接続を再開」）。つながるまで間をあけて何度か試す
+function resumeRemote() {
+  if (!canResumeRemote()) return false;
+  resumeError = '';
+  reconnector.start();
+  notifyRemoteOnly();
+  return true;
+}
+
+// 自分で切断したのではなく、接続が切れたとき
+function onRemoteLost() {
+  if (quitState !== 'idle') return;
+  send('board:changed', withRemoteSession(boardState()));
+  if (store.settings.remoteClientResume) resumeRemote();
+}
+
+// 裏での再開や、つないでいる途中の接続をやめる
+function cancelConnecting() {
+  connectSeq++;
+  wantConnected = false;
+  reconnector?.cancel();
+}
+
+// 自分で切断する。次の起動時には自動で再開しない
+function disconnectRemote() {
+  cancelConnecting();
+  store.settings.remoteClientResume = false;
+  store.save();
+  remoteClient?.disconnect();
+  sshTunnel?.close();
+}
+
 app.whenReady().then(async () => {
   const userData = app.getPath('userData');
   store = new Store(path.join(userData, 'board.json'));
@@ -266,11 +390,19 @@ app.whenReady().then(async () => {
     }
     send(channel, payload);
   });
+  // 'disconnected' は自分で切ったときには来ない（ホストが落ちた・回線が切れたとき）
   remoteClient.on('disconnected', () => {
+    sshTunnel?.close();
     notifyRemoteOnly();
-    send('board:changed', withRemoteSession(boardState()));
+    onRemoteLost();
   });
   remoteClient.on('changed', notifyRemoteOnly);
+  reconnector = new Reconnector({ connect: () => connectRemote() });
+  reconnector.on('changed', notifyRemoteOnly);
+  reconnector.on('failed', (err) => {
+    resumeError = (err && err.message) || String(err);
+    notifyRemoteOnly();
+  });
 
   handle('board:get', () => withRemoteSession(boardState()));
   handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
@@ -312,6 +444,9 @@ app.whenReady().then(async () => {
   });
   handle('remote:startHost', async ({ port } = {}) => {
     if (remoteClient?.connected) throw new Error('クライアントとして接続中はホストを開始できません。先に切断してください');
+    // ホストになるなら、クライアントとしての再開はしない
+    cancelConnecting();
+    store.settings.remoteClientResume = false;
     if (port != null) {
       const n = parseInt(port, 10);
       store.settings.remotePort = n === 0 ? 0 : Math.min(65535, Math.max(1024, n || DEFAULT_PORT));
@@ -350,54 +485,43 @@ app.whenReady().then(async () => {
     if (sshKey != null) s.remoteSshKey = String(sshKey).trim();
     if (sshPath != null) s.remoteSshPath = String(sshPath).trim() || 'ssh';
     store.save();
-    const token = s.remoteClientToken || '';
-    let target = { host: h, port: p };
-    if (m === 'ssh') {
-      // アプリが ssh -N -L を張り、手元の空きポート経由でホストの 127.0.0.1:p へつなぐ
-      sshTunnel?.close();
-      sshTunnel = new SshTunnel({ command: sshCommand(s.remoteSshPath) });
-      sshTunnel.on('exit', () => {
-        // トンネルが落ちたら接続も切れる。状態だけ画面に知らせる
-        if (remoteClient?.connected) remoteClient.disconnect();
-        notifyRemoteOnly();
-      });
-      const localPort = await sshTunnel.open({ host: s.remoteSshHost, user: s.remoteSshUser, sshPort: s.remoteSshPort, remotePort: p, identityFile: s.remoteSshKey });
-      target = { host: '127.0.0.1', port: localPort };
-    }
-    let result;
+    // 手で接続するときは、裏でのつなぎ直しを止める
+    reconnector.cancel();
+    resumeError = '';
+    return connectRemote({ code });
+  });
+  // 保存した接続先とトークンで、前回の接続を再開する（ボード上部の「前回の接続を再開」）
+  handle('remote:resume', async () => {
+    if (remoteClient?.connected) return remoteSession();
+    if (!canResumeRemote()) throw new Error('再開できる前回の接続がありません。RC設定から接続してください');
+    reconnector.cancel();
+    resumeError = '';
+    notifyRemoteOnly();
     try {
-      result = await remoteClient.connect({ ...target, code: code || '', token: code ? '' : token });
+      return await connectRemote();
     } catch (err) {
-      sshTunnel?.close();
-      if (m === 'ssh' && /ECONNRESET|接続が切れました|ECONNREFUSED/.test(String(err?.message))) {
-        throw new Error(`SSH はつながりましたが、ホストの Agent Kanban に届きませんでした。ホストの Agent Kanban で「ホストを開始」しているか、待ち受けポート（${p}）が合っているかを確かめてください`);
-      }
-      if (m === 'direct' && !isLoopbackHost(h) && /ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH/.test(String(err?.code || err?.message))) {
-        throw new Error(`${h}:${p} に直接つながりません。ホストは外に見せないよう 127.0.0.1 でしか待ち受けていないため、Tailscale の IP などへは直接つなげません。接続方法を「SSH 経由」にして、SSH の接続先にその IP を入れてください`);
-      }
+      resumeError = (err && err.message) || String(err);
+      notifyRemoteOnly();
       throw err;
     }
-    if (result.token) {
-      store.settings.remoteClientToken = result.token;
-      store.save();
-    }
+  });
+  handle('remote:cancelResume', () => {
+    if (remoteClient?.connected) return remoteSession();
+    cancelConnecting();
+    sshTunnel?.close();
     notifyRemoteOnly();
-    // 接続直後にホストのボードを取る
-    const board = await remoteClient.invoke('board:get');
-    send('board:changed', withRemoteSession(board));
     return remoteSession();
   });
   handle('remote:disconnect', () => {
-    remoteClient?.disconnect();
-    sshTunnel?.close();
+    disconnectRemote();
     send('board:changed', withRemoteSession(boardState()));
     return remoteSession();
   });
   handle('remote:forgetToken', () => {
+    disconnectRemote();
     store.settings.remoteClientToken = '';
     store.save();
-    remoteClient?.disconnect();
-    sshTunnel?.close();
+    resumeError = '';
     notifyRemoteOnly();
     return remoteSession();
   });
@@ -679,6 +803,8 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+  // 前回クライアントとして接続したまま終えていたら、その接続を裏で再開する（自分で切断していたらしない）
+  if (store.settings.remoteClientResume && !remoteHost?.listening()) resumeRemote();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length > 0) return;
     // ウィンドウを閉じて裏で動いているあいだに新しい版が入ったら、新しい版で起動し直す
@@ -701,6 +827,7 @@ app.on('before-quit', (e) => {
   if (quitState === 'done' || !agents) {
     store?.flush();
     permServer?.close();
+    reconnector?.cancel();
     remoteClient?.disconnect();
     sshTunnel?.close();
     remoteHost?.stop();
@@ -717,6 +844,7 @@ app.on('before-quit', (e) => {
       /* 終了は続ける */
     }
     try {
+      reconnector?.cancel();
       remoteClient?.disconnect();
       sshTunnel?.close();
       await remoteHost?.stop();
