@@ -39,7 +39,7 @@ const agentLabel = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[1];
 const agentShort = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[2];
 const agentOf = (c) => (c && AGENTS.some((x) => x[0] === c.agent) ? c.agent : 'claude');
 
-const state = { board: { settings: {}, cards: [] }, selected: null, tab: 'log', logs: new Map(), headSig: '' };
+const state = { board: { settings: {}, cards: [] }, selected: null, tab: 'log', logs: new Map(), headSig: '', relayOpen: new Set() };
 const $ = (id) => document.getElementById(id);
 
 function esc(s) {
@@ -347,7 +347,7 @@ function orchChipsHtml(c) {
     const n = competitors(c).length;
     chips.push(c.compete.adopted ? '<span class="orch-chip compete">🏁 採用した案</span>' : `<span class="orch-chip compete" title="同じタスクを複数のエージェントで解いています">🏁 競争 ${n}案</span>`);
   }
-  return chips.length ? `<div class="card-skill-row">${chips.join('')}</div>` : '';
+  return (chips.length ? `<div class="card-skill-row">${chips.join('')}</div>` : '') + (c.relay && !isChat(c) ? relayBarHtml(c) : '');
 }
 function competitors(c) {
   if (!c || !c.compete) return c ? [c] : [];
@@ -561,16 +561,81 @@ function closeDetail() {
   renderBoard();
 }
 
-// 詳細: リレーの工程の進み具合
-function relayRowHtml(c) {
-  if (!c.relay) return '';
+// リレーの工程の状態（ワークフロー表示用）
+const RELAY_STATE = {
+  pending: ['・', '待ち'],
+  queued: ['…', '待機中'],
+  running: ['▶', '実行中'],
+  question: ['?', '質問中'],
+  waiting: ['!', '承認待ち'],
+  awaiting: ['?', '回答待ち'],
+  spec: ['?', '仕様の確認'],
+  conflict: ['!', 'コンフリクト'],
+  interrupted: ['‖', '中断'],
+  stopped: ['■', '停止'],
+  failed: ['✕', '失敗'],
+  done: ['✓', '完了'],
+};
+function relayStepState(c, i) {
   const r = c.relay;
-  const busy = c.status === 'running' || c.status === 'queued';
-  const steps = r.steps.map((st, i) => {
-    const mark = i < r.index ? '✓' : i === r.index ? (busy ? '▶' : c.status === 'failed' ? '✕' : c.status === 'todo' ? '・' : '✓') : '・';
-    return `<span class="relay-step ${i === r.index ? 'cur' : i < r.index ? 'done' : ''}">${mark} ${i + 1}. ${esc(st.label)} <small>${esc(agentShort(st.agent))}</small></span>`;
+  if (i < r.index) return 'done';
+  if (i > r.index) return 'pending';
+  const b = badgeFor(c)[0];
+  if (b === 'review') return i === r.steps.length - 1 ? 'done' : 'stopped'; // 途中の工程で止まっている（停止したとき）
+  if (b === 'todo') return 'pending';
+  return RELAY_STATE[b] ? b : 'done';
+}
+function durText(ms) {
+  if (!(ms > 0)) return '';
+  return elapsed(Date.now() - ms).replace(/(\d+分)\d+秒$/, '$1');
+}
+function hhmm(t) {
+  const d = new Date(t);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// ボードのカード: 工程の数だけ区切った進み具合のバー
+function relayBarHtml(c) {
+  const r = c.relay;
+  const segs = r.steps.map((st, i) => `<span class="rb-seg rs-${relayStepState(c, i)}" title="${i + 1}. ${esc(st.label)}（${esc(agentShort(st.agent))}）: ${RELAY_STATE[relayStepState(c, i)][1]}"></span>`);
+  return `<div class="relay-bar">${segs.join('')}</div>`;
+}
+
+// 詳細: リレーの工程をワークフローの形で見せる（状態・エージェント・時間・金額・前の工程の報告）
+function relayFlowHtml(c) {
+  if (!c.relay || isChat(c)) return '';
+  const r = c.relay;
+  const hist = new Map((r.history || []).map((h) => [h.index, h]));
+  const doneN = r.steps.filter((_, i) => relayStepState(c, i) === 'done').length;
+  const nodes = r.steps.map((st, i) => {
+    const stt = relayStepState(c, i);
+    const [icon, label] = RELAY_STATE[stt];
+    const h = hist.get(i);
+    const info = [];
+    if (h) {
+      if (h.startedAt && h.at) info.push(`⏱ ${durText(h.at - h.startedAt) || '1分未満'}`);
+      if (h.costUsd) info.push(`$${h.costUsd.toFixed(3)}`);
+    } else if (i === r.index && r.stepStartedAt) {
+      if (stt === 'running') info.push(`⏱ <span class="elapsed" data-since="${r.stepStartedAt}">${elapsed(r.stepStartedAt)}</span>（${hhmm(r.stepStartedAt)} から）`);
+      else info.push(`${hhmm(r.stepStartedAt)} に開始`);
+      const cost = (c.costUsd || 0) - (r.stepCostStart || 0);
+      if (cost > 0) info.push(`$${cost.toFixed(3)}`);
+    }
+    const key = `${c.id}:${i}`;
+    const report = h && String(h.report || '').trim()
+      ? `<details class="rf-report" data-rkey="${esc(key)}" ${state.relayOpen.has(key) ? 'open' : ''}><summary>次の工程へ渡した報告</summary><div class="rf-report-body">${esc(h.report)}</div></details>`
+      : '';
+    return `<li class="rf-node rs-${stt} ${i === r.index ? 'cur' : ''}">
+      <span class="rf-dot">${icon}</span>
+      <div class="rf-body">
+        <div class="rf-head"><b>${i + 1}. ${esc(st.label)}</b> <span class="rf-agent">${esc(agentLabel(st.agent))}</span> <span class="rf-state">${label}</span></div>
+        ${info.length ? `<div class="rf-info">${info.join(' ・ ')}</div>` : ''}
+        ${st.instruction ? `<div class="rf-inst" title="${esc(st.instruction)}">${esc(st.instruction)}</div>` : ''}
+        ${report}
+      </div>
+    </li>`;
   });
-  return `<dt>リレー</dt><dd class="relay-row">${steps.join('<span class="relay-arrow">→</span>')}</dd>`;
+  return `<div class="relay-flow"><div class="rf-title">🔁 リレー <span class="muted small">${doneN}/${r.steps.length} 工程が完了</span></div><ol class="rf-list">${nodes.join('')}</ol></div>`;
 }
 
 // 詳細: 競争の候補（同じタスクをほかのエージェントで解いたもの）
@@ -631,7 +696,6 @@ function renderDetailHead() {
     <dl class="d-meta">
       ${c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''}
       ${!chat ? `<dt>エージェント</dt><dd>${esc(agentLabel(agentOf(c)))}</dd>` : ''}
-      ${relayRowHtml(c)}
       ${sessionRowHtml(c)}
       ${chat ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（worktree は作りません）</span></dd>` : ''}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
@@ -642,6 +706,7 @@ function renderDetailHead() {
       ${(c.alwaysAllow || []).length ? `<dt>常に許可</dt><dd>${c.alwaysAllow.map(esc).join(', ')}</dd>` : ''}
     </dl>
     ${isInterrupted(c) ? interruptedBoxHtml(c) : c.error ? `<div class="d-error">${esc(c.error)}</div>` : ''}
+    ${relayFlowHtml(c)}
     ${competeBoxHtml(c)}
     ${conflictBoxHtml(c)}
     ${questionFormHtml(c)}
@@ -650,6 +715,7 @@ function renderDetailHead() {
     ${permissionBlock(c, false)}
     <div class="d-actions">${btns.join('')}</div>`;
   $('closeDetail').onclick = closeDetail;
+  $('detailHead').querySelectorAll('details[data-rkey]').forEach((d) => (d.ontoggle = () => (d.open ? state.relayOpen.add(d.dataset.rkey) : state.relayOpen.delete(d.dataset.rkey))));
   const ds = $('dSession');
   if (ds) {
     ds.onchange = async () => {
