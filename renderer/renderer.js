@@ -3870,9 +3870,22 @@ api.appInfo().then(
   // pref: ユーザーが決めた（保存した）高さ / h: いま実際に使っている高さ（入りきらないときは pref より縮める）
   const pref = { head: Number(localStorage.getItem(KEYS.head)) || 0, foot: Number(localStorage.getItem(KEYS.foot)) || 0 };
   const h = { ...pref };
+  const title = $('detailTitle');
+  const input = $('followInput');
   const minH = () => Math.max(24, tabs.offsetHeight);
+  // 下の段の入力欄は、いちばん上のタイトルと同じ高さより低くしない
+  const syncInputMin = () => {
+    input.style.minHeight = title.offsetHeight > 0 ? `${title.offsetHeight}px` : '';
+  };
+  // 下の段の最小の高さ: 入力欄がタイトルの高さを保てるだけの高さ（タブの高さより低くはしない）
+  // （段の中身がはみ出しているときも正しく測れるように、scrollHeight で中身の高さを見る）
+  const footMin = () => {
+    const chrome = foot.offsetHeight - foot.clientHeight + foot.scrollHeight - input.offsetHeight;
+    return Math.max(minH(), chrome + title.offsetHeight);
+  };
+  const minFor = (k) => (k === 'foot' ? footMin() : minH());
   // 上下の段とタブを除いた、3つの段で分け合える高さ
-  const avail = () => panel.clientHeight - tabs.offsetHeight - $('detailTitle').offsetHeight;
+  const avail = () => panel.clientHeight - tabs.offsetHeight - title.offsetHeight;
   const cur = (k) => (h[k] > 0 ? h[k] : els[k].offsetHeight);
   const apply = (k) => {
     const el = els[k];
@@ -3882,13 +3895,13 @@ api.appInfo().then(
   // k の段を v にしたいとき、ほかの2つの段がタブの高さ以上を保てる範囲に収める
   const clampFor = (k, v) => {
     const other = k === 'head' ? 'foot' : 'head';
-    const min = minH();
-    const max = avail() - cur(other) - min;
-    return Math.max(min, Math.min(v, max));
+    const max = avail() - cur(other) - minH();
+    return Math.max(minFor(k), Math.min(v, max));
   };
   // パネルの高さが変わったら（ウィンドウの大きさ・モーダルとの切り替え）、はみ出さないように縮める
   const fit = () => {
     if (panel.classList.contains('hidden') || !panel.clientHeight) return;
+    syncInputMin();
     const min = minH();
     // 上の段の中身が長いタスクに切り替えても、上・中の段がタブの高さより潰れないようにする
     head.style.minHeight = body.style.minHeight = `${min}px`;
@@ -3897,10 +3910,15 @@ api.appInfo().then(
     h.foot = pref.foot;
     apply('head');
     apply('foot');
+    // 前に保存した高さが低すぎて入力欄がタイトルより低くなるときは、そこまで高くする
+    if (h.foot > 0 && h.foot < footMin()) {
+      h.foot = footMin();
+      apply('foot');
+    }
     let over = cur('head') + cur('foot') + min - avail();
     for (const k of ['foot', 'head']) {
       if (over <= 0 || !(h[k] > 0)) continue;
-      const cut = Math.min(over, h[k] - min);
+      const cut = Math.min(over, h[k] - minFor(k));
       if (cut > 0) {
         h[k] -= cut;
         over -= cut;
@@ -3945,7 +3963,10 @@ api.appInfo().then(
   setup('splitFoot', 'foot', -1); // 上へ動かすと下の段が高くなる
   apply('head');
   apply('foot');
-  new ResizeObserver(fit).observe(panel);
+  // タイトルの行数が変わった（タスクの切り替え・全文の表示）ときも、入力欄の最小の高さを合わせ直す
+  const ro = new ResizeObserver(fit);
+  ro.observe(panel);
+  ro.observe(title);
 })();
 
 (async () => {
