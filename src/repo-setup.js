@@ -13,7 +13,7 @@ function normalizeCloneUrl(input) {
   if (!s) throw new Error('クローンする URL を入れてください');
   if (/\s/.test(s)) throw new Error('URL に空白が入っています');
   if (/^(https?|ssh|git):\/\/[^\s/]+\/.+/i.test(s)) return s;
-  if (/^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s/-][^\s]*$/.test(s)) return s; // git@github.com:owner/repo.git
+  if (/^[A-Za-z0-9_][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9.-]*:[^\s/-][^\s]*$/.test(s)) return s; // git@github.com:owner/repo.git
   const short = s.match(/^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(\.git)?$/);
   if (short && !short[2].startsWith('.')) return `https://github.com/${short[1]}/${short[2]}.git`;
   throw new Error(`この URL ではクローンできません（${s}）。https://github.com/owner/repo や git@github.com:owner/repo.git、owner/repo の形で入れてください`);
@@ -65,13 +65,23 @@ async function cloneFrom(u, parent, name) {
     await git.git(parent, ['clone', '--', u, path.basename(dir.replace(/\\/g, '/'))], { network: true, timeout: 30 * 60 * 1000 });
   } catch (err) {
     const msg = String(err.stderr || err.message || '');
-    if (/Authentication failed|could not read Username|terminal prompts disabled|Permission denied \(publickey\)/i.test(msg)) {
+    if (/Authentication failed|could not read Username|terminal prompts disabled|Permission denied \(publickey\)|Host key verification failed/i.test(msg)) {
       throw new Error(`認証できなかったのでクローンできませんでした。非公開のリポジトリなら、ターミナルで一度 git clone して認証を済ませるか、gh にログインしてください。\n${msg.trim()}`);
     }
     if (/not found|does not exist/i.test(msg)) throw new Error(`リポジトリが見つかりませんでした（${u}）\n${msg.trim()}`);
     throw err;
   }
   return dir;
+}
+
+// コミットが1つもない（空のリポジトリをクローンした）ときは、タスク用の worktree を作れないので知らせる
+async function hasCommit(dir) {
+  try {
+    await git.git(dir, ['rev-parse', '--verify', '-q', 'HEAD']);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function runGh(args, cwd) {
@@ -113,4 +123,4 @@ async function createRepo({ parent, name, github = '' }) {
   return { dir, github };
 }
 
-module.exports = { normalizeCloneUrl, repoNameFromUrl, validateName, targetDir, cloneRepo, cloneFrom, createRepo };
+module.exports = { hasCommit, normalizeCloneUrl, repoNameFromUrl, validateName, targetDir, cloneRepo, cloneFrom, createRepo };

@@ -216,7 +216,9 @@ app.whenReady().then(async () => {
   handle('repo:clone', async ({ url, parent, name } = {}) => {
     const dir = await repoSetup.cloneRepo({ url, parent, name });
     store.settings.lastRepoParent = parent;
-    return openRepo(dir);
+    openRepo(dir);
+    const warning = (await repoSetup.hasCommit(dir)) ? '' : 'クローンしましたが、このリポジトリにはコミットがまだありません。タスクを動かすには、最初のコミットを入れて push してください';
+    return { dir, warning };
   });
   handle('repo:create', async ({ parent, name, github } = {}) => {
     const r = await repoSetup.createRepo({ parent, name, github });
