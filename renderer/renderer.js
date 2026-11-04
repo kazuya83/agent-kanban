@@ -1,4 +1,4 @@
-/* global api */
+/* global api, icon, NOTIF_ICON */
 const COLUMNS = [
   { key: 'todo', label: 'Todo', statuses: ['todo'], hint: 'ここから「実行中」へドラッグしても開始できます' },
   { key: 'running', label: '実行中', statuses: ['queued', 'running'] },
@@ -6,7 +6,7 @@ const COLUMNS = [
   { key: 'done', label: '完了', statuses: ['done'] },
 ];
 // タスクに紐づかない会話（worktree を作らず、リポジトリのフォルダでそのまま話す）はボードのレーンには出さず、
-// 「💬 会話」ボタンから一覧を開き、選んだ会話はモーダルで表示する
+// 「会話」ボタンから一覧を開き、選んだ会話はモーダルで表示する
 const STATUS_LABEL = { todo: '未着手', queued: '待機中', running: '実行中', review: 'レビュー待ち', failed: 'エラー', done: 'マージ済み' };
 const CHAT_STATUS_LABEL = { todo: '未開始', queued: '待機中', running: '返答中', review: '返事済み', failed: 'エラー', done: '終了' };
 const isChat = (c) => !!c && c.kind === 'chat';
@@ -42,6 +42,8 @@ const agentOf = (c) => (c && AGENTS.some((x) => x[0] === c.agent) ? c.agent : 'c
 
 const state = { board: { settings: {}, cards: [] }, selected: null, tab: 'log', logs: new Map(), headSig: '', relayOpen: new Set() };
 const $ = (id) => document.getElementById(id);
+// index.html の data-icon="名前" の場所に、モノクロの SVG アイコンを入れる（icons.js）
+for (const el of document.querySelectorAll('[data-icon]')) el.outerHTML = icon(el.dataset.icon, el.className);
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -145,7 +147,7 @@ function permissionBlock(c, compact) {
     .map(
       (r) => `
       <div class="perm" data-card="${c.id}" data-req="${r.id}">
-        <div class="perm-title">⚠ 承認待ち: <b>${esc(r.toolName)}</b></div>
+        <div class="perm-title">${icon('alert')}承認待ち: <b>${esc(r.toolName)}</b></div>
         ${r.summary ? `<code class="perm-summary">${esc(r.summary)}</code>` : ''}
         ${compact ? '' : `<details><summary>入力の全文</summary><pre>${esc(r.detail)}</pre></details>
           <input class="deny-reason" placeholder="拒否する理由（任意・${esc(agentShort(agentOf(c)))} に伝わります）" />`}
@@ -189,7 +191,7 @@ function questionCompactHtml(c) {
   const q = req.questions[0];
   const quick = req.questions.length === 1 && !q.multiSelect && q.options.length && q.options.length <= 4;
   return `<div class="qbox" data-card="${c.id}" data-req="${req.id}">
-    <div class="q-title">❓ ${esc(q.header ? q.header + ': ' : '')}${esc(q.question)}</div>
+    <div class="q-title">${icon('question')}${esc(q.header ? q.header + ': ' : '')}${esc(q.question)}</div>
     ${quick
       ? `<div class="q-quick">${q.options.map((o) => `<button class="btn small" data-qpick="${esc(o.label)}" title="${esc(o.description)}">${esc(o.label)}</button>`).join('')}<button class="btn small ghost" data-qopen="1">その他…</button></div>`
       : `<div class="q-quick"><button class="btn small primary" data-qopen="1">回答する（${req.questions.length}問）</button></div>`}
@@ -201,7 +203,7 @@ function questionFormHtml(c) {
   return (c.questions || [])
     .map(
       (req) => `<div class="qform" data-card="${c.id}" data-req="${req.id}">
-      <div class="q-title">❓ ${esc(agentShort(agentOf(c)))} からの質問</div>
+      <div class="q-title">${icon('question')}${esc(agentShort(agentOf(c)))} からの質問</div>
       ${req.questions
         .map(
           (q, i) => `<div class="q-item" data-qi="${i}">
@@ -244,7 +246,7 @@ function conflictBoxHtml(c) {
       actions = `<div class="cf-actions"><button class="btn primary" data-cact="agent">${who} に解消してもらう</button><button class="btn" data-cact="manual">自分で解消する</button><button class="btn ghost" data-cact="dismiss">閉じる</button></div>
         <p class="muted small">どちらも、${esc(k.target)} をこのタスクのブランチに取り込んで解消します。${esc(k.target)} 自体は解消が終わってマージするまで変わりません。</p>`;
     return `<div class="cf-box">
-      <b>⚠ ${k.pr ? `PR が ${esc(k.target)} とコンフリクトしています` : `${esc(k.target)} とコンフリクトしています`}${k.unresolved && k.unresolved.length ? '（まだ残っています）' : ''}</b>
+      <b>${icon('alert')}${k.pr ? `PR が ${esc(k.target)} とコンフリクトしています` : `${esc(k.target)} とコンフリクトしています`}${k.unresolved && k.unresolved.length ? '（まだ残っています）' : ''}</b>
       ${files.length ? `<ul class="cf-files">${files.map((f) => `<li class="mono">${esc(f)}</li>`).join('')}</ul>` : '<p class="muted small">コンフリクトしているファイルは、解消を始めると表示されます。</p>'}
       ${actions}
     </div>`;
@@ -252,10 +254,10 @@ function conflictBoxHtml(c) {
   if (c.conflictResolved && !busy && (c.status === 'review' || c.status === 'failed')) {
     const r = c.conflictResolved;
     if (r.pr)
-      return `<div class="cf-box ok"><b>✓ origin/${esc(r.target)} を取り込んで、コンフリクトを解消しました</b>
+      return `<div class="cf-box ok"><b>${icon('check')}origin/${esc(r.target)} を取り込んで、コンフリクトを解消しました</b>
       <p class="small">差分タブで解消の内容を確かめてから、PR を更新（push）してください。</p>
       <div class="cf-actions"><button class="btn primary" data-cact="pushPr">PR を更新（push）</button><button class="btn ghost" data-cact="dismiss">閉じる</button></div></div>`;
-    return `<div class="cf-box ok"><b>✓ ${esc(r.target)} を取り込んで、コンフリクトを解消しました</b>
+    return `<div class="cf-box ok"><b>${icon('check')}${esc(r.target)} を取り込んで、コンフリクトを解消しました</b>
       <p class="small">差分タブで解消の内容を確かめてから、マージしてください。</p>
       <div class="cf-actions"><button class="btn primary" data-cact="remerge">${esc(r.target)} にマージ${r.push ? 'して push' : ''}</button><button class="btn ghost" data-cact="dismiss">閉じる</button></div></div>`;
   }
@@ -325,15 +327,15 @@ function cardHtml(c) {
       </div>
       <div class="card-title">${c.issue ? `<a class="issue-chip" data-url="${esc(c.issue.url)}" title="Issue を開く">#${c.issue.number}</a> ${esc(c.title.replace(/^#\d+\s*/, ''))}` : esc(c.title)}</div>
       ${orchChipsHtml(c)}
-      ${c.skill ? `<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">⚡ /${esc(c.skill)}</span></div>` : ''}
+      ${c.skill ? `<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">${icon('zap')}/${esc(c.skill)}</span></div>` : ''}
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
       ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(plainText(c.lastMessage))}</div>` : ''}
-      ${isSpecPending(c) ? '<div class="card-msg card-spec">📝 内容が詰まっていないので、開発を開始できません。開いて質問に答えてください</div>' : ''}
-      ${isInterrupted(c) ? `<div class="int-quick"><button class="btn small primary" data-resume="${c.id}" title="中断したところから続けます">▶ 再開</button></div>` : ''}
+      ${isSpecPending(c) ? `<div class="card-msg card-spec">${icon('note')}内容が詰まっていないので、開発を開始できません。開いて質問に答えてください</div>` : ''}
+      ${isInterrupted(c) ? `<div class="int-quick"><button class="btn small primary" data-resume="${c.id}" title="中断したところから続けます">${icon('play')}再開</button></div>` : ''}
       ${questionCompactHtml(c)}
       ${permissionBlock(c, true)}
       <div class="card-meta">
-        ${c.branch ? `<span title="${esc(c.branch)}">⎇ ${esc(c.branch.replace(/^agent\//, ''))}</span>` : ''}
+        ${c.branch ? `<span title="${esc(c.branch)}">${icon('branch')}${esc(c.branch.replace(/^agent\//, ''))}</span>` : ''}
         ${c.costUsd ? `<span>$${c.costUsd.toFixed(2)}</span>` : ''}
       </div>
     </div>`;
@@ -342,11 +344,11 @@ function cardHtml(c) {
 // カードに出すエージェント・Pipeline・競争の印
 function orchChipsHtml(c) {
   const chips = [];
-  if (c.relay) chips.push(`<span class="orch-chip relay" title="Pipeline: 工程ごとに別のエージェントへ順番に引き継ぎます">🔁 ${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${esc(agentShort(agentOf(c)))}</span>`);
-  else if (agentOf(c) !== 'claude') chips.push(`<span class="orch-chip agent">🤖 ${esc(agentLabel(agentOf(c)))}</span>`);
+  if (c.relay) chips.push(`<span class="orch-chip relay" title="Pipeline: 工程ごとに別のエージェントへ順番に引き継ぎます">${icon('pipeline')}${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${esc(agentShort(agentOf(c)))}</span>`);
+  else if (agentOf(c) !== 'claude') chips.push(`<span class="orch-chip agent">${icon('bot')}${esc(agentLabel(agentOf(c)))}</span>`);
   if (c.compete) {
     const n = competitors(c).length;
-    chips.push(c.compete.adopted ? '<span class="orch-chip compete">🏁 採用した案</span>' : `<span class="orch-chip compete" title="同じタスクを複数のエージェントで解いています">🏁 競争 ${n}案</span>`);
+    chips.push(c.compete.adopted ? `<span class="orch-chip compete">${icon('flag')}採用した案</span>` : `<span class="orch-chip compete" title="同じタスクを複数のエージェントで解いています">${icon('flag')}競争 ${n}案</span>`);
   }
   return (chips.length ? `<div class="card-skill-row">${chips.join('')}</div>` : '') + (c.relay && !isChat(c) ? relayBarHtml(c) : '');
 }
@@ -386,7 +388,7 @@ function renderCostInfo(settings) {
 function renderBoard() {
   const { settings, cards } = state.board;
   renderInterruptBanner();
-  $('repoBtn').textContent = settings.repoPath ? `📁 ${settings.repoPath}` : '📁 リポジトリを選ぶ';
+  $('repoBtn').innerHTML = icon('folder') + esc(settings.repoPath || 'リポジトリを選ぶ');
   // 会話は同時実行数に数えない
   const running = cards.filter((c) => c.status === 'running' && !isChat(c)).length;
   renderCostInfo(settings);
@@ -430,7 +432,7 @@ function byAttention(a, b) {
   return (needsYou(b) ? 1 : 0) - (needsYou(a) ? 1 : 0) || b.createdAt - a.createdAt;
 }
 
-// 「💬 会話」ボタン: 会話の数と、返事を待っている会話があるかを出す
+// 「会話」ボタン: 会話の数と、返事を待っている会話があるかを出す
 function renderChatBtn() {
   const chats = state.board.cards.filter(isChat);
   const waiting = chats.filter(needsYou).length;
@@ -507,9 +509,9 @@ function interruptedBoxHtml(c) {
   const it = c.interrupted;
   const how = it.kind === 'queued' ? '待機中だった指示を、そのままもう一度渡して始めます。' : c.sessionId ? '同じ会話の続きとして、中断したところから作業を続けてもらいます。' : '最後に渡した指示で、もう一度始めます。';
   return `<div class="int-box">
-    <b>⏸ アプリの終了で中断されました</b>${it.at ? `<span class="muted small">（${esc(new Date(it.at).toLocaleString())}）</span>` : ''}
+    <b>${icon('pause')}アプリの終了で中断されました</b>${it.at ? `<span class="muted small">（${esc(new Date(it.at).toLocaleString())}）</span>` : ''}
     <p class="small">${esc(how)}別の指示で続けたいときは、下の欄から追加指示を送ってください。</p>
-    <div class="cf-actions"><button class="btn primary" data-act="resume">▶ 再開</button><button class="btn ghost" data-act="dismissInterrupted" title="再開せずに、中断の表示だけ消します">再開しない</button></div>
+    <div class="cf-actions"><button class="btn primary" data-act="resume">${icon('play')}再開</button><button class="btn ghost" data-act="dismissInterrupted" title="再開せずに、中断の表示だけ消します">再開しない</button></div>
   </div>`;
 }
 
@@ -521,8 +523,8 @@ function renderInterruptBanner() {
     el.classList.add('hidden');
     return;
   }
-  el.innerHTML = `<span>⏸ 前回アプリを終了したときに、<b>${list.length} 件</b>のタスクが中断されました。</span>
-    <button class="btn small primary" id="resumeAllBtn">▶ すべて再開</button>
+  el.innerHTML = `<span>${icon('pause')}前回アプリを終了したときに、<b>${list.length} 件</b>のタスクが中断されました。</span>
+    <button class="btn small primary" id="resumeAllBtn">${icon('play')}すべて再開</button>
     <button class="btn small ghost" id="interruptLater">あとで</button>`;
   el.classList.remove('hidden');
   $('resumeAllBtn').onclick = () => runBusy('タスクを再開しています…', () => api.resumeAll().then((n) => `${n} 件のタスクを再開しました`)).then((m) => m && toast(m, 'ok'));
@@ -628,10 +630,10 @@ function relayFlowHtml(c) {
     const h = hist.get(i);
     const info = [];
     if (h) {
-      if (h.startedAt && h.at) info.push(`⏱ ${durText(h.at - h.startedAt) || '1分未満'}`);
+      if (h.startedAt && h.at) info.push(`${icon('clock')}${durText(h.at - h.startedAt) || '1分未満'}`);
       if (h.costUsd) info.push(`$${h.costUsd.toFixed(3)}`);
     } else if (i === r.index && r.stepStartedAt) {
-      if (stt === 'running') info.push(`⏱ <span class="elapsed" data-since="${r.stepStartedAt}">${elapsed(r.stepStartedAt)}</span>（${hhmm(r.stepStartedAt)} から）`);
+      if (stt === 'running') info.push(`${icon('clock')}<span class="elapsed" data-since="${r.stepStartedAt}">${elapsed(r.stepStartedAt)}</span>（${hhmm(r.stepStartedAt)} から）`);
       else info.push(`${hhmm(r.stepStartedAt)} に開始`);
       const cost = (c.costUsd || 0) - (r.stepCostStart || 0);
       if (cost > 0) info.push(`$${cost.toFixed(3)}`);
@@ -650,7 +652,7 @@ function relayFlowHtml(c) {
       </div>
     </li>`;
   });
-  return `<div class="relay-flow"><div class="rf-title">🔁 Pipeline <span class="muted small">${doneN}/${r.steps.length} 工程が完了</span></div><ol class="rf-list">${nodes.join('')}</ol></div>`;
+  return `<div class="relay-flow"><div class="rf-title">${icon('pipeline')}Pipeline <span class="muted small">${doneN}/${r.steps.length} 工程が完了</span></div><ol class="rf-list">${nodes.join('')}</ol></div>`;
 }
 
 // 詳細: 競争の候補（同じタスクをほかのエージェントで解いたもの）
@@ -667,12 +669,12 @@ function competeBoxHtml(c) {
     })
     .join('');
   const canAdopt = c.status === 'review' || c.status === 'failed';
-  return `<div class="compete-box"><b>🏁 競争: 同じタスクを ${list.length} つのエージェントで解いています</b>
+  return `<div class="compete-box"><b>${icon('flag')}競争: 同じタスクを ${list.length} つのエージェントで解いています</b>
     <div class="compete-list">${rows}</div>
     <small>${busy ? 'まだ動いている候補があります。' : 'すべての候補が終わりました。'}差分タブでそれぞれの変更を見比べて、よいものを採用してください。採用すると、ほかの候補は worktree とブランチごと破棄します。</small>
     <div class="d-actions">
-      ${canAdopt ? `<button class="btn primary" data-act="adopt">🏁 この案（${esc(agentShort(agentOf(c)))}）を採用</button>` : ''}
-      <button class="btn" data-act="compare" ${busy ? 'title="終わっていない候補は、その時点の内容で比べます"' : ''}>🤔 ${esc(agentShort(defaultAgent()))} に比べてもらう</button>
+      ${canAdopt ? `<button class="btn primary" data-act="adopt">${icon('flag')}この案（${esc(agentShort(agentOf(c)))}）を採用</button>` : ''}
+      <button class="btn" data-act="compare" ${busy ? 'title="終わっていない候補は、その時点の内容で比べます"' : ''}>${icon('compare')}${esc(agentShort(defaultAgent()))} に比べてもらう</button>
       ${c.compete.compareChat && card(c.compete.compareChat) ? `<button class="btn ghost" data-goto="${c.compete.compareChat}">比較の会話を開く</button>` : ''}
     </div></div>`;
 }
@@ -686,21 +688,21 @@ function renderDetailHead() {
   const s = c.status;
   const chat = isChat(c);
   const btns = chat ? [
-    isInterrupted(c) && `<button class="btn primary" data-act="resume" title="中断したところから続けます">▶ 再開</button>`,
-    (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">■ 停止</button>`,
+    isInterrupted(c) && `<button class="btn primary" data-act="resume" title="中断したところから続けます">${icon('play')}再開</button>`,
+    (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">${icon('stop')}停止</button>`,
     c.sessionId && s !== 'running' && s !== 'queued' &&
-      `<button class="btn" data-act="toTask" title="この会話の続きとして、worktree で作業するタスクを作ります（会話はそのまま残ります）">📝 タスクにする</button>`,
+      `<button class="btn" data-act="toTask" title="この会話の続きとして、worktree で作業するタスクを作ります（会話はそのまま残ります）">${icon('note')}タスクにする</button>`,
     `<button class="btn danger" data-act="discard">削除</button>`,
   ].filter(Boolean) : [
-    isInterrupted(c) && `<button class="btn primary" data-act="resume" title="中断したところから続けます">▶ 再開</button>`,
-    s === 'todo' && !isInterrupted(c) && `<button class="btn primary" data-act="start">▶ 開始</button>`,
-    (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">■ 停止</button>`,
+    isInterrupted(c) && `<button class="btn primary" data-act="resume" title="中断したところから続けます">${icon('play')}再開</button>`,
+    s === 'todo' && !isInterrupted(c) && `<button class="btn primary" data-act="start">${icon('play')}開始</button>`,
+    (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">${icon('stop')}停止</button>`,
     (s === 'review' || s === 'failed') && c.worktreePath &&
       (state.board.settings.integration === 'pr'
-        ? `<button class="btn primary" data-act="pr">${c.prUrl ? '⇡ PR を更新…' : '⇡ PR を作成…'}</button>`
-        : `<button class="btn primary" data-act="merge">⇲ マージ…</button>`),
+        ? `<button class="btn primary" data-act="pr">${icon('pr')}${c.prUrl ? 'PR を更新…' : 'PR を作成…'}</button>`
+        : `<button class="btn primary" data-act="merge">${icon('merge')}マージ…</button>`),
     // 完了したタスクは開き直さない。修正は別のタスクにする（このタスクのやりとりを引き継ぐ）
-    s === 'done' && `<button class="btn" data-act="fixTask" title="このタスクのやりとり（完了後の会話も含む）を引き継いで、修正のための新しいタスクを作ります">🛠 修正タスクを作る</button>`,
+    s === 'done' && `<button class="btn" data-act="fixTask" title="このタスクのやりとり（完了後の会話も含む）を引き継いで、修正のための新しいタスクを作ります">${icon('wrench')}修正タスクを作る</button>`,
     c.worktreePath && `<button class="btn ghost" data-act="open">フォルダを開く</button>`,
     `<button class="btn danger" data-act="discard">${s === 'done' || c.afterDone ? '削除' : '破棄'}</button>`,
   ].filter(Boolean);
@@ -727,8 +729,8 @@ function renderDetailHead() {
     ${competeBoxHtml(c)}
     ${conflictBoxHtml(c)}
     ${questionFormHtml(c)}
-    ${isSpecPending(c) ? `<div class="d-awaiting d-spec"><b>📝 内容が詰まっていないので、開発を開始できません</b><p>${esc(String(c.lastText || '').slice(-1200))}</p><small>下の欄で ${esc(agentShort(agentOf(c)))} の質問に答えて、仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>`
-    : c.awaitingReply && (s === 'review' || s === 'failed') ? `<div class="d-awaiting"><b>💬 ${esc(agentShort(agentOf(c)))} が質問しています</b><p>${esc(String(c.lastText || '').slice(-600))}</p><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>` : ''}
+    ${isSpecPending(c) ? `<div class="d-awaiting d-spec"><b>${icon('note')}内容が詰まっていないので、開発を開始できません</b><p>${esc(String(c.lastText || '').slice(-1200))}</p><small>下の欄で ${esc(agentShort(agentOf(c)))} の質問に答えて、仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>`
+    : c.awaitingReply && (s === 'review' || s === 'failed') ? `<div class="d-awaiting"><b>${icon('chat')}${esc(agentShort(agentOf(c)))} が質問しています</b><p>${esc(String(c.lastText || '').slice(-600))}</p><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>` : ''}
     ${permissionBlock(c, false)}
     <div class="d-actions">${btns.join('')}</div>`;
   $('closeDetail').onclick = closeDetail;
@@ -754,7 +756,7 @@ function renderDetailHead() {
     chat ? (canFollow ? 'メッセージを送る（Ctrl/⌘ + Enter で送信）。同じ会話の続きとして話せます' : '返事が来たら、続きを話せます')
     : canFollow && isSpecPending(c) ? '質問への答えを書く（Ctrl/⌘ + Enter で送信）。分からないところは「おまかせ」と書いてもかまいません'
     : canFollow && c.awaitingReply ? `${agentShort(agentOf(c))} への回答を書く（Ctrl/⌘ + Enter で送信）`
-    : s === 'done' ? '完了したタスクについて話す（Ctrl/⌘ + Enter で送信）。ファイルは変えずに答えます。修正が必要なときは「🛠 修正タスクを作る」から別のタスクにしてください'
+    : s === 'done' ? '完了したタスクについて話す（Ctrl/⌘ + Enter で送信）。ファイルは変えずに答えます。修正が必要なときは「修正タスクを作る」から別のタスクにしてください'
     : c.afterDone ? '返事が来たら、続きを話せます'
     : canFollow ? '追加の指示を送る（Ctrl/⌘ + Enter で送信）。同じセッションの続きとして動きます'
     : s === 'todo' ? '開始すると、終わったあとに追加の指示を送れます'
@@ -846,7 +848,7 @@ document.querySelectorAll('#tabs .tab').forEach((t) =>
 const MD_KINDS = new Set(['text', 'user', 'question', 'result']);
 function logEntryHtml(e) {
   const time = new Date(e.t).toLocaleTimeString();
-  const sk = e.skill ? `<span class="skill-chip small">⚡ /${esc(e.skill)}</span> ` : '';
+  const sk = e.skill ? `<span class="skill-chip small">${icon('zap')}/${esc(e.skill)}</span> ` : '';
   const md = MD_KINDS.has(e.kind) && typeof Markdown !== 'undefined';
   const body = md ? `<div class="md">${sk ? `<div>${sk}</div>` : ''}${Markdown.render(e.text)}</div>` : `${sk}${esc(e.text)}`;
   const label = e.kind === 'text' && e.agent ? agentShort(e.agent) : LOG_LABEL[e.kind] || e.kind;
@@ -861,7 +863,7 @@ function logImagesHtml(images) {
     if (im && IMG_TYPES.has(im.mediaType) && typeof im.data === 'string' && /^[A-Za-z0-9+/]+=*$/.test(im.data)) {
       return `<img class="log-img" src="data:${im.mediaType};base64,${im.data}" alt="画像" title="クリックで大きく表示" />`;
     }
-    return `<span class="log-img-omitted">🖼 画像（${esc((im && im.omitted) || '表示できません')}）</span>`;
+    return `<span class="log-img-omitted">${icon('image')}画像（${esc((im && im.omitted) || '表示できません')}）</span>`;
   });
   return `<div class="log-imgs">${items.join('')}</div>`;
 }
@@ -903,7 +905,7 @@ function diffTreeHtml(node, depth) {
   let html = '';
   for (const d of node.dirs) {
     const closed = diffUi.collapsedDirs.has(d.path);
-    html += `<li class="dv-dir ${closed ? 'closed' : ''}"><div class="dv-row" data-dir="${esc(d.path)}" ${pad(depth)} title="${esc(d.path)}"><span class="dv-caret">▾</span><span class="dv-ico">📁</span><span class="dv-name">${esc(d.name)}</span></div>
+    html += `<li class="dv-dir ${closed ? 'closed' : ''}"><div class="dv-row" data-dir="${esc(d.path)}" ${pad(depth)} title="${esc(d.path)}"><span class="dv-caret">▾</span><span class="dv-ico">${icon('folder')}</span><span class="dv-name">${esc(d.name)}</span></div>
       <ul>${diffTreeHtml(d, depth + 1)}</ul></li>`;
   }
   for (const f of node.files) {
@@ -957,7 +959,7 @@ function diffHtml(text, files) {
   const add = files.reduce((n, f) => n + f.add, 0);
   const del = files.reduce((n, f) => n + f.del, 0);
   return `<div class="dv ${diffUi.tree ? '' : 'no-tree'}">
-    <div class="diff-stat"><button class="btn small ghost" id="toggleDiffTree" title="ファイルツリーの表示を切り替えます">☰</button>
+    <div class="diff-stat"><button class="btn small ghost" id="toggleDiffTree" title="ファイルツリーの表示を切り替えます">${icon('sidebar')}</button>
       <span><b>${files.length}</b> ファイル <span class="add">+${add}</span> <span class="del">-${del}</span></span>
       <span class="spacer"></span>
       <button class="btn small ghost" id="diffExpandAll">すべて開く</button><button class="btn small ghost" id="diffCollapseAll">すべて閉じる</button>
@@ -1345,8 +1347,8 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
       <optgroup label="1つのエージェントで動かす">${single}</optgroup>
       <optgroup label="オーケストレーション">
         ${orchestrationOf(s) === 'relay'
-          ? opt('relay', `🔁 Pipeline: ${stepsLabel}${relayOff ? '（⚙ 設定で工程のエージェントを使う設定にしてください）' : ''}`, relayOff)
-          : opt('compete', comp.length >= 2 ? `🏁 競争: ${comp.map(agentShort).join('・')} で同じタスクを解いて比べる` : '🏁 競争（⚙ 設定で使うエージェントを2つ以上選んでください）', comp.length < 2)}
+          ? opt('relay', `Pipeline: ${stepsLabel}${relayOff ? '（設定で工程のエージェントを使う設定にしてください）' : ''}`, relayOff)
+          : opt('compete', comp.length >= 2 ? `競争: ${comp.map(agentShort).join('・')} で同じタスクを解いて比べる` : '競争（設定で使うエージェントを2つ以上選んでください）', comp.length < 2)}
       </optgroup>
     </select>
     <small id="${idp}AgentHint" class="muted"></small></label>`;
@@ -1357,7 +1359,7 @@ function bindAgentField(idp, onChange) {
   const hint = () => {
     const v = sel.value;
     $(`${idp}AgentHint`).textContent =
-      v === 'relay' ? '同じ worktree で、設定の工程の順にエージェントが作業を引き継ぎます（前の工程の報告を次に渡します）。工程は ⚙ 設定で変えられます。'
+      v === 'relay' ? '同じ worktree で、設定の工程の順にエージェントが作業を引き継ぎます（前の工程の報告を次に渡します）。工程は「設定」で変えられます。'
       : v === 'compete' ? 'エージェントごとにカードと worktree を作って並列に解きます。終わったら差分を見比べ、よい案を採用してマージします。'
       : agentLimitHint(v);
     onChange?.(v);
@@ -1419,7 +1421,7 @@ function newTask(opts = {}) {
   );
 }
 
-// 「💬 会話」ボタン: 会話の一覧を出す（会話がまだなければ、すぐに新しい会話を始める）
+// 「会話」ボタン: 会話の一覧を出す（会話がまだなければ、すぐに新しい会話を始める）
 function openChats() {
   if (!state.board.settings.repoPath) return chooseRepo();
   if (!state.board.cards.some(isChat)) return newChat();
@@ -1432,7 +1434,7 @@ function drawChatList() {
   const box = $('chatList');
   if (!box) return;
   const chats = state.board.cards.filter(isChat).sort(byAttention);
-  box.innerHTML = `<h2>💬 会話</h2>
+  box.innerHTML = `<h2>${icon('chat')}会話</h2>
     <p class="muted small">タスクを作らずに、このリポジトリについてエージェントと話した会話です。選ぶと開きます。</p>
     <div class="chat-list">${chats.map(cardHtml).join('') || '<div class="col-empty">会話はまだありません</div>'}</div>
     <div class="modal-actions"><button class="btn ghost" id="chatListClose">閉じる</button><button class="btn primary" id="chatListNew">＋ 新しい会話</button></div>`;
@@ -1450,13 +1452,13 @@ $('modalBox').addEventListener('click', (e) => {
 function newChat() {
   if (!state.board.settings.repoPath) return chooseRepo();
   openModal(
-    `<h2>💬 会話を始める</h2>
+    `<h2>${icon('chat')}会話を始める</h2>
      <p class="muted small">タスクを作らずに、このリポジトリについてエージェントと話せます（質問・調べもの・相談など）。worktree やブランチは作らず、コミットやマージもしません。</p>
      ${agentFieldHtml('c', undefined, { orchestration: false })}
      <div class="field"><span>メッセージ</span><div id="cSkill" class="skill-slot"></div><textarea id="cMsg" rows="6" placeholder="例: このリポジトリの全体の構成を教えて"></textarea></div>
      <label class="field"><span>タイトル（省略するとメッセージの1行目）</span><input id="cTitle" /></label>
      ${sessionFieldHtml('c')}
-     <p class="muted small">会話はリポジトリのフォルダ（手元の作業中のファイル）でそのまま動くので、ファイルの変更やコマンドは毎回カードで確かめます。作業してほしくなったら、詳細画面の「📝 タスクにする」で会話の続きからタスクを作れます。</p>
+     <p class="muted small">会話はリポジトリのフォルダ（手元の作業中のファイル）でそのまま動くので、ファイルの変更やコマンドは毎回カードで確かめます。作業してほしくなったら、詳細画面の「タスクにする」で会話の続きからタスクを作れます。</p>
      <div class="modal-actions"><button class="btn ghost" id="cCancel">キャンセル</button><button class="btn primary" id="cOk">話しかける（Ctrl/⌘ + Enter）</button></div>`,
     () => {
       $('cMsg').focus();
@@ -1496,12 +1498,12 @@ function renderSkillSlot(slotId, value, onChange, opts = {}) {
   const el = $(slotId);
   if (!el) return;
   if (opts.disabled) {
-    el.innerHTML = value ? `<span class="skill-chip off">⚡ /${esc(value)}</span>` : '';
+    el.innerHTML = value ? `<span class="skill-chip off">${icon('zap')}/${esc(value)}</span>` : '';
     return;
   }
   el.innerHTML = value
-    ? `<span class="skill-chip" title="このスキルを使って実行します">⚡ /${esc(value)}<button type="button" class="chip-x" title="スキルを外す">×</button></span><button type="button" class="btn small ghost skill-pick">変更</button>`
-    : `<button type="button" class="btn small ghost skill-pick">⚡ スキルを選ぶ</button>`;
+    ? `<span class="skill-chip" title="このスキルを使って実行します">${icon('zap')}/${esc(value)}<button type="button" class="chip-x" title="スキルを外す">×</button></span><button type="button" class="btn small ghost skill-pick">変更</button>`
+    : `<button type="button" class="btn small ghost skill-pick">${icon('zap')}スキルを選ぶ</button>`;
   const x = el.querySelector('.chip-x');
   if (x) x.onclick = () => onChange(null);
   el.querySelector('.skill-pick').onclick = () => openSkillPicker(value, onChange);
@@ -1667,7 +1669,7 @@ function openIssueModal(prefill = '') {
         (g) => {
           const el = $('nRepoInfo');
           if (!el) return;
-          if (!g || !g.slug) el.textContent = '⚠ このリポジトリの origin が GitHub ではないため、Issue を読み込めません。';
+          if (!g || !g.slug) el.textContent = 'このリポジトリの origin が GitHub ではないため、Issue を読み込めません。';
           else el.textContent = `${g.slug.owner}/${g.slug.repo} の Issue を読み込みます。`;
         },
         () => {},
@@ -1861,7 +1863,7 @@ async function openSettings() {
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
        <small>「＋ 新しいタスク」と「Issue から作成」を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
-     <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上の 🔔）</label>
+     <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上のベル）</label>
      <h3 class="s-section">使うエージェント</h3>
      <small class="muted s-note">チェックを付けたエージェントだけ、コマンドとモデルを設定でき、タスク・会話・Pipeline・競争で選べます（1つ以上）。</small>
      ${agentConfigHtml('claude', s, `
@@ -1901,16 +1903,16 @@ async function openSettings() {
      <h3 class="s-section">オーケストレーション</h3>
      <div class="field"><span>使うオーケストレーション（Pipelineと競争は、どちらか1つだけ使えます。使わないこともできます）</span>
        <div class="check-row">
-         <label class="check"><input type="radio" name="sOrch" value="relay" ${orchestrationOf(s) === 'relay' ? 'checked' : ''} /> 🔁 Pipeline</label>
-         <label class="check"><input type="radio" name="sOrch" value="compete" ${orchestrationOf(s) === 'compete' ? 'checked' : ''} /> 🏁 競争</label>
+         <label class="check"><input type="radio" name="sOrch" value="relay" ${orchestrationOf(s) === 'relay' ? 'checked' : ''} /> ${icon('pipeline')}Pipeline</label>
+         <label class="check"><input type="radio" name="sOrch" value="compete" ${orchestrationOf(s) === 'compete' ? 'checked' : ''} /> ${icon('flag')}競争</label>
          <label class="check"><input type="radio" name="sOrch" value="none" ${orchestrationOf(s) === 'none' ? 'checked' : ''} /> なし</label>
        </div>
        <small>選んだ方だけ、タスクを作るときに「エージェント」の欄で選べます。「なし」なら、いつも1つのエージェントで動かします（Pipeline・競争の設定は消えずに残ります）。</small></div>
-     <div class="field" id="sRelayField"><span>🔁 Pipelineの工程（上から順に、同じ worktree で引き継ぎます）</span>
+     <div class="field" id="sRelayField"><span>${icon('pipeline')}Pipelineの工程（上から順に、同じ worktree で引き継ぎます）</span>
        <div id="sRelay" class="relay-edit"></div>
        <button class="btn small" id="sRelayAdd" type="button">＋ 工程を足す</button>
        <small>工程ごとにエージェントと担当の説明を決めます。前の工程の変更はコミットしてから、最後の報告と一緒に次の工程へ渡します。</small></div>
-     <div class="field" id="sCompeteField"><span>🏁 競争させるエージェント（2つ以上）</span>
+     <div class="field" id="sCompeteField"><span>${icon('flag')}競争させるエージェント（2つ以上）</span>
        <div class="check-row" id="sCompeteBox"></div>
        <small>使うエージェントにチェックを付けたものから選べます。</small></div>
 
@@ -2080,8 +2082,8 @@ async function chooseRepo() {
     `<h2>リポジトリを選ぶ</h2>
      <p class="muted small">選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。</p>
      <div class="repo-choices">
-       <button class="btn repo-choice" data-pick="">🪟 <b>このパソコンのフォルダを選ぶ</b><small>C:\\Users\\… など</small></button>
-       ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">🐧 <b>${esc(d)} のフォルダを選ぶ</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}
+       <button class="btn repo-choice" data-pick="">${icon('monitor')}<b>このパソコンのフォルダを選ぶ</b><small>C:\\Users\\… など</small></button>
+       ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">${icon('terminal')}<b>${esc(d)} のフォルダを選ぶ</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}
      </div>
      <div class="modal-actions"><button class="btn ghost" id="rpCancel">キャンセル</button></div>`,
     () => {
@@ -2166,7 +2168,7 @@ function renderGh(st) {
   }
   if (st.hasProjectScope === false && state.board.settings.issueStatusSync !== false) {
     el.className = 'gh-panel gh-warn';
-    el.innerHTML = `<span>✓ gh で GitHub にログインしています${st.user ? `（<b>${esc(st.user)}</b>）` : ''}</span>
+    el.innerHTML = `<span>${icon('check')}gh で GitHub にログインしています${st.user ? `（<b>${esc(st.user)}</b>）` : ''}</span>
       <p>Issue のステータス（GitHub Projects の In progress / In review / Done）を自動で変えるには、project の権限が必要です。</p>
       <p><button class="btn primary small" id="ghScope">Projects の権限を追加</button> <span class="muted small">ブラウザが開くので、表示されたコードを入力します</span></p>
       <div><button class="btn small ghost" id="ghRecheck">もう一度確認</button></div>${log}`;
@@ -2175,7 +2177,7 @@ function renderGh(st) {
     return;
   }
   el.className = 'gh-panel ok';
-  el.innerHTML = `<span>✓ gh で GitHub にログインしています${st.user ? `（<b>${esc(st.user)}</b>）` : ''}</span>`;
+  el.innerHTML = `<span>${icon('check')}gh で GitHub にログインしています${st.user ? `（<b>${esc(st.user)}</b>）` : ''}</span>`;
 }
 
 async function ghAction(kind) {
@@ -2207,7 +2209,6 @@ api.onGh((ev) => {
 
 // ---------------- 通知（右上のベル） ----------------
 
-const NOTIF_ICON = { permission: '🔐', question: '❓', awaiting: '💬', review: '👀', failed: '⚠️', done: '✅', skill: '💡', conflict: '⚔️' };
 
 function timeAgo(t) {
   const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
@@ -2224,7 +2225,7 @@ function notifItemHtml(n) {
       ? `<button class="btn small primary" data-nact="${esc(n.id)}">${esc(n.actionLabel || '実行')}</button>`
       : n.action && n.actedAt ? '<span class="muted small">対応済み</span>' : '';
   return `<div class="notif-item ${n.read ? '' : 'unread'} k-${esc(n.kind)}" data-nid="${esc(n.id)}" data-card="${alive ? esc(n.cardId) : ''}">
-    <span class="notif-icon">${NOTIF_ICON[n.kind] || '🔔'}</span>
+    <span class="notif-icon">${icon(NOTIF_ICON[n.kind] || 'bell')}</span>
     <div class="notif-main">
       <div class="notif-title">${esc(n.title)}</div>
       ${n.body ? `<div class="notif-body">${esc(plainText(n.body))}</div>` : ''}
@@ -2369,10 +2370,10 @@ async function checkEnv() {
     for (const a of on) if (!has(a)) msgs.push(`${env.wsl}（WSL）の中に ${a} が見つかりません。${env.wsl} のターミナルで ${agentLabel(a)} をインストールしてログインしてください（このリポジトリのタスクは ${env.wsl} の中で動きます）。`);
   } else {
     if (!env.git) msgs.push(`git が見つかりません。${env.platform === 'win32' ? 'Git for Windows（https://git-scm.com/）' : env.platform === 'darwin' ? 'ターミナルで xcode-select --install を実行するか Homebrew で git' : 'git'} をインストールしてから、アプリを再起動してください。`);
-    for (const a of on) if (!has(a)) msgs.push(`${a} コマンドが見つかりません。${agentLabel(a)} をインストールしてログインするか、⚙ 設定で ${a} のフルパスを指定してください（ターミナルで which ${a}、Windows なら where ${a} で調べられます）。使わないなら、⚙ 設定の「使うエージェント」でチェックを外してください。`);
+    for (const a of on) if (!has(a)) msgs.push(`${a} コマンドが見つかりません。${agentLabel(a)} をインストールしてログインするか、「設定」で ${a} のフルパスを指定してください（ターミナルで which ${a}、Windows なら where ${a} で調べられます）。使わないなら、「設定」の「使うエージェント」でチェックを外してください。`);
   }
   const el = $('envBanner');
-  el.innerHTML = msgs.map((m) => `<div>⚠ ${esc(m)}</div>`).join('');
+  el.innerHTML = msgs.map((m) => `<div>${icon('alert')}${esc(m)}</div>`).join('');
   el.classList.toggle('hidden', msgs.length === 0);
 }
 

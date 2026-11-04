@@ -16,7 +16,7 @@ const { agentLabel, agentShort } = providers;
 const MAX_LOGS = 2000;
 const MCP_SERVER_NAME = 'agent_kanban';
 const PERMISSION_TOOL = `mcp__${MCP_SERVER_NAME}__approve`;
-const INTERRUPTED_MESSAGE = 'アプリの終了で中断されました。「▶ 再開」で中断したところから続けられます（追加指示を送っても再開できます）。';
+const INTERRUPTED_MESSAGE = 'アプリの終了で中断されました。「再開」で中断したところから続けられます（追加指示を送っても再開できます）。';
 // 作業のあとに「スキルにしておくとよいもの」を提案してもらうときの指示
 const SKILL_SUGGEST_PROMPT = [
   'ここまでの作業を振り返って、次から同じような作業をもっと速く・確実にできるように、スキル（SKILL.md）として残しておくとよさそうなものを提案してください。',
@@ -684,14 +684,14 @@ class AgentManager extends EventEmitter {
     if ((mode === 'relay' || mode === 'compete') && providers.cleanOrchestration(s.orchestration) !== mode) {
       const name = (m) => (m === 'relay' ? 'Pipeline' : '競争');
       const why = providers.cleanOrchestration(s.orchestration) === 'none' ? 'オーケストレーションを使わない設定' : 'Pipelineと競争はどちらか1つだけ使えます';
-      throw new Error(`${name(mode)}は使わない設定になっています（${why}）。⚙ 設定の「オーケストレーション」で${name(mode)}を選んでください`);
+      throw new Error(`${name(mode)}は使わない設定になっています（${why}）。「設定」の「オーケストレーション」で${name(mode)}を選んでください`);
     }
     if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from });
     if (mode === 'relay') {
       const steps = providers.cleanRelaySteps(s.relaySteps);
       if (!steps.length) throw new Error('Pipelineの工程がありません。設定の「Pipelineの工程」を決めてください');
       const off = steps.find((st) => !providers.isEnabled(s, st.agent));
-      if (off) throw new Error(`Pipelineの工程「${off.label}」の ${agentLabel(off.agent)} は使わない設定になっています。⚙ 設定で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
+      if (off) throw new Error(`Pipelineの工程「${off.label}」の ${agentLabel(off.agent)} は使わない設定になっています。「設定」で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
       const c = this.createCard({ title, prompt, issue, session, skill, agent: steps[0].agent, relay: { steps, index: 0, history: [] }, fromChat: from });
       return [c];
     }
@@ -713,7 +713,7 @@ class AgentManager extends EventEmitter {
   // 使うエージェントか（設定でチェックを付けていなければエラー）
   assertEnabled(agent) {
     if (!providers.isAgent(agent)) throw new Error(`知らないエージェントです: ${agent}`);
-    if (!providers.isEnabled(this.store.settings, agent)) throw new Error(`${agentLabel(agent)} は使わない設定になっています。⚙ 設定の「使うエージェント」でチェックを付けてください`);
+    if (!providers.isEnabled(this.store.settings, agent)) throw new Error(`${agentLabel(agent)} は使わない設定になっています。「設定」の「使うエージェント」でチェックを付けてください`);
   }
 
   // アプリが頼む作業（比較・スキルの提案など）を任せるエージェント。元のカードのエージェントが使えるならそれ、なければ最初から選んでおくエージェント
@@ -791,7 +791,7 @@ class AgentManager extends EventEmitter {
     c.agent = st.agent;
     c.sessionId = null;
     c.forkNext = false;
-    this.log(c, 'system', `🔁 Pipeline: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」を ${agentLabel(st.agent)} に引き継ぎます`);
+    this.log(c, 'system', `Pipeline: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」を ${agentLabel(st.agent)} に引き継ぎます`);
     this.enqueue(c, buildRelayStepPrompt(c, r.index));
   }
 
@@ -824,7 +824,7 @@ class AgentManager extends EventEmitter {
     const others = this.competitors(id).filter((x) => x.id !== id);
     for (const x of others) await this.discard(x.id);
     c.compete = { ...c.compete, adopted: true, total: 1 };
-    this.log(c, 'system', `🏁 この案（${agentLabel(agentOf(c))}）を採用しました。ほかの ${others.length} 件の候補は破棄しました`);
+    this.log(c, 'system', `この案（${agentLabel(agentOf(c))}）を採用しました。ほかの ${others.length} 件の候補は破棄しました`);
     this.changed(c);
     return others.length;
   }
@@ -834,7 +834,7 @@ class AgentManager extends EventEmitter {
     const list = this.competitors(id);
     if (list.length < 2) throw new Error('比べる候補がありません');
     const title = list[0].compete.title || list[0].title;
-    const chat = this.createChat({ message: buildComparePrompt(title, list), title: `🏁 比較: ${title}`, agent: providers.defaultAgentOf(this.store.settings) });
+    const chat = this.createChat({ message: buildComparePrompt(title, list), title: `比較: ${title}`, agent: providers.defaultAgentOf(this.store.settings) });
     for (const x of list) x.compete.compareChat = chat.id;
     this.changed(chat);
     return chat;

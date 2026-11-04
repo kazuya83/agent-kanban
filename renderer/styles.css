@@ -92,7 +92,14 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .brand { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
 .brand-ver { font-size: 10.5px; font-weight: 400; color: var(--muted); font-family: var(--mono); }
-.logo { color: var(--accent); }
+.logo { color: var(--text); }
+.ic.logo { width: 20px; height: 20px; margin: 0; stroke-width: 1.8; }
+/* モノクロの線画アイコン（icons.js）。色は文字色に合わせる */
+.ic { display: inline-block; width: 1.05em; height: 1.05em; vertical-align: -0.17em; stroke-width: 2; flex-shrink: 0; margin-right: 0.3em; }
+.notif-btn .ic, .icon .ic, #toggleDiffTree .ic { margin-right: 0; }
+.notif-btn .ic { width: 16px; height: 16px; vertical-align: -3px; }
+.repo-choice .ic { width: 18px; height: 18px; margin-bottom: 2px; }
+.dv-ico .ic { margin-right: 0; }
 .repo { border: 1px dashed var(--line); background: transparent; padding: 4px 10px; border-radius: 8px; cursor: pointer; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repo:hover { border-color: var(--accent); }
 .spacer { flex: 1; }
@@ -496,7 +503,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 .notif-item:hover { background: var(--panel-2); }
 .notif-item.unread { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .notif-item.k-skill { border-left: 3px solid var(--warn); }
-.notif-icon { font-size: 16px; line-height: 20px; }
+.notif-icon { font-size: 16px; line-height: 20px; color: var(--text); }
+.notif-icon .ic { width: 16px; height: 16px; margin: 2px 0 0; }
 .notif-main { flex: 1; min-width: 0; }
 .notif-title { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
 .notif-body { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
