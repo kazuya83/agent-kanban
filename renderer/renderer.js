@@ -810,7 +810,9 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'fixTask') newTask({ fromChat: c });
   if (act === 'adopt') {
     const others = competitors(c).filter((x) => x.id !== c.id && x.status !== 'done' && !x.afterDone);
-    const msg = `${agentLabel(agentOf(c))} の案を採用しますか？\nほかの候補（${others.map((x) => agentShort(agentOf(x))).join('・')}）は worktree とブランチごと破棄され、元に戻せません。`;
+    const msg = others.length
+      ? `${agentLabel(agentOf(c))} の案を採用しますか？\nほかの候補（${others.map((x) => agentShort(agentOf(x))).join('・')}）は worktree とブランチごと破棄され、元に戻せません。`
+      : `${agentLabel(agentOf(c))} の案を採用しますか？\nほかの候補は完了しているので、破棄せずに残します。`;
     if (confirm(msg)) await runBusy('ほかの候補を破棄しています…', () => api.adoptCompetitor(c.id), 'この案を採用しました。マージ（または PR の作成）で取り込めます');
     return;
   }

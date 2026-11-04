@@ -278,6 +278,20 @@ test('競争: 同じタスクを複数のエージェントで並列に解き、
   assert.strictEqual(cx.status, 'done');
 });
 
+test('競争: 採用しても、完了した候補は削除せずに残す', async () => {
+  const { agents, store } = setup();
+  store.settings.orchestration = 'compete';
+  store.settings.competeAgents = ['claude', 'codex'];
+  const [cl, cx] = agents.createTask({ title: 'race2', prompt: '競争のタスク', agent: 'compete' });
+  for (const c of [cl, cx]) agents.start(c.id);
+  await waitFor(() => cl.status === 'review' && cx.status === 'review');
+  cl.status = 'done'; // もう取り込んだ候補
+  assert.strictEqual(await agents.adoptCompetitor(cx.id), 0);
+  assert.ok(store.card(cl.id), '完了した候補はボードに残る');
+  assert.strictEqual(cx.compete.adopted, true);
+  await assert.rejects(agents.discard(cl.id), /完了したタスクは削除できません/);
+});
+
 test('競争: エージェントが2つ未満ならエラー。Issue からも競争で作れる', async () => {
   const { agents, store } = setup();
   store.settings.orchestration = 'compete';
