@@ -50,6 +50,18 @@ GitHub Actions でも自動でビルドします（`.github/workflows/build.yml`
   - リリースしたあと、Mac・Windows・Linux でインストール用のコマンドを実際に試します
 - **手動で実行したとき**（Actions の「Run workflow」）: すぐに3つの OS でビルドして、実行結果ページの「Artifacts」にファイルを置きます（リリースはしません）
 
+### Mac のビルドが「Queued」のまま進まないとき
+
+GitHub の Mac の実行環境が混んでいると、ジョブが割り当てを待ったまま進みません（ビルドの不具合ではありません）。待っているあいだに次の push をすると、その実行は取り消されて、新しい実行がまた最初から待つことになります。
+
+Mac の実行環境の種類は、**リポジトリの変数 `MACOS_RUNNER`** で変えられます（コードを変える必要はありません）。何も入れなければ `macos-15` を使います。
+
+1. GitHub のリポジトリの「Settings → Secrets and variables → Actions → **Variables**」を開きます
+2. 「New repository variable」で、名前を `MACOS_RUNNER`、値を使いたい実行環境（例: `macos-14`、`macos-15`、`macos-latest`、Intel の `macos-15-intel`）にして保存します
+3. 次の push から、その実行環境でビルドとインストールの確認をします
+
+Intel の Mac の実行環境でも、Apple Silicon 用（arm64）と Intel 用（x64）の両方の dmg を作れます。
+
 新しいバージョンは、main に push すると自動で出ます。インストール用のコマンドは、いつも最新の Release を入れます。
 
 ## しくみ
