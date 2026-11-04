@@ -338,7 +338,6 @@ function renderBoard() {
   const { settings, cards } = state.board;
   renderInterruptBanner();
   $('repoBtn').textContent = settings.repoPath ? `📁 ${settings.repoPath}` : '📁 リポジトリを選ぶ';
-  $('baseInfo').textContent = settings.repoPath ? `ベース: ${settings.baseBranch || 'チェックアウト中のブランチ'}` : '';
   // 会話は同時実行数に数えない
   const running = cards.filter((c) => c.status === 'running' && !isChat(c)).length;
   const queued = cards.filter((c) => c.status === 'queued' && !isChat(c)).length;
