@@ -161,16 +161,64 @@ test('Codex のタスク: worktree で動いてコミットし、追加指示は
   assert.ok(c.logs.some((l) => l.kind === 'text' && l.agent === 'codex'));
   assert.ok(c.logs.some((l) => l.kind === 'tool' && /^Bash/.test(l.text)));
   assert.match(await agents.diff(c.id), /コーデックスで作って/);
-  // 実行中のメッセージ（btw）は送れない
+  // 終わったあとは btw ではなく追加指示
+  assert.throws(() => agents.btw(c.id, 'x'), /追加指示/);
   const sid = c.sessionId;
   agents.send(c.id, 'もう1つ');
-  assert.throws(() => agents.btw(c.id, 'x'), /btw/);
   await waitFor(() => c.status === 'review' && calls().filter((x) => x.kind === 'codex').length === 2);
   const second = calls().filter((x) => x.kind === 'codex')[1].args;
   assert.deepStrictEqual(second.slice(0, 2), ['exec', 'resume']);
   assert.strictEqual(second[second.length - 2], sid);
   // Codex のカードで、Claude Code の会話は選べない
   assert.throws(() => agents.setSession(c.id, { mode: 'resume', id: 'claude-sess' }), /続けられません/);
+});
+
+test('Codex の実行中 btw: 今の作業は続け、終わったあとに追加指示として送る', async () => {
+  const { agents, calls } = setup();
+  process.env.FAKE_SLEEP = '600';
+  try {
+    const [c] = agents.createTask({ title: 'cx-btw', prompt: 'コーデックスで作って', agent: 'codex' });
+    agents.start(c.id);
+    await waitFor(() => c.status === 'running' && !!c.sessionId);
+    const sid = c.sessionId;
+    agents.btw(c.id, 'テストも書いて');
+    assert.strictEqual(c.btw[0].state, 'follow');
+    agents.btw(c.id, 'コメントも');
+    assert.strictEqual(c.btw[1].state, 'follow');
+    // 1回目が終わるまで追加指示は走らない
+    assert.strictEqual(calls().filter((x) => x.kind === 'codex').length, 1);
+    await waitFor(() => c.status === 'review' && c.btw[0].state === 'delivered' && calls().filter((x) => x.kind === 'codex').length === 2);
+    assert.strictEqual(c.btw[0].state, 'delivered');
+    assert.strictEqual(c.btw[1].state, 'delivered');
+    const second = calls().filter((x) => x.kind === 'codex')[1].args;
+    assert.deepStrictEqual(second.slice(0, 2), ['exec', 'resume']);
+    assert.strictEqual(second[second.length - 2], sid);
+    assert.match(await agents.diff(c.id), /テストも書いて/);
+    assert.match(await agents.diff(c.id), /コメントも/);
+    assert.ok(c.logs.some((l) => l.kind === 'system' && /追加指示として送ります/.test(l.text)));
+  } finally {
+    delete process.env.FAKE_SLEEP;
+  }
+});
+
+test('Codex の実行中 btw: 停止したときは予約した btw を送らない', async () => {
+  const { agents, calls } = setup();
+  process.env.FAKE_SLEEP = '3000';
+  try {
+    const [c] = agents.createTask({ title: 'cx-btw-stop', prompt: 'コーデックスで作って', agent: 'codex' });
+    agents.start(c.id);
+    await waitFor(() => c.status === 'running' && !!c.sessionId);
+    agents.btw(c.id, 'テストも書いて');
+    assert.strictEqual(c.btw[0].state, 'follow');
+    agents.stop(c.id);
+    await waitFor(() => c.status === 'review' && c.btw[0].state === 'lost');
+    await new Promise((r) => setTimeout(r, 300));
+    assert.strictEqual(c.status, 'review');
+    assert.strictEqual(calls().filter((x) => x.kind === 'codex').length, 1);
+    assert.ok(c.logs.some((l) => l.kind === 'system' && /送りませんでした/.test(l.text)));
+  } finally {
+    delete process.env.FAKE_SLEEP;
+  }
 });
 
 test('Gemini のタスク: 失敗はエラー列に、見つからないとわかりやすいエラー', async () => {
