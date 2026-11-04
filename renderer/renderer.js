@@ -1332,7 +1332,7 @@ setInterval(() => {
   if (c && (c.status === 'running' || c.status === 'queued') && c.worktreePath) renderWorktree(c, { quiet: true });
 }, 4000);
 
-const BTW_STATE = { sent: '送信済み', delivered: '反映済み', queued: '開始時に渡します', lost: '届きませんでした' };
+const BTW_STATE = { sent: '送信済み', delivered: '反映済み', queued: '開始時に渡します', follow: '終了後に追加指示', lost: '届きませんでした' };
 function btwListHtml(c) {
   const list = c.btw || [];
   if (!list.length) return '<div class="muted small">まだ送っていません</div>';
@@ -1346,8 +1346,10 @@ function updateBtwTab(c) {
   $('btwTab').textContent = n ? `btw (${n})` : 'btw';
   const live = c && (c.status === 'running' || c.status === 'queued');
   $('btwTab').classList.toggle('live', !!live);
-  // Codex / Gemini / Cursor は実行中のメッセージに対応していない（待機中なら開始の指示に付け足せる）
-  $('btwTab').title = c && agentOf(c) !== 'claude' ? `${agentLabel(agentOf(c))} には、実行中のメッセージは送れません（待機中なら、開始するときの指示に付け足します）` : '実行中のエージェントに、作業を止めずにメッセージを送ります';
+  // Codex / Gemini / Cursor は実行中の stdin 追加に対応していない（終了後に追加指示／待機中は開始の指示に付け足す）
+  $('btwTab').title = c && agentOf(c) !== 'claude'
+    ? `${agentLabel(agentOf(c))} では、実行中に送ると今の作業のあと追加指示として送ります（待機中なら開始するときの指示に付け足します）`
+    : '実行中のエージェントに、作業を止めずにメッセージを送ります';
 }
 
 async function renderDetailBody() {
@@ -1368,11 +1370,22 @@ async function renderDetailBody() {
     await renderWorktree(c);
   } else if (state.tab === 'btw') {
     const live = c.status === 'running' || c.status === 'queued';
+    const nonClaude = agentOf(c) !== 'claude';
+    const help = nonClaude
+      ? `${agentLabel(agentOf(c))} では、作業の途中にはメッセージを差し込めません。実行中に送ると今の作業は続け、終わったあとに「追加指示」として送ります。待機中なら、開始するときの指示に付け足します。`
+      : 'エージェントの作業を止めずに、メッセージを送れます（例:「テストも書いて」「その API は使わないで」）。Claude Code は今の作業の途中で読み、そのまま反映します。';
+    const hint = !live
+      ? (c.status === 'todo' ? '開始すると送れるようになります' : '作業が終わったあとは、下の「追加指示」を使ってください')
+      : c.status === 'queued'
+        ? '待機中なので、開始するときの指示に付け足します'
+        : nonClaude
+          ? '今の作業は続け、終わったあとに追加指示として送ります'
+          : '送ると、すぐに実行中のエージェントに届きます';
     body.innerHTML = `<div class="pad btw">
-      <p class="muted small">エージェントの作業を止めずに、メッセージを送れます（例:「テストも書いて」「その API は使わないで」）。Claude Code は今の作業の途中で読み、そのまま反映します（Codex / Gemini / Cursor は、待機中なら開始するときの指示に付け足します）。</p>
+      <p class="muted small">${help}</p>
       <div id="btwList" class="btw-list">${btwListHtml(c)}</div>
       <textarea id="btwInput" rows="3" placeholder="${live ? 'btw: …（Ctrl/⌘ + Enter で送信）' : 'エージェントが実行中のときに送れます'}" ${live ? '' : 'disabled'}></textarea>
-      <div class="btw-actions"><span class="muted small">${live ? (c.status === 'queued' ? '待機中なので、開始するときの指示に付け足します' : '送ると、すぐに実行中のエージェントに届きます') : c.status === 'todo' ? '開始すると送れるようになります' : '作業が終わったあとは、下の「追加指示」を使ってください'}</span>
+      <div class="btw-actions"><span class="muted small">${hint}</span>
         <button class="btn primary" id="btwSend" ${live ? '' : 'disabled'}>送信</button></div>
     </div>`;
     const send = async () => {
@@ -1454,7 +1467,7 @@ document.addEventListener('keydown', (e) => {
 
 // エージェントの注意書き（Claude Code 以外は、CLI の作りの都合でできないことがある）
 function agentLimitHint(a) {
-  return a === 'claude' ? '' : `${agentLabel(a)} は CLI の作りの都合で、カードでの承認・選択肢の質問・btw（実行中のメッセージ）・既存の会話の引き継ぎに対応していません。権限は設定の権限モードに合わせて CLI 側で許可します。`;
+  return a === 'claude' ? '' : `${agentLabel(a)} は CLI の作りの都合で、カードでの承認・選択肢の質問・作業途中へのメッセージ差し込み・既存の会話の引き継ぎに対応していません（btw は終了後の追加指示として送られます）。権限は設定の権限モードに合わせて CLI 側で許可します。`;
 }
 
 // Pipelineと競争は排他。設定で選んだ方だけを使える（'relay' / 'compete' / 'none'＝どちらも使わない）

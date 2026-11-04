@@ -181,6 +181,11 @@ function isChat(c) {
   return !!c && c.kind === 'chat';
 }
 
+// Claude 以外で、実行中に送った btw を「終わったあとの追加指示」待ちにしているか
+function hasFollowBtw(c) {
+  return !!(c && c.btw && c.btw.some((m) => m.state === 'follow'));
+}
+
 function truncate(s, n) {
   s = String(s ?? '');
   return s.length > n ? `${s.slice(0, n)}…` : s;
@@ -1527,7 +1532,7 @@ class AgentManager extends EventEmitter {
     child.stdin.on('error', () => {});
     if (agent === 'claude') this.writeMessage(run, prompt, null);
     else {
-      // Codex / Gemini は指示を stdin で1回だけ受け取る（Cursor は引数で受け取ったので空で閉じる）。実行中のメッセージ（btw）は送れない
+      // Codex / Gemini は指示を stdin で1回だけ受け取る（Cursor は引数で受け取ったので空で閉じる）。実行中の btw は終了後の追加指示にする
       run.stdinClosed = true;
       child.stdin.end(providers.promptViaArg(agent) ? '' : prompt);
     }
@@ -1547,7 +1552,7 @@ class AgentManager extends EventEmitter {
       if (run.parser) for (const a of run.parser.flush()) this.applyAction(c, a, run);
       this.procs.delete(c.id);
       this.runs.delete(c.id);
-      // 受け取られないまま終わった btw は「届かなかった」にする
+      // 受け取られないまま終わった btw は「届かなかった」にする（終了後の追加指示待ち follow は残す）
       for (const m of c.btw || []) if (m.state === 'sent') m.state = 'lost';
       this.denyAllPending(c.id, 'エージェントが終了しました');
       if (!this.store.card(c.id)) return; // 破棄された
@@ -1593,7 +1598,8 @@ class AgentManager extends EventEmitter {
         // 会話は返事が来たらいつでも続きを話せるので、「回答待ち」にはしない
         c.awaitingReply = !chat && (c.specState === 'pending' || endsWithQuestion(c.lastText));
         // Pipelineの途中なら、レビューに回さずに次の工程へ引き継ぐ（質問で止まったとき・仕様の確認中は、答えてもらってから）
-        const plan = c.awaitingReply ? null : this.relayNextStep(c);
+        // btw で追加指示待ちがあるときは、今の工程の続きを優先する
+        const plan = c.awaitingReply || hasFollowBtw(c) ? null : this.relayNextStep(c);
         relayNext = !!plan && plan.to !== null;
         if (relayNext) relayTo = plan.to;
         if (relayNext) {
@@ -1624,6 +1630,8 @@ class AgentManager extends EventEmitter {
       c.stopRequested = false;
       c.finishedAt = Date.now();
       this.changed(c);
+      // Claude 以外で予約した btw は、終わったあとに追加指示として送る
+      if (this.flushFollowBtw(c)) return;
       if (relayNext) return this.advanceRelay(c, relayTo);
       this.checkCompetitionDone(c);
       this.pump();
@@ -1662,6 +1670,7 @@ class AgentManager extends EventEmitter {
     c.stopRequested = false;
     c.finishedAt = Date.now();
     this.changed(c);
+    if (this.flushFollowBtw(c)) return;
     this.pump();
   }
 
@@ -1839,8 +1848,42 @@ class AgentManager extends EventEmitter {
   }
 
   /**
-   * 実行中のエージェントにメッセージを送る（btw）。今の作業にそのまま反映される。
-   * 待機中なら、開始するときの指示に付け足す
+   * 実行中に予約した btw（Claude 以外）を、追加指示として送る。
+   * @returns {boolean} 送ったら true（enqueue 済みなので呼び出し側は pump しない）
+   */
+  flushFollowBtw(c) {
+    const pending = (c.btw || []).filter((m) => m.state === 'follow');
+    if (!pending.length) return false;
+    const text = pending.map((m) => m.text).join('\n\n').trim();
+    for (const m of pending) m.state = 'delivered';
+    if (!text) {
+      this.changed(c);
+      return false;
+    }
+    this.log(c, 'system', 'btw で予約したメッセージを追加指示として送ります');
+    // user ログは btw 時に済んでいる。send() と同じ続き方で enqueue する
+    if (c.status === 'done' && !isChat(c)) {
+      const first = !c.afterDoneSession;
+      if (first) this.log(c, 'system', '完了したタスクについて話します（ファイルは変えません。修正が必要なときは「修正タスクを作る」から別のタスクにしてください）');
+      c.sessionId = c.afterDoneSession || null;
+      c.forkNext = false;
+      c.afterDone = true;
+      this.enqueue(c, promptWithSkill(agentOf(c), null, first ? buildAfterDonePrompt(c, text) : text));
+      return true;
+    }
+    if (!['review', 'failed', 'done'].includes(c.status)) {
+      this.changed(c);
+      return false;
+    }
+    const body = inSpecCheck(c) ? `${text}\n\n${SPEC_FOLLOW_NOTE}` : text;
+    this.enqueue(c, promptWithSkill(agentOf(c), null, body));
+    return true;
+  }
+
+  /**
+   * 実行中のエージェントにメッセージを送る（btw）。Claude は今の作業にそのまま反映する。
+   * 待機中なら、開始するときの指示に付け足す。
+   * Claude 以外の実行中は、終わったあとに追加指示として送る予約にする
    */
   btw(id, text) {
     const c = this.must(id);
@@ -1851,11 +1894,11 @@ class AgentManager extends EventEmitter {
     if (c.status === 'queued') {
       c.pendingPrompt = `${c.pendingPrompt || ''}\n\n${wrapped}`;
       entry.state = 'queued';
+    } else if (c.status === 'running' && agentOf(c) !== 'claude') {
+      // Codex / Gemini / Cursor は実行中の stdin 追加に対応していないので、終了後の追加指示にする
+      entry.state = 'follow';
     } else {
       const run = this.runs && this.runs.get(id);
-      if (c.status === 'running' && agentOf(c) !== 'claude') {
-        throw new Error(`${agentLabel(agentOf(c))} は、実行中のメッセージ（btw）に対応していません。終わったあとに下の「追加指示」で送ってください`);
-      }
       if (c.status !== 'running' || !run || run.finished || run.stdinClosed) {
         throw new Error('btw はエージェントの実行中だけ送れます。終わったあとは下の「追加指示」を使ってください');
       }

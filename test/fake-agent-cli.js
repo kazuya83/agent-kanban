@@ -6,6 +6,7 @@ const fs = require('fs');
 
 const [kind, ...args] = process.argv.slice(2);
 const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const opt = (name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
@@ -15,7 +16,7 @@ if (process.env.FAKE_ARGS_LOG) fs.appendFileSync(process.env.FAKE_ARGS_LOG, `${J
 let prompt = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => (prompt += d));
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   if (kind === 'cursor') prompt = args[args.length - 1].replace(/^ (?=-)/, '');
   // ブランチ名を聞かれたら、ファイルは書かずに名前だけ返す
   const branchAsk = prompt.startsWith('git のブランチ名を1つだけ考えてください');
@@ -45,6 +46,8 @@ process.stdin.on('end', () => {
     // codex exec [resume] --json ... [SESSION_ID] -
     const resumed = args[1] === 'resume' ? args[args.length - 2] : null;
     out({ type: 'thread.started', thread_id: resumed || `codex-thread-${process.pid}` });
+    // 実行中の btw（終了後の追加指示予約）を試すとき用。会話 ID が付いたあとに待つ
+    if (process.env.FAKE_SLEEP) await sleep(Number(process.env.FAKE_SLEEP));
     out({ type: 'turn.started' });
     out({ type: 'item.started', item: { id: 'item_0', type: 'command_execution', command: `bash -lc 'echo > ${file}'`, status: 'in_progress' } });
     fs.writeFileSync(file, `${prompt}\n`);
