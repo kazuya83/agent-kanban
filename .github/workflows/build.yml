@@ -4,6 +4,7 @@
 #   バージョンを自動で上げて（0.1.8 → 0.1.9）3つの OS でビルドし、GitHub Release を作り、インストールを確かめる
 #   - 公開は Mac を待たない: Windows と Linux ができたら公開し、Mac の dmg は、できしだい同じ版に追加する
 #     （Mac の実行環境は空き待ちが長いことがあるため。Mac のインストールは手元の Mac で確かめる）
+#   - Mac が 10 分（変数 MACOS_QUEUE_MINUTES）たっても始まらなければ、Mac はスキップする（mac-timeout）
 #   - 途中で次の push が来たら、前の実行は取り消す（続けてマージしても、リリースまで進むのは最後の1回）
 #   - 0.2.0 のように大きく上げたいときは、package.json の version をその番号にして push する
 #   - バージョンの決め方は scripts/next-version.js
@@ -165,6 +166,56 @@ jobs:
             dist/*.dmg
             dist/*.AppImage
           if-no-files-found: error
+
+  # Mac が決まった時間（既定は 10 分。リポジトリの変数 MACOS_QUEUE_MINUTES で変えられる）たっても
+  # 始まらなければ、Mac をスキップする。
+  # GitHub には 1 つのジョブだけを取り消す方法がないので、ほかのジョブ（公開・インストールの確認）が
+  # 終わるのを待ってから、この実行を取り消す（実行の結果は「cancelled」になるが、公開は済んでいる）
+  mac-timeout:
+    needs: test
+    if: needs.test.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LIMIT_MIN: ${{ vars.MACOS_QUEUE_MINUTES || '10' }}
+    steps:
+      - name: Mac が始まるのを待ち、始まらなければスキップする
+        run: |
+          api="repos/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          jobs() { gh api "$api/attempts/${{ github.run_attempt }}/jobs?per_page=100" -q '.jobs[]|[.name,.status,.created_at]|@tsv'; }
+          limit=$(( LIMIT_MIN * 60 ))
+          while true; do
+            mac=$(jobs | awk -F'\t' '$1=="build-mac"')
+            st=$(printf '%s' "$mac" | cut -f2)
+            if [ -n "$st" ] && [ "$st" != "queued" ] && [ "$st" != "waiting" ] && [ "$st" != "pending" ]; then
+              echo "Mac のビルドが始まりました（$st）"; exit 0
+            fi
+            created=$(printf '%s' "$mac" | cut -f3)
+            if [ -n "$created" ] && [ $(( $(date +%s) - $(date -d "$created" +%s) )) -ge "$limit" ]; then break; fi
+            sleep 20
+          done
+          echo "::warning::Mac の実行環境が ${LIMIT_MIN} 分たっても割り当てられないので、Mac をスキップします（この版には Mac の dmg が付きません）"
+          # Mac とこのジョブ以外（公開・インストールの確認）が終わるのを待つ
+          # （後のジョブは前が終わってから一覧に出てくるので、公開が終わり、しばらく変わらないことを確かめる）
+          calm=0
+          while [ "$calm" -lt 3 ]; do
+            j=$(jobs)
+            if printf '%s\n' "$j" | awk -F'\t' '$1!="build-mac" && $1!="mac-timeout" && $1!="release-mac" && $2!="completed"' | grep -q . \
+              || ! printf '%s\n' "$j" | awk -F'\t' '$1=="release" && $2=="completed"' | grep -q .; then
+              calm=0
+            else
+              calm=$(( calm + 1 ))
+            fi
+            sleep 20
+          done
+          # 待っているあいだに Mac が始まっていたら、取り消さない
+          st=$(jobs | awk -F'\t' '$1=="build-mac"{print $2}')
+          if [ "$st" != "queued" ] && [ "$st" != "waiting" ] && [ "$st" != "pending" ]; then
+            echo "Mac のビルドが始まったので、スキップしません（$st）"; exit 0
+          fi
+          gh api -X POST "$api/cancel"
 
   release:
     # Mac（build-mac）は待たない

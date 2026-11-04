@@ -55,6 +55,8 @@ GitHub Actions でも自動でビルドします（`.github/workflows/build.yml`
 
 GitHub の Mac の実行環境が混んでいると、ジョブが割り当てを待ったまま進みません（ビルドの不具合ではありません）。公開は Mac を待たないので、Windows と Linux の版は先に出ます。待っているあいだに次の push をすると、その実行は取り消されて、新しい実行がまた最初から待つことになります。
 
+**Mac が 10 分たっても始まらなければ、Mac はスキップします**（`mac-timeout` ジョブ）。公開とインストールの確認が終わるのを待ってから実行を取り消すので、実行の結果は「cancelled」になりますが、Windows と Linux の版は公開されています（その版には Mac の dmg は付きません）。待つ時間は、**リポジトリの変数 `MACOS_QUEUE_MINUTES`**（分）で変えられます。
+
 Mac の実行環境の種類は、**リポジトリの変数 `MACOS_RUNNER`** で変えられます（コードを変える必要はありません）。何も入れなければ `macos-14` を使います。
 
 1. GitHub のリポジトリの「Settings → Secrets and variables → Actions → **Variables**」を開きます
