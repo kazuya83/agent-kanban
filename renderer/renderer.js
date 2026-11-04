@@ -702,7 +702,8 @@ function renderDetailHead() {
     // 完了したタスクは開き直さない。修正は別のタスクにする（このタスクのやりとりを引き継ぐ）
     s === 'done' && `<button class="btn" data-act="fixTask" title="このタスクのやりとり（完了後の会話も含む）を引き継いで、修正のための新しいタスクを作ります">🛠 修正タスクを作る</button>`,
     c.worktreePath && `<button class="btn ghost" data-act="open">フォルダを開く</button>`,
-    `<button class="btn danger" data-act="discard">${s === 'done' || c.afterDone ? '削除' : '破棄'}</button>`,
+    // 完了したタスク（完了後の会話の途中も含む）は削除できない
+    s !== 'done' && !c.afterDone && `<button class="btn danger" data-act="discard">破棄</button>`,
   ].filter(Boolean);
   $('detailHead').innerHTML = `
     <div class="d-title-row">
@@ -808,8 +809,10 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'toTask') newTask({ fromChat: c });
   if (act === 'fixTask') newTask({ fromChat: c });
   if (act === 'adopt') {
-    const others = competitors(c).filter((x) => x.id !== c.id);
-    const msg = `${agentLabel(agentOf(c))} の案を採用しますか？\nほかの候補（${others.map((x) => agentShort(agentOf(x))).join('・')}）は worktree とブランチごと破棄され、元に戻せません。`;
+    const others = competitors(c).filter((x) => x.id !== c.id && x.status !== 'done' && !x.afterDone);
+    const msg = others.length
+      ? `${agentLabel(agentOf(c))} の案を採用しますか？\nほかの候補（${others.map((x) => agentShort(agentOf(x))).join('・')}）は worktree とブランチごと破棄され、元に戻せません。`
+      : `${agentLabel(agentOf(c))} の案を採用しますか？\nほかの候補は完了しているので、破棄せずに残します。`;
     if (confirm(msg)) await runBusy('ほかの候補を破棄しています…', () => api.adoptCompetitor(c.id), 'この案を採用しました。マージ（または PR の作成）で取り込めます');
     return;
   }
@@ -826,9 +829,9 @@ $('detailHead').addEventListener('click', async (e) => {
     return;
   }
   if (act === 'discard') {
-    const msg = c.status === 'done' ? `「${c.title}」をボードから削除しますか？` : `「${c.title}」を破棄しますか？\nworktree とブランチ ${c.branch || ''} も削除され、元に戻せません。`;
-    if (confirm(msg)) {
-      await runBusy(c.status === 'done' ? '削除しています…' : 'worktree とブランチを削除しています…', () => api.discard(c.id), '破棄しました');
+    if (c.status === 'done' || c.afterDone) return toast('完了したタスクは削除できません');
+    if (confirm(`「${c.title}」を破棄しますか？\nworktree とブランチ ${c.branch || ''} も削除され、元に戻せません。`)) {
+      await runBusy('worktree とブランチを削除しています…', () => api.discard(c.id), '破棄しました');
       closeDetail();
     }
   }

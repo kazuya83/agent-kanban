@@ -896,6 +896,8 @@ test('完了（マージ済み）のタスクと話しても、開き直さな�
   assert.strictEqual(fs.readdirSync(repo).filter((f) => f.startsWith('out-')).length, outsBefore, 'ファイルを変えない');
   assert.strictEqual(g('rev-parse', 'main').toString().trim(), mainBefore, 'コミットしない');
   await assert.rejects(agents.merge(c.id, { target: 'main' }), /レビュー中のタスクだけ/, 'マージはできない（ボタンも出ない）');
+  await assert.rejects(agents.discard(c.id), /完了したタスクは削除できません/, '完了したタスクは削除できない');
+  assert.ok(store.card(c.id), 'ボードに残る');
 
   // 2回目は、完了後の会話の続き
   const talk = c.sessionId;
@@ -914,6 +916,8 @@ test('完了（マージ済み）のタスクと話しても、開き直さな�
   assert.match(fix.chatContext, /もう少し詳しく/);
   assert.strictEqual(c.status, 'done', '元のタスクは完了のまま');
   await agents.discard(fix.id);
+  await assert.rejects(agents.discard(c.id), /完了したタスクは削除できません/);
+  assert.ok(store.card(c.id));
 
   // 完了に入ったら、通知で「スキルにしませんか？」と聞く（1つのタスクで1回だけ）
   const notes = agents.listNotifications(c.repoPath).filter((n) => n.cardId === c.id);
