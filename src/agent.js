@@ -102,6 +102,9 @@ function withChatContext(context, prompt) {
 
 // 仕様が詰まっていないとエージェントが判断したときに、返事の1行目に付けてもらう印（アプリが見て「仕様の確認」にする。画面には出さない）
 const SPEC_MARKER = '[[SPEC_UNCLEAR]]';
+// 仕様の確認の質問を、回答フォーム（選択肢・自由入力）にするための JSON を入れてもらうコードブロックの言語名
+const SPEC_QUESTIONS_LANG = 'spec-questions';
+const SPEC_QUESTIONS_RE = new RegExp('\\n?[ \\t]*```[ \\t]*' + SPEC_QUESTIONS_LANG + '[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*', 'g');
 // 新しいタスク・Issue から作ったタスクの最初の指示に付ける。内容が足りなければ、開発を始めずに質問してもらう
 const SPEC_CHECK_PROMPT = [
   '# 開発を始める前に、タスクの内容が足りているかを確かめてください',
@@ -114,6 +117,9 @@ const SPEC_CHECK_PROMPT = [
   '  2. 「内容が詰まっていないので、開発を開始できません。」と書き、何が足りないかを短く説明する',
   '  3. 決めてほしいことを番号付きの質問にする（1回に5つまで。答えやすいように選択肢やおすすめの案も添える）',
   '  4. 最後は質問（？）で終える',
+  `  5. そのあと、返事のいちばん最後に、同じ質問を画面の回答フォーム（選択肢・自由入力）にするための JSON を \`\`\`${SPEC_QUESTIONS_LANG} のコードブロックで付ける（アプリが読み取ってフォームにします。ユーザーには表示されません）`,
+  `     形: [{"question": "質問文", "header": "短い見出し（12文字まで）", "multiSelect": false, "options": [{"label": "選択肢", "description": "説明"}]}]`,
+  '     選択肢は1問に2〜4つ。おすすめの案があれば先頭にして label の最後に「（おすすめ）」を付ける。自由に書いてもらうだけの質問は options を [] にする（フォームには、どの質問にも自由入力の欄が付きます）',
   '- AskUserQuestion ツールは使わず、文章で質問してください',
   `- ユーザーが答えたら、もう一度判断してください。まだ足りなければ、同じ形（1行目に \`${SPEC_MARKER}\`）で続きの質問をしてください`,
   '- 詰まったら、決まった仕様を「## 決まった仕様」として箇条書きでまとめてから、開発を始めてください（この返事には印を付けないでください）',
@@ -128,6 +134,40 @@ function hasSpecMarker(text) {
 }
 function stripSpecMarker(text) {
   return hasSpecMarker(text) ? String(text).trimStart().slice(SPEC_MARKER.length).replace(/^[ \t]*\n?/, '') : String(text || '');
+}
+// 返事から質問フォーム用の JSON ブロックを取り出す。text はブロックを除いた本文、questions は読めなければ null
+function extractSpecQuestions(text) {
+  const src = String(text || '');
+  let questions = null;
+  const body = src.replace(SPEC_QUESTIONS_RE, (_, json) => {
+    if (!questions) questions = parseSpecQuestions(json);
+    return '';
+  });
+  return { text: body.replace(/\s+$/, ''), questions };
+}
+function parseSpecQuestions(json) {
+  let data;
+  try {
+    data = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (data && !Array.isArray(data) && Array.isArray(data.questions)) data = data.questions;
+  if (!Array.isArray(data)) return null;
+  const qs = data
+    .filter((q) => q && typeof q === 'object' && typeof q.question === 'string' && q.question.trim())
+    .slice(0, 5)
+    .map((q) => ({
+      question: truncate(q.question.trim(), 500),
+      header: truncate(String(q.header || '').trim(), 24),
+      multiSelect: !!q.multiSelect,
+      options: (Array.isArray(q.options) ? q.options : [])
+        .map((o) => (typeof o === 'string' ? { label: o } : o))
+        .filter((o) => o && typeof o.label === 'string' && o.label.trim())
+        .slice(0, 6)
+        .map((o) => ({ label: truncate(o.label.trim(), 120), description: truncate(String(o.description || '').trim(), 300) })),
+    }));
+  return qs.length ? qs : null;
 }
 // 仕様の確認をしているあいだか（checking: 最初の判断の前 / pending: 足りないと言われて答えを待っている）
 function inSpecCheck(c) {
@@ -1135,6 +1175,7 @@ class AgentManager extends EventEmitter {
     c.awaitingReply = false;
     c.lastText = '';
     c.lastSpecUnclear = false;
+    c.specQuestions = null;
     c.pendingPrompt = prompt;
     c.status = 'queued';
     c.queuedAt = Date.now();
@@ -1548,6 +1589,7 @@ class AgentManager extends EventEmitter {
           if (!c.lastSpecUnclear && c.specState === 'pending') this.log(c, 'system', '仕様が詰まったので、開発を進めました');
           c.specState = c.lastSpecUnclear ? 'pending' : 'settled';
         }
+        if (c.specState !== 'pending') c.specQuestions = null;
         // 会話は返事が来たらいつでも続きを話せるので、「回答待ち」にはしない
         c.awaitingReply = !chat && (c.specState === 'pending' || endsWithQuestion(c.lastText));
         // Pipelineの途中なら、レビューに回さずに次の工程へ引き継ぐ（質問で止まったとき・仕様の確認中は、答えてもらってから）
@@ -1647,8 +1689,7 @@ class AgentManager extends EventEmitter {
         for (const b of (ev.message && ev.message.content) || []) {
           if (b.type === 'text' && b.text && b.text.trim()) {
             // 仕様の確認の印は覚えておいて、画面には出さない
-            c.lastSpecUnclear = hasSpecMarker(b.text);
-            const text = c.lastSpecUnclear ? stripSpecMarker(b.text) : b.text;
+            const text = this.takeSpecQuestions(c, b.text);
             if (!text.trim()) continue;
             this.log(c, 'text', text, { agent: 'claude' });
             c.lastText = text.trim();
@@ -1683,7 +1724,9 @@ class AgentManager extends EventEmitter {
           run.resultError = (typeof ev.result === 'string' && ev.result) || `エラー（${ev.subtype}）`;
           this.log(c, 'error', `エラーで終了しました: ${run.resultError}`);
         } else {
-          if (typeof ev.result === 'string' && ev.result.trim()) c.lastMessage = truncate(ev.result.trim(), 200);
+          // 仕様の確認の印・質問フォーム用のブロックは、カードの一言には出さない
+          const said = typeof ev.result === 'string' ? extractSpecQuestions(stripSpecMarker(ev.result)).text.trim() : '';
+          if (said) c.lastMessage = truncate(said, 200);
           this.log(c, 'result', `完了しました（${secs}秒 / $${cost.toFixed(3)}）`);
         }
         this.changed(c);
@@ -1716,8 +1759,7 @@ class AgentManager extends EventEmitter {
         break;
       case 'text': {
         // 仕様の確認の印は覚えておいて、画面には出さない（Claude のときと同じ）
-        c.lastSpecUnclear = hasSpecMarker(a.text);
-        const text = c.lastSpecUnclear ? stripSpecMarker(a.text) : String(a.text);
+        const text = this.takeSpecQuestions(c, a.text);
         if (!text.trim()) break;
         this.log(c, 'text', text, who);
         c.lastText = text.trim();
@@ -1824,6 +1866,20 @@ class AgentManager extends EventEmitter {
     this.log(c, 'user', `btw: ${text}`);
     this.changed(c);
     return entry;
+  }
+
+  // 返事の文章から仕様の確認の印と、質問フォーム用の JSON ブロックを取り出してカードに覚えておく（どちらも画面に出さない）
+  takeSpecQuestions(c, raw) {
+    const marked = hasSpecMarker(raw);
+    const { text, questions } = extractSpecQuestions(marked ? stripSpecMarker(raw) : String(raw || ''));
+    // 印付きの返事のすぐあとに、ブロックだけが別のメッセージで来たときは、同じ質問のフォームとして扱う（仕様が詰まったとは見なさない）
+    if (!marked && !text.trim() && questions && c.lastSpecUnclear) {
+      c.specQuestions = questions;
+      return text;
+    }
+    c.lastSpecUnclear = marked;
+    if (marked) c.specQuestions = questions;
+    return text;
   }
 
   // ---------- 承認（--permission-prompt-tool） ----------
@@ -2499,4 +2555,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
+module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };

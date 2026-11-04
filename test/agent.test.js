@@ -609,6 +609,10 @@ test('仕様の確認: 内容が詰まっていなければ開発を始めずに
     assert.ok(!c.lastText.includes('[[SPEC_UNCLEAR]]'), '印は画面に出さない');
     assert.ok(!c.logs.some((l) => l.kind === 'text' && String(l.text).trimStart().startsWith('[[SPEC_UNCLEAR]]')));
     assert.ok(c.logs.some((l) => l.kind === 'text' && /^内容が詰まっていないので/.test(l.text)));
+    // 質問フォーム用の JSON はカードに覚えて、画面（本文・ログ）には出さない
+    assert.deepStrictEqual(c.specQuestions, [{ question: '対象の画面はどれですか？', header: '画面', multiSelect: false, options: [{ label: '設定画面（おすすめ）', description: 'いちばん使われる画面' }, { label: '一覧画面', description: '' }] }]);
+    assert.ok(!c.lastText.includes('spec-questions') && !c.lastText.includes('"question"'));
+    assert.ok(!c.logs.some((l) => String(l.text).includes('"question":"対象の画面')), 'JSON はログに出さない');
     assert.ok(c.logs.some((l) => l.kind === 'question' && /開発を開始できません/.test(l.text)));
     assert.ok(store.notifications.some((n) => n.kind === 'awaiting' && /仕様の確認/.test(n.title)));
     assert.strictEqual(agents.issueStatusKey(c), null, '仕様の確認中はレビューにしない');
@@ -619,6 +623,15 @@ test('仕様の確認: 内容が詰まっていなければ開発を始めずに
     await waitFor(() => c.status === 'review');
     assert.strictEqual(c.specState, 'pending');
 
+    // 本文とブロックが別々のメッセージで来ても、仕様の確認のまま、フォームにする
+    agents.send(c.id, '[vague] [split] まだ');
+    await waitFor(() => c.status === 'review');
+    assert.strictEqual(c.specState, 'pending');
+    assert.strictEqual(c.awaitingReply, true);
+    assert.deepStrictEqual(c.specQuestions, [{ question: '色はどうしますか？', header: '', multiSelect: false, options: [] }]);
+    assert.match(c.lastText, /色はどうしますか？$/);
+    assert.strictEqual(c.lastMessage, '色はどうしますか？', 'カードの一言に印やブロックを出さない');
+
     // 答えると仕様が詰まって、開発を始める
     agents.send(c.id, '設定画面で [spec-ok]');
     await waitFor(() => c.permissions.length === 1);
@@ -626,6 +639,7 @@ test('仕様の確認: 内容が詰まっていなければ開発を始めずに
     await waitFor(() => c.status === 'review');
     assert.strictEqual(c.specState, 'settled');
     assert.strictEqual(c.awaitingReply, false);
+    assert.strictEqual(c.specQuestions, null, '仕様が詰まったらフォームは消す');
     assert.match(await agents.diff(c.id), /設定画面で/);
     assert.ok(c.logs.some((l) => l.kind === 'system' && /仕様が詰まった/.test(l.text)));
 
@@ -1119,4 +1133,20 @@ test('cleanBranchName / buildBranchNamePrompt', () => {
   assert.match(p, /feature\/<番号>-<英語>/);
   assert.match(p, /Issue 番号: 3/);
   assert.match(p, /タスク ID: ab12/);
+});
+
+test('仕様の確認: 質問フォーム用の JSON ブロックを読み取り、本文から取り除く', () => {
+  const { extractSpecQuestions } = require('../src/agent');
+  const r = extractSpecQuestions('質問です？\n\n```spec-questions\n{"questions":[{"question":"色は？","multiSelect":true,"options":["赤",{"label":"青"},{"label":""}]},{"question":"名前は？","options":[]},{"header":"x"}]}\n```\n');
+  assert.strictEqual(r.text, '質問です？');
+  assert.deepStrictEqual(r.questions, [
+    { question: '色は？', header: '', multiSelect: true, options: [{ label: '赤', description: '' }, { label: '青', description: '' }] },
+    { question: '名前は？', header: '', multiSelect: false, options: [] },
+  ]);
+  // 壊れた JSON はフォームにしない（本文からは取り除く）
+  const bad = extractSpecQuestions('質問？\n```spec-questions\n[{ broken\n```');
+  assert.strictEqual(bad.text, '質問？');
+  assert.strictEqual(bad.questions, null);
+  // ブロックがなければそのまま
+  assert.deepStrictEqual(extractSpecQuestions('ふつうの返事'), { text: 'ふつうの返事', questions: null });
 });

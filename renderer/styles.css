@@ -423,6 +423,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 .q-opt small { color: var(--muted); }
 .q-opt .q-other { margin-top: 4px; padding: 5px 8px; font-size: 12px; }
 .q-actions { display: flex; gap: 8px; margin-top: 6px; }
+.q-free, .q-note { width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 12px; resize: vertical; }
+.spec-qform { margin-top: 8px; border-color: color-mix(in srgb, #3fb6c9 55%, transparent); background: color-mix(in srgb, #3fb6c9 6%, var(--panel)); }
+.spec-qform .q-chip { background: color-mix(in srgb, #3fb6c9 22%, transparent); color: #3fb6c9; }
+.spec-qform .q-opt:hover, .spec-qform .q-opt:has(input:checked) { border-color: #3fb6c9; }
+.spec-qform .q-opt:has(input:checked) { background: color-mix(in srgb, #3fb6c9 10%, var(--panel-2)); }
+.spec-qform > small { display: block; margin-top: 6px; }
 .d-awaiting { margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, #b57bff 50%, transparent); background: color-mix(in srgb, #b57bff 8%, var(--panel)); }
 .d-awaiting p { margin: 6px 0; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; }
 .d-awaiting small { color: var(--muted); }
