@@ -2599,7 +2599,10 @@ api.appInfo().then(
   const tabs = $('tabs');
   const KEYS = { head: 'detailHeadHeight', foot: 'detailFootHeight' };
   const els = { head, foot };
-  const h = { head: Number(localStorage.getItem(KEYS.head)) || 0, foot: Number(localStorage.getItem(KEYS.foot)) || 0 };
+  const body = $('detailBody');
+  // pref: ユーザーが決めた（保存した）高さ / h: いま実際に使っている高さ（入りきらないときは pref より縮める）
+  const pref = { head: Number(localStorage.getItem(KEYS.head)) || 0, foot: Number(localStorage.getItem(KEYS.foot)) || 0 };
+  const h = { ...pref };
   const minH = () => Math.max(24, tabs.offsetHeight);
   // 上下の段とタブを除いた、3つの段で分け合える高さ
   const avail = () => panel.clientHeight - tabs.offsetHeight;
@@ -2620,6 +2623,13 @@ api.appInfo().then(
   const fit = () => {
     if (panel.classList.contains('hidden') || !panel.clientHeight) return;
     const min = minH();
+    // 上の段の中身が長いタスクに切り替えても、上・中の段がタブの高さより潰れないようにする
+    head.style.minHeight = body.style.minHeight = `${min}px`;
+    // 毎回ユーザーが決めた高さから計算し直す（モーダルを閉じた・ウィンドウを戻したときは元の高さに戻る）
+    h.head = pref.head;
+    h.foot = pref.foot;
+    apply('head');
+    apply('foot');
     let over = cur('head') + cur('foot') + min - avail();
     for (const k of ['foot', 'head']) {
       if (over <= 0 || !(h[k] > 0)) continue;
@@ -2651,14 +2661,15 @@ api.appInfo().then(
         handle.removeEventListener('pointercancel', up);
         handle.classList.remove('dragging');
         document.body.classList.remove('resizing-row');
-        if (h[k] > 0) localStorage.setItem(KEYS[k], String(Math.round(h[k])));
+        pref[k] = h[k] > 0 ? Math.round(h[k]) : pref[k];
+        if (pref[k] > 0) localStorage.setItem(KEYS[k], String(pref[k]));
       };
       handle.addEventListener('pointermove', move);
       handle.addEventListener('pointerup', up);
       handle.addEventListener('pointercancel', up);
     });
     handle.addEventListener('dblclick', () => {
-      h[k] = 0;
+      h[k] = pref[k] = 0;
       apply(k);
       localStorage.removeItem(KEYS[k]);
     });
