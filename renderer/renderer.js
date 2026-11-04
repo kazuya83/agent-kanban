@@ -378,7 +378,7 @@ function cardHtml(c) {
       ${permissionBlock(c, true)}
       <div class="card-meta">
         ${c.branch ? `<span title="${esc(c.branch)}">${icon('branch')}${esc(c.branch.replace(/^agent\//, ''))}</span>` : ''}
-        ${c.costUsd ? `<span>$${c.costUsd.toFixed(2)}</span>` : ''}
+        ${c.costUsd ? `<span class="card-cost">$${c.costUsd.toFixed(2)}</span>` : ''}
       </div>
     </div>`;
 }
@@ -418,7 +418,7 @@ function renderCostInfo(settings) {
   // 0:00 にリセットされるなら、終わりの日は前の日（例: 月曜 0:00 リセット → 月〜日）
   const midnight = start.getHours() === 0 && start.getMinutes() === 0;
   const last = midnight ? new Date(w.end - 1) : end;
-  el.textContent = `今週 $${(Number(w.usd) || 0).toFixed(2)} ・ ${md(start)}〜${md(last)}`;
+  el.innerHTML = `今週 $${(Number(w.usd) || 0).toFixed(2)}<span class="pill-sub"> ・ ${md(start)}〜${md(last)}</span>`;
   const src = { claude: 'Claude から届いた週間上限のリセット日時', settings: '設定で決めたリセットの曜日・時刻', default: 'リセット日時がまだ分からないので月曜 0:00（設定で変えられます）' }[w.source] || '';
   el.title = `Claude の週間上限のリセットに合わせた、今週このリポジトリのタスクで使った金額です\n期間: ${full(start)} 〜 ${full(end)}\n区切り: ${src}\nこれまでの合計: $${total.toFixed(2)}（削除したタスクの分も含みます）`;
   // 週が変わったら表示を新しい週に切り替える
@@ -670,6 +670,7 @@ async function selectNew(id) {
 }
 
 async function select(id) {
+  if (state.selected !== id) state.titleExpanded = false;
   state.selected = id;
   state.headSig = '';
   if (state.chatListOpen) closeModal();
@@ -871,7 +872,7 @@ function renderDetailHead() {
   $('detailTitle').innerHTML = `
     <div class="d-title-row">
       <span class="badge b-${badgeFor(c)[0]}">${badgeFor(c)[1]}</span>
-      <h2 class="d-title">${esc(c.title)}</h2>
+      <h2 class="d-title" id="detailTitleText" title="${esc(c.title)}">${esc(c.title)}</h2>
       <button class="icon" id="closeDetail" title="閉じる">✕</button>
     </div>`;
   $('detailHead').innerHTML = `
@@ -885,6 +886,14 @@ function renderDetailHead() {
     ${permissionBlock(c, false)}
     <div class="d-actions">${btns.join('')}</div>`;
   $('closeDetail').onclick = closeDetail;
+  // 長いタイトルは2行までにして、クリックで全文を開いたり閉じたりする
+  const tt = $('detailTitleText');
+  tt.classList.toggle('expanded', !!state.titleExpanded);
+  tt.onclick = () => {
+    if (!state.titleExpanded && tt.scrollHeight <= tt.clientHeight + 1) return;
+    state.titleExpanded = !state.titleExpanded;
+    tt.classList.toggle('expanded', state.titleExpanded);
+  };
   $('detailHead').querySelectorAll('details[data-rkey]').forEach((d) => (d.ontoggle = () => (d.open ? state.relayOpen.add(d.dataset.rkey) : state.relayOpen.delete(d.dataset.rkey))));
   if (state.tab === 'info') renderInfo(c);
   const canFollow = canSendFollow(c);
@@ -3376,7 +3385,7 @@ api.appInfo().then(
   const KEY = 'detailWidth';
   const panel = $('detail');
   const handle = $('detailResizer');
-  const MIN = 360;
+  const MIN = 320;
   const clamp = (w) => Math.max(MIN, Math.min(w, window.innerWidth - 240));
   const apply = (w) => panel.style.setProperty('--detail-w', `${Math.round(w)}px`);
   const saved = Number(localStorage.getItem(KEY));

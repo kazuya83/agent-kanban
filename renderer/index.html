@@ -14,11 +14,11 @@
       <span id="remoteInfo" class="pill remote-pill hidden" title="遠隔操作の状態"></span>
       <span id="costInfo" class="pill cost hidden" title="Claude の週間上限のリセットに合わせた、今週このリポジトリのタスクで使った金額"></span>
       <span id="runInfo" class="pill"></span>
-      <button id="rcBtn" class="btn ghost" title="遠隔操作（RC）: ホストの開始・別の PC への接続・SSH の鍵"><span data-icon="monitor"></span>RC設定</button>
-      <button id="settingsBtn" class="btn ghost"><span data-icon="settings"></span>設定</button>
-      <button id="chatBtn" class="btn chat-btn" title="タスクを作らずに、このリポジトリについてエージェントと話します"><span data-icon="chat"></span>会話<span id="chatCount" class="chat-count hidden"></span></button>
-      <button id="newBtn" class="btn primary"><span data-icon="plus"></span>新しいタスク</button>
-      <button id="issueBtn" class="btn"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="vertical-align:-2px"><path fill="currentColor" d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13ZM8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg> Issue から作成</button>
+      <button id="rcBtn" class="btn ghost" title="遠隔操作（RC）: ホストの開始・別の PC への接続・SSH の鍵"><span data-icon="monitor"></span><span class="btn-label">RC設定</span></button>
+      <button id="settingsBtn" class="btn ghost" title="設定"><span data-icon="settings"></span><span class="btn-label">設定</span></button>
+      <button id="chatBtn" class="btn chat-btn" title="タスクを作らずに、このリポジトリについてエージェントと話します"><span data-icon="chat"></span><span class="btn-label">会話</span><span id="chatCount" class="chat-count hidden"></span></button>
+      <button id="newBtn" class="btn primary" title="新しいタスク"><span data-icon="plus"></span><span class="btn-label">新しいタスク</span></button>
+      <button id="issueBtn" class="btn" title="GitHub の Issue からタスクを作成"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="vertical-align:-2px"><path fill="currentColor" d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13ZM8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg><span class="btn-label">Issue から作成</span></button>
       <div class="notif-wrap">
         <button id="notifBtn" class="btn ghost notif-btn" title="通知"><span data-icon="bell"></span><span id="notifCount" class="notif-count hidden"></span></button>
         <div id="notifPanel" class="notif-panel hidden" role="dialog" aria-label="通知"></div>
