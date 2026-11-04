@@ -79,10 +79,14 @@ git config core.hooksPath .githooks
 - マージしたあとの main から一時的な worktree（ブランチ `build-apps/<sha>`）を作り、`claude -p "/build-apps review"` でテストと3つの OS のビルドをします。落ちたときは、install.sh / install.ps1 などを Claude が直します
 - できたファイルは、main をチェックアウトしているフォルダの `dist/` に写して残します
 - 直したところがあれば、コミットしてからもう一度ビルドして確かめます。通れば main にマージして `origin/main` に push します。直したところがなければ、マージも push もしません
-- **Release の公開はしません。** 公開は今までどおり `scripts/release-local.sh` で行います
-- 失敗したとき・コンフリクトしたとき・main に未コミットの変更があるときは、自動ではマージしません。macOS の通知で知らせ、ブランチと worktree を残します
+- **ビルドが通ったら、そのまま GitHub Release を公開します。** できたファイルをそのまま使うので、もう一度ビルドはしません。版の番号とリリースするかどうかは `scripts/release-local.sh` と同じく `scripts/next-version.js` で決めます（README・docs・テストだけの変更では出しません）
+  - ビルドしたコミットがまだ `origin/main` にない（push していない）とき・その版がもう公開されているときは、出しません
+  - 出したくないときは `AFTER_MERGE_NO_RELEASE=1` を付けます。`gh` にログインしておく必要があります
+- 失敗したとき・コンフリクトしたとき・main に未コミットの変更があるときは、自動ではマージも公開もしません。macOS の通知で知らせ、ブランチと worktree を残します
 - 一度に1つだけ動きます。動いている間に次のマージが入ったら、終わったあとにもう一度動きます
-- ログは `.git/build-apps/logs/` に出ます。手で動かすときは `scripts/after-merge-build.sh` を実行します
+- **進み具合**: 「1/4 テストとビルドを始めました」→「2/4 直したところがあったので、もう一度ビルドしています」（直したときだけ）→「3/4 ビルド OK」→「4/4 Release を出すか確かめています」→「終わりました: …（公開した Release の URL か、出さなかった理由）」の順に、macOS の通知で知らせます
+  - `scripts/after-merge-build.sh --status` で、動いているかどうか・今の段階・これまでの結果（新しい 10 件）を見られます（中身は `.git/build-apps/status` と `.git/build-apps/history.log`）
+- 細かいログは `.git/build-apps/logs/` に出ます。手で動かすときは `scripts/after-merge-build.sh` を実行します
 - 止めたいときは `git config --unset core.hooksPath` を実行します
 
 ## しくみ

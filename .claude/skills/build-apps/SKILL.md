@@ -36,7 +36,7 @@ GitHub Actions はテストだけを動かす。**ビルドとリリースは、
 
 ## 注意
 
-- 公開は外に出る操作なので、`release` は必ずユーザーの OK をもらってから行う
+- 公開は外に出る操作なので、手で `release` するときは必ずユーザーの OK をもらってから行う
 - バージョンは `scripts/next-version.js` が決める。0.2.0 のように大きく上げたいときは、package.json の version をその番号にして main に入れてから release する
 - `dist/` は毎回消して作り直す
-- main にタスクをマージすると、`.githooks/post-merge` → `scripts/after-merge-build.sh` が、このスキルの `review` を `claude -p` で裏で動かす（`build-apps/<sha>` という worktree の中で動く）。そのときはユーザーに質問できないので、最後まで自分で直す。コミット・マージ・push はスクリプトが行うので、スキルの中ではしない。できたファイルは、スクリプトが main をチェックアウトしているフォルダの `dist/` に写す
+- main にタスクをマージすると、`.githooks/post-merge` → `scripts/after-merge-build.sh` が、このスキルの `review` を `claude -p` で裏で動かす（`build-apps/<sha>` という worktree の中で動く）。そのときはユーザーに質問できないので、最後まで自分で直す。コミット・マージ・push・Release の公開はスクリプトが行うので、スキルの中ではしない。できたファイルは、スクリプトが main をチェックアウトしているフォルダの `dist/` に写し、ビルドが通ればそのファイルで Release を公開する（ユーザーがこの自動の公開を有効にしている。止めるときは `AFTER_MERGE_NO_RELEASE=1`）
