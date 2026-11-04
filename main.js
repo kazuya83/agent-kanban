@@ -46,7 +46,7 @@ function createWindow() {
     height: 900,
     minWidth: 960,
     minHeight: 600,
-    title: 'Claude Agent Kanban',
+    title: 'Agent Kanban',
     backgroundColor: '#0f1115',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -198,7 +198,7 @@ app.whenReady().then(async () => {
     return { branches, current, hasOrigin };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'specCheck', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'relaySteps', 'competeAgents', 'weeklyResetDay', 'weeklyResetTime'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'specCheck', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'relaySteps', 'competeAgents', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
     if (patch && 'branchNamingRule' in patch) patch = { ...patch, branchNamingRule: String(patch.branchNamingRule || '').trim() };
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     if (patch && 'suggestSkillsOnDone' in patch) patch = { ...patch, suggestSkillsOnDone: !!patch.suggestSkillsOnDone };
@@ -211,7 +211,8 @@ app.whenReady().then(async () => {
       if (b) git.assertSafeRef(b, 'ベースブランチ名');
       patch = { ...patch, baseBranch: b };
     }
-    if (patch && 'defaultAgent' in patch && !providers.isAgent(patch.defaultAgent) && !['relay', 'compete'].includes(patch.defaultAgent)) patch = { ...patch, defaultAgent: 'claude' };
+    if (patch && 'enabledAgents' in patch) patch = { ...patch, enabledAgents: providers.cleanEnabledAgents(patch.enabledAgents) };
+    if (patch && 'defaultAgent' in patch && !providers.isAgent(patch.defaultAgent)) patch = { ...patch, defaultAgent: 'claude' };
     for (const k of ['codexPath', 'codexModel', 'geminiPath', 'geminiModel']) if (patch && k in patch) patch = { ...patch, [k]: String(patch[k] || '').trim() };
     if (patch && 'relaySteps' in patch) patch = { ...patch, relaySteps: providers.cleanRelaySteps(patch.relaySteps) };
     if (patch && 'competeAgents' in patch) patch = { ...patch, competeAgents: providers.cleanCompeteAgents(patch.competeAgents) };
@@ -222,6 +223,8 @@ app.whenReady().then(async () => {
       patch = { ...patch, statusMapping: { inProgress: str(m.inProgress), inReview: str(m.inReview), done: str(m.done) } };
     }
     for (const k of allowed) if (patch && k in patch) store.settings[k] = patch[k];
+    // 最初から選んでおくエージェントは、使うエージェントの中から（使わない設定にしたら、使うものの先頭にする）
+    store.settings.defaultAgent = providers.defaultAgentOf(store.settings);
     store.settings.maxParallel = Math.min(10, Math.max(1, parseInt(store.settings.maxParallel, 10) || 1));
     store.save();
     agents.pump();
@@ -229,12 +232,13 @@ app.whenReady().then(async () => {
     return store.settings;
   });
   // agent: claude / codex / gemini / relay（リレー） / compete（競争。カードが複数できる）。返すのは最初のカードの ID
-  handle('card:create', ({ title, prompt, autoStart, session, skill, agent }) => {
-    const cards = agents.createTask({ title, prompt, session, skill, agent });
+  // fromChat: 会話の続きとしてタスクを作るときの、元の会話のカードの ID
+  handle('card:create', ({ title, prompt, autoStart, session, skill, agent, fromChat }) => {
+    const cards = agents.createTask({ title, prompt, session, skill, agent, fromChat });
     if (autoStart) for (const c of cards) agents.start(c.id);
     return cards[0].id;
   });
-  handle('chat:create', ({ message, title, session, skill }) => agents.createChat({ message, title, session, skill }).id);
+  handle('chat:create', ({ message, title, session, skill, agent }) => agents.createChat({ message, title, session, skill, agent }).id);
   handle('card:createFromIssues', async ({ numbers, extra, autoStart, session, skill, agent }) => {
     const { cards, errors } = await agents.createFromIssues({ numbers, extra, session, skill, agent });
     if (autoStart) for (const c of cards) agents.start(c.id);

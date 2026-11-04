@@ -1,4 +1,4 @@
-// Claude Code 以外のエージェント CLI（Codex CLI / Gemini CLI）の起動のしかたと、出力の読み取り
+// エージェント CLI（Claude Code / Codex CLI / Gemini CLI）の一覧と、Claude Code 以外の起動のしかた・出力の読み取り
 //
 // どの CLI も「作業フォルダで起動 → 指示を stdin で渡す → 1行1つの JSON（JSONL）でイベントを出す」形で動かす。
 // 出力は CLI ごとに形が違うので、ここで共通の形（アクション）に直して agent.js に渡す:
@@ -233,6 +233,26 @@ function cleanCompeteAgents(list) {
   return out;
 }
 
+// ---------- 使うエージェント ----------
+// 設定でチェックを付けたエージェントだけを、タスク・会話・リレー・競争で選べるようにする（1つは必ず残す）
+const DEFAULT_ENABLED_AGENTS = ['claude'];
+function cleanEnabledAgents(list) {
+  const out = cleanCompeteAgents(list).sort((a, b) => AGENT_IDS.indexOf(a) - AGENT_IDS.indexOf(b));
+  return out.length ? out : [...DEFAULT_ENABLED_AGENTS];
+}
+function enabledAgents(settings) {
+  return cleanEnabledAgents(settings && settings.enabledAgents);
+}
+function isEnabled(settings, a) {
+  return enabledAgents(settings).includes(a);
+}
+// 新しいタスク・会話で最初から選んでおくエージェント（使わない設定のものなら、使うものの先頭）
+function defaultAgentOf(settings) {
+  const list = enabledAgents(settings);
+  const d = settings && settings.defaultAgent;
+  return list.includes(d) ? d : list[0];
+}
+
 module.exports = {
   AGENTS,
   AGENT_IDS,
@@ -249,4 +269,9 @@ module.exports = {
   DEFAULT_COMPETE_AGENTS,
   cleanRelaySteps,
   cleanCompeteAgents,
+  DEFAULT_ENABLED_AGENTS,
+  cleanEnabledAgents,
+  enabledAgents,
+  isEnabled,
+  defaultAgentOf,
 };

@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { Store } = require('../src/store');
+const { Store, migrateSettings } = require('../src/store');
 const { AgentManager, promptWithSkill } = require('../src/agent');
 const providers = require('../src/providers');
 
@@ -35,6 +35,7 @@ function setup() {
     codexPath: bin('codex', FAKE_CLI, 'codex'),
     geminiPath: bin('gemini', FAKE_CLI, 'gemini'),
     maxParallel: 3,
+    enabledAgents: ['claude', 'codex', 'gemini'],
     specCheck: false, // ここでは指示をそのまま渡したときの流れを確かめる（仕様の確認は agent.test.js で確かめる）
   });
   const agents = new AgentManager(store, { mcpScript: path.join(__dirname, '..', 'src', 'permission-mcp.js'), mcpDir: path.join(tmp, 'data', 'mcp'), nodeBin: process.execPath });
@@ -222,4 +223,97 @@ test('競争: エージェントが2つ未満ならエラー。Issue からも�
   const { cards } = await agents.createFromIssues({ numbers: '5', agent: 'compete' });
   assert.deepStrictEqual(cards.map((c) => c.agent), ['codex', 'gemini']);
   assert.ok(cards.every((c) => c.issue.number === 5));
+});
+
+test('使うエージェント: チェックを付けていないエージェントでは、タスク・会話・リレー・競争を作れない', async () => {
+  const { agents, store } = setup();
+  store.settings.enabledAgents = ['claude', 'codex'];
+  assert.throws(() => agents.createTask({ prompt: 'x', agent: 'gemini' }), /使わない設定/);
+  assert.throws(() => agents.createChat({ message: 'x', agent: 'gemini' }), /使わない設定/);
+  store.settings.relaySteps = [
+    { agent: 'codex', label: '実装', instruction: '' },
+    { agent: 'gemini', label: 'テスト', instruction: '' },
+  ];
+  assert.throws(() => agents.createTask({ prompt: 'x', agent: 'relay' }), /工程「テスト」の Gemini CLI は使わない設定/);
+  // 競争は使うエージェントだけで（2つ未満ならエラー）
+  store.settings.competeAgents = ['claude', 'codex', 'gemini'];
+  assert.deepStrictEqual(agents.createTask({ prompt: 'x', agent: 'compete' }).map((c) => c.agent), ['claude', 'codex']);
+  store.settings.enabledAgents = ['codex'];
+  assert.throws(() => agents.createTask({ prompt: 'x', agent: 'compete' }), /2つ以上/);
+  // エージェントを指定しなければ、最初から選んでおくエージェント（使わない設定なら、使うものの先頭）
+  store.settings.defaultAgent = 'claude';
+  assert.strictEqual(agents.createTask({ prompt: 'y' })[0].agent, 'codex');
+  assert.strictEqual(agents.createChat({ message: 'y' }).agent, 'codex');
+});
+
+test('使うエージェント: 前のバージョンの設定は、使っていたエージェントにチェックを付け、最初のエージェントからリレー・競争を外す', () => {
+  const s1 = { defaultAgent: 'relay', relaySteps: [{ agent: 'codex', label: 'a', instruction: '' }], competeAgents: ['claude', 'gemini'] };
+  migrateSettings(s1, { defaultAgent: 'relay' }, []);
+  assert.deepStrictEqual(s1.enabledAgents, ['claude', 'codex']);
+  assert.strictEqual(s1.defaultAgent, 'claude');
+  const s2 = { defaultAgent: 'gemini', relaySteps: [], competeAgents: [] };
+  migrateSettings(s2, { defaultAgent: 'gemini' }, [{ agent: 'codex' }]);
+  assert.deepStrictEqual(s2.enabledAgents, ['claude', 'codex', 'gemini']);
+  assert.strictEqual(s2.defaultAgent, 'gemini');
+  // 保存してある「使うエージェント」はそのまま。最初のエージェントが使わない設定なら、使うものの先頭
+  const s3 = { defaultAgent: 'claude', enabledAgents: ['gemini'] };
+  migrateSettings(s3, { enabledAgents: ['gemini'] }, []);
+  assert.deepStrictEqual(s3.enabledAgents, ['gemini']);
+  assert.strictEqual(s3.defaultAgent, 'gemini');
+  assert.deepStrictEqual(providers.cleanEnabledAgents([]), ['claude'], '1つもなければ Claude Code');
+});
+
+test('Claude 以外でも: 会話・ブランチの命名・競争の比較・スキルの提案ができる', async () => {
+  const { agents, store, g } = setup();
+  store.settings.defaultAgent = 'codex';
+  // 会話
+  const chat = agents.createChat({ message: '構成を教えて' });
+  assert.strictEqual(chat.agent, 'codex');
+  await waitFor(() => chat.status === 'review');
+  assert.match(chat.lastText, /codex done: 構成を教えて/);
+  // ブランチの命名規則（Gemini のタスクなら Gemini に聞く）
+  store.settings.branchNamingRule = 'feature/<内容> にする';
+  const [c] = agents.createTask({ title: 'gm', prompt: 'ジェミニで作る', agent: 'gemini' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  assert.strictEqual(c.branch, 'feature/fake-gemini-branch');
+  const [d] = agents.createTask({ title: 'cx', prompt: 'コーデックスで作る', agent: 'codex' });
+  agents.start(d.id);
+  await waitFor(() => d.status === 'review');
+  assert.strictEqual(d.branch, 'feature/fake-codex-branch');
+  assert.ok(g('branch').toString().includes('feature/fake-codex-branch'));
+  store.settings.branchNamingRule = '';
+  // 競争の比較は、最初から選んでおくエージェントに頼む
+  store.settings.competeAgents = ['codex', 'gemini'];
+  const cards = agents.createTask({ title: 'race', prompt: '競争', agent: 'compete' });
+  for (const x of cards) agents.start(x.id);
+  await waitFor(() => cards.every((x) => x.status === 'review'));
+  const cmp = agents.compareCompetitors(cards[0].id);
+  assert.strictEqual(cmp.agent, 'codex');
+  await waitFor(() => cmp.status === 'review');
+  // スキルの提案は、元のタスクのエージェントに頼む
+  const sk = agents.suggestSkills(c.id);
+  assert.strictEqual(sk.agent, 'gemini');
+  await waitFor(() => sk.status === 'review');
+});
+
+test('Claude 以外の会話からタスクにすると、会話のやりとりを最初の指示に添えて渡す', async () => {
+  const { agents } = setup();
+  const chat = agents.createChat({ message: 'ログイン画面の相談', agent: 'codex' });
+  await waitFor(() => chat.status === 'review');
+  const [t] = agents.createTask({ prompt: '会話の内容で作って', agent: 'gemini', fromChat: chat.id, session: { mode: 'resume', id: chat.sessionId } });
+  assert.ok(!t.sessionId, 'Codex の会話のセッションは Gemini には渡さない');
+  agents.start(t.id);
+  await waitFor(() => t.status === 'review');
+  const diff = await agents.diff(t.id);
+  assert.match(diff, /これまでの会話/);
+  assert.match(diff, /【ユーザー】 ログイン画面の相談/);
+  assert.match(diff, /【Codex】 codex done/);
+  assert.match(diff, /会話の内容で作って/);
+  // Claude Code どうしなら、会話そのもの（セッション）を引き継ぐ
+  const cc = agents.createChat({ message: 'claude と相談', agent: 'claude' });
+  await waitFor(() => cc.status === 'review');
+  const [t2] = agents.createTask({ prompt: '続きを', agent: 'claude', fromChat: cc.id, session: { mode: 'resume', id: cc.sessionId } });
+  assert.strictEqual(t2.sessionId, cc.sessionId);
+  assert.strictEqual(t2.chatContext, undefined);
 });

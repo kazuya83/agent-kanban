@@ -16,6 +16,21 @@ let prompt = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => (prompt += d));
 process.stdin.on('end', () => {
+  // ブランチ名を聞かれたら、ファイルは書かずに名前だけ返す
+  const branchAsk = prompt.startsWith('git のブランチ名を1つだけ考えてください');
+  if (branchAsk && kind === 'codex') {
+    out({ type: 'thread.started', thread_id: `codex-thread-${process.pid}` });
+    out({ type: 'item.completed', item: { id: 'item_0', type: 'agent_message', text: 'feature/fake-codex-branch' } });
+    out({ type: 'turn.completed' });
+    process.exit(0);
+  }
+  if (branchAsk && kind === 'gemini') {
+    out({ type: 'init', session_id: `gemini-sess-${process.pid}` });
+    out({ type: 'message', role: 'assistant', content: 'feature/fake-', delta: true });
+    out({ type: 'message', role: 'assistant', content: 'gemini-branch', delta: true });
+    out({ type: 'result', status: 'success' });
+    process.exit(0);
+  }
   const file = `${kind}-${Date.now()}-${process.pid}.txt`;
   const fail = prompt.startsWith('[fail]'); // 先頭にあるときだけ（リレーの次の工程の指示には元の指示が入るので）
   const ask = prompt.includes('[q]');

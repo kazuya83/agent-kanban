@@ -1,7 +1,7 @@
 {
   "name": "agent-kanban",
   "version": "0.1.8",
-  "description": "Claude Code のタスクをカンバンで管理し、git worktree ごとに並列実行するデスクトップアプリ",
+  "description": "AI コーディングエージェント（Claude Code / Codex CLI / Gemini CLI）のタスクをカンバンで管理し、git worktree ごとに並列実行するデスクトップアプリ",
   "main": "main.js",
   "license": "MIT",
   "author": "kazuya83",
@@ -20,8 +20,8 @@
   },
   "build": {
     "appId": "dev.agentkanban.app",
-    "productName": "Claude Agent Kanban",
-    "artifactName": "claude-agent-kanban-${version}-${os}-${arch}.${ext}",
+    "productName": "Agent Kanban",
+    "artifactName": "agent-kanban-${version}-${os}-${arch}.${ext}",
     "files": ["main.js", "preload.js", "src/**", "renderer/**"],
     "asarUnpack": ["src/permission-mcp.js"],
     "directories": {
@@ -36,7 +36,7 @@
       "gatekeeperAssess": false
     },
     "dmg": {
-      "artifactName": "claude-agent-kanban-${version}-mac-${arch}.${ext}"
+      "artifactName": "agent-kanban-${version}-mac-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -44,16 +44,16 @@
         { "target": "portable", "arch": ["x64"] },
         { "target": "zip", "arch": ["x64"] }
       ],
-      "artifactName": "claude-agent-kanban-${version}-win-${arch}.${ext}"
+      "artifactName": "agent-kanban-${version}-win-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "claude-agent-kanban-${version}-win-setup.${ext}"
+      "artifactName": "agent-kanban-${version}-win-setup.${ext}"
     },
     "portable": {
-      "artifactName": "claude-agent-kanban-${version}-win-portable.${ext}"
+      "artifactName": "agent-kanban-${version}-win-portable.${ext}"
     },
     "linux": {
       "target": ["AppImage"],

@@ -18,12 +18,23 @@ const PERMISSION_MODES = [
   ['bypassPermissions', 'すべて自動で許可する（注意）'],
 ];
 
-// エージェント（Claude Code 以外の CLI にも対応）と、オーケストレーション（リレー・競争）
+// エージェント（Claude Code / Codex CLI / Gemini CLI）と、オーケストレーション（リレー・競争）
 const AGENTS = [
   ['claude', 'Claude Code', 'Claude'],
   ['codex', 'Codex CLI', 'Codex'],
   ['gemini', 'Gemini CLI', 'Gemini'],
 ];
+// 設定で「使う」にチェックを付けたエージェント（1つもなければ Claude Code）
+function enabledAgents(s = state.board.settings || {}) {
+  const on = Array.isArray(s.enabledAgents) ? s.enabledAgents : ['claude'];
+  const list = AGENTS.map((x) => x[0]).filter((a) => on.includes(a));
+  return list.length ? list : ['claude'];
+}
+// 新しいタスク・会話で最初から選んでおくエージェント
+function defaultAgent(s = state.board.settings || {}) {
+  const list = enabledAgents(s);
+  return list.includes(s.defaultAgent) ? s.defaultAgent : list[0];
+}
 const agentLabel = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[1];
 const agentShort = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[2];
 const agentOf = (c) => (c && AGENTS.some((x) => x[0] === c.agent) ? c.agent : 'claude');
@@ -136,7 +147,7 @@ function permissionBlock(c, compact) {
         <div class="perm-title">⚠ 承認待ち: <b>${esc(r.toolName)}</b></div>
         ${r.summary ? `<code class="perm-summary">${esc(r.summary)}</code>` : ''}
         ${compact ? '' : `<details><summary>入力の全文</summary><pre>${esc(r.detail)}</pre></details>
-          <input class="deny-reason" placeholder="拒否する理由（任意・Claude に伝わります）" />`}
+          <input class="deny-reason" placeholder="拒否する理由（任意・${esc(agentShort(agentOf(c)))} に伝わります）" />`}
         <div class="perm-actions">
           <button class="btn small allow" data-decision="allow">許可</button>
           <button class="btn small deny" data-decision="deny">拒否</button>
@@ -189,7 +200,7 @@ function questionFormHtml(c) {
   return (c.questions || [])
     .map(
       (req) => `<div class="qform" data-card="${c.id}" data-req="${req.id}">
-      <div class="q-title">❓ Claude からの質問</div>
+      <div class="q-title">❓ ${esc(agentShort(agentOf(c)))} からの質問</div>
       ${req.questions
         .map(
           (q, i) => `<div class="q-item" data-qi="${i}">
@@ -207,7 +218,7 @@ function questionFormHtml(c) {
         </div>`,
         )
         .join('')}
-      <div class="q-actions"><button class="btn primary" data-qact="submit">回答する</button><button class="btn ghost" data-qact="skip" title="Claude に、妥当だと思う方法で進めてもらいます">答えずに続ける</button></div>
+      <div class="q-actions"><button class="btn primary" data-qact="submit">回答する</button><button class="btn ghost" data-qact="skip" title="${esc(agentShort(agentOf(c)))} に、妥当だと思う方法で進めてもらいます">答えずに続ける</button></div>
     </div>`,
     )
     .join('');
@@ -216,19 +227,20 @@ function questionFormHtml(c) {
 // ---- コンフリクト ----
 function conflictBoxHtml(c) {
   const busy = c.status === 'running' || c.status === 'queued';
+  const who = esc(agentShort(agentOf(c)));
   if (c.conflict) {
     const k = c.conflict;
     const files = (k.unresolved && k.unresolved.length ? k.unresolved : k.files) || [];
     let actions;
-    if (k.resolving && busy) actions = '<p class="muted small">Claude がコンフリクトを解消しています…（ログで進み具合を見られます）</p>';
+    if (k.resolving && busy) actions = `<p class="muted small">${who} がコンフリクトを解消しています…（ログで進み具合を見られます）</p>`;
     else if (k.manual)
       actions = `<p class="small">タスクの worktree で、上のファイルの <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> 〜 <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code> を直してください。</p>
-        <div class="cf-actions"><button class="btn" data-cact="open">フォルダを開く</button><button class="btn primary" data-cact="complete">解消した（取り込みを完了）</button><button class="btn" data-cact="agent">Claude に任せる</button><button class="btn ghost" data-cact="abort">取り込みを中止</button></div>`;
+        <div class="cf-actions"><button class="btn" data-cact="open">フォルダを開く</button><button class="btn primary" data-cact="complete">解消した（取り込みを完了）</button><button class="btn" data-cact="agent">${who} に任せる</button><button class="btn ghost" data-cact="abort">取り込みを中止</button></div>`;
     else if (k.pr)
-      actions = `<div class="cf-actions"><button class="btn primary" data-cact="agent">Claude に解消してもらう</button><button class="btn" data-cact="manual">自分で解消する</button>${c.prUrl ? '<button class="btn ghost" data-cact="openPr">GitHub で見る</button>' : ''}<button class="btn ghost" data-cact="dismiss">閉じる</button></div>
+      actions = `<div class="cf-actions"><button class="btn primary" data-cact="agent">${who} に解消してもらう</button><button class="btn" data-cact="manual">自分で解消する</button>${c.prUrl ? '<button class="btn ghost" data-cact="openPr">GitHub で見る</button>' : ''}<button class="btn ghost" data-cact="dismiss">閉じる</button></div>
         <p class="muted small">どちらも、origin/${esc(k.target)} をこのタスクのブランチに取り込んで解消します。解消できたら「PR を更新」で push すると、PR のコンフリクトがなくなります。</p>`;
     else
-      actions = `<div class="cf-actions"><button class="btn primary" data-cact="agent">Claude に解消してもらう</button><button class="btn" data-cact="manual">自分で解消する</button><button class="btn ghost" data-cact="dismiss">閉じる</button></div>
+      actions = `<div class="cf-actions"><button class="btn primary" data-cact="agent">${who} に解消してもらう</button><button class="btn" data-cact="manual">自分で解消する</button><button class="btn ghost" data-cact="dismiss">閉じる</button></div>
         <p class="muted small">どちらも、${esc(k.target)} をこのタスクのブランチに取り込んで解消します。${esc(k.target)} 自体は解消が終わってマージするまで変わりません。</p>`;
     return `<div class="cf-box">
       <b>⚠ ${k.pr ? `PR が ${esc(k.target)} とコンフリクトしています` : `${esc(k.target)} とコンフリクトしています`}${k.unresolved && k.unresolved.length ? '（まだ残っています）' : ''}</b>
@@ -250,7 +262,10 @@ function conflictBoxHtml(c) {
 }
 
 async function conflictAction(c, act) {
-  if (act === 'agent') return runBusy('Claude に解消を頼んでいます…', () => api.resolveConflict(c.id, 'agent'), 'Claude に解消を頼みました');
+  if (act === 'agent') {
+    const who = agentShort(agentOf(c));
+    return runBusy(`${who} に解消を頼んでいます…`, () => api.resolveConflict(c.id, 'agent'), `${who} に解消を頼みました`);
+  }
   if (act === 'manual') {
     const r = await runBusy('コンフリクトした状態を作っています…', () => api.resolveConflict(c.id, 'manual'));
     if (r && r.manual) {
@@ -379,7 +394,7 @@ function renderBoard() {
   $('runInfo').textContent = `実行中 ${running}/${settings.maxParallel || 1}`;
 
   if (!settings.repoPath) {
-    $('board').innerHTML = `<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、Claude Code を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ</button></div>`;
+    $('board').innerHTML = `<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、エージェント（Claude Code / Codex CLI / Gemini CLI）を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ</button></div>`;
     $('emptyRepo').onclick = chooseRepo;
     return;
   }
@@ -408,7 +423,7 @@ function renderChatBtn() {
   n.textContent = String(waiting || chats.length);
   n.classList.toggle('hidden', !chats.length);
   n.classList.toggle('warn', !!waiting);
-  $('chatBtn').title = waiting ? `あなたの対応を待っている会話が ${waiting} 件あります` : 'タスクを作らずに、このリポジトリについて Claude と話します';
+  $('chatBtn').title = waiting ? `あなたの対応を待っている会話が ${waiting} 件あります` : 'タスクを作らずに、このリポジトリについてエージェントと話します';
   if (state.chatListOpen) drawChatList();
 }
 
@@ -577,7 +592,7 @@ function competeBoxHtml(c) {
     <small>${busy ? 'まだ動いている候補があります。' : 'すべての候補が終わりました。'}差分タブでそれぞれの変更を見比べて、よいものを採用してください。採用すると、ほかの候補は worktree とブランチごと破棄します。</small>
     <div class="d-actions">
       ${canAdopt ? `<button class="btn primary" data-act="adopt">🏁 この案（${esc(agentShort(agentOf(c)))}）を採用</button>` : ''}
-      <button class="btn" data-act="compare" ${busy ? 'title="終わっていない候補は、その時点の内容で比べます"' : ''}>🤔 Claude に比べてもらう</button>
+      <button class="btn" data-act="compare" ${busy ? 'title="終わっていない候補は、その時点の内容で比べます"' : ''}>🤔 ${esc(agentShort(defaultAgent()))} に比べてもらう</button>
       ${c.compete.compareChat && card(c.compete.compareChat) ? `<button class="btn ghost" data-goto="${c.compete.compareChat}">比較の会話を開く</button>` : ''}
     </div></div>`;
 }
@@ -719,7 +734,7 @@ $('detailHead').addEventListener('click', async (e) => {
     return;
   }
   if (act === 'discard' && isChat(c)) {
-    if (confirm(`会話「${c.title}」をボードから削除しますか？\n（Claude Code の会話の記録は残るので、あとで「既存の会話」から引き継げます）`)) {
+    if (confirm(`会話「${c.title}」をボードから削除しますか？\n${agentOf(c) === 'claude' ? '（Claude Code の会話の記録は残るので、あとで「既存の会話」から引き継げます）' : ''}`)) {
       await runBusy('削除しています…', () => api.discard(c.id), '削除しました');
       closeDetail();
     }
@@ -1135,7 +1150,7 @@ async function renderDetailBody() {
   } else if (state.tab === 'btw') {
     const live = c.status === 'running' || c.status === 'queued';
     body.innerHTML = `<div class="pad btw">
-      <p class="muted small">エージェントの作業を止めずに、メッセージを送れます（例:「テストも書いて」「その API は使わないで」）。Claude は今の作業の途中で読み、そのまま反映します。</p>
+      <p class="muted small">エージェントの作業を止めずに、メッセージを送れます（例:「テストも書いて」「その API は使わないで」）。Claude Code は今の作業の途中で読み、そのまま反映します（Codex / Gemini は、待機中なら開始するときの指示に付け足します）。</p>
       <div id="btwList" class="btw-list">${btwListHtml(c)}</div>
       <textarea id="btwInput" rows="3" placeholder="${live ? 'btw: …（Ctrl/⌘ + Enter で送信）' : 'エージェントが実行中のときに送れます'}" ${live ? '' : 'disabled'}></textarea>
       <div class="btw-actions"><span class="muted small">${live ? (c.status === 'queued' ? '待機中なので、開始するときの指示に付け足します' : '送ると、すぐに実行中のエージェントに届きます') : c.status === 'todo' ? '開始すると送れるようになります' : '作業が終わったあとは、下の「追加指示」を使ってください'}</span>
@@ -1218,35 +1233,58 @@ document.addEventListener('keydown', (e) => {
   else if (state.selected) closeDetail();
 });
 
-// タスクを動かすエージェントを選ぶ欄（単独のエージェント / リレー / 競争）
-function agentFieldHtml(idp, value) {
+// エージェントの注意書き（Claude Code 以外は、CLI の作りの都合でできないことがある）
+function agentLimitHint(a) {
+  return a === 'claude' ? '' : `${agentLabel(a)} は CLI の作りの都合で、カードでの承認・選択肢の質問・btw（実行中のメッセージ）・既存の会話の引き継ぎに対応していません。権限は設定の権限モードに合わせて CLI 側で許可します。`;
+}
+
+// タスクを動かすエージェントを選ぶ欄（単独のエージェント / リレー / 競争）。使う設定のエージェントだけ出す
+// orchestration: false なら、1つのエージェントだけを選ぶ（会話など）
+function agentFieldHtml(idp, value, { orchestration = true } = {}) {
   const s = state.board.settings;
-  const v = value || s.defaultAgent || 'claude';
-  const steps = (s.relaySteps || []).map((x) => `${x.label}(${agentShort(x.agent)})`).join(' → ') || '未設定';
-  const comp = (s.competeAgents || []).map(agentShort).join('・') || '未設定';
-  const opt = (val, label) => `<option value="${val}" ${val === v ? 'selected' : ''}>${esc(label)}</option>`;
+  const on = enabledAgents(s);
+  const v = value || defaultAgent(s);
+  const opt = (val, label, disabled) => `<option value="${val}" ${val === v && !disabled ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(label)}</option>`;
+  const single = AGENTS.filter(([a]) => on.includes(a)).map(([a, l]) => opt(a, l)).join('');
+  if (!orchestration) return `<label class="field"><span>エージェント</span><select id="${idp}Agent">${single}</select><small id="${idp}AgentHint" class="muted"></small></label>`;
+  const steps = s.relaySteps || [];
+  const relayOff = !steps.length || steps.some((x) => !on.includes(x.agent));
+  const comp = (s.competeAgents || []).filter((a) => on.includes(a));
+  const stepsLabel = steps.map((x) => `${x.label}(${agentShort(x.agent)})`).join(' → ') || '未設定';
   return `<label class="field"><span>エージェント</span>
     <select id="${idp}Agent">
-      <optgroup label="1つのエージェントで動かす">${AGENTS.map(([a, l]) => opt(a, l)).join('')}</optgroup>
+      <optgroup label="1つのエージェントで動かす">${single}</optgroup>
       <optgroup label="オーケストレーション">
-        ${opt('relay', `🔁 リレー: ${steps}`)}
-        ${opt('compete', `🏁 競争: ${comp} で同じタスクを解いて比べる`)}
+        ${opt('relay', `🔁 リレー: ${stepsLabel}${relayOff ? '（⚙ 設定で工程のエージェントを使う設定にしてください）' : ''}`, relayOff)}
+        ${opt('compete', comp.length >= 2 ? `🏁 競争: ${comp.map(agentShort).join('・')} で同じタスクを解いて比べる` : '🏁 競争（⚙ 設定で使うエージェントを2つ以上選んでください）', comp.length < 2)}
       </optgroup>
     </select>
     <small id="${idp}AgentHint" class="muted"></small></label>`;
 }
-function bindAgentField(idp) {
+// onChange(agent): 選び直したときに呼ぶ（会話の欄の出し分けなど）
+function bindAgentField(idp, onChange) {
   const sel = $(`${idp}Agent`);
   const hint = () => {
     const v = sel.value;
     $(`${idp}AgentHint`).textContent =
       v === 'relay' ? '同じ worktree で、設定の工程の順にエージェントが作業を引き継ぎます（前の工程の報告を次に渡します）。工程は ⚙ 設定で変えられます。'
       : v === 'compete' ? 'エージェントごとにカードと worktree を作って並列に解きます。終わったら差分を見比べ、よい案を採用してマージします。'
-      : v !== 'claude' ? `${agentLabel(v)} はカードでの承認・選択肢の質問・btw に対応していません。設定の権限モードに合わせて CLI 側で許可します（既存の会話の引き継ぎも Claude Code だけです）。`
-      : '';
+      : agentLimitHint(v);
+    onChange?.(v);
   };
   sel.onchange = hint;
   hint();
+}
+// 既存の会話（Claude Code の会話）を選べるのは、最初に動くのが Claude Code のときだけ
+function firstAgentOf(v) {
+  const s = state.board.settings;
+  if (v === 'relay') return ((s.relaySteps || [])[0] || {}).agent || 'claude';
+  if (v === 'compete') return (s.competeAgents || []).includes('claude') ? 'claude' : '';
+  return v;
+}
+function toggleSessionField(idp, agent) {
+  const box = $(`${idp}Session`)?.closest('.field');
+  if (box) box.classList.toggle('hidden', agent !== 'claude');
 }
 
 function newTask(opts = {}) {
@@ -1254,9 +1292,9 @@ function newTask(opts = {}) {
   const from = opts.fromChat;
   openModal(
     `<h2>新しいタスク</h2>
-     ${from ? `<p class="muted small">会話「${esc(from.title)}」の続きとして、タスクを始めます（会話の内容を Claude が引き継ぎます。会話そのものはそのまま残ります）。</p>` : ''}
+     ${from ? `<p class="muted small">会話「${esc(from.title)}」の続きとして、タスクを始めます（会話の内容をエージェントが引き継ぎます。会話そのものはそのまま残ります）。</p>` : ''}
      <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
-     ${agentFieldHtml('n')}
+     ${agentFieldHtml('n', from && enabledAgents().includes(agentOf(from)) ? agentOf(from) : undefined)}
      <div class="field"><span>エージェントへの指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></div>
      ${sessionFieldHtml('n')}
      <p class="muted small">GitHub の Issue から作るときは、右上の「Issue から作成」を使ってください。</p>
@@ -1265,13 +1303,15 @@ function newTask(opts = {}) {
     () => {
       $('nPrompt').focus();
       if (from) $('nPrompt').value = 'ここまでの会話の内容をもとに、作業を進めてください。';
-      fillSessionField('n', from ? { id: from.sessionId, title: `会話: ${from.title}` } : undefined);
-      bindAgentField('n');
+      // Claude Code の会話なら会話そのものを引き継ぐ。それ以外の会話は、やりとりを指示に添えて渡す
+      const fromClaude = from && agentOf(from) === 'claude';
+      fillSessionField('n', fromClaude ? { id: from.sessionId, title: `会話: ${from.title}` } : undefined);
+      bindAgentField('n', (v) => toggleSessionField('n', fromClaude || !from ? firstAgentOf(v) : ''));
       let skill = state.board.settings.defaultSkill || null;
       const drawSkill = () => renderSkillSlot('nSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
       const submit = async () => {
-        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value }));
+        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value, fromChat: from ? from.id : undefined }));
         if (id) {
           closeModal();
           select(id);
@@ -1300,7 +1340,7 @@ function drawChatList() {
   if (!box) return;
   const chats = state.board.cards.filter(isChat).sort(byAttention);
   box.innerHTML = `<h2>💬 会話</h2>
-    <p class="muted small">タスクを作らずに、このリポジトリについて Claude と話した会話です。選ぶと開きます。</p>
+    <p class="muted small">タスクを作らずに、このリポジトリについてエージェントと話した会話です。選ぶと開きます。</p>
     <div class="chat-list">${chats.map(cardHtml).join('') || '<div class="col-empty">会話はまだありません</div>'}</div>
     <div class="modal-actions"><button class="btn ghost" id="chatListClose">閉じる</button><button class="btn primary" id="chatListNew">＋ 新しい会話</button></div>`;
   $('chatListClose').onclick = closeModal;
@@ -1318,7 +1358,8 @@ function newChat() {
   if (!state.board.settings.repoPath) return chooseRepo();
   openModal(
     `<h2>💬 会話を始める</h2>
-     <p class="muted small">タスクを作らずに、このリポジトリについて Claude と話せます（質問・調べもの・相談など）。worktree やブランチは作らず、コミットやマージもしません。</p>
+     <p class="muted small">タスクを作らずに、このリポジトリについてエージェントと話せます（質問・調べもの・相談など）。worktree やブランチは作らず、コミットやマージもしません。</p>
+     ${agentFieldHtml('c', undefined, { orchestration: false })}
      <div class="field"><span>メッセージ</span><div id="cSkill" class="skill-slot"></div><textarea id="cMsg" rows="6" placeholder="例: このリポジトリの全体の構成を教えて"></textarea></div>
      <label class="field"><span>タイトル（省略するとメッセージの1行目）</span><input id="cTitle" /></label>
      ${sessionFieldHtml('c')}
@@ -1327,11 +1368,12 @@ function newChat() {
     () => {
       $('cMsg').focus();
       fillSessionField('c');
+      bindAgentField('c', (v) => toggleSessionField('c', v));
       let skill = null;
       const drawSkill = () => renderSkillSlot('cSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
       const submit = async () => {
-        const id = await runBusy('会話を始めています…', () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: readSessionField('c'), skill }));
+        const id = await runBusy('会話を始めています…', () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: $('cAgent').value === 'claude' ? readSessionField('c') : { mode: 'new' }, skill, agent: $('cAgent').value }));
         if (id) {
           closeModal();
           select(id);
@@ -1393,7 +1435,7 @@ async function openSkillPicker(current, onPick) {
   };
   box.innerHTML = `
     <div class="sk-head"><h2>スキルを選ぶ</h2><button type="button" class="icon" id="skClose">✕</button></div>
-    <p class="muted small">1つだけ選べます。選んだスキルは、指示の先頭に <code>/スキル名</code> として付けて Claude に渡します。</p>
+    <p class="muted small">1つだけ選べます。選んだスキルは、Claude Code には指示の先頭に <code>/スキル名</code> として、ほかのエージェントには SKILL.md の場所を添えて渡します。</p>
     <input id="skSearch" placeholder="名前や説明で絞り込む" autocomplete="off" />
     <div class="skill-grid" id="skGrid"></div>
     ${skills.length ? '' : '<p class="muted small">使えるスキルが見つかりません。<code>.claude/skills/&lt;名前&gt;/SKILL.md</code>（このリポジトリ）か <code>~/.claude/skills/</code> に置くと、ここに出ます。</p>'}`;
@@ -1539,7 +1581,7 @@ function openIssueModal(prefill = '') {
       );
       refreshGh();
       fillSessionField('n');
-      bindAgentField('n');
+      bindAgentField('n', (v) => toggleSessionField('n', firstAgentOf(v)));
       let skill = state.board.settings.defaultSkill || null;
       const drawSkill = () => renderSkillSlot('nSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
@@ -1632,7 +1674,7 @@ async function openPr(c) {
   const def = c.prBase && others.includes(c.prBase) ? c.prBase : c.baseBranch;
   const opt = (b) => `<option value="${esc(b)}" ${b === def ? 'selected' : ''}>${esc(b)}${b === c.baseBranch ? '（ベース）' : ''}</option>`;
   const title = c.issue ? c.title.replace(/^#\d+\s*/, '') : c.title;
-  const body = [c.issue ? `Closes #${c.issue.number}\n` : '', c.lastMessage ? `${c.lastMessage}\n` : '', '---\nClaude Agent Kanban のタスクから作成しました。'].join('\n').trim();
+  const body = [c.issue ? `Closes #${c.issue.number}\n` : '', c.lastMessage ? `${c.lastMessage}\n` : '', '---\nAgent Kanban のタスクから作成しました。'].join('\n').trim();
   const updating = !!c.prUrl;
   openModal(
     `<h2>${updating ? 'PR を更新' : 'PR を作成'}</h2>
@@ -1677,6 +1719,14 @@ async function openPr(c) {
   );
 }
 
+// 設定の「使うエージェント」の1つ分。チェックを付けたときだけ、コマンド・モデルなどの欄を出す
+function agentConfigHtml(a, s, body) {
+  const on = enabledAgents(s).includes(a);
+  return `<div class="agent-cfg ${on ? 'on' : ''}" data-agent="${a}">
+    <label class="check agent-cfg-head"><input type="checkbox" class="sUse" value="${a}" ${on ? 'checked' : ''} /> <b>${esc(agentLabel(a))}</b> を使う</label>
+    <div class="agent-cfg-body" ${on ? '' : 'hidden'}>${body}</div></div>`;
+}
+
 async function openSettings() {
   const s = state.board.settings;
   // ブランチ一覧は git を何回も起動するので（Windows だと遅い）、待たずにモーダルを開いてから後で入れる
@@ -1697,7 +1747,7 @@ async function openSettings() {
        <small>レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。</small></label>
      <label class="field"><span>ブランチの命名規則（自然言語で書けます）</span>
        <textarea id="sBranchRule" rows="2" placeholder="例: feature/<Issue番号>-<内容を表す短い英語> にする。Issue がないときは feature/<内容を表す短い英語>">${esc(s.branchNamingRule || '')}</textarea>
-       <small>書いておくと、タスクの開始時に Claude がこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。</small></label>
+       <small>書いておくと、タスクの開始時にそのタスクのエージェントがこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。</small></label>
      <div class="field">
        <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> Issue のステータスを自動で変える（GitHub Projects）</label>
        <small>Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。</small>
@@ -1714,55 +1764,76 @@ async function openSettings() {
      <label class="field"><span>権限モード</span>
        <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
        <small>自動で許可されない操作は、カードに「承認待ち」として表示されます。</small></label>
-     <label class="field"><span>最初から許可しておくツール（カンマか改行で区切る）</span>
-       <textarea id="sAllowed" rows="2" placeholder="例: Bash(npm test:*), Bash(git status), WebSearch">${esc(s.allowedTools)}</textarea></label>
-     <div class="row">
-       <label class="field"><span>同時に動かす数</span><input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
-     </div>
+     <label class="field"><span>同時に動かす数</span><input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
        <small>「＋ 新しいタスク」と「Issue から作成」を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
-     <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前に Claude と対話して仕様を詰める</label>
+     <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上の 🔔）</label>
-     <div class="row">
-       <label class="field"><span>週間上限のリセット曜日（上部の「今週」の区切り）</span>
-         <select id="sResetDay"><option value="">自動（Claude から届く日時を使う）</option>
-         ${'日月火水木金土'.split('').map((d, i) => `<option value="${i}" ${String(s.weeklyResetDay) === String(i) ? 'selected' : ''}>${d}曜日</option>`).join('')}</select></label>
-       <label class="field"><span>リセット時刻</span><input id="sResetTime" type="time" value="${esc(s.weeklyResetTime || '00:00')}" /></label>
-     </div>
-     <small class="field-note">Claude の使用状況（/usage）に出る週間上限のリセット日時に合わせます。自動のときは、Claude がリセット日時を知らせてくるまで月曜 0:00 で区切ります。</small>
-
-     <h3 class="s-section">エージェントとオーケストレーション</h3>
-     <div class="row">
-       <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath || 'claude')}" /></label>
-       <label class="field"><span>Claude のモデル（空なら既定）</span><input id="sModel" placeholder="例: sonnet / opus" value="${esc(s.model || '')}" /></label>
-     </div>
-     <div class="row">
-       <label class="field"><span>codex コマンドのパス</span><input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
-       <label class="field"><span>Codex のモデル（空なら既定）</span><input id="sCodexModel" placeholder="例: gpt-5-codex" value="${esc(s.codexModel || '')}" /></label>
-     </div>
-     <div class="row">
-       <label class="field"><span>gemini コマンドのパス</span><input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
-       <label class="field"><span>Gemini のモデル（空なら既定）</span><input id="sGeminiModel" placeholder="例: gemini-2.5-pro" value="${esc(s.geminiModel || '')}" /></label>
-     </div>
+     <h3 class="s-section">使うエージェント</h3>
+     <small class="muted s-note">チェックを付けたエージェントだけ、コマンドとモデルを設定でき、タスク・会話・リレー・競争で選べます（1つ以上）。</small>
+     ${agentConfigHtml('claude', s, `
+       <div class="row">
+         <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath || 'claude')}" /></label>
+         <label class="field"><span>モデル（空なら既定）</span><input id="sModel" placeholder="例: sonnet / opus" value="${esc(s.model || '')}" /></label>
+       </div>
+       <label class="field"><span>最初から許可しておくツール（カンマか改行で区切る）</span>
+         <textarea id="sAllowed" rows="2" placeholder="例: Bash(npm test:*), Bash(git status), WebSearch">${esc(s.allowedTools)}</textarea></label>
+       <div class="row">
+         <label class="field"><span>週間上限のリセット曜日（上部の「今週」の区切り）</span>
+           <select id="sResetDay"><option value="">自動（Claude から届く日時を使う）</option>
+           ${'日月火水木金土'.split('').map((d, i) => `<option value="${i}" ${String(s.weeklyResetDay) === String(i) ? 'selected' : ''}>${d}曜日</option>`).join('')}</select></label>
+         <label class="field"><span>リセット時刻</span><input id="sResetTime" type="time" value="${esc(s.weeklyResetTime || '00:00')}" /></label>
+       </div>
+       <small class="field-note">Claude の使用状況（/usage）に出る週間上限のリセット日時に合わせます。自動のときは、Claude がリセット日時を知らせてくるまで月曜 0:00 で区切ります。</small>`)}
+     ${agentConfigHtml('codex', s, `
+       <div class="row">
+         <label class="field"><span>codex コマンドのパス</span><input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
+         <label class="field"><span>モデル（空なら既定）</span><input id="sCodexModel" placeholder="例: gpt-5-codex" value="${esc(s.codexModel || '')}" /></label>
+       </div>`)}
+     ${agentConfigHtml('gemini', s, `
+       <div class="row">
+         <label class="field"><span>gemini コマンドのパス</span><input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
+         <label class="field"><span>モデル（空なら既定）</span><input id="sGeminiModel" placeholder="例: gemini-2.5-pro" value="${esc(s.geminiModel || '')}" /></label>
+       </div>`)}
      <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可）。</small>
-     <label class="field"><span>新しいタスクで最初から選んでおくエージェント</span>
-       <select id="sDefaultAgent">${[...AGENTS.map(([a, l]) => [a, l]), ['relay', '🔁 リレー'], ['compete', '🏁 競争']].map(([v, l]) => `<option value="${v}" ${v === (s.defaultAgent || 'claude') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+     <label class="field"><span>新しいタスク・会話で最初から選んでおくエージェント</span>
+       <select id="sDefaultAgent"></select>
+       <small>リレー・競争は、タスクを作るときに「エージェント」の欄で選べます。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
+
+     <h3 class="s-section">オーケストレーション</h3>
      <div class="field"><span>🔁 リレーの工程（上から順に、同じ worktree で引き継ぎます）</span>
        <div id="sRelay" class="relay-edit"></div>
        <button class="btn small" id="sRelayAdd" type="button">＋ 工程を足す</button>
        <small>工程ごとにエージェントと担当の説明を決めます。前の工程の変更はコミットしてから、最後の報告と一緒に次の工程へ渡します。</small></div>
      <div class="field"><span>🏁 競争させるエージェント（2つ以上）</span>
-       <div class="check-row">${AGENTS.map(([a, l]) => `<label class="check"><input type="checkbox" class="sCompete" value="${a}" ${(s.competeAgents || []).includes(a) ? 'checked' : ''} /> ${esc(l)}</label>`).join('')}</div></div>
+       <div class="check-row" id="sCompeteBox"></div>
+       <small>使うエージェントにチェックを付けたものから選べます。</small></div>
 
      <div class="modal-actions"><button class="btn ghost" id="sCancel">キャンセル</button><button class="btn primary" id="sOk">保存</button></div>`,
     () => {
       let relay = (s.relaySteps || []).map((x) => ({ ...x }));
+      // 画面でチェックを付けている「使うエージェント」
+      const using = () => AGENTS.map((x) => x[0]).filter((a) => document.querySelector(`.sUse[value="${a}"]`)?.checked);
+      let competeSel = new Set(s.competeAgents || []);
+      const drawAgents = () => {
+        const on = using();
+        const list = on.length ? on : ['claude'];
+        // 最初から選んでおくエージェント
+        const dsel = $('sDefaultAgent');
+        const cur = dsel.value || defaultAgent(s);
+        dsel.innerHTML = list.map((a) => `<option value="${a}" ${a === cur ? 'selected' : ''}>${esc(agentLabel(a))}</option>`).join('');
+        if (!list.includes(cur)) dsel.value = list[0];
+        // 競争させるエージェント
+        document.querySelectorAll('.sCompete').forEach((x) => (x.checked ? competeSel.add(x.value) : competeSel.delete(x.value)));
+        $('sCompeteBox').innerHTML = list.map((a) => `<label class="check"><input type="checkbox" class="sCompete" value="${a}" ${competeSel.has(a) ? 'checked' : ''} /> ${esc(agentLabel(a))}</label>`).join('');
+      };
       const drawRelay = () => {
+        const on = using();
         $('sRelay').innerHTML = relay
           .map(
             (st, i) => `<div class="relay-edit-row" data-i="${i}">
               <span class="relay-no">${i + 1}</span>
-              <select class="rAgent">${AGENTS.map(([a, l]) => `<option value="${a}" ${a === st.agent ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+              <select class="rAgent">${AGENTS.filter(([a]) => on.includes(a) || a === st.agent).map(([a, l]) => `<option value="${a}" ${a === st.agent ? 'selected' : ''}>${esc(l)}${on.includes(a) ? '' : '（使わない設定）'}</option>`).join('')}</select>
               <input class="rLabel" placeholder="工程の名前（例: 実装）" value="${esc(st.label)}" />
               <button class="icon rUp" type="button" title="上へ" ${i === 0 ? 'disabled' : ''}>↑</button>
               <button class="icon rDel" type="button" title="この工程を消す">✕</button>
@@ -1781,9 +1852,21 @@ async function openSettings() {
         return relay;
       };
       drawRelay();
+      drawAgents();
+      // 「使う」のチェックを切り替えたら、そのエージェントの欄を出し入れして、選べるエージェントを描き直す
+      document.querySelectorAll('.sUse').forEach((cb) => {
+        cb.onchange = () => {
+          const box = cb.closest('.agent-cfg');
+          box.classList.toggle('on', cb.checked);
+          box.querySelector('.agent-cfg-body').hidden = !cb.checked;
+          readRelay();
+          drawRelay();
+          drawAgents();
+        };
+      });
       $('sRelayAdd').onclick = () => {
         readRelay();
-        relay.push({ agent: 'claude', label: '', instruction: '' });
+        relay.push({ agent: $('sDefaultAgent').value || 'claude', label: '', instruction: '' });
         drawRelay();
       };
       $('sRelay').onclick = (e) => {
@@ -1819,6 +1902,11 @@ async function openSettings() {
       refreshGh();
       $('sCancel').onclick = closeModal;
       $('sOk').onclick = async () => {
+        const on = using();
+        if (!on.length) return toast('使うエージェントを1つ以上選んでください');
+        const steps = readRelay();
+        const offStep = steps.find((st) => (st.label || st.instruction) && !on.includes(st.agent));
+        if (offStep && !confirm(`リレーの工程「${offStep.label || '（名前なし）'}」の ${agentLabel(offStep.agent)} は使わない設定です。このままだとリレーを始められません。保存しますか？`)) return;
         const r = await runBusy('設定を保存しています…', () =>
           api.updateSettings({
             baseBranch: $('sBase').value,
@@ -1834,8 +1922,10 @@ async function openSettings() {
             geminiPath: $('sGemini').value.trim() || 'gemini',
             geminiModel: $('sGeminiModel').value.trim(),
             defaultAgent: $('sDefaultAgent').value,
-            relaySteps: readRelay(),
-            competeAgents: [...document.querySelectorAll('.sCompete:checked')].map((x) => x.value),
+            enabledAgents: on,
+            relaySteps: steps,
+            // 使わない設定にしたエージェントの競争の選択は覚えておく（また使う設定にしたら戻る）
+            competeAgents: [...new Set([...[...document.querySelectorAll('.sCompete:checked')].map((x) => x.value), ...[...competeSel].filter((a) => !on.includes(a))])],
             defaultSkill: defSkill || '',
             issueStatusSync: $('sIssueSync').checked,
             suggestSkillsOnDone: $('sSuggestSkills').checked,
@@ -1872,7 +1962,7 @@ async function chooseRepo() {
   if (!distros.length) return pickRepo();
   openModal(
     `<h2>リポジトリを選ぶ</h2>
-     <p class="muted small">選んだフォルダが WSL の中なら、git と claude も WSL の中で動かします（WSL の中にも git と Claude Code が必要です）。</p>
+     <p class="muted small">選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。</p>
      <div class="repo-choices">
        <button class="btn repo-choice" data-pick="">🪟 <b>このパソコンのフォルダを選ぶ</b><small>C:\\Users\\… など</small></button>
        ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">🐧 <b>${esc(d)} のフォルダを選ぶ</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}
@@ -2151,22 +2241,19 @@ setInterval(() => {
   document.querySelectorAll('.elapsed[data-since]').forEach((el) => (el.textContent = elapsed(Number(el.dataset.since))));
 }, 1000);
 
-// git / claude が見つからないときは画面上部に案内を出す
+// git や、使う設定のエージェントのコマンドが見つからないときは画面上部に案内を出す
 async function checkEnv() {
   const env = await run(() => api.checkEnv());
   if (!env) return;
   const msgs = [];
+  const on = enabledAgents();
+  const has = (a) => (env.agents ? !!env.agents[a] : a === 'claude' ? !!env.claude : true);
   if (env.wsl) {
     if (!env.git) msgs.push(`${env.wsl}（WSL）の中に git が見つかりません。${env.wsl} のターミナルで sudo apt install git を実行してください。`);
-    if (!env.claude) msgs.push(`${env.wsl}（WSL）の中に claude が見つかりません。${env.wsl} のターミナルで Claude Code をインストールしてログインしてください（このリポジトリのタスクは ${env.wsl} の中で動きます）。`);
-  } else if (!env.git) msgs.push(`git が見つかりません。${env.platform === 'win32' ? 'Git for Windows（https://git-scm.com/）' : env.platform === 'darwin' ? 'ターミナルで xcode-select --install を実行するか Homebrew で git' : 'git'} をインストールしてから、アプリを再起動してください。`);
-  if (!env.wsl && !env.claude) msgs.push('claude コマンドが見つかりません。Claude Code をインストールしてログインするか、⚙ 設定で claude のフルパスを指定してください（ターミナルで which claude、Windows なら where claude で調べられます）。');
-  // 新しいタスクで最初から選んでおくエージェント（リレー・競争ならその中のエージェント）が見つからないとき
-  const s = state.board.settings || {};
-  const d = s.defaultAgent || 'claude';
-  const used = new Set(d === 'relay' ? (s.relaySteps || []).map((x) => x.agent) : d === 'compete' ? s.competeAgents || [] : [d]);
-  for (const a of ['codex', 'gemini']) {
-    if (used.has(a) && env.agents && !env.agents[a]) msgs.push(`${a} コマンドが見つかりません。${agentLabel(a)} を使うタスク（リレー・競争を含む）は失敗します。インストールするか、⚙ 設定で ${a} のフルパスを指定してください。`);
+    for (const a of on) if (!has(a)) msgs.push(`${env.wsl}（WSL）の中に ${a} が見つかりません。${env.wsl} のターミナルで ${agentLabel(a)} をインストールしてログインしてください（このリポジトリのタスクは ${env.wsl} の中で動きます）。`);
+  } else {
+    if (!env.git) msgs.push(`git が見つかりません。${env.platform === 'win32' ? 'Git for Windows（https://git-scm.com/）' : env.platform === 'darwin' ? 'ターミナルで xcode-select --install を実行するか Homebrew で git' : 'git'} をインストールしてから、アプリを再起動してください。`);
+    for (const a of on) if (!has(a)) msgs.push(`${a} コマンドが見つかりません。${agentLabel(a)} をインストールしてログインするか、⚙ 設定で ${a} のフルパスを指定してください（ターミナルで which ${a}、Windows なら where ${a} で調べられます）。使わないなら、⚙ 設定の「使うエージェント」でチェックを外してください。`);
   }
   const el = $('envBanner');
   el.innerHTML = msgs.map((m) => `<div>⚠ ${esc(m)}</div>`).join('');
@@ -2177,7 +2264,7 @@ async function checkEnv() {
 api.appInfo().then(
   (i) => {
     $('appVersion').textContent = `v${i.version}${i.packaged ? '' : '（開発版）'}`;
-    $('appVersion').title = `Claude Agent Kanban v${i.version}`;
+    $('appVersion').title = `Agent Kanban v${i.version}`;
   },
   () => {},
 );
