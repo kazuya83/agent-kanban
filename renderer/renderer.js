@@ -601,6 +601,23 @@ function renderInterruptBanner() {
 
 // ---------------- 詳細パネル ----------------
 
+// 作ったカードがまだ手元のボードに無ければ、ボードを読み直す。
+// board:changed は少し遅れて届く（遠隔操作中はホストからの中継なので、遅れたり届かなかったりもする）ので、それを待たずに一覧へ出す
+async function refreshBoardFor(ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+  if (!list.length || list.every((id) => card(id))) return;
+  const board = await run(() => api.getBoard());
+  if (!board) return;
+  state.board = board;
+  renderBoard();
+}
+
+// 作ったカードを開く（一覧にまだ無ければ、読み直してから）
+async function selectNew(id) {
+  await refreshBoardFor(id);
+  if (card(id)) select(id);
+}
+
 async function select(id) {
   state.selected = id;
   state.headSig = '';
@@ -920,7 +937,7 @@ $('detailHead').addEventListener('click', async (e) => {
   }
   if (act === 'compare') {
     const id = await runBusy('比べてもらう会話を始めています…', () => api.compareCompetitors(c.id));
-    if (id) select(id);
+    if (id) selectNew(id);
     return;
   }
   if (act === 'discard' && isChat(c)) {
@@ -1580,7 +1597,7 @@ function newTask(opts = {}) {
         const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value, fromChat: from ? from.id : undefined }));
         if (id) {
           closeModal();
-          select(id);
+          selectNew(id);
         }
       };
       $('nOk').onclick = submit;
@@ -1642,7 +1659,7 @@ function newChat() {
         const id = await runBusy('会話を始めています…', () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: $('cAgent').value === 'claude' ? readSessionField('c') : { mode: 'new' }, skill, agent: $('cAgent').value }));
         if (id) {
           closeModal();
-          select(id);
+          selectNew(id);
         }
       };
       $('cOk').onclick = submit;
@@ -1816,6 +1833,7 @@ async function createFromIssues(numbers, extra, autoStart, session, skill, agent
   if (!r) return false;
   if (r.errors.length) toast(r.errors.join('\n'));
   else toast(`${r.ids.length} 件のタスクを Issue から作りました`, 'ok');
+  await refreshBoardFor(r.ids);
   if (r.ids.length === 1) select(r.ids[0]);
   return true;
 }
@@ -2824,8 +2842,7 @@ $('notifPanel').addEventListener('click', async (e) => {
     const to = (r && r.cardId) || (c && c.id);
     if (r && to) {
       closeNotifications();
-      if (!card(to)) state.board = await api.getBoard();
-      select(to);
+      selectNew(to);
     }
     return;
   }
