@@ -76,6 +76,8 @@ contextBridge.exposeInMainWorld('api', {
   remoteRefreshPair: () => call('remote:refreshPair'),
   remoteClearPairs: () => call('remote:clearPairs'),
   remoteConnect: (p) => call('remote:connect', p || {}),
+  remoteResume: () => call('remote:resume'),
+  remoteCancelResume: () => call('remote:cancelResume'),
   remoteDisconnect: () => call('remote:disconnect'),
   remoteForgetToken: () => call('remote:forgetToken'),
   onRemote: (cb) => ipcRenderer.on('remote:changed', (_e, d) => cb(d)),
