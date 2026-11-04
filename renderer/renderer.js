@@ -427,9 +427,31 @@ function renderCostInfo(settings) {
   if (wait > 0 && wait < 2 ** 31 - 1) weekRollTimer = setTimeout(async () => ((state.board = await api.getBoard()), renderBoard()), wait + 1000);
 }
 
+function renderRemoteInfo() {
+  const el = $('remoteInfo');
+  const rs = state.board.remoteSession;
+  if (!rs || rs.role === 'local') {
+    el.classList.add('hidden');
+    el.textContent = '';
+    return;
+  }
+  el.classList.remove('hidden');
+  el.classList.toggle('host', rs.role === 'host');
+  if (rs.role === 'client') {
+    el.textContent = `遠隔操作中 → ${rs.client.host}:${rs.client.port}`;
+    el.title = 'ホストのボードを表示・操作しています。クリックで設定を開きます';
+  } else {
+    const code = rs.host.pairCode ? ` ・ コード ${rs.host.pairCode}` : '';
+    el.textContent = `ホスト待ち受け :${rs.host.port}${code}`;
+    el.title = 'このマシンで遠隔ホストとして待ち受けています。クリックで設定を開きます';
+  }
+  el.onclick = () => openSettings();
+}
+
 function renderBoard() {
   const { settings, cards } = state.board;
   renderInterruptBanner();
+  renderRemoteInfo();
   $('repoBtn').innerHTML = icon('folder') + esc(settings.repoPath || 'リポジトリを選ぶ');
   // 会話は同時実行数に数えない
   const running = cards.filter((c) => c.status === 'running' && !isChat(c)).length;
@@ -1999,6 +2021,12 @@ async function openSettings() {
        <small>「＋ 新しいタスク」と「Issue から作成」を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上のベル）</label>
+     <label class="check"><input type="checkbox" id="sClaudeRc" ${s.claudeRemoteControl ? 'checked' : ''} /> Claude カード起動時に公式 Remote Control（--remote-control）も付ける（claude.ai/code や Claude アプリから続けられる）</label>
+
+     <h3 class="s-section">遠隔操作（SSH トンネル）</h3>
+     <small class="muted s-note">Mac mini などで作業し、別の PC（Windows など）から同じボードを操作できます。通信はアプリが 127.0.0.1 だけを待ち受けるので、先に SSH ポート転送を張ってください。</small>
+     <div class="remote-box" id="sRemoteBox">遠隔の状態を読み込み中…</div>
+
      <h3 class="s-section">使うエージェント</h3>
      <small class="muted s-note">チェックを付けたエージェントだけ、コマンドとモデルを設定でき、タスク・会話・Pipeline・競争で選べます（1つ以上）。</small>
      ${agentConfigHtml('claude', s, `
@@ -2182,6 +2210,62 @@ async function openSettings() {
       // 「Issue のステータスを自動で変える」にチェックがあるときだけ、項目名と選択肢の指定を出す
       $('sIssueSync').onchange = () => ($('sStatusMap').hidden = !$('sIssueSync').checked);
       refreshGh();
+      const drawRemote = async () => {
+        const box = $('sRemoteBox');
+        if (!box) return;
+        let rs;
+        try {
+          rs = await api.remoteStatus();
+        } catch (err) {
+          box.innerHTML = `<div class="warn">${esc(err.message)}</div>`;
+          return;
+        }
+        const port = rs.host.port || 17831;
+        const ssh = `ssh -L ${port}:127.0.0.1:${port} <user>@<host>`;
+        const hostBlock = rs.host.listening
+          ? `<div><strong>ホストとして待ち受け中</strong>（ポート ${esc(port)}・接続 ${rs.host.clients || 0}・ペア済み ${rs.host.pairedCount || 0}）</div>
+             <div>ペアリングコード: <span class="pair-code">${rs.host.pairCode ? esc(rs.host.pairCode) : '（期限切れ・再発行してください）'}</span></div>
+             <div class="row">
+               <button class="btn small" type="button" id="rRefreshPair">コードを再発行</button>
+               <button class="btn small" type="button" id="rClearPairs">ペアを破棄</button>
+               <button class="btn small danger" type="button" id="rStopHost">ホストを停止</button>
+             </div>
+             <div><small class="muted">操作側で次のトンネルを張ってから接続します:</small><div class="remote-ssh">${esc(ssh)}</div></div>`
+          : `<div><strong>ホスト（作業側）</strong></div>
+             <label class="field"><span>待ち受けポート</span><input id="rHostPort" type="number" min="1024" max="65535" value="${esc(port)}" /></label>
+             <button class="btn small primary" type="button" id="rStartHost">ホストを開始（ペアリングコードを出す）</button>
+             <div><small class="muted">開始後、操作側で SSH トンネルを張り、下の「クライアント」からコードで接続します。</small><div class="remote-ssh">${esc(ssh)}</div></div>`;
+        const clientBlock = rs.client.connected
+          ? `<div><strong>クライアントとして接続中</strong> → ${esc(rs.client.host)}:${esc(rs.client.port)}</div>
+             <button class="btn small danger" type="button" id="rDisconnect">切断してローカルボードに戻る</button>`
+          : `<div><strong>クライアント（操作側）</strong></div>
+             <div class="row">
+               <label class="field"><span>接続先ホスト</span><input id="rClientHost" value="${esc(rs.client.host || '127.0.0.1')}" /></label>
+               <label class="field"><span>ポート</span><input id="rClientPort" type="number" min="1024" max="65535" value="${esc(rs.client.port || 17831)}" /></label>
+             </div>
+             <label class="field"><span>ペアリングコード（初回のみ。トークンがあれば空で再接続）</span><input id="rPairCode" placeholder="6桁" maxlength="8" /></label>
+             <div class="row">
+               <button class="btn small primary" type="button" id="rConnect">${rs.client.hasToken ? '保存したトークンで接続' : 'コードでペアリング'}</button>
+               ${rs.client.hasToken ? '<button class="btn small" type="button" id="rForgetToken">トークンを忘れる</button>' : ''}
+             </div>
+             <small class="muted">SSH 例: <code>${esc(ssh)}</code>（トンネル後はホストに 127.0.0.1 を指定）</small>`;
+        box.innerHTML = `${hostBlock}<hr style="border:0;border-top:1px solid var(--line);margin:4px 0" />${clientBlock}`;
+        const busy = (label, fn) => runBusy(label, fn).then((ok) => { if (ok !== undefined) drawRemote(); });
+        if ($('rStartHost')) $('rStartHost').onclick = () => busy('ホストを開始しています…', () => api.remoteStartHost({ port: $('rHostPort').value }));
+        if ($('rStopHost')) $('rStopHost').onclick = () => busy('ホストを停止しています…', () => api.remoteStopHost());
+        if ($('rRefreshPair')) $('rRefreshPair').onclick = () => busy('コードを発行しています…', () => api.remoteRefreshPair());
+        if ($('rClearPairs')) $('rClearPairs').onclick = () => {
+          if (!confirm('ペアリング済みのクライアントをすべて無効にしますか？')) return;
+          busy('ペアを破棄しています…', () => api.remoteClearPairs());
+        };
+        if ($('rConnect')) $('rConnect').onclick = () =>
+          busy('接続しています…', () =>
+            api.remoteConnect({ host: $('rClientHost').value, port: $('rClientPort').value, code: $('rPairCode').value.trim() }),
+          );
+        if ($('rDisconnect')) $('rDisconnect').onclick = () => busy('切断しています…', () => api.remoteDisconnect());
+        if ($('rForgetToken')) $('rForgetToken').onclick = () => busy('トークンを消しています…', () => api.remoteForgetToken());
+      };
+      drawRemote();
       $('sCancel').onclick = closeModal;
       $('sOk').onclick = async () => {
         const on = using();
@@ -2215,6 +2299,7 @@ async function openSettings() {
             issueStatusSync: $('sIssueSync').checked,
             suggestSkillsOnDone: $('sSuggestSkills').checked,
             specCheck: $('sSpecCheck').checked,
+            claudeRemoteControl: $('sClaudeRc').checked,
             weeklyResetDay: $('sResetDay').value,
             weeklyResetTime: $('sResetTime').value || '00:00',
             statusFieldName: $('sStatusField').value.trim(),
@@ -2537,6 +2622,12 @@ $('notifPanel').addEventListener('click', async (e) => {
 });
 
 // ---------------- 更新の受信 ----------------
+
+api.onRemote((rs) => {
+  if (!state.board) state.board = { settings: {}, cards: [] };
+  state.board.remoteSession = rs;
+  renderRemoteInfo();
+});
 
 api.onBoard((board) => {
   state.board = board;

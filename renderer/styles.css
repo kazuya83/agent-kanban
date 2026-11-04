@@ -105,6 +105,11 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .spacer { flex: 1; }
 .pill { background: var(--panel-2); border: 1px solid var(--line); padding: 3px 10px; border-radius: 999px; color: var(--muted); }
 .pill.cost { font-family: var(--mono); color: var(--text); }
+.pill.remote-pill { color: var(--run); border-color: color-mix(in srgb, var(--run) 45%, var(--line)); cursor: pointer; }
+.pill.remote-pill.host { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.remote-box { display: grid; gap: 12px; padding: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; margin: 8px 0 4px; }
+.remote-box .pair-code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.2em; font-weight: 600; color: var(--text); }
+.remote-ssh { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 
 /* レイアウト */
 .layout { flex: 1; display: flex; min-height: 0; }
