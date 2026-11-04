@@ -623,6 +623,15 @@ test('仕様の確認: 内容が詰まっていなければ開発を始めずに
     await waitFor(() => c.status === 'review');
     assert.strictEqual(c.specState, 'pending');
 
+    // 本文とブロックが別々のメッセージで来ても、仕様の確認のまま、フォームにする
+    agents.send(c.id, '[vague] [split] まだ');
+    await waitFor(() => c.status === 'review');
+    assert.strictEqual(c.specState, 'pending');
+    assert.strictEqual(c.awaitingReply, true);
+    assert.deepStrictEqual(c.specQuestions, [{ question: '色はどうしますか？', header: '', multiSelect: false, options: [] }]);
+    assert.match(c.lastText, /色はどうしますか？$/);
+    assert.strictEqual(c.lastMessage, '色はどうしますか？', 'カードの一言に印やブロックを出さない');
+
     // 答えると仕様が詰まって、開発を始める
     agents.send(c.id, '設定画面で [spec-ok]');
     await waitFor(() => c.permissions.length === 1);

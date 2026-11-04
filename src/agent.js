@@ -1583,8 +1583,7 @@ class AgentManager extends EventEmitter {
         for (const b of (ev.message && ev.message.content) || []) {
           if (b.type === 'text' && b.text && b.text.trim()) {
             // 仕様の確認の印は覚えておいて、画面には出さない
-            c.lastSpecUnclear = hasSpecMarker(b.text);
-            const text = this.takeSpecQuestions(c, c.lastSpecUnclear ? stripSpecMarker(b.text) : b.text);
+            const text = this.takeSpecQuestions(c, b.text);
             if (!text.trim()) continue;
             this.log(c, 'text', text);
             c.lastText = text.trim();
@@ -1654,8 +1653,7 @@ class AgentManager extends EventEmitter {
         break;
       case 'text': {
         // 仕様の確認の印は覚えておいて、画面には出さない（Claude のときと同じ）
-        c.lastSpecUnclear = hasSpecMarker(a.text);
-        const text = this.takeSpecQuestions(c, c.lastSpecUnclear ? stripSpecMarker(a.text) : String(a.text));
+        const text = this.takeSpecQuestions(c, a.text);
         if (!text.trim()) break;
         this.log(c, 'text', text, who);
         c.lastText = text.trim();
@@ -1764,11 +1762,18 @@ class AgentManager extends EventEmitter {
     return entry;
   }
 
-  // 仕様の確認の返事なら、質問フォーム用の JSON ブロックを取り出してカードに覚えておく（ブロックは画面に出さない）
-  takeSpecQuestions(c, text) {
-    const { text: body, questions } = extractSpecQuestions(text);
-    if (c.lastSpecUnclear) c.specQuestions = questions;
-    return body;
+  // 返事の文章から仕様の確認の印と、質問フォーム用の JSON ブロックを取り出してカードに覚えておく（どちらも画面に出さない）
+  takeSpecQuestions(c, raw) {
+    const marked = hasSpecMarker(raw);
+    const { text, questions } = extractSpecQuestions(marked ? stripSpecMarker(raw) : String(raw || ''));
+    // 印付きの返事のすぐあとに、ブロックだけが別のメッセージで来たときは、同じ質問のフォームとして扱う（仕様が詰まったとは見なさない）
+    if (!marked && !text.trim() && questions && c.lastSpecUnclear) {
+      c.specQuestions = questions;
+      return text;
+    }
+    c.lastSpecUnclear = marked;
+    if (marked) c.specQuestions = questions;
+    return text;
   }
 
   // ---------- 承認（--permission-prompt-tool） ----------

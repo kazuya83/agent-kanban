@@ -129,6 +129,13 @@ async function turn(prompt, sessionId) {
   }
   // [vague] があれば（仕様の確認を頼まれていて、まだ答え [spec-ok] をもらっていなければ）、印を付けて質問して止まる
   if (prompt.includes('[vague]') && prompt.includes('[[SPEC_UNCLEAR]]') && !prompt.includes('[spec-ok]')) {
+    // [split] なら、質問の本文とフォーム用のブロックを別々のメッセージで返す
+    if (prompt.includes('[split]')) {
+      out({ type: 'assistant', message: { content: [{ type: 'text', text: '[[SPEC_UNCLEAR]]\n内容が詰まっていないので、開発を開始できません。\n1. 色はどうしますか？' }] } });
+      out({ type: 'assistant', message: { content: [{ type: 'text', text: '```spec-questions\n[{"question":"色はどうしますか？","options":[]}]\n```' }] } });
+      out({ type: 'result', subtype: 'success', is_error: false, result: '[[SPEC_UNCLEAR]]\n色はどうしますか？\n```spec-questions\n[]\n```', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
+      return;
+    }
     out({ type: 'assistant', message: { content: [{ type: 'text', text: '[[SPEC_UNCLEAR]]\n内容が詰まっていないので、開発を開始できません。\n1. 対象の画面はどれですか？\n\n```spec-questions\n[{"question":"対象の画面はどれですか？","header":"画面","options":[{"label":"設定画面（おすすめ）","description":"いちばん使われる画面"},{"label":"一覧画面"}]}]\n```' }] } });
     out({ type: 'result', subtype: 'success', is_error: false, result: '対象の画面はどれですか？', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
     return;
