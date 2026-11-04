@@ -222,14 +222,22 @@ release_built() {
   fi
 
   step "v$version を Release として公開しています"
+  local assets=("$dir"/agent-kanban-"$version"-*.dmg "$dir"/agent-kanban-"$version"-*.exe
+    "$dir"/agent-kanban-"$version"-*.zip "$dir"/agent-kanban-"$version"-*.AppImage)
+  # 説明は前の版からの変更点を Markdown でまとめる（作れなかったら GitHub の自動の説明にする）
+  local notes notes_opt=(--generate-notes)
+  notes="$(mktemp -t agent-kanban-notes)"
+  if (cd "$wt" && node scripts/release-notes.js --version "$version" --target "$target" "${assets[@]}") >"$notes" 2>>"$log"; then
+    notes_opt=(--notes-file "$notes")
+  fi
   (
     cd "$wt" && "$gh_bin" release create "v$version" \
       --target "$target" \
       --title "Agent Kanban v$version" \
-      --generate-notes \
-      "$dir"/agent-kanban-"$version"-*.dmg "$dir"/agent-kanban-"$version"-*.exe \
-      "$dir"/agent-kanban-"$version"-*.zip "$dir"/agent-kanban-"$version"-*.AppImage
-  ) >>"$log" 2>&1 || { fail "v$version の Release を出せませんでした"; return 1; }
+      "${notes_opt[@]}" \
+      "${assets[@]}"
+  ) >>"$log" 2>&1 || { rm -f "$notes"; fail "v$version の Release を出せませんでした"; return 1; }
+  rm -f "$notes"
   "${G[@]}" fetch origin --tags --quiet >>"$log" 2>&1
   url="$(cd "$wt" && "$gh_bin" release view "v$version" --json url -q .url 2>>"$log")"
   release_msg="v$version を公開しました${url:+: $url}"

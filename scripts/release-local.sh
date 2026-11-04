@@ -40,10 +40,16 @@ gh release view "v$version" >/dev/null 2>&1 && die "v$version はもう公開さ
 scripts/build-all.sh --version "$version"
 
 info "v$version を公開する"
+assets=(dist/*.dmg dist/*.exe dist/*.zip dist/*.AppImage)
+# 説明は前の版からの変更点を Markdown でまとめる（作れなかったら GitHub の自動の説明にする）
+notes="$(mktemp -t agent-kanban-notes)"
+trap 'rm -f "$notes"' EXIT
+notes_opt=(--generate-notes)
+node scripts/release-notes.js --version "$version" "${assets[@]}" >"$notes" && notes_opt=(--notes-file "$notes")
 gh release create "v$version" \
   --target "$(git rev-parse HEAD)" \
   --title "Agent Kanban v$version" \
-  --generate-notes \
-  dist/*.dmg dist/*.exe dist/*.zip dist/*.AppImage
+  "${notes_opt[@]}" \
+  "${assets[@]}"
 git fetch origin --tags --quiet
 info "公開しました: $(gh release view "v$version" --json url -q .url)"
