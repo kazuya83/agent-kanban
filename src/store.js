@@ -24,14 +24,14 @@ const DEFAULT_SETTINGS = {
   weeklyResetTime: '00:00', // 週間上限がリセットされる時刻（HH:MM・ローカル時刻）。weeklyResetDay を決めたときに使う
   // ---- エージェント ----
   enabledAgents: DEFAULT_ENABLED_AGENTS, // 使うエージェント（チェックを付けたものだけ、コマンド・モデルを設定してタスクや会話で選べる）
-  defaultAgent: 'claude', // 新しいタスク・会話で最初から選んでおくエージェント（claude / codex / gemini。リレー・競争はタスクを作るときに選ぶ）
+  defaultAgent: 'claude', // 新しいタスク・会話で最初から選んでおくエージェント（claude / codex / gemini。Pipeline・競争はタスクを作るときに選ぶ）
   codexPath: 'codex',
   codexModel: '',
   geminiPath: 'gemini',
   geminiModel: '',
   // ---- オーケストレーション ----
-  orchestration: 'relay', // リレーと競争は排他。使うのはどちらか1つ（'relay' / 'compete'）
-  relaySteps: DEFAULT_RELAY_STEPS, // リレー: 同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ
+  orchestration: 'relay', // Pipelineと競争は排他。使うのはどちらか1つ（'relay' / 'compete'）
+  relaySteps: DEFAULT_RELAY_STEPS, // Pipeline: 同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ
   competeAgents: DEFAULT_COMPETE_AGENTS, // 競争: 同じタスクを、これらのエージェントで並列に解かせる
 };
 
@@ -68,9 +68,9 @@ function migrateSettings(settings, raw, cards) {
     for (const c of cards) if (c && c.agent) used.add(c.agent);
     settings.enabledAgents = cleanEnabledAgents([...used]);
   } else settings.enabledAgents = cleanEnabledAgents(raw.enabledAgents);
-  // リレーと競争は排他（どちらか1つ）。知らない値ならリレー
+  // Pipelineと競争は排他（どちらか1つ）。知らない値ならPipeline
   settings.orchestration = cleanOrchestration(settings.orchestration);
-  // 「最初から選んでおくエージェント」にはリレー・競争を選べなくなったので、1つのエージェントにする
+  // 「最初から選んでおくエージェント」にはPipeline・競争を選べなくなったので、1つのエージェントにする
   if (!isAgent(settings.defaultAgent) || !settings.enabledAgents.includes(settings.defaultAgent)) settings.defaultAgent = settings.enabledAgents[0];
 }
 

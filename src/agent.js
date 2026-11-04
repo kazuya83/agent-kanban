@@ -205,11 +205,11 @@ function promptWithSkill(agent, skill, prompt) {
   return `（スキル「${skill}」の手順に従ってください。手順は .claude/skills/${name}/SKILL.md か ~/.claude/skills/${name}/SKILL.md に書かれています）\n\n${prompt}`;
 }
 
-// ---------- リレー（工程ごとに別のエージェントへ順番に引き継ぐ） ----------
+// ---------- Pipeline（工程ごとに別のエージェントへ順番に引き継ぐ） ----------
 
 function relayHeader(c, i) {
   const st = c.relay.steps[i];
-  return `あなたは、複数のエージェントで順番に作業を引き継ぐ「リレー」の、工程 ${i + 1}/${c.relay.steps.length}「${st.label}」の担当です。`;
+  return `あなたは、複数のエージェントで順番に作業を引き継ぐ「Pipeline」の、工程 ${i + 1}/${c.relay.steps.length}「${st.label}」の担当です。`;
 }
 
 // 最初の工程の指示（タスクの指示 + 担当の説明）
@@ -630,7 +630,7 @@ class AgentManager extends EventEmitter {
   /**
    * タスクを作る。エージェントの選び方（mode）で作るカードが変わる
    * - claude / codex / gemini: そのエージェントで1枚
-   * - relay: 設定のリレーの工程で1枚（同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ）
+   * - relay: 設定のPipelineの工程で1枚（同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ）
    * - compete: 設定の競争のエージェントの数だけ（同じタスクを、それぞれ別の worktree で並列に解く）
    * @returns {object[]} 作ったカード
    */
@@ -639,17 +639,17 @@ class AgentManager extends EventEmitter {
     const mode = agent || providers.defaultAgentOf(s);
     const chat = fromChat ? this.store.card(fromChat) : null;
     const from = isChat(chat) ? chat : null;
-    // リレーと競争は排他。設定で選んでいない方は使えない
+    // Pipelineと競争は排他。設定で選んでいない方は使えない
     if ((mode === 'relay' || mode === 'compete') && providers.cleanOrchestration(s.orchestration) !== mode) {
-      const name = (m) => (m === 'relay' ? 'リレー' : '競争');
-      throw new Error(`${name(mode)}は使わない設定になっています（リレーと競争はどちらか1つだけ使えます）。⚙ 設定の「オーケストレーション」で${name(mode)}を選んでください`);
+      const name = (m) => (m === 'relay' ? 'Pipeline' : '競争');
+      throw new Error(`${name(mode)}は使わない設定になっています（Pipelineと競争はどちらか1つだけ使えます）。⚙ 設定の「オーケストレーション」で${name(mode)}を選んでください`);
     }
     if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from });
     if (mode === 'relay') {
       const steps = providers.cleanRelaySteps(s.relaySteps);
-      if (!steps.length) throw new Error('リレーの工程がありません。設定の「リレーの工程」を決めてください');
+      if (!steps.length) throw new Error('Pipelineの工程がありません。設定の「Pipelineの工程」を決めてください');
       const off = steps.find((st) => !providers.isEnabled(s, st.agent));
-      if (off) throw new Error(`リレーの工程「${off.label}」の ${agentLabel(off.agent)} は使わない設定になっています。⚙ 設定で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
+      if (off) throw new Error(`Pipelineの工程「${off.label}」の ${agentLabel(off.agent)} は使わない設定になっています。⚙ 設定で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
       const c = this.createCard({ title, prompt, issue, session, skill, agent: steps[0].agent, relay: { steps, index: 0, history: [] }, fromChat: from });
       return [c];
     }
@@ -720,7 +720,7 @@ class AgentManager extends EventEmitter {
     return card;
   }
 
-  // 最初の指示（スキル・リレーの担当の説明を付けたもの）
+  // 最初の指示（スキル・Pipelineの担当の説明を付けたもの）
   firstPrompt(c) {
     // 仕様の確認中は、開発を始める前に内容が足りているかを判断してもらう指示を付ける
     const body = withChatContext(c.chatContext, c.prompt);
@@ -730,12 +730,12 @@ class AgentManager extends EventEmitter {
 
   // ---------- オーケストレーション ----------
 
-  // リレーにまだ次の工程があるか
+  // Pipelineにまだ次の工程があるか
   relayHasNext(c) {
     return !!(c.relay && !isChat(c) && c.relay.index < c.relay.steps.length - 1);
   }
 
-  // リレーの次の工程へ進める（同じ worktree のまま、次のエージェントで新しい会話を始める）
+  // Pipelineの次の工程へ進める（同じ worktree のまま、次のエージェントで新しい会話を始める）
   advanceRelay(c) {
     const r = c.relay;
     const cost = Math.max(0, (c.costUsd || 0) - (r.stepCostStart || 0));
@@ -748,7 +748,7 @@ class AgentManager extends EventEmitter {
     c.agent = st.agent;
     c.sessionId = null;
     c.forkNext = false;
-    this.log(c, 'system', `🔁 リレー: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」を ${agentLabel(st.agent)} に引き継ぎます`);
+    this.log(c, 'system', `🔁 Pipeline: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」を ${agentLabel(st.agent)} に引き継ぎます`);
     this.enqueue(c, buildRelayStepPrompt(c, r.index));
   }
 
@@ -876,7 +876,7 @@ class AgentManager extends EventEmitter {
     if (!c.sessions.some((x) => x.id === id)) {
       const from = c.sessions.find((x) => x.origin === 'imported' && !x.forkedTo);
       if (from) from.forkedTo = id;
-      // リレーでは工程ごとにエージェントが変わるので、どのエージェントの会話かを残す
+      // Pipelineでは工程ごとにエージェントが変わるので、どのエージェントの会話かを残す
       c.sessions.push({ id, at: Date.now(), origin: 'task', agent: agentOf(c), label: truncate(String(c.lastPromptSent || c.prompt).split('\n')[0], 60), from: from ? from.id : undefined });
     }
   }
@@ -1009,7 +1009,7 @@ class AgentManager extends EventEmitter {
       }
       c.status = 'running';
       c.startedAt = Date.now();
-      // リレー: 今の工程を最初に始めた時刻（追加指示で続けたときは変えない）
+      // Pipeline: 今の工程を最初に始めた時刻（追加指示で続けたときは変えない）
       if (c.relay && !isChat(c) && !c.relay.stepStartedAt) c.relay.stepStartedAt = c.startedAt;
       this.changed(c);
       this.launch(c).catch((err) => this.fail(c, err.message));
@@ -1391,10 +1391,10 @@ class AgentManager extends EventEmitter {
         }
         // 会話は返事が来たらいつでも続きを話せるので、「回答待ち」にはしない
         c.awaitingReply = !chat && (c.specState === 'pending' || endsWithQuestion(c.lastText));
-        // リレーの途中なら、レビューに回さずに次の工程へ引き継ぐ（質問で止まったとき・仕様の確認中は、答えてもらってから）
+        // Pipelineの途中なら、レビューに回さずに次の工程へ引き継ぐ（質問で止まったとき・仕様の確認中は、答えてもらってから）
         relayNext = !c.awaitingReply && this.relayHasNext(c);
         if (relayNext) {
-          /* 通知はリレーが終わってから */
+          /* 通知はPipelineが終わってから */
         } else if (c.specState === 'pending') {
           this.log(c, 'question', `内容が詰まっていないので、開発を開始できません。${agentShort(agent)} の質問に下の欄から答えて、仕様を詰めてください（詰まったら、そのまま開発を始めます）`);
           this.emit('awaiting', c);
