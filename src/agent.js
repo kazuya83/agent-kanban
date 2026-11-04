@@ -339,6 +339,20 @@ function agentOf(c) {
   return (c && providers.isAgent(c.agent) && c.agent) || 'claude';
 }
 
+// タスク・会話を作るときに選んだモデル名を確かめる（空なら設定の既定を使う）。
+// Windows ではシェル経由で CLI を動かすので、モデル名に使わない文字は受け付けない
+function cleanModel(model) {
+  const m = String(model || '').trim();
+  if (!m) return '';
+  if (m.length > 100 || !/^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$/.test(m)) throw new Error(`モデル名に使えない文字が入っています: ${m}`);
+  return m;
+}
+
+// カードを動かすモデル（カードで選んでいなければ、設定のエージェントごとの既定）
+function modelOf(c, settings) {
+  return (c && c.model) || providers.agentModel(settings, agentOf(c));
+}
+
 // 指示にスキルを付ける。Claude Code は「/スキル名」で呼べるが、ほかのエージェントには SKILL.md の場所を伝えて手順に従ってもらう
 function promptWithSkill(agent, skill, prompt) {
   if (agent === 'claude' || !skill) return withSkill(skill, prompt);
@@ -906,11 +920,13 @@ class AgentManager extends EventEmitter {
    * - compete: 設定の競争のエージェントの数だけ（同じタスクを、それぞれ別の worktree で並列に解く）
    * @returns {object[]} 作ったカード
    */
-  createTask({ title, prompt, issue, session, skill, agent, fromChat, attachments: files }) {
+  createTask({ title, prompt, issue, session, skill, agent, model, fromChat, attachments: files }) {
     const s = this.store.settings;
     // 添付は先に確かめておく（カードごとに保存する）
     const parsed = attachments.parseAttachments(files);
     const mode = agent || providers.defaultAgentOf(s);
+    // Pipeline・競争は工程・カードごとにエージェントが違うので、モデルは設定のものを使う
+    const m = mode === 'relay' || mode === 'compete' ? '' : cleanModel(model);
     // 会話の続き、または完了したタスクの修正として作る
     const chat = fromChat ? this.store.card(fromChat) : null;
     const from = isChat(chat) || (chat && chat.status === 'done') ? chat : null;
@@ -929,7 +945,7 @@ class AgentManager extends EventEmitter {
       const c = this.createCard({ title, prompt, issue, session, skill, agent: steps[0].agent, relay: { steps, index: 0, history: [] }, fromChat: from, parsed });
       return [c];
     }
-    return [this.createCard({ title, prompt, issue, session, skill, agent: mode, fromChat: from, parsed })];
+    return [this.createCard({ title, prompt, issue, session, skill, agent: mode, model: m, fromChat: from, parsed })];
   }
 
   // 競争: 同じタスクを、設定のエージェントそれぞれのカードにする（使わない設定のエージェントは外す）
@@ -957,7 +973,7 @@ class AgentManager extends EventEmitter {
     return a && providers.isEnabled(s, a) ? a : providers.defaultAgentOf(s);
   }
 
-  createCard({ title, prompt, issue, session, skill, agent, relay, compete, fromChat, parsed }) {
+  createCard({ title, prompt, issue, session, skill, agent, model, relay, compete, fromChat, parsed }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     if (!prompt || !prompt.trim()) throw new Error('指示を入力してください');
@@ -975,6 +991,7 @@ class AgentManager extends EventEmitter {
     };
     if (issue) card.issue = { number: issue.number, title: issue.title, url: issue.url };
     card.agent = agent || 'claude';
+    if (model && !relay && !compete) card.model = cleanModel(model);
     if (relay) card.relay = relay;
     if (compete) card.compete = compete;
     card.sessions = [];
@@ -1103,7 +1120,7 @@ class AgentManager extends EventEmitter {
    * worktree もブランチも作らず、リポジトリのフォルダでそのままエージェントと話す（コミット・マージはしない）
    * @param {{ message: string, title?: string, session?: object, skill?: string, agent?: string }} p
    */
-  createChat({ message, title, session, skill, agent, attachments: files }) {
+  createChat({ message, title, session, skill, agent, model, attachments: files }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     const text = String(message || '').trim();
@@ -1111,6 +1128,7 @@ class AgentManager extends EventEmitter {
     const parsed = attachments.parseAttachments(files);
     const a = agent || providers.defaultAgentOf(s);
     this.assertEnabled(a);
+    const m = cleanModel(model);
     const card = {
       id: crypto.randomBytes(4).toString('hex'),
       kind: 'chat',
@@ -1125,6 +1143,7 @@ class AgentManager extends EventEmitter {
       sessions: [],
       agent: a,
     };
+    if (m) card.model = m;
     // 既存の会話（Claude Code の会話）を引き継げるのは Claude Code だけ
     if (session && session.id && a === 'claude') this.applySession(card, session);
     card.skill = cleanSkill(skill);
@@ -1140,7 +1159,7 @@ class AgentManager extends EventEmitter {
    * @param {{ numbers: string, extra?: string }} p  numbers は「12」「12, 15」「#12 #15」など
    * @returns {Promise<{ cards: object[], errors: string[] }>}
    */
-  async createFromIssues({ numbers, extra, session, skill, agent }) {
+  async createFromIssues({ numbers, extra, session, skill, agent, model }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     const list = github.parseIssueNumbers(numbers);
@@ -1155,7 +1174,7 @@ class AgentManager extends EventEmitter {
       try {
         const issue = await this.fetchIssue(s.repoPath, n);
         if (issue.state && issue.state !== 'open') errors.push(`#${n} はクローズ済みですが、タスクを作りました`);
-        cards.push(...this.createTask({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue, session, skill, agent }));
+        cards.push(...this.createTask({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue, session, skill, agent, model }));
       } catch (err) {
         errors.push(`#${n}: ${err.message}`);
       }
@@ -1539,7 +1558,7 @@ class AgentManager extends EventEmitter {
    */
   async generateBranchName(c, rule, cwd) {
     this.log(c, 'system', `命名規則に従ってブランチ名を ${agentShort(agentOf(c))} に考えてもらっています…`);
-    const out = await this.askOnce(agentOf(c), cwd, buildBranchNamePrompt(rule, c));
+    const out = await this.askOnce(agentOf(c), cwd, buildBranchNamePrompt(rule, c), c.model);
     const name = cleanBranchName(out);
     if (!name) throw new Error('ブランチ名が返ってきませんでした');
     return name;
@@ -1550,17 +1569,19 @@ class AgentManager extends EventEmitter {
    * @param {string} agent
    * @param {string} cwd
    * @param {string} prompt
+   * @param {string} [model]  使うモデル（なければ設定の既定）
    * @returns {Promise<string>}
    */
-  async askOnce(agent, cwd, prompt) {
+  async askOnce(agent, cwd, prompt, model) {
     const s = this.store.settings;
     let args;
     let parser = null;
     if (agent === 'claude') {
       args = ['-p', '--output-format', 'text', '--permission-mode', 'default'];
-      if (s.model) args.push('--model', s.model);
+      const m = model || s.model;
+      if (m) args.push('--model', m);
     } else {
-      args = providers.buildArgs(agent, { mode: 'plan', model: providers.agentModel(s, agent), prompt });
+      args = providers.buildArgs(agent, { mode: 'plan', model: model || providers.agentModel(s, agent), prompt });
       parser = providers.createParser(agent, { summarize: summarizeInput });
     }
     const child = await this.spawnAgent(agent, cwd, args);
@@ -1712,7 +1733,8 @@ class AgentManager extends EventEmitter {
       // stdin を開いたままにして、実行中でもメッセージ（btw）を送れるようにする
       args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--replay-user-messages'];
       if (mode) args.push('--permission-mode', mode);
-      if (s.model) args.push('--model', s.model);
+      const model = modelOf(c, s);
+      if (model) args.push('--model', model);
       const allowed = splitList(s.allowedTools);
       if (allowed.length) args.push('--allowedTools', ...allowed);
       const mcpConfig = this.writeMcpConfig(c, wsl.parseWslPath(cwd)?.distro);
@@ -1730,7 +1752,7 @@ class AgentManager extends EventEmitter {
         c.forkNext = false;
       }
       const attachDir = this.attachDirOf(c);
-      args = providers.buildArgs(agent, { mode, model: providers.agentModel(s, agent), sessionId: c.sessionId ? assertSessionId(c.sessionId) : null, prompt: c.pendingPrompt || '', includeDirs: attachDir ? [attachDir] : [] });
+      args = providers.buildArgs(agent, { mode, model: modelOf(c, s), sessionId: c.sessionId ? assertSessionId(c.sessionId) : null, prompt: c.pendingPrompt || '', includeDirs: attachDir ? [attachDir] : [] });
     }
 
     const prompt = c.pendingPrompt || '';
@@ -2867,4 +2889,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, SKILL_SUGGEST_REPEAT_NOTE, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
+module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, SKILL_SUGGEST_REPEAT_NOTE, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt, cleanModel, modelOf };

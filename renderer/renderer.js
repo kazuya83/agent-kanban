@@ -1023,6 +1023,7 @@ function detailMetaHtml(c) {
   return `<dl class="d-meta">
       ${c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''}
       ${!chat ? `<dt>エージェント</dt><dd>${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</dd>` : ''}
+      <dt>モデル</dt><dd>${c.model ? esc(c.model) : settingsModel(agentOf(c)) ? `${esc(settingsModel(agentOf(c)))} <span class="muted small">（設定の既定）</span>` : '<span class="muted small">CLI の既定</span>'}</dd>
       ${sessionRowHtml(c)}
       ${chat ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（worktree は作りません）</span></dd>` : ''}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
@@ -2074,6 +2075,42 @@ function firstAgentOf(v) {
   if (v === 'compete') return (s.competeAgents || []).includes('claude') ? 'claude' : '';
   return v;
 }
+// ---------------- モデルを選ぶ欄（タスク・会話を作るとき） ----------------
+
+// 設定のエージェントごとの既定のモデルの名前（キー）と、入力欄に出す候補
+const MODEL_KEY = { claude: 'model', codex: 'codexModel', gemini: 'geminiModel', cursor: 'cursorModel' };
+const MODEL_SUGGEST = {
+  claude: ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
+  codex: ['gpt-5-codex', 'gpt-5'],
+  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+  cursor: ['gpt-5', 'sonnet-4.5', 'opus-4.1'],
+};
+function settingsModel(agent, s = state.board.settings || {}) {
+  return String(s[MODEL_KEY[agent] || 'model'] || '').trim();
+}
+function modelFieldHtml(idp, value = '') {
+  return `<label class="field"><span>モデル（空なら設定の既定）</span>
+    <input id="${idp}Model" list="${idp}ModelList" autocomplete="off" spellcheck="false" value="${esc(value)}" /><datalist id="${idp}ModelList"></datalist>
+    <small id="${idp}ModelHint" class="muted"></small></label>`;
+}
+// エージェントを選び直したら、候補と既定の表示を合わせる。Pipeline・競争はエージェントが複数なので、設定のモデルを使う（欄を隠す）
+function updateModelField(idp, agent) {
+  const input = $(`${idp}Model`);
+  if (!input) return;
+  const multi = agent === 'relay' || agent === 'compete';
+  input.closest('.field').classList.toggle('hidden', multi);
+  if (multi) return;
+  const def = settingsModel(agent);
+  input.placeholder = def ? `例: ${def}（設定の既定）` : `例: ${(MODEL_SUGGEST[agent] || [])[0] || ''}`;
+  $(`${idp}ModelList`).innerHTML = (MODEL_SUGGEST[agent] || []).map((m) => `<option value="${esc(m)}"></option>`).join('');
+  $(`${idp}ModelHint`).textContent = `${agentLabel(agent)} に渡すモデルです。空なら${def ? `設定の「${def}」` : ' CLI の既定のモデル'}を使います。`;
+}
+// 送るモデル（Pipeline・競争のときは送らない）
+function readModelField(idp, agent) {
+  if (agent === 'relay' || agent === 'compete') return undefined;
+  return ($(`${idp}Model`)?.value || '').trim() || undefined;
+}
+
 function toggleSessionField(idp, agent) {
   const box = $(`${idp}Session`)?.closest('.field');
   if (box) box.classList.toggle('hidden', agent !== 'claude');
@@ -2090,6 +2127,7 @@ function newTask(opts = {}) {
      : from ? `<p class="muted small">会話「${esc(from.title)}」の続きとして、タスクを始めます（会話の内容をエージェントが引き継ぎます。会話そのものはそのまま残ります）。</p>` : ''}
      <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
      ${agentFieldHtml('n', from && enabledAgents().includes(agentOf(from)) ? agentOf(from) : undefined)}
+     ${modelFieldHtml('n', from && enabledAgents().includes(agentOf(from)) ? from.model || '' : '')}
      <div class="field"><span>エージェントへの指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。画像やファイルは貼り付け・ドラッグ＆ドロップでも添付できます。"></textarea><div id="nAttach" class="attach-bar"></div></div>
      ${sessionFieldHtml('n')}
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
@@ -2102,14 +2140,17 @@ function newTask(opts = {}) {
       // Claude Code の会話なら会話そのものを引き継ぐ。それ以外の会話・完了したタスクは、やりとりを指示に添えて渡す
       const fromClaude = from && !fromDone && agentOf(from) === 'claude';
       fillSessionField('n', fromClaude ? { id: from.sessionId, title: `会話: ${from.title}` } : undefined);
-      bindAgentField('n', (v) => toggleSessionField('n', fromClaude || !from ? firstAgentOf(v) : ''));
+      bindAgentField('n', (v) => {
+        toggleSessionField('n', fromClaude || !from ? firstAgentOf(v) : '');
+        updateModelField('n', v);
+      });
       let skill = state.board.settings.defaultSkill || null;
       const drawSkill = () => renderSkillSlot('nSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
       const att = attachField({ box: $('nAttach'), input: $('nPrompt'), drop: $('nPrompt').closest('.field') });
       const submit = async () => {
         const files = att.list();
-        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value, fromChat: from ? from.id : undefined, attachments: files.length ? files : undefined }));
+        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value, model: readModelField('n', $('nAgent').value), fromChat: from ? from.id : undefined, attachments: files.length ? files : undefined }));
         if (id) {
           closeModal();
           selectNew(id);
@@ -2173,6 +2214,7 @@ function newChat() {
     `<h2>${icon('chat')}会話を始める</h2>
      <p class="muted small">タスクを作らずに、このリポジトリについてエージェントと話せます（質問・調べもの・相談など）。worktree やブランチは作らず、コミットやマージもしません。</p>
      ${agentFieldHtml('c', undefined, { orchestration: false })}
+     ${modelFieldHtml('c')}
      <div class="field"><span>メッセージ</span><div id="cSkill" class="skill-slot"></div><textarea id="cMsg" rows="6" placeholder="例: このリポジトリの全体の構成を教えて（画像やファイルは貼り付け・ドラッグ＆ドロップでも添付できます）"></textarea><div id="cAttach" class="attach-bar"></div></div>
      <label class="field"><span>タイトル（省略するとメッセージの1行目）</span><input id="cTitle" /></label>
      ${sessionFieldHtml('c')}
@@ -2181,14 +2223,17 @@ function newChat() {
     () => {
       $('cMsg').focus();
       fillSessionField('c');
-      bindAgentField('c', (v) => toggleSessionField('c', v));
+      bindAgentField('c', (v) => {
+        toggleSessionField('c', v);
+        updateModelField('c', v);
+      });
       let skill = null;
       const drawSkill = () => renderSkillSlot('cSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
       const att = attachField({ box: $('cAttach'), input: $('cMsg'), drop: $('cMsg').closest('.field') });
       const submit = async () => {
         const files = att.list();
-        const id = await runBusy('会話を始めています…', () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: $('cAgent').value === 'claude' ? readSessionField('c') : { mode: 'new' }, skill, agent: $('cAgent').value, attachments: files.length ? files : undefined }));
+        const id = await runBusy('会話を始めています…', () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: $('cAgent').value === 'claude' ? readSessionField('c') : { mode: 'new' }, skill, agent: $('cAgent').value, model: readModelField('c', $('cAgent').value), attachments: files.length ? files : undefined }));
         if (id) {
           closeModal();
           selectNew(id);
@@ -2430,8 +2475,8 @@ function openSessionManager() {
 // ---------------- GitHub Issue から作る ----------------
 
 // Issue 番号からカードを作る（上部の枠と、詳細ダイアログの両方から使う）
-async function createFromIssues(numbers, extra, autoStart, session, skill, agent) {
-  const r = await runBusy('Issue を読み込んでタスクを作成しています…', () => api.createFromIssues({ numbers, extra, autoStart, session, skill, agent }));
+async function createFromIssues(numbers, extra, autoStart, session, skill, agent, model) {
+  const r = await runBusy('Issue を読み込んでタスクを作成しています…', () => api.createFromIssues({ numbers, extra, autoStart, session, skill, agent, model }));
   if (!r) return false;
   if (r.errors.length) toast(r.errors.join('\n'));
   else toast(`${r.ids.length} 件のタスクを Issue から作りました`, 'ok');
@@ -2451,6 +2496,7 @@ function openIssueModal(prefill = '') {
      <p class="muted small" id="nRepoInfo">リポジトリを確認しています…</p>
      <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div>
      ${agentFieldHtml('n')}
+     ${modelFieldHtml('n')}
      ${sessionFieldHtml('n')}
      <div class="field"><span>追加の指示（任意・すべての Issue に付けます）</span><div id="nSkill" class="skill-slot"></div><textarea id="nExtra" rows="4" placeholder="例: 変更したらテストを追加して npm test で確認して"></textarea></div>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
@@ -2469,14 +2515,17 @@ function openIssueModal(prefill = '') {
       );
       refreshGh();
       fillSessionField('n');
-      bindAgentField('n', (v) => toggleSessionField('n', firstAgentOf(v)));
+      bindAgentField('n', (v) => {
+        toggleSessionField('n', firstAgentOf(v));
+        updateModelField('n', v);
+      });
       let skill = state.board.settings.defaultSkill || null;
       const drawSkill = () => renderSkillSlot('nSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
       const submit = async () => {
         $('nOk').disabled = true;
         $('nOk').textContent = 'Issue を読み込んでいます…';
-        const ok = await createFromIssues($('nNumbers').value, $('nExtra').value, $('nStart').checked, readSessionField('n'), skill, $('nAgent').value);
+        const ok = await createFromIssues($('nNumbers').value, $('nExtra').value, $('nStart').checked, readSessionField('n'), skill, $('nAgent').value, readModelField('n', $('nAgent').value));
         if (ok) return closeModal();
         $('nOk').disabled = false;
         $('nOk').textContent = 'Issue からタスクを作成';

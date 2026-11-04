@@ -558,3 +558,30 @@ test('Claude 以外の会話からタスクにすると、会話のやりとり�
   assert.strictEqual(t2.sessionId, cc.sessionId);
   assert.strictEqual(t2.chatContext, undefined);
 });
+
+test('タスク・会話を作るときに選んだモデルで動かす（空なら設定の既定）', async () => {
+  const { agents, store, calls } = setup();
+  store.settings.codexModel = 'o3';
+  const [t] = agents.createTask({ prompt: 'モデルを変えて作って', agent: 'codex', model: ' gpt-5-codex ' });
+  assert.strictEqual(t.model, 'gpt-5-codex');
+  agents.start(t.id);
+  await waitFor(() => t.status === 'review');
+  const modelArg = (args) => args[args.indexOf('-m') + 1];
+  assert.strictEqual(modelArg(calls().at(-1).args), 'gpt-5-codex');
+  // 選ばなければ設定の既定
+  const chat = agents.createChat({ message: '相談', agent: 'codex' });
+  assert.strictEqual(chat.model, undefined);
+  await waitFor(() => chat.status === 'review');
+  assert.strictEqual(modelArg(calls().at(-1).args), 'o3');
+  // 会話でも選べる
+  const chat2 = agents.createChat({ message: '相談2', agent: 'gemini', model: 'gemini-2.5-flash' });
+  await waitFor(() => chat2.status === 'review');
+  assert.strictEqual(modelArg(calls().at(-1).args), 'gemini-2.5-flash');
+  // シェルに渡ると困る文字は受け付けない
+  assert.throws(() => agents.createTask({ prompt: 'x', agent: 'codex', model: 'gpt; rm -rf /' }), /モデル名/);
+  assert.throws(() => agents.createChat({ message: 'x', agent: 'codex', model: '$(whoami)' }), /モデル名/);
+  // Pipeline・競争は、設定のモデルを使う
+  Object.assign(store.settings, { orchestration: 'compete', competeAgents: ['codex', 'gemini'] });
+  const cards = agents.createTask({ prompt: 'くらべて', agent: 'compete', model: 'gpt-5' });
+  assert.ok(cards.every((c) => !c.model));
+});
