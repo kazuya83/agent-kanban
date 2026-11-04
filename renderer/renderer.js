@@ -3385,7 +3385,7 @@ api.appInfo().then(
   const KEY = 'detailWidth';
   const panel = $('detail');
   const handle = $('detailResizer');
-  const MIN = 360;
+  const MIN = 320;
   const clamp = (w) => Math.max(MIN, Math.min(w, window.innerWidth - 240));
   const apply = (w) => panel.style.setProperty('--detail-w', `${Math.round(w)}px`);
   const saved = Number(localStorage.getItem(KEY));
