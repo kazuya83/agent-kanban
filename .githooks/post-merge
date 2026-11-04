@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# main に「Merge agent task:」のマージが入ったら、/build-apps を裏で走らせる（scripts/after-merge-build.sh）
+#
+# 有効にするには、リポジトリで 1 回だけ: git config core.hooksPath .githooks
+# マージ自体は待たせない（すぐに終わる）。ログは .git/build-apps/logs/ に出る
+
+# 自動の取り込み（after-merge-build.sh 自身のマージ）では動かさない
+[ -n "${AGENT_KANBAN_AFTER_MERGE:-}" ] && exit 0
+[ "$(uname -s)" = "Darwin" ] || exit 0
+
+branch="$(git symbolic-ref --short -q HEAD)" || exit 0
+[ "$branch" = "main" ] || exit 0
+git log -1 --format=%s HEAD | grep -q '^Merge agent task:' || exit 0
+
+top="$(git rev-parse --show-toplevel)" || exit 0
+common="$(cd "$(git rev-parse --git-common-dir)" && pwd)" || exit 0
+src="$top/scripts/after-merge-build.sh"
+[ -f "$src" ] || exit 0
+
+# マージした場所は一時的な worktree のことがある（すぐ消される）ので、スクリプトは .git の中に写してから動かす
+state="$common/build-apps"
+mkdir -p "$state" || exit 0
+cp "$src" "$state/after-merge-build.sh" && chmod +x "$state/after-merge-build.sh" || exit 0
+
+nohup "$state/after-merge-build.sh" --git-dir "$common" </dev/null >>"$state/hook.log" 2>&1 &
+echo "post-merge: /build-apps を裏で始めました（ログ: $state/logs/）"
+exit 0

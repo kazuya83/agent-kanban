@@ -67,6 +67,23 @@ scripts/release-local.sh
 
 インストール用のコマンドは、いつも最新の Release を入れます。
 
+### マージしたあとに自動でビルドする
+
+次を1回実行しておきます。そうすると、Agent Kanban でタスクを main にマージするたびに（マージのメッセージが `Merge agent task:` で始まるとき）、`/build-apps` が裏で動きます。
+
+```bash
+git config core.hooksPath .githooks
+```
+
+- `.githooks/post-merge` が `scripts/after-merge-build.sh` を裏で走らせます。マージ自体はすぐに終わります
+- マージしたあとの main から一時的な worktree（ブランチ `build-apps/<sha>`）を作り、`claude -p "/build-apps review"` でテストと3つの OS のビルドをします。落ちたときは、install.sh / install.ps1 などを Claude が直します
+- 直したところがあれば、コミットしてからもう一度ビルドして確かめます。通れば main にマージして `origin/main` に push します。直したところがなければ、マージも push もしません
+- **Release の公開はしません。** 公開は今までどおり `scripts/release-local.sh` で行います
+- 失敗したとき・コンフリクトしたとき・main に未コミットの変更があるときは、自動ではマージしません。macOS の通知で知らせ、ブランチと worktree を残します
+- 一度に1つだけ動きます。動いている間に次のマージが入ったら、終わったあとにもう一度動きます
+- ログは `.git/build-apps/logs/` に出ます。手で動かすときは `scripts/after-merge-build.sh` を実行します
+- 止めたいときは `git config --unset core.hooksPath` を実行します
+
 ## しくみ
 
 ```
