@@ -33,6 +33,12 @@ test('WSL の中でコマンドを動かす引数（スペースや引用符を�
   assert.strictEqual(env, "a'b c;/usr/bin:/bin");
 });
 
+// 偽の wsl はこの環境でそのまま動くので、git や pwd はシンボリックリンクをたどった本当のパスを返す。
+// macOS の一時フォルダ（/var/... → /private/var/...）でも比べられるよう、本当のパスにしておく
+function tmpDir() {
+  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-wsl-')));
+}
+
 function fakeWsl(tmp) {
   const bin = path.join(tmp, 'wsl');
   fs.writeFileSync(bin, `#!/bin/sh\nexec "${process.execPath}" "${path.join(__dirname, 'fake-wsl.js')}" "$@"\n`, { mode: 0o755 });
@@ -40,7 +46,7 @@ function fakeWsl(tmp) {
 }
 
 test('ディストリビューションの一覧（UTF-16LE・docker-desktop は除く）', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-wsl-'));
+  const tmp = tmpDir();
   process.env.AGENT_KANBAN_WSL = fakeWsl(tmp);
   try {
     assert.deepStrictEqual(await wsl.listDistros(), ['Ubuntu', 'Debian']);
@@ -50,7 +56,7 @@ test('ディストリビューションの一覧（UTF-16LE・docker-desktop は
 });
 
 test('WSL のフォルダでは、git を WSL の中で動かし、返ってきたパスを Windows の形に戻す', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-wsl-'));
+  const tmp = tmpDir();
   const repo = path.join(tmp, 'repo');
   fs.mkdirSync(repo);
   const g = (...a) => execFileSync('git', a, { cwd: repo });
@@ -85,7 +91,7 @@ test('WSL のフォルダでは、git を WSL の中で動かし、返ってき�
 });
 
 test('WSL のフォルダでは、claude を WSL の中で起動する（Windows のパスは /mnt/c/... に、環境変数も渡す）', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-wsl-'));
+  const tmp = tmpDir();
   const log = path.join(tmp, 'wsl.log');
   process.env.AGENT_KANBAN_WSL = fakeWsl(tmp);
   process.env.FAKE_WSL_LOG = log;
@@ -126,7 +132,7 @@ test('WSL のフォルダでは、claude を WSL の中で起動する（Windows
 });
 
 test('WSL のリポジトリの会話は、WSL の中のパスで「このリポジトリの会話」を見分ける', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-wsl-'));
+  const tmp = tmpDir();
   const cfg = path.join(tmp, 'claude');
   const pj = path.join(cfg, 'projects', 'p');
   fs.mkdirSync(pj, { recursive: true });
