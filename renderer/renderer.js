@@ -40,7 +40,7 @@ const agentLabel = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[1];
 const agentShort = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[2];
 const agentOf = (c) => (c && AGENTS.some((x) => x[0] === c.agent) ? c.agent : 'claude');
 
-const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'log', logs: new Map(), headSig: '', relayOpen: new Set() };
+const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'chat', logs: new Map(), headSig: '', relayOpen: new Set() };
 const $ = (id) => document.getElementById(id);
 // index.html の data-icon="名前" の場所に、モノクロの SVG アイコンを入れる（icons.js）
 for (const el of document.querySelectorAll('[data-icon]')) el.outerHTML = icon(el.dataset.icon, el.className);
@@ -704,11 +704,9 @@ async function select(id) {
   $('followInput').value = '';
   followAttach.clear();
   state.followSkill = null;
-  // 承認や回答が必要なものはログの最後に出すので、そのときはログタブで開く
-  if (hasLogActions(card(id)) && state.tab !== 'log') {
-    state.tab = 'log';
-    document.querySelectorAll('#tabs .tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === 'log'));
-  }
+  // 質問への回答はチャットの最後に、承認はログの最後に出すので、そのときはそのタブで開く
+  const need = hasChatActions(card(id)) ? 'chat' : hasLogActions(card(id)) ? 'log' : null;
+  if (need && state.tab !== need) setTab(need);
   renderBoard();
   renderDetailHead();
   updateBtwTab(card(id));
@@ -726,10 +724,12 @@ function updateTabsFor(c) {
   document.querySelectorAll('#tabs .tab').forEach((t) => {
     if (t.dataset.tab === 'worktree' || t.dataset.tab === 'diff') t.classList.toggle('hidden', chat);
   });
-  if (chat && (state.tab === 'worktree' || state.tab === 'diff')) {
-    state.tab = 'log';
-    document.querySelectorAll('#tabs .tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === 'log'));
-  }
+  if (chat && (state.tab === 'worktree' || state.tab === 'diff')) setTab('chat');
+}
+
+function setTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll('#tabs .tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === tab));
 }
 
 function closeDetail() {
@@ -1073,8 +1073,7 @@ $('detailHead').addEventListener('click', async (e) => {
 
 document.querySelectorAll('#tabs .tab').forEach((t) =>
   t.addEventListener('click', () => {
-    state.tab = t.dataset.tab;
-    document.querySelectorAll('#tabs .tab').forEach((x) => x.classList.toggle('active', x === t));
+    setTab(t.dataset.tab);
     renderDetailBody();
   }),
 );
@@ -1127,13 +1126,18 @@ function renderChatLog(body, c, logs) {
   drawLogActions(c, true);
 }
 
-// ログの最後に出す、あなたの操作が必要なもの（承認・質問の回答・仕様の確認・回答待ちの案内）
+// ログの最後に出す、あなたの操作が必要なもの（承認）。質問への回答はチャットタブに出す
 function logActionsHtml(c) {
+  const parts = [permissionBlock(c, false)];
+  if (hasChatActions(c)) parts.push(`<div class="d-awaiting"><b>${icon('question')}${esc(agentShort(agentOf(c)))} が質問しています</b><small>「チャット」タブで答えてください。</small></div>`);
+  return parts.join('');
+}
+// チャットの最後に出す、あなたの操作が必要なもの（途中の質問の回答・仕様の確認・回答待ちの案内）
+function chatActionsHtml(c) {
   const s = c.status;
   const who = esc(agentShort(agentOf(c)));
   const spec = isSpecPending(c);
   const parts = [
-    permissionBlock(c, false),
     questionFormHtml(c),
     spec
       ? `<div class="d-awaiting d-spec"><b>${icon('note')}内容が詰まっていないので、開発を開始できません</b><small>${specQuestions(c) ? 'このすぐ下のフォーム（または下の欄）' : '下の欄'}で、上の ${who} の質問に答えて仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>${specFormHtml(c)}`
@@ -1144,23 +1148,32 @@ function logActionsHtml(c) {
   return parts.join('');
 }
 function hasLogActions(c) {
-  return !!(c && ((c.permissions || []).length || (c.questions || []).length || isSpecPending(c) || (c.awaitingReply && (c.status === 'review' || c.status === 'failed'))));
+  return !!(c && (c.permissions || []).length);
+}
+function hasChatActions(c) {
+  return !!(c && ((c.questions || []).length || isSpecPending(c) || (c.awaitingReply && (c.status === 'review' || c.status === 'failed'))));
 }
 // 中身が変わったときだけ描き直す（選びかけのラジオや入力中の文字を消さない）
 function drawLogActions(c, force) {
   const tab = $('logTab');
   const attn = hasLogActions(c);
   tab.classList.toggle('attn', attn);
-  tab.title = attn ? 'ログの最後に、承認や回答が必要なものがあります' : '';
-  if (state.tab !== 'log') return;
+  tab.title = attn ? 'ログの最後に、承認が必要なものがあります' : '';
+  const ctab = $('chatTab');
+  const cattn = hasChatActions(c);
+  ctab.classList.toggle('attn', cattn);
+  ctab.title = cattn ? 'チャットの最後に、答えてほしい質問があります' : CHAT_TAB_TITLE;
+  if (state.tab === 'chat') updateChatTab(c);
+  if (state.tab !== 'log' && state.tab !== 'chat') return;
   const box = $('logActions');
   if (!box) return;
-  const html = logActionsHtml(c);
-  if (!force && box.dataset.card === c.id && box.dataset.html === html) return;
+  const html = state.tab === 'chat' ? chatActionsHtml(c) : logActionsHtml(c);
+  if (!force && box.dataset.card === c.id && box.dataset.tab === state.tab && box.dataset.html === html) return;
   const body = $('detailBody');
   const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
   const grew = !box.dataset.html && html;
   box.dataset.card = c.id;
+  box.dataset.tab = state.tab;
   box.dataset.html = html;
   box.innerHTML = html;
   box.classList.toggle('hidden', !html);
@@ -1178,6 +1191,39 @@ function appendChatLog(body, c, entry) {
     const open = !!lastEl.querySelector('details[open]');
     lastEl.outerHTML = chatItemHtml(item, agent, open);
   } else box.insertAdjacentHTML('beforeend', chatItemHtml(item, agent));
+}
+
+// 「チャット」タブ: 指示・途中の質問と、エージェントの最後の返事だけを並べる（ツールの呼び出しや結果は出さない）
+const CHAT_TAB_TITLE = '指示や質問と、それに対するエージェントの最後の返事だけを見ます（ツールの結果などは「ログ」で見られます）';
+function chatItemsHtml(c) {
+  const agent = agentOf(c);
+  const running = c.status === 'running';
+  const items = ChatLog.final(state.logs.get(c.id) || [], agent, running);
+  const html = items.map((it) => chatItemHtml(it, agent)).join('');
+  const working = running ? `<div class="c-note k-working">${icon('clock')}<span class="c-note-x">${esc(agentShort(agent))} が作業しています…（途中の様子は「ログ」で見られます）</span></div>` : '';
+  if (!html && !working) {
+    return `<div class="muted pad">${isChat(c) ? 'まだ会話はありません。' : `まだ返事はありません。「開始」を押すと ${agentLabel(agent)} が動き出します。`}</div>`;
+  }
+  return html + working;
+}
+function renderChatTab(body, c) {
+  state.chat = null;
+  const html = chatItemsHtml(c);
+  state.chatView = { id: c.id, html };
+  body.innerHTML = `<div class="chat-log" id="chatItems">${html}</div><div id="logActions" class="log-actions"></div>`;
+  drawLogActions(c, true);
+}
+// 新しいログや状態の変化で、最後の返事が変わったときだけ描き直す
+function updateChatTab(c) {
+  const box = $('chatItems');
+  if (!box || !state.chatView || state.chatView.id !== c.id) return;
+  const html = chatItemsHtml(c);
+  if (html === state.chatView.html) return;
+  const body = $('detailBody');
+  const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+  state.chatView.html = html;
+  box.innerHTML = html;
+  if (atBottom) body.scrollTop = body.scrollHeight;
 }
 
 // ツールの結果に入っていた画像（スクリーンショットなど）。クリックで大きく表示する
@@ -1625,6 +1671,9 @@ async function renderDetailBody() {
   const body = $('detailBody');
   if (state.tab === 'info') {
     renderInfo(c);
+  } else if (state.tab === 'chat') {
+    renderChatTab(body, c);
+    body.scrollTop = body.scrollHeight;
   } else if (state.tab === 'log') {
     const logs = state.logs.get(c.id) || [];
     if (logs.length) renderChatLog(body, c, logs);
@@ -3605,6 +3654,9 @@ api.onLog(({ id, entry }) => {
     const c = card(id);
     if (c) appendChatLog(body, c, entry);
     if (atBottom) body.scrollTop = body.scrollHeight;
+  } else if (state.selected === id && state.tab === 'chat') {
+    const c = card(id);
+    if (c) updateChatTab(c);
   }
 });
 api.onFocus((id) => card(id) && select(id));

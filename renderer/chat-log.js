@@ -62,5 +62,31 @@
     return items;
   }
 
-  return { build, push };
+  // 「チャット」タブ用: ツールの呼び出し・結果やシステムのお知らせは出さず、
+  // あなたの指示（と回答）・途中の質問・エラーと、それぞれの指示に対するエージェントの最後の返事だけを並べる。
+  // 返事は、次の指示・質問・完了・エラーのところで「最後の返事」として確定する。
+  // 実行中（running）は、まだ途中の返事かもしれないので、確定するまで出さない。
+  const FINAL_STOPS = new Set(['user', 'question', 'result', 'error']);
+  function final(logs, defaultAgent, running) {
+    const items = [];
+    let pending = null;
+    const flush = () => {
+      if (!pending) return;
+      items.push({ type: 'assistant', entry: pending, agent: pending.agent || 'claude', known: true, head: true });
+      pending = null;
+    };
+    for (const e of logs || []) {
+      if (!e) continue;
+      if (e.kind === 'text') pending = e;
+      else if (FINAL_STOPS.has(e.kind)) {
+        flush();
+        if (e.kind === 'user') items.push({ type: 'user', entry: e });
+        else if (e.kind !== 'result') items.push({ type: 'notice', entry: e });
+      }
+    }
+    if (!running) flush();
+    return items;
+  }
+
+  return { build, push, final };
 });

@@ -1,7 +1,7 @@
 // ログタブをチャットの形に並べる renderer/chat-log.js を確かめる
 const test = require('node:test');
 const assert = require('node:assert');
-const { build, push } = require('../renderer/chat-log');
+const { build, push, final } = require('../renderer/chat-log');
 
 const L = (kind, text, extra) => ({ t: 1, kind, text, ...(extra || {}) });
 
@@ -72,4 +72,35 @@ test('build: agent の無い古いツールは、まとまりのエージェン�
   const items = build([L('text', 'a', { agent: 'gemini' }), L('tool', 'Read  a')], 'claude');
   assert.strictEqual(items[1].agent, 'gemini');
   assert.strictEqual(items[1].head, false);
+});
+
+test('final: チャットタブには、指示と最後の返事だけを出す（ツールやお知らせは出さない）', () => {
+  const items = final(
+    [L('system', 'worktree を作成しました'), L('user', '直して'), L('text', '見てみます'), L('tool', 'Read  a.js'), L('tool_result', '...'), L('text', '直しました'), L('result', '完了しました'), L('user', '次も'), L('text', 'やりました')],
+    'claude',
+    false,
+  );
+  assert.deepStrictEqual(items.map((it) => [it.type, it.entry.text]), [['user', '直して'], ['assistant', '直しました'], ['user', '次も'], ['assistant', 'やりました']]);
+  assert.strictEqual(items[1].agent, 'claude');
+  assert.strictEqual(items[1].head, true);
+});
+
+test('final: 途中の質問と回答は、その前の返事と一緒にチャットに出す', () => {
+  const items = final(
+    [L('user', '作って'), L('text', 'どちらにしますか'), L('tool', 'AskUserQuestion  x'), L('question', '質問: A か B か'), L('user', 'A か B か → A', { answer: true }), L('text', 'A で作りました', { agent: 'codex' }), L('result', '完了')],
+    'claude',
+    false,
+  );
+  assert.deepStrictEqual(items.map((it) => it.type), ['user', 'assistant', 'notice', 'user', 'assistant']);
+  assert.strictEqual(items[2].entry.kind, 'question');
+  assert.strictEqual(items[4].agent, 'codex');
+});
+
+test('final: 実行中は、まだ確定していない返事を出さない', () => {
+  const logs = [L('user', 'x'), L('text', '調べています')];
+  assert.deepStrictEqual(final(logs, 'claude', true).map((it) => it.type), ['user']);
+  assert.deepStrictEqual(final(logs, 'claude', false).map((it) => it.type), ['user', 'assistant']);
+  // エラーで終わったら、その前の返事とエラーを出す
+  const err = final([...logs, L('error', 'エラーで終了しました')], 'claude', true);
+  assert.deepStrictEqual(err.map((it) => it.type), ['user', 'assistant', 'notice']);
 });
