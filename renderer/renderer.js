@@ -626,7 +626,7 @@ function relayFlowHtml(c) {
   const doneN = r.steps.filter((_, i) => relayStepState(c, i) === 'done').length;
   const nodes = r.steps.map((st, i) => {
     const stt = relayStepState(c, i);
-    const [icon, label] = RELAY_STATE[stt];
+    const [mark, label] = RELAY_STATE[stt]; // icon() を隠さないよう、別の名前にする
     const h = hist.get(i);
     const info = [];
     if (h) {
@@ -643,7 +643,7 @@ function relayFlowHtml(c) {
       ? `<details class="rf-report" data-rkey="${esc(key)}" ${state.relayOpen.has(key) ? 'open' : ''}><summary>次の工程へ渡した報告</summary><div class="rf-report-body">${esc(h.report)}</div></details>`
       : '';
     return `<li class="rf-node rs-${stt} ${i === r.index ? 'cur' : ''}">
-      <span class="rf-dot">${icon}</span>
+      <span class="rf-dot">${mark}</span>
       <div class="rf-body">
         <div class="rf-head"><b>${i + 1}. ${esc(st.label)}</b> <span class="rf-agent">${esc(agentLabel(st.agent))}</span> <span class="rf-state">${label}</span></div>
         ${info.length ? `<div class="rf-info">${info.join(' ・ ')}</div>` : ''}

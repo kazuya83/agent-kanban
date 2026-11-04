@@ -36,3 +36,11 @@ test('index.html の data-icon は icons.js にある名前', () => {
   for (const [, name] of html.matchAll(/data-icon="([^"]+)"/g)) assert.ok(ICON_NAMES.includes(name), name);
   for (const [, name] of fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf8').matchAll(/icon\('([^']+)'\)/g)) assert.ok(ICON_NAMES.includes(name), name);
 });
+
+test('renderer.js で icon() を同じ名前の変数で隠していない', () => {
+  // const [icon, label] = ... のように隠すと、その中の icon('clock') が TypeError になり、
+  // 詳細（Pipelineの工程など）が何も表示されなくなる
+  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf8');
+  const decl = /\b(?:const|let|var)\s+(?:icon\b|[[{][^=;]*?\bicon\b[^=;]*?[\]}]\s*=)|function\s*\w*\s*\([^)]*\bicon\b[^)]*\)|\(([^()]*\b)?icon\b[^()]*\)\s*=>|\bicon\s*=>/;
+  src.split('\n').forEach((line, i) => assert.doesNotMatch(line, decl, `renderer.js:${i + 1}: ${line.trim().slice(0, 80)}`));
+});
