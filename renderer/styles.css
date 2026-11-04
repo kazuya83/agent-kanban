@@ -94,7 +94,6 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .topbar > .spacer { flex: 1 1 0; min-width: 0; }
 .topbar > .repo { flex: 0 1 auto; min-width: 90px; }
 .topbar .btn { display: inline-flex; align-items: center; }
-.topbar #issueBtn svg { margin-right: 0.3em; }
 .brand { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
 .brand-ver { font-size: 10.5px; font-weight: 400; color: var(--muted); font-family: var(--mono); }
@@ -713,7 +712,7 @@ body.resizing-row { cursor: row-resize; user-select: none; }
   .detail { min-width: 320px; }
   /* よく使う「新しいタスク」以外のボタンはアイコンだけにする（名前はマウスを乗せると出る） */
   .topbar .btn:not(.primary) .btn-label { display: none; }
-  .topbar .btn:not(.primary) .ic, .topbar #issueBtn svg { margin-right: 0; }
+  .topbar .btn:not(.primary) .ic { margin-right: 0; }
   .topbar .btn { padding: 6px 9px; }
   .pill.remote-pill { max-width: 200px; }
 }
@@ -737,3 +736,4 @@ body.resizing-row { cursor: row-resize; user-select: none; }
   .d-head { max-height: 45%; }
   .tab { padding: 6px 10px; }
 }
+.modal-box .task-mode-tabs { padding: 0; margin: -4px 0 14px; }

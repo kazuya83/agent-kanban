@@ -1787,16 +1787,17 @@ function newTask(opts = {}) {
   const fromDone = from && !isChat(from);
   openModal(
     `<h2>${fromDone ? '修正タスク' : '新しいタスク'}</h2>
+     ${from ? '' : taskModeTabsHtml('text')}
      ${fromDone ? `<p class="muted small">完了したタスク「${esc(from.title)}」の修正として、新しいタスクを始めます（元のタスクのやりとりをエージェントが引き継ぎます。元のタスクはそのまま残ります）。</p>`
      : from ? `<p class="muted small">会話「${esc(from.title)}」の続きとして、タスクを始めます（会話の内容をエージェントが引き継ぎます。会話そのものはそのまま残ります）。</p>` : ''}
      <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
      ${agentFieldHtml('n', from && enabledAgents().includes(agentOf(from)) ? agentOf(from) : undefined)}
      <div class="field"><span>エージェントへの指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。画像やファイルは貼り付け・ドラッグ＆ドロップでも添付できます。"></textarea><div id="nAttach" class="attach-bar"></div></div>
      ${sessionFieldHtml('n')}
-     <p class="muted small">GitHub の Issue から作るときは、右上の「Issue から作成」を使ってください。</p>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
      <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">作成（Ctrl/⌘ + Enter）</button></div>`,
     () => {
+      if (!from) bindTaskModeTabs();
       $('nPrompt').focus();
       if (from) $('nPrompt').value = fromDone ? '完了したタスクの内容をもとに、次の点を修正してください。\n\n' : 'ここまでの会話の内容をもとに、作業を進めてください。';
       if (fromDone) $('nTitle').value = `修正: ${from.title}`;
@@ -1823,6 +1824,21 @@ function newTask(opts = {}) {
       });
     },
   );
+}
+
+// 新しいタスクの作り方（自然言語で書く / GitHub の Issue から）を切り替えるタブ
+function taskModeTabsHtml(active) {
+  const tab = (mode, label) => `<button type="button" class="tab ${mode === active ? 'active' : ''}" data-task-mode="${mode}" role="tab" aria-selected="${mode === active}">${label}</button>`;
+  return `<nav class="tabs task-mode-tabs" role="tablist">${tab('text', '自然言語で作成')}${tab('issue', 'GitHub Issue から作成')}</nav>`;
+}
+function bindTaskModeTabs() {
+  document.querySelectorAll('#modalBox [data-task-mode]').forEach((b) => {
+    b.onclick = () => {
+      if (b.classList.contains('active')) return;
+      if (b.dataset.taskMode === 'issue') openIssueModal();
+      else newTask();
+    };
+  });
 }
 
 // 「会話」ボタン: 会話の一覧を出す（会話がまだなければ、すぐに新しい会話を始める）
@@ -2060,7 +2076,8 @@ async function createFromIssues(numbers, extra, autoStart, session, skill, agent
 function openIssueModal(prefill = '') {
   if (!state.board.settings.repoPath) return chooseRepo();
   openModal(
-    `<h2>Issue から作成</h2>
+    `<h2>新しいタスク</h2>
+     ${taskModeTabsHtml('issue')}
      <label class="field"><span>Issue 番号（複数ならカンマかスペースで区切る。1つの Issue が1枚のカードになり、並列で動きます）</span>
        <input id="nNumbers" placeholder="例: 12 または 12, 15, 18" inputmode="numeric" value="${esc(prefill)}" /></label>
      <p class="muted small" id="nRepoInfo">リポジトリを確認しています…</p>
@@ -2071,6 +2088,7 @@ function openIssueModal(prefill = '') {
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
      <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">Issue からタスクを作成</button></div>`,
     () => {
+      bindTaskModeTabs();
       $('nNumbers').focus();
       api.repoGithub().then(
         (g) => {
@@ -2568,7 +2586,7 @@ async function openSettings() {
        <small>自動で許可されない操作は、カードに「承認待ち」として表示されます。</small></label>
      <label class="field"><span>同時に動かす数</span><input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
-       <small>「＋ 新しいタスク」と「Issue から作成」を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
+       <small>「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上のベル）</label>
      <label class="check"><input type="checkbox" id="sClaudeRc" ${s.claudeRemoteControl ? 'checked' : ''} /> Claude カード起動時に公式 Remote Control（--remote-control）も付ける（claude.ai/code や Claude アプリから続けられる）</label>
@@ -3076,7 +3094,6 @@ $('repoBtn').onclick = chooseRepo;
 $('newBtn').onclick = () => newTask();
 $('chatBtn').onclick = openChats;
 $('detailBackdrop').addEventListener('mousedown', closeDetail);
-$('issueBtn').onclick = () => openIssueModal();
 $('settingsBtn').onclick = openSettings;
 $('rcBtn').onclick = openRemoteSettings;
 
