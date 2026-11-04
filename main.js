@@ -9,7 +9,7 @@ const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
 const { RemoteHost, RemoteClient, DEFAULT_PORT, isProxyChannel, isLocalChannel } = require('./src/remote');
-const { SshTunnel, isLoopbackHost } = require('./src/ssh-tunnel');
+const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
 
 // Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
 fixPath();
@@ -152,7 +152,7 @@ async function dispatch(channel, arg) {
     return data;
   }
   // 接続中に手元のボードを触る操作（リポジトリの選択ダイアログなど）は、ホストと食い違うので止める
-  if (remoteClient?.connected && !isLocalChannel(channel)) throw new Error('遠隔操作中はこの操作を使えません（ホストの Mac 側で行うか、切断してから使ってください）');
+  if (remoteClient?.connected && !isLocalChannel(channel)) throw new Error('遠隔操作中はこの操作を使えません（ホスト側で行うか、切断してから使ってください）');
   const fn = localHandlers.get(channel);
   if (!fn) throw new Error(`未対応の操作です: ${channel}`);
   return fn(arg);
@@ -272,6 +272,8 @@ app.whenReady().then(async () => {
   handle('board:get', () => withRemoteSession(boardState()));
   handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
   handle('remote:status', () => remoteSession());
+  // このマシンをホストにするとき、操作側に入れてもらう接続先と SSH サーバーの状態
+  handle('remote:hostInfo', () => sshHostInfo());
   handle('remote:startHost', async ({ port } = {}) => {
     if (remoteClient?.connected) throw new Error('クライアントとして接続中はホストを開始できません。先に切断してください');
     if (port != null) {
@@ -332,7 +334,7 @@ app.whenReady().then(async () => {
     } catch (err) {
       sshTunnel?.close();
       if (m === 'ssh' && /ECONNRESET|接続が切れました|ECONNREFUSED/.test(String(err?.message))) {
-        throw new Error(`SSH はつながりましたが、ホストの Agent Kanban に届きませんでした。Mac 側で「ホストを開始」しているか、待ち受けポート（${p}）が合っているかを確かめてください`);
+        throw new Error(`SSH はつながりましたが、ホストの Agent Kanban に届きませんでした。ホストの Agent Kanban で「ホストを開始」しているか、待ち受けポート（${p}）が合っているかを確かめてください`);
       }
       if (m === 'direct' && !isLoopbackHost(h) && /ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH/.test(String(err?.code || err?.message))) {
         throw new Error(`${h}:${p} に直接つながりません。ホストは外に見せないよう 127.0.0.1 でしか待ち受けていないため、Tailscale の IP などへは直接つなげません。接続方法を「SSH 経由」にして、SSH の接続先にその IP を入れてください`);
