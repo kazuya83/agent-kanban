@@ -238,16 +238,88 @@ function promptWithSkill(agent, skill, prompt) {
 
 // ---------- Pipeline（工程ごとに別のエージェントへ順番に引き継ぐ） ----------
 
+// 分岐: 判定する工程のエージェントに、返事の最後に書いてもらう印
+const RELAY_PASS = '[[PASS]]';
+const RELAY_FAIL = '[[FAIL]]';
+
+// 工程 i を何回目に実行するか（ループで戻ってきたら 2回目以降）
+function relayRunNo(c, i) {
+  return (c.relay.history || []).filter((h) => h.index === i).length + 1;
+}
+
 function relayHeader(c, i) {
   const st = c.relay.steps[i];
-  return `あなたは、複数のエージェントで順番に作業を引き継ぐ「Pipeline」の、工程 ${i + 1}/${c.relay.steps.length}「${st.label}」の担当です。`;
+  const n = relayRunNo(c, i);
+  return `あなたは、複数のエージェントで順番に作業を引き継ぐ「Pipeline」の、工程 ${i + 1}/${c.relay.steps.length}「${st.label}」${n > 1 ? `（${n}回目）` : ''}の担当です。`;
+}
+
+// 分岐の行き先の説明
+function relayTargetText(c, i, to) {
+  if (to === 'end') return 'Pipelineを終えてレビューに回します';
+  const j = to === undefined || to === null ? i + 1 : to;
+  if (j >= c.relay.steps.length) return 'Pipelineを終えてレビューに回します';
+  const st = c.relay.steps[j];
+  return `工程${j + 1}「${st.label}」（${agentLabel(st.agent)}）${j <= i ? 'に戻ってやり直します' : 'へ進みます'}`;
+}
+
+// 判定する工程に付ける、印の書き方の説明
+function relayJudgeNote(c, i) {
+  const st = c.relay.steps[i];
+  if (!providers.relayJudges(st)) return '';
+  return [
+    '',
+    '## 判定（必ず書いてください）',
+    `この工程では、作業の結果を判定してもらいます。返事の最後の行に、次のどちらか1つだけを書いてください。`,
+    `- 問題がない（合格）: \`${RELAY_PASS}\` → ${relayTargetText(c, i, st.onPass)}`,
+    `- 直す必要がある（差し戻し）: \`${RELAY_FAIL}\` → ${relayTargetText(c, i, st.onFail)}`,
+    '差し戻すときは、何を直してほしいかを報告に具体的に書いてください（次の工程に渡します）。',
+  ].join('\n');
+}
+
+// 返事の最後の判定の印（なければ null）
+function relayVerdict(text) {
+  const s = String(text || '');
+  const p = s.lastIndexOf(RELAY_PASS);
+  const f = s.lastIndexOf(RELAY_FAIL);
+  if (p < 0 && f < 0) return null;
+  return f > p ? 'fail' : 'pass';
+}
+
+/**
+ * 工程が終わったあと、次にどこへ進むかを決める
+ * @returns {{ to: number|null, verdict: string|null, missing?: boolean, limit?: boolean }} to が null なら Pipeline を終える
+ */
+function relayPlan(c) {
+  const r = c.relay;
+  const i = r.index;
+  const st = r.steps[i];
+  let verdict = null;
+  let missing = false;
+  let target = null;
+  if (providers.relayJudges(st)) {
+    verdict = relayVerdict(c.lastText);
+    if (!verdict) {
+      verdict = 'pass';
+      missing = true;
+    }
+    target = verdict === 'fail' ? st.onFail : st.onPass;
+  }
+  if (target === 'end') return { to: null, verdict, missing };
+  const to = target === undefined || target === null ? i + 1 : target;
+  if (to >= r.steps.length) return { to: null, verdict, missing };
+  // ループ（今の工程か前の工程へ戻る）は、工程ごとの上限回数まで
+  if (to <= i) {
+    const max = st.maxLoops || providers.RELAY_MAX_LOOPS_DEFAULT;
+    if (((r.loops || {})[i] || 0) >= max) return { to: null, verdict, missing, limit: true };
+  }
+  return { to, verdict, missing };
 }
 
 // 最初の工程の指示（タスクの指示 + 担当の説明）
 function buildRelayFirstPrompt(c, prompt) {
   const st = c.relay.steps[0];
   const next = c.relay.steps.slice(1).map((x, j) => `工程${j + 2}「${x.label}」（${agentLabel(x.agent)}）`).join(' → ');
-  return [prompt, '', '---', relayHeader(c, 0), next ? `このあと ${next} が続きます。` : '', st.instruction ? `\n## あなたの担当\n${st.instruction}` : '']
+  return [prompt, '', '---', relayHeader(c, 0), next ? `このあと ${next} が続きます。` : '', st.instruction ? `\n## あなたの担当\n${st.instruction}` : '', relayJudgeNote(c, 0)]
     .filter((x) => x !== '')
     .join('\n');
 }
@@ -256,9 +328,14 @@ function buildRelayFirstPrompt(c, prompt) {
 function buildRelayStepPrompt(c, i) {
   const st = c.relay.steps[i];
   const lines = [relayHeader(c, i), '', '## タスクの指示', truncate(c.prompt, 6000), '', '## これまでの工程'];
-  for (const h of c.relay.history || []) {
+  // ループで長くなりすぎないよう、新しい方から 10 件まで
+  const hist = c.relay.history || [];
+  if (hist.length > 10) lines.push(`（前の ${hist.length - 10} 件の報告は省きました）`, '');
+  for (const h of hist.slice(-10)) {
     const s = c.relay.steps[h.index] || {};
-    lines.push(`### 工程${h.index + 1}「${s.label || ''}」（${agentLabel(h.agent)}）の報告`, truncate(String(h.report || '（報告なし）').trim(), 3000), '');
+    const v = h.verdict === 'fail' ? '・差し戻し' : h.verdict === 'pass' ? '・合格' : '';
+    const n = h.run > 1 ? `・${h.run}回目` : '';
+    lines.push(`### 工程${h.index + 1}「${s.label || ''}」（${agentLabel(h.agent)}${n}${v}）の報告`, truncate(String(h.report || '（報告なし）').trim(), 3000), '');
   }
   lines.push(
     '## 作業の場所',
@@ -267,6 +344,8 @@ function buildRelayStepPrompt(c, i) {
     '## あなたの担当',
     st.instruction || `工程「${st.label}」を進めてください。`,
   );
+  const note = relayJudgeNote(c, i);
+  if (note) lines.push(note);
   return lines.join('\n');
 }
 
@@ -773,17 +852,39 @@ class AgentManager extends EventEmitter {
 
   // ---------- オーケストレーション ----------
 
-  // Pipelineにまだ次の工程があるか
-  relayHasNext(c) {
-    return !!(c.relay && !isChat(c) && c.relay.index < c.relay.steps.length - 1);
+  // 工程が終わったとき: 次の工程（分岐・ループの行き先）を決める。Pipelineを終えるなら to: null で、終えた印を付ける
+  // （終えたあとの追加指示では、もう次の工程へは進まない）
+  // @returns {{ to: number|null, limitMsg?: string }|null} Pipelineでなければ null
+  relayNextStep(c) {
+    if (!c.relay || isChat(c) || c.relay.done) return null;
+    const r = c.relay;
+    const st = r.steps[r.index];
+    const plan = relayPlan(c);
+    r.lastVerdict = plan.verdict;
+    if (plan.missing) this.log(c, 'system', `Pipeline: 工程「${st.label}」の返事に判定の印（${RELAY_PASS} / ${RELAY_FAIL}）がなかったので、合格として扱いました`);
+    else if (plan.verdict) this.log(c, 'system', `Pipeline: 工程「${st.label}」の判定は「${plan.verdict === 'fail' ? '差し戻し' : '合格'}」でした`);
+    if (plan.to !== null) return { to: plan.to };
+    r.done = true;
+    if (!plan.limit) return { to: null };
+    r.limitReached = true;
+    const limitMsg = `工程「${st.label}」から戻れる上限（${st.maxLoops || providers.RELAY_MAX_LOOPS_DEFAULT}回）に達したので、Pipelineを終えてレビューに回しました。差分と最後の報告を確かめてください`;
+    this.log(c, 'error', `Pipeline: ${limitMsg}`);
+    return { to: null, limitMsg };
   }
 
-  // Pipelineの次の工程へ進める（同じ worktree のまま、次のエージェントで新しい会話を始める）
-  advanceRelay(c) {
+  // Pipelineの次の工程（to。省略したら次の番号）へ進める（同じ worktree のまま、次のエージェントで新しい会話を始める）
+  advanceRelay(c, to) {
     const r = c.relay;
+    const from = r.index;
+    const next = to === undefined ? from + 1 : to;
     const cost = Math.max(0, (c.costUsd || 0) - (r.stepCostStart || 0));
-    r.history = [...(r.history || []), { index: r.index, agent: agentOf(c), sessionId: c.sessionId || null, report: truncate(c.lastText || c.lastMessage || '', 4000), startedAt: r.stepStartedAt || null, at: Date.now(), costUsd: cost }];
-    r.index += 1;
+    const entry = { index: from, run: relayRunNo(c, from), agent: agentOf(c), sessionId: c.sessionId || null, report: truncate(c.lastText || c.lastMessage || '', 4000), startedAt: r.stepStartedAt || null, at: Date.now(), costUsd: cost };
+    if (r.lastVerdict) entry.verdict = r.lastVerdict;
+    r.history = [...(r.history || []), entry];
+    r.lastVerdict = null;
+    // ループ（今の工程か前の工程へ戻る）の回数を、戻した工程ごとに数える
+    if (next <= from) r.loops = { ...(r.loops || {}), [from]: ((r.loops || {})[from] || 0) + 1 };
+    r.index = next;
     // ワークフロー表示のため、工程ごとの開始時刻と、開始したときの金額を残す
     r.stepStartedAt = null;
     r.stepCostStart = c.costUsd || 0;
@@ -791,7 +892,8 @@ class AgentManager extends EventEmitter {
     c.agent = st.agent;
     c.sessionId = null;
     c.forkNext = false;
-    this.log(c, 'system', `Pipeline: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」を ${agentLabel(st.agent)} に引き継ぎます`);
+    const n = relayRunNo(c, r.index);
+    this.log(c, 'system', `Pipeline: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」${n > 1 ? `（${n}回目）` : ''}を ${agentLabel(st.agent)} に引き継ぎます`);
     this.enqueue(c, buildRelayStepPrompt(c, r.index));
   }
 
@@ -1426,6 +1528,7 @@ class AgentManager extends EventEmitter {
         return;
       }
       let relayNext = false;
+      let relayTo;
       if (spawnError) {
         c.status = 'failed';
         c.error =
@@ -1448,7 +1551,9 @@ class AgentManager extends EventEmitter {
         // 会話は返事が来たらいつでも続きを話せるので、「回答待ち」にはしない
         c.awaitingReply = !chat && (c.specState === 'pending' || endsWithQuestion(c.lastText));
         // Pipelineの途中なら、レビューに回さずに次の工程へ引き継ぐ（質問で止まったとき・仕様の確認中は、答えてもらってから）
-        relayNext = !c.awaitingReply && this.relayHasNext(c);
+        const plan = c.awaitingReply ? null : this.relayNextStep(c);
+        relayNext = !!plan && plan.to !== null;
+        if (relayNext) relayTo = plan.to;
         if (relayNext) {
           /* 通知はPipelineが終わってから */
         } else if (c.specState === 'pending') {
@@ -1461,6 +1566,7 @@ class AgentManager extends EventEmitter {
           this.notify(c, 'awaiting', `回答待ち: ${c.title}`, c.lastText || `${agentShort(agent)} が質問しています`);
         } else {
           if (isChat(c)) this.notify(c, 'awaiting', `返事: ${c.title}`, c.lastText || `${agentShort(agent)} が返事をしました`);
+          else if (plan && plan.limitMsg) this.notify(c, 'review', `ループの上限: ${c.title}`, plan.limitMsg);
           else this.notify(c, 'review', `レビュー待ち: ${c.title}`, c.lastText || '作業が終わりました。差分を確かめてください');
         }
       } else {
@@ -1476,7 +1582,7 @@ class AgentManager extends EventEmitter {
       c.stopRequested = false;
       c.finishedAt = Date.now();
       this.changed(c);
-      if (relayNext) return this.advanceRelay(c);
+      if (relayNext) return this.advanceRelay(c, relayTo);
       this.checkCompetitionDone(c);
       this.pump();
     };

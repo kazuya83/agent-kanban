@@ -343,18 +343,49 @@ function cleanOrchestration(v) {
   return ORCHESTRATIONS.includes(v) ? v : 'relay';
 }
 
+// 分岐の行き先: 'end'（終了してレビュー列へ）か、工程の番号（0 から）。それ以外（null など）は「次の工程」
+const RELAY_MAX_LOOPS_DEFAULT = 3;
+function cleanRelayTarget(v, map) {
+  if (v === 'end') return 'end';
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || !map.has(n)) return null;
+  return map.get(n);
+}
+
 // 設定から読んだPipelineの工程を整える（知らないエージェント・空の工程は落とす）
+// 分岐（onPass / onFail）・戻る上限（maxLoops）は、判定する工程だけに残す。行き先は落とした工程の分だけ番号を詰める
 function cleanRelaySteps(steps) {
   if (!Array.isArray(steps)) return [];
-  return steps
-    .map((x) => ({
-      agent: isAgent(x && x.agent) ? x.agent : 'claude',
-      label: trunc(String((x && x.label) || '').trim(), 30),
-      instruction: trunc(String((x && x.instruction) || '').trim(), 4000),
-    }))
-    .filter((x) => x.label || x.instruction)
-    .map((x, i) => ({ ...x, label: x.label || `工程${i + 1}` }))
-    .slice(0, 8);
+  const base = steps.map((x) => ({
+    agent: isAgent(x && x.agent) ? x.agent : 'claude',
+    label: trunc(String((x && x.label) || '').trim(), 30),
+    instruction: trunc(String((x && x.instruction) || '').trim(), 4000),
+    raw: x || {},
+  }));
+  // 元の番号 → 残した工程の番号
+  const map = new Map();
+  base.forEach((x, i) => {
+    if ((x.label || x.instruction) && map.size < 8) map.set(i, map.size);
+  });
+  return base
+    .filter((_, i) => map.has(i))
+    .map(({ raw, ...x }, i) => {
+      const out = { ...x, label: x.label || `工程${i + 1}` };
+      const onPass = cleanRelayTarget(raw.onPass, map);
+      const onFail = cleanRelayTarget(raw.onFail, map);
+      if (onPass !== null) out.onPass = onPass;
+      if (onFail !== null) out.onFail = onFail;
+      if (onPass !== null || onFail !== null) {
+        const m = Number(raw.maxLoops);
+        out.maxLoops = Number.isInteger(m) && m >= 1 ? Math.min(m, 10) : RELAY_MAX_LOOPS_DEFAULT;
+      }
+      return out;
+    });
+}
+// 判定する工程か（合格・差し戻しで行き先が変わる）
+function relayJudges(st) {
+  return !!st && (st.onPass !== undefined || st.onFail !== undefined);
 }
 function cleanCompeteAgents(list) {
   const out = [];
@@ -399,6 +430,8 @@ module.exports = {
   DEFAULT_RELAY_STEPS,
   DEFAULT_COMPETE_AGENTS,
   cleanRelaySteps,
+  relayJudges,
+  RELAY_MAX_LOOPS_DEFAULT,
   cleanOrchestration,
   ORCHESTRATIONS,
   cleanCompeteAgents,

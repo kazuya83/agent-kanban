@@ -593,3 +593,14 @@ body.resizing { cursor: col-resize; user-select: none; }
 .agent-cfg-head { margin: 0; }
 .agent-cfg-body { margin-top: 8px; }
 .agent-cfg-body[hidden] { display: none; }
+
+/* Pipeline: 分岐・ループ */
+.rs-skipped { --rs: var(--muted); }
+.rf-node.rs-skipped .rf-body { opacity: 0.55; }
+.rf-verdict { font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 999px; }
+.rf-verdict.v-pass { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.rf-verdict.v-fail { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.relay-branch { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); }
+.relay-branch label { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
+.relay-branch .rLoops { width: 52px; }
+.relay-branch [hidden] { display: none; }
