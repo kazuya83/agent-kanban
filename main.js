@@ -868,11 +868,12 @@ app.whenReady().then(async () => {
   handle('skills:list', async () => require('./src/skills').listSkills(store.settings.repoPath, { configDir: await claudeConfigFor(store.settings.repoPath) }));
   handle('card:btw', ({ id, text }) => agents.btw(id, text));
   handle('card:setSession', ({ id, session }) => agents.setSession(id, session));
-  // 会話の一覧。どのカードが使っているか（usedBy）も付ける
+  // 会話の一覧（このリポジトリとタスク用 worktree の会話だけ）。どのカードが使っているか（usedBy）も付ける
   handle('sessions:list', async () => {
     const usage = agents.sessionUsage();
     return require('./src/sessions')
       .listSessions(store.settings.repoPath, { configDir: await claudeConfigFor(store.settings.repoPath) })
+      .filter((s) => s.related)
       .map((s) => ({ ...s, usedBy: usage.get(s.id) || [] }));
   });
   handle('sessions:delete', ({ ids } = {}) => agents.deleteSessions(ids));
