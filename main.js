@@ -6,6 +6,7 @@ const { AgentManager } = require('./src/agent');
 const { PermissionServer } = require('./src/permission-server');
 const git = require('./src/git');
 const { fixPath, resolveCommand } = require('./src/env');
+const providers = require('./src/providers');
 
 // Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
 fixPath();
@@ -140,6 +141,7 @@ app.whenReady().then(async () => {
   handle('env:check', () => ({
     git: resolveCommand('git'),
     claude: resolveCommand(store.settings.claudePath || 'claude'),
+    agents: Object.fromEntries(providers.AGENT_IDS.map((a) => [a, resolveCommand(providers.agentCommand(store.settings, a))])),
     platform: process.platform,
   }));
   handle('repo:choose', async () => {
@@ -163,7 +165,7 @@ app.whenReady().then(async () => {
     };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'branchNamingRule'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'relaySteps', 'competeAgents'];
     if (patch && 'branchNamingRule' in patch) patch = { ...patch, branchNamingRule: String(patch.branchNamingRule || '').trim() };
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     if (patch && 'suggestSkillsOnDone' in patch) patch = { ...patch, suggestSkillsOnDone: !!patch.suggestSkillsOnDone };
@@ -173,6 +175,10 @@ app.whenReady().then(async () => {
       if (b) git.assertSafeRef(b, 'ベースブランチ名');
       patch = { ...patch, baseBranch: b };
     }
+    if (patch && 'defaultAgent' in patch && !providers.isAgent(patch.defaultAgent) && !['relay', 'compete'].includes(patch.defaultAgent)) patch = { ...patch, defaultAgent: 'claude' };
+    for (const k of ['codexPath', 'codexModel', 'geminiPath', 'geminiModel']) if (patch && k in patch) patch = { ...patch, [k]: String(patch[k] || '').trim() };
+    if (patch && 'relaySteps' in patch) patch = { ...patch, relaySteps: providers.cleanRelaySteps(patch.relaySteps) };
+    if (patch && 'competeAgents' in patch) patch = { ...patch, competeAgents: providers.cleanCompeteAgents(patch.competeAgents) };
     if (patch && 'statusFieldName' in patch) patch = { ...patch, statusFieldName: String(patch.statusFieldName || '').trim() };
     if (patch && 'statusMapping' in patch) {
       const m = patch.statusMapping || {};
@@ -186,14 +192,15 @@ app.whenReady().then(async () => {
     notifyBoard();
     return store.settings;
   });
-  handle('card:create', ({ title, prompt, autoStart, session, skill }) => {
-    const c = agents.createCard({ title, prompt, session, skill });
-    if (autoStart) agents.start(c.id);
-    return c.id;
+  // agent: claude / codex / gemini / relay（リレー） / compete（競争。カードが複数できる）。返すのは最初のカードの ID
+  handle('card:create', ({ title, prompt, autoStart, session, skill, agent }) => {
+    const cards = agents.createTask({ title, prompt, session, skill, agent });
+    if (autoStart) for (const c of cards) agents.start(c.id);
+    return cards[0].id;
   });
   handle('chat:create', ({ message, title, session, skill }) => agents.createChat({ message, title, session, skill }).id);
-  handle('card:createFromIssues', async ({ numbers, extra, autoStart, session, skill }) => {
-    const { cards, errors } = await agents.createFromIssues({ numbers, extra, session, skill });
+  handle('card:createFromIssues', async ({ numbers, extra, autoStart, session, skill, agent }) => {
+    const { cards, errors } = await agents.createFromIssues({ numbers, extra, session, skill, agent });
     if (autoStart) for (const c of cards) agents.start(c.id);
     return { ids: cards.map((c) => c.id), errors };
   });
@@ -232,6 +239,8 @@ app.whenReady().then(async () => {
   handle('card:dismissInterrupted', (id) => agents.dismissInterrupted(id));
   handle('card:stop', (id) => agents.stop(id));
   handle('card:send', ({ id, message, skill }) => agents.send(id, message, skill));
+  handle('compete:adopt', (id) => agents.adoptCompetitor(id));
+  handle('compete:compare', (id) => agents.compareCompetitors(id).id);
   handle('card:suggestSkills', ({ id }) => agents.suggestSkills(id));
   handle('notifications:read', ({ ids } = {}) => agents.readNotifications(store.settings.repoPath, ids));
   handle('notifications:clear', ({ ids } = {}) => agents.clearNotifications(store.settings.repoPath, ids));

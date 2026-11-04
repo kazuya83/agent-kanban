@@ -1,6 +1,7 @@
 // ボードの状態を JSON ファイルに保存する
 const fs = require('fs');
 const path = require('path');
+const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS } = require('./providers');
 
 const DEFAULT_SETTINGS = {
   repoPath: '',
@@ -18,6 +19,15 @@ const DEFAULT_SETTINGS = {
   pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
   suggestSkillsOnDone: true, // タスクが完了したら「スキルにしませんか？」と通知する
   branchNamingRule: '', // ブランチの命名規則（自然言語）。空なら agent/issue-12-xxxx のようないつもの名前
+  // ---- Claude Code 以外のエージェント ----
+  defaultAgent: 'claude', // 新しいタスクで最初から選んでおくエージェント（claude / codex / gemini / relay / compete）
+  codexPath: 'codex',
+  codexModel: '',
+  geminiPath: 'gemini',
+  geminiModel: '',
+  // ---- オーケストレーション ----
+  relaySteps: DEFAULT_RELAY_STEPS, // リレー: 同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ
+  competeAgents: DEFAULT_COMPETE_AGENTS, // 競争: 同じタスクを、これらのエージェントで並列に解かせる
 };
 
 const MAX_NOTIFICATIONS = 200;
