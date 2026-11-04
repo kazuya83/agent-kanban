@@ -10,6 +10,8 @@ const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
 const { RemoteHost, RemoteClient, DEFAULT_PORT, isProxyChannel, isLocalChannel } = require('./src/remote');
 const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
+const sshKey = require('./src/ssh-key');
+const fs = require('fs');
 
 // Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
 fixPath();
@@ -274,6 +276,39 @@ app.whenReady().then(async () => {
   handle('remote:status', () => remoteSession());
   // このマシンをホストにするとき、操作側に入れてもらう接続先と SSH サーバーの状態
   handle('remote:hostInfo', () => sshHostInfo());
+  // 操作側で使う SSH の鍵（作るのはアプリ、ホストへの登録はユーザー）
+  const keyInfo = (st) => ({ ...st, commands: st.publicKey ? sshKey.registerCommands(st.publicKey) : null });
+  // keyPath: 画面の「鍵ファイル」の欄（空ならアプリの専用の鍵 ~/.ssh/agent-kanban_ed25519）
+  const keyPathOf = (keyPath) => (keyPath != null ? String(keyPath) : store.settings.remoteSshKey || '');
+  handle('remote:keyStatus', ({ keyPath } = {}) => keyInfo(sshKey.keyStatus({ keyPath: keyPathOf(keyPath) })));
+  handle('remote:genKey', async ({ keyPath, sshPath } = {}) => {
+    const cmd = sshCommand(sshPath != null ? sshPath : store.settings.remoteSshPath);
+    const st = await sshKey.generateKey({ keyPath: keyPathOf(keyPath), command: sshKey.keygenCommandFor(cmd) });
+    // 接続のときにこの鍵を使う
+    store.settings.remoteSshKey = st.path;
+    store.save();
+    return keyInfo(st);
+  });
+  // ホスト側: 操作側から受け取った公開鍵ファイルを選んで、authorized_keys に登録する
+  handle('remote:pickPubKey', async () => {
+    const r = await dialog.showOpenDialog(win, {
+      title: '操作側から受け取った公開鍵（.pub）を選択',
+      properties: ['openFile'],
+      filters: [{ name: '公開鍵', extensions: ['pub'] }, { name: 'すべてのファイル', extensions: ['*'] }],
+    });
+    if (r.canceled || !r.filePaths[0]) return null;
+    const file = r.filePaths[0];
+    const st = fs.statSync(file);
+    if (st.size > 64 * 1024) throw new Error('公開鍵のファイルではないようです（大きすぎます）');
+    const key = sshKey.parsePublicKey(fs.readFileSync(file, 'utf8'));
+    return { path: file, key: key.line, type: key.type, comment: key.comment };
+  });
+  handle('remote:installPubKey', async ({ path: file } = {}) => {
+    if (!file) throw new Error('公開鍵のファイルを選んでください');
+    const r = await sshKey.installPublicKey({ text: fs.readFileSync(String(file), 'utf8') });
+    notifyRemoteOnly();
+    return r;
+  });
   handle('remote:startHost', async ({ port } = {}) => {
     if (remoteClient?.connected) throw new Error('クライアントとして接続中はホストを開始できません。先に切断してください');
     if (port != null) {
