@@ -110,6 +110,10 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .remote-box { display: grid; gap: 12px; padding: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; margin: 8px 0 4px; }
 .remote-box .pair-code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.2em; font-weight: 600; color: var(--text); }
 .remote-ssh { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.remote-key { display: grid; gap: 6px; margin-top: 8px; padding: 10px; border: 1px dashed var(--line); border-radius: 8px; }
+.remote-key .ok-note { color: var(--ok); font-size: 12px; word-break: break-all; }
+.remote-key-row { display: flex; gap: 6px; align-items: flex-start; }
+.remote-key-row .remote-ssh { flex: 1; min-width: 0; word-break: break-all; user-select: text; }
 
 /* レイアウト */
 .layout { flex: 1; display: flex; min-height: 0; }

@@ -35,7 +35,7 @@ test('ループバックかどうか', () => {
 test('ssh の失敗を、直し方の分かる文にする', () => {
   assert.match(explainSshError('ssh: connect to host 100.1.2.3 port 22: Connection timed out', { host: '100.1.2.3' }), /リモートログイン/);
   assert.match(explainSshError('ssh: connect to host x port 22: Connection refused', { host: 'x' }), /リモートログイン/);
-  assert.match(explainSshError('kazuya@x: Permission denied (publickey,password).', { host: 'x' }), /ssh-keygen/);
+  assert.match(explainSshError('kazuya@x: Permission denied (publickey,password).', { host: 'x' }), /RC設定.*鍵を作る/);
   assert.match(explainSshError('Host key verification failed.', { host: 'x' }), /ssh-keygen -R x/);
   assert.match(explainSshError('ssh: Could not resolve hostname macmini: No such host is known.', { host: 'macmini' }), /見つかりません/);
   assert.match(explainSshError('', { spawnError: Object.assign(new Error('x'), { code: 'ENOENT' }) }), /OpenSSH/);

@@ -440,13 +440,13 @@ function renderRemoteInfo() {
   if (rs.role === 'client') {
     const c = rs.client;
     el.textContent = c.mode === 'direct' ? `遠隔操作中 → ${c.host}:${c.port}` : `遠隔操作中 → SSH ${c.sshHost}`;
-    el.title = 'ホストのボードを表示・操作しています。クリックで設定を開きます';
+    el.title = 'ホストのボードを表示・操作しています。クリックで RC設定を開きます';
   } else {
     const code = rs.host.pairCode ? ` ・ コード ${rs.host.pairCode}` : '';
     el.textContent = `ホスト待ち受け :${rs.host.port}${code}`;
-    el.title = 'このマシンで遠隔ホストとして待ち受けています。クリックで設定を開きます';
+    el.title = 'このマシンで遠隔ホストとして待ち受けています。クリックで RC設定を開きます';
   }
-  el.onclick = () => openSettings();
+  el.onclick = () => openRemoteSettings();
 }
 
 function renderBoard() {
@@ -1993,6 +1993,217 @@ function agentConfigHtml(a, s, body) {
     <div class="agent-cfg-body" ${on ? '' : 'hidden'}>${body}</div></div>`;
 }
 
+// ---------------- RC設定（遠隔操作） ----------------
+
+function openRemoteSettings() {
+  openModal(
+    `<h2>RC設定（遠隔操作）</h2>
+     <small class="muted s-note">作業する PC（ホスト。Mac でも Windows でも）のボードを、別の PC（クライアント）から操作できます。ホストは 127.0.0.1 だけで待ち受けるので、SSH のポート転送を通してつなぎます（手順は README の「遠隔操作」）。</small>
+     <div class="remote-box" id="rcBox">遠隔の状態を読み込み中…</div>
+     <div class="modal-actions"><button class="btn primary" id="rcClose">閉じる</button></div>`,
+    () => {
+      // 操作側の SSH の鍵。作るのはこのアプリ、公開鍵をホストに登録するのはユーザー
+      const copyBtn = (id, label = 'コピー') => `<button class="btn small" type="button" data-copy="${id}">${label}</button>`;
+      const drawKey = async (st) => {
+        const kb = $('rKeyBox');
+        if (!kb) return;
+        if (!st) {
+          try {
+            st = await api.remoteKeyStatus({ keyPath: $('rSshKey')?.value || '' });
+          } catch (err) {
+            kb.innerHTML = `<div class="warn">${esc(err.message)}</div>`;
+            return;
+          }
+        }
+        if (!$('rKeyBox')) return;
+        if (!st.exists) {
+          kb.innerHTML = `<div><strong>① SSH の鍵を作る</strong></div>
+            <small class="muted">${esc(st.path)} にまだ鍵がありません。このアプリで ssh-keygen を動かして、パスフレーズなしの ed25519 の鍵を作ります（アプリからはパスフレーズを入力できないため）。</small>
+            <div class="row"><button class="btn small primary" type="button" id="rGenKey">鍵を作る</button></div>`;
+          $('rGenKey').onclick = async () => {
+            const r = await runBusy('SSH の鍵を作っています…', () => api.remoteGenKey({ keyPath: $('rSshKey').value, sshPath: $('rSshPath').value }));
+            if (!r) return;
+            if ($('rSshKey')) $('rSshKey').value = r.path;
+            toast(r.created ? '鍵を作りました。公開鍵のファイルをホストに渡して登録してください' : 'すでにある鍵を使います', 'ok');
+            drawKey(r);
+          };
+          return;
+        }
+        if (!st.publicKey) {
+          kb.innerHTML = `<div class="warn">鍵 ${esc(st.path)} はありますが、公開鍵（${esc(st.pubPath)}）が読めません。ターミナルで <code>ssh-keygen -y -f "${esc(st.path)}" &gt; "${esc(st.pubPath)}"</code> を実行して作り直してください。</div>`;
+          return;
+        }
+        const cmd = st.commands || {};
+        const user = $('rSshUser')?.value.trim() || '<ユーザー名>';
+        const host = $('rSshHost')?.value.trim() || '<ホストの IP>';
+        kb.innerHTML = `<div><strong>① SSH の鍵</strong>: ${esc(st.path)}（できています）</div>
+          <div class="remote-key-row"><div class="remote-ssh" id="rPubKey">${esc(st.publicKey)}</div>${copyBtn('rPubKey', '公開鍵をコピー')}</div>
+          <div><strong>② 公開鍵をホストに渡す</strong>（ここはご自身で行ってください）</div>
+          <small class="muted">公開鍵のファイル <b>${esc(st.pubPath)}</b> を、USB・共有フォルダ・メールなどでホストの PC の好きな場所に置き、ホストの Agent Kanban の「RC設定」→「操作側の公開鍵を登録する」で選んで登録します。秘密鍵（${esc(st.path)}）は渡さないでください。アプリを使わずに登録するなら、ホストの OS に合ったコマンドをホストで実行します:</small>
+          <div><small>ホストが Mac（ターミナルで）</small></div>
+          <div class="remote-key-row"><div class="remote-ssh" id="rCmdMac">${esc(cmd.mac || '')}</div>${copyBtn('rCmdMac')}</div>
+          <div><small>ホストが Windows で、ユーザーが管理者（ふつうの個人の PC。PowerShell を「管理者として実行」で）</small></div>
+          <div class="remote-key-row"><div class="remote-ssh" id="rCmdWinAdmin">${esc(cmd.winAdmin || '')}</div>${copyBtn('rCmdWinAdmin')}</div>
+          <div><small>ホストが Windows で、ユーザーが管理者ではない（PowerShell で）</small></div>
+          <div class="remote-key-row"><div class="remote-ssh" id="rCmdWinUser">${esc(cmd.winUser || '')}</div>${copyBtn('rCmdWinUser')}</div>
+          <div><strong>③ パスワードなしで入れるか確かめる</strong>（この PC のターミナルで。初回は yes と答えます）</div>
+          <div class="remote-key-row"><div class="remote-ssh" id="rCmdCheck">${esc(`ssh -i "${st.path}" ${user}@${host} exit`)}</div>${copyBtn('rCmdCheck')}</div>`;
+        kb.querySelectorAll('[data-copy]').forEach((b) => {
+          b.onclick = () => navigator.clipboard.writeText($(b.dataset.copy).textContent).then(() => toast('コピーしました', 'ok'), () => toast('コピーできませんでした'));
+        });
+      };
+      const drawRemote = async () => {
+        const box = $('rcBox');
+        if (!box) return;
+        let rs;
+        try {
+          rs = await api.remoteStatus();
+        } catch (err) {
+          box.innerHTML = `<div class="warn">${esc(err.message)}</div>`;
+          return;
+        }
+        // このマシンをホストにするときの接続先（操作側に入れてもらう値）と SSH サーバーの状態
+        let hi = null;
+        if (!rs.client.connected) {
+          try {
+            hi = await api.remoteHostInfo();
+          } catch {
+            hi = null;
+          }
+        }
+        const sshServerHowto = hi?.platform === 'win32'
+          ? '「設定 → システム → オプション機能」で「OpenSSH サーバー」を追加し、管理者の PowerShell で <code>Start-Service sshd; Set-Service sshd -StartupType Automatic</code> を実行してください'
+          : hi?.platform === 'darwin'
+            ? '「システム設定 → 一般 → 共有 → リモートログイン」をオンにしてください'
+            : 'SSH サーバー（sshd）を起動してください';
+        const hostInfoBlock = hi
+          ? `<div class="remote-ssh">操作側の「SSH の接続先」: ${hi.tailscaleIps.length ? esc(hi.tailscaleIps.join(' / ')) : `${esc(hi.hostname)}（Tailscale の IP が見つかりません。Tailscale が接続中か確かめてください）`}
+    ユーザー名: ${esc(hi.user || '?')}
+    SSH サーバー（ポート ${esc(hi.sshPort)}）: ${hi.sshServer ? '動いています' : '動いていません'}</div>
+             ${hi.sshServer ? '' : `<div class="warn">このマシンの SSH サーバーが動いていないので、操作側からつなげません。${sshServerHowto}</div>`}
+             <div class="remote-key" id="rHostKeyBox">
+               <div><strong>操作側の公開鍵を登録する</strong></div>
+               <small class="muted">操作側の RC設定で作った公開鍵（agent-kanban_ed25519.pub）を、USB・共有フォルダ・メールなどでこの PC の好きな場所に置き、ここで選んで「登録する」を押すと、SSH で入れるように設定します（${hi.platform === 'win32' ? '管理者のユーザーは C:\\ProgramData\\ssh\\administrators_authorized_keys、それ以外は ~/.ssh/authorized_keys' : '~/.ssh/authorized_keys'} に足します）。</small>
+               <div class="remote-key-row"><div class="remote-ssh" id="rHostPubPath">（まだ選んでいません）</div><button class="btn small" type="button" id="rPickPub">ファイルを選択…</button></div>
+               <div id="rHostPubInfo"></div>
+               <div class="row"><button class="btn small primary" type="button" id="rInstallPub" disabled>登録する</button></div>
+             </div>`
+          : '';
+        const port = rs.host.port || 17831;
+        const ssh = `ssh -L ${port}:127.0.0.1:${port} <user>@<host>`;
+        const hostBlock = rs.host.listening
+          ? `<div><strong>ホストとして待ち受け中</strong>（ポート ${esc(port)}・接続 ${rs.host.clients || 0}・ペア済み ${rs.host.pairedCount || 0}）</div>
+             <div>ペアリングコード: <span class="pair-code">${rs.host.pairCode ? esc(rs.host.pairCode) : '（期限切れ・再発行してください）'}</span></div>
+             <div class="row">
+               <button class="btn small" type="button" id="rRefreshPair">コードを再発行</button>
+               <button class="btn small" type="button" id="rClearPairs">ペアを破棄</button>
+               <button class="btn small danger" type="button" id="rStopHost">ホストを停止</button>
+             </div>
+             <div><small class="muted">操作側の「クライアント」で「SSH 経由」を選び、下の接続先とユーザー名を入れて接続します。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>
+             ${hostInfoBlock}`
+          : `<div><strong>ホスト（作業側）</strong></div>
+             <label class="field"><span>待ち受けポート</span><input id="rHostPort" type="number" min="1024" max="65535" value="${esc(port)}" /></label>
+             <button class="btn small primary" type="button" id="rStartHost">ホストを開始（ペアリングコードを出す）</button>
+             <div><small class="muted">開始後、操作側の「クライアント」で「SSH 経由」を選び、下の接続先とユーザー名・コードで接続します（このマシンの SSH サーバーをオンにしておいてください）。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>
+             ${hostInfoBlock}`;
+        const c = rs.client;
+        const viaSsh = c.mode !== 'direct';
+        const clientBlock = c.connected
+          ? `<div><strong>クライアントとして接続中</strong> → ${viaSsh ? `SSH 経由 ${esc(c.sshUser ? `${c.sshUser}@` : '')}${esc(c.sshHost)}（ホストのポート ${esc(c.port)}）` : `${esc(c.host)}:${esc(c.port)}`}</div>
+             <button class="btn small danger" type="button" id="rDisconnect">切断してローカルボードに戻る</button>`
+          : `<div><strong>クライアント（操作側）</strong></div>
+             <label class="field"><span>接続方法</span>
+               <select id="rClientMode">
+                 <option value="ssh" ${viaSsh ? 'selected' : ''}>SSH 経由（アプリがトンネルを張る・おすすめ）</option>
+                 <option value="direct" ${viaSsh ? '' : 'selected'}>直接（自分で張ったトンネルの 127.0.0.1 などへ）</option>
+               </select>
+             </label>
+             <div id="rSshFields" ${viaSsh ? '' : 'hidden'}>
+               <div class="row">
+                 <label class="field"><span>SSH の接続先（Tailscale の IP・名前など）</span><input id="rSshHost" placeholder="100.x.x.x / マシン名" value="${esc(c.sshHost || '')}" /></label>
+                 <label class="field"><span>ユーザー名（ホストのログイン名）</span><input id="rSshUser" placeholder="kazuya" value="${esc(c.sshUser || '')}" /></label>
+                 <label class="field"><span>SSH ポート</span><input id="rSshPort" type="number" min="1" max="65535" value="${esc(c.sshPort || 22)}" /></label>
+               </div>
+               <div class="row">
+                 <label class="field"><span>鍵ファイル（空ならこのアプリで作る ~/.ssh/agent-kanban_ed25519）</span><input id="rSshKey" placeholder="~/.ssh/agent-kanban_ed25519" value="${esc(c.sshKey || '')}" /></label>
+                 <label class="field"><span>ssh コマンド</span><input id="rSshPath" value="${esc(c.sshPath || 'ssh')}" /></label>
+               </div>
+               <small class="muted">SSH は鍵で入れる必要があります（パスワードは入力できません）。ホスト側で SSH サーバーをオンにしてください（Mac は「リモートログイン」、Windows は「OpenSSH サーバー」）。接続先とユーザー名は、ホストの Agent Kanban のこの画面に出ています。</small>
+               <div class="remote-key" id="rKeyBox">SSH の鍵を確かめています…</div>
+             </div>
+             <div class="row">
+               <label class="field" id="rClientHostField" ${viaSsh ? 'hidden' : ''}><span>接続先ホスト</span><input id="rClientHost" value="${esc(c.host || '127.0.0.1')}" /></label>
+               <label class="field"><span>ホストの待ち受けポート</span><input id="rClientPort" type="number" min="1024" max="65535" value="${esc(c.port || 17831)}" /></label>
+             </div>
+             <label class="field"><span>ペアリングコード（初回のみ。トークンがあれば空で再接続）</span><input id="rPairCode" placeholder="6桁" maxlength="8" /></label>
+             <div class="row">
+               <button class="btn small primary" type="button" id="rConnect">${c.hasToken ? '保存したトークンで接続' : 'コードでペアリング'}</button>
+               ${c.hasToken ? '<button class="btn small" type="button" id="rForgetToken">トークンを忘れる</button>' : ''}
+             </div>
+             <small class="muted" id="rDirectHint" ${viaSsh ? 'hidden' : ''}>直接のときは、先に <code>${esc(ssh)}</code> を張り、接続先ホストは 127.0.0.1 のままにします（ホストは 127.0.0.1 でしか待ち受けないので、Tailscale の IP を直接入れてもつながりません）</small>`;
+        box.innerHTML = `${hostBlock}<hr style="border:0;border-top:1px solid var(--line);margin:4px 0" />${clientBlock}`;
+        const busy = (label, fn) => runBusy(label, fn).then((ok) => { if (ok !== undefined) drawRemote(); });
+        if ($('rStartHost')) $('rStartHost').onclick = () => busy('ホストを開始しています…', () => api.remoteStartHost({ port: $('rHostPort').value }));
+        if ($('rStopHost')) $('rStopHost').onclick = () => busy('ホストを停止しています…', () => api.remoteStopHost());
+        if ($('rRefreshPair')) $('rRefreshPair').onclick = () => busy('コードを発行しています…', () => api.remoteRefreshPair());
+        if ($('rClearPairs')) $('rClearPairs').onclick = () => {
+          if (!confirm('ペアリング済みのクライアントをすべて無効にしますか？')) return;
+          busy('ペアを破棄しています…', () => api.remoteClearPairs());
+        };
+        if ($('rClientMode')) $('rClientMode').onchange = () => {
+          const ssh = $('rClientMode').value === 'ssh';
+          $('rSshFields').hidden = !ssh;
+          $('rClientHostField').hidden = ssh;
+          $('rDirectHint').hidden = ssh;
+        };
+        if ($('rConnect')) $('rConnect').onclick = () => {
+          const mode = $('rClientMode').value;
+          if (mode === 'ssh' && !$('rSshHost').value.trim()) return toast('SSH の接続先（Tailscale の IP か名前）を入れてください');
+          busy(mode === 'ssh' ? 'SSH トンネルを張って接続しています…' : '接続しています…', () =>
+            api.remoteConnect({
+              mode,
+              host: $('rClientHost').value,
+              port: $('rClientPort').value,
+              code: $('rPairCode').value.trim(),
+              sshHost: $('rSshHost').value,
+              sshUser: $('rSshUser').value,
+              sshPort: $('rSshPort').value,
+              sshKey: $('rSshKey').value,
+              sshPath: $('rSshPath').value,
+            }),
+          );
+        };
+        // ホスト側: 受け取った公開鍵ファイルを選んで登録する
+        let pickedPub = null;
+        if ($('rPickPub')) $('rPickPub').onclick = async () => {
+          const r = await runBusy('公開鍵を読み込んでいます…', () => api.remotePickPubKey());
+          if (!r) return;
+          pickedPub = r;
+          $('rHostPubPath').textContent = r.path;
+          $('rHostPubInfo').innerHTML = `<small class="muted">鍵: ${esc(r.type)}${r.comment ? `（${esc(r.comment)}）` : ''}</small>`;
+          $('rInstallPub').disabled = false;
+        };
+        if ($('rInstallPub')) $('rInstallPub').onclick = async () => {
+          if (!pickedPub) return toast('公開鍵のファイルを選んでください');
+          const r = await runBusy('公開鍵を登録しています…', () => api.remoteInstallPubKey({ path: pickedPub.path }));
+          if (!r) return;
+          $('rHostPubInfo').innerHTML = `<div class="ok-note">${r.added ? '登録しました' : 'この鍵はもう登録されています'}: ${esc(r.file)}<br />操作側で「SSH 経由」・接続先・ユーザー名（下の値）を入れて接続できます。</div>`;
+          toast(r.added ? '公開鍵を登録しました' : 'この鍵はもう登録されています', 'ok');
+        };
+        if ($('rKeyBox')) {
+          drawKey();
+          // 鍵ファイルの欄を変えたら、その鍵を見直す
+          $('rSshKey').onchange = () => drawKey();
+        }
+        if ($('rDisconnect')) $('rDisconnect').onclick = () => busy('切断しています…', () => api.remoteDisconnect());
+        if ($('rForgetToken')) $('rForgetToken').onclick = () => busy('トークンを消しています…', () => api.remoteForgetToken());
+      };
+      drawRemote();
+      $('rcClose').onclick = closeModal;
+    },
+  );
+}
+
 async function openSettings() {
   const s = state.board.settings;
   // ブランチ一覧は git を何回も起動するので（Windows だと遅い）、待たずにモーダルを開いてから後で入れる
@@ -2036,10 +2247,6 @@ async function openSettings() {
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上のベル）</label>
      <label class="check"><input type="checkbox" id="sClaudeRc" ${s.claudeRemoteControl ? 'checked' : ''} /> Claude カード起動時に公式 Remote Control（--remote-control）も付ける（claude.ai/code や Claude アプリから続けられる）</label>
-
-     <h3 class="s-section">遠隔操作（SSH トンネル）</h3>
-     <small class="muted s-note">作業する PC（ホスト。Mac でも Windows でも）のボードを、別の PC（クライアント）から操作できます。ホストは 127.0.0.1 だけで待ち受けるので、SSH のポート転送を通してつなぎます（手順は README の「遠隔操作」）。</small>
-     <div class="remote-box" id="sRemoteBox">遠隔の状態を読み込み中…</div>
 
      <h3 class="s-section">使うエージェント</h3>
      <small class="muted s-note">チェックを付けたエージェントだけ、コマンドとモデルを設定でき、タスク・会話・Pipeline・競争で選べます（1つ以上）。</small>
@@ -2224,123 +2431,6 @@ async function openSettings() {
       // 「Issue のステータスを自動で変える」にチェックがあるときだけ、項目名と選択肢の指定を出す
       $('sIssueSync').onchange = () => ($('sStatusMap').hidden = !$('sIssueSync').checked);
       refreshGh();
-      const drawRemote = async () => {
-        const box = $('sRemoteBox');
-        if (!box) return;
-        let rs;
-        try {
-          rs = await api.remoteStatus();
-        } catch (err) {
-          box.innerHTML = `<div class="warn">${esc(err.message)}</div>`;
-          return;
-        }
-        // このマシンをホストにするときの接続先（操作側に入れてもらう値）と SSH サーバーの状態
-        let hi = null;
-        if (!rs.client.connected) {
-          try {
-            hi = await api.remoteHostInfo();
-          } catch {
-            hi = null;
-          }
-        }
-        const sshServerHowto = hi?.platform === 'win32'
-          ? '「設定 → システム → オプション機能」で「OpenSSH サーバー」を追加し、管理者の PowerShell で <code>Start-Service sshd; Set-Service sshd -StartupType Automatic</code> を実行してください'
-          : hi?.platform === 'darwin'
-            ? '「システム設定 → 一般 → 共有 → リモートログイン」をオンにしてください'
-            : 'SSH サーバー（sshd）を起動してください';
-        const hostInfoBlock = hi
-          ? `<div class="remote-ssh">操作側の「SSH の接続先」: ${hi.tailscaleIps.length ? esc(hi.tailscaleIps.join(' / ')) : `${esc(hi.hostname)}（Tailscale の IP が見つかりません。Tailscale が接続中か確かめてください）`}
-ユーザー名: ${esc(hi.user || '?')}
-SSH サーバー（ポート ${esc(hi.sshPort)}）: ${hi.sshServer ? '動いています' : '動いていません'}</div>
-             ${hi.sshServer ? '' : `<div class="warn">このマシンの SSH サーバーが動いていないので、操作側からつなげません。${sshServerHowto}</div>`}`
-          : '';
-        const port = rs.host.port || 17831;
-        const ssh = `ssh -L ${port}:127.0.0.1:${port} <user>@<host>`;
-        const hostBlock = rs.host.listening
-          ? `<div><strong>ホストとして待ち受け中</strong>（ポート ${esc(port)}・接続 ${rs.host.clients || 0}・ペア済み ${rs.host.pairedCount || 0}）</div>
-             <div>ペアリングコード: <span class="pair-code">${rs.host.pairCode ? esc(rs.host.pairCode) : '（期限切れ・再発行してください）'}</span></div>
-             <div class="row">
-               <button class="btn small" type="button" id="rRefreshPair">コードを再発行</button>
-               <button class="btn small" type="button" id="rClearPairs">ペアを破棄</button>
-               <button class="btn small danger" type="button" id="rStopHost">ホストを停止</button>
-             </div>
-             <div><small class="muted">操作側の「クライアント」で「SSH 経由」を選び、下の接続先とユーザー名を入れて接続します。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>
-             ${hostInfoBlock}`
-          : `<div><strong>ホスト（作業側）</strong></div>
-             <label class="field"><span>待ち受けポート</span><input id="rHostPort" type="number" min="1024" max="65535" value="${esc(port)}" /></label>
-             <button class="btn small primary" type="button" id="rStartHost">ホストを開始（ペアリングコードを出す）</button>
-             <div><small class="muted">開始後、操作側の「クライアント」で「SSH 経由」を選び、下の接続先とユーザー名・コードで接続します（このマシンの SSH サーバーをオンにしておいてください）。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>
-             ${hostInfoBlock}`;
-        const c = rs.client;
-        const viaSsh = c.mode !== 'direct';
-        const clientBlock = c.connected
-          ? `<div><strong>クライアントとして接続中</strong> → ${viaSsh ? `SSH 経由 ${esc(c.sshUser ? `${c.sshUser}@` : '')}${esc(c.sshHost)}（ホストのポート ${esc(c.port)}）` : `${esc(c.host)}:${esc(c.port)}`}</div>
-             <button class="btn small danger" type="button" id="rDisconnect">切断してローカルボードに戻る</button>`
-          : `<div><strong>クライアント（操作側）</strong></div>
-             <label class="field"><span>接続方法</span>
-               <select id="rClientMode">
-                 <option value="ssh" ${viaSsh ? 'selected' : ''}>SSH 経由（アプリがトンネルを張る・おすすめ）</option>
-                 <option value="direct" ${viaSsh ? '' : 'selected'}>直接（自分で張ったトンネルの 127.0.0.1 などへ）</option>
-               </select>
-             </label>
-             <div id="rSshFields" ${viaSsh ? '' : 'hidden'}>
-               <div class="row">
-                 <label class="field"><span>SSH の接続先（Tailscale の IP・名前など）</span><input id="rSshHost" placeholder="100.x.x.x / マシン名" value="${esc(c.sshHost || '')}" /></label>
-                 <label class="field"><span>ユーザー名（ホストのログイン名）</span><input id="rSshUser" placeholder="kazuya" value="${esc(c.sshUser || '')}" /></label>
-                 <label class="field"><span>SSH ポート</span><input id="rSshPort" type="number" min="1" max="65535" value="${esc(c.sshPort || 22)}" /></label>
-               </div>
-               <div class="row">
-                 <label class="field"><span>鍵ファイル（空なら既定の ~/.ssh/id_*）</span><input id="rSshKey" placeholder="C:\\Users\\you\\.ssh\\id_ed25519" value="${esc(c.sshKey || '')}" /></label>
-                 <label class="field"><span>ssh コマンド</span><input id="rSshPath" value="${esc(c.sshPath || 'ssh')}" /></label>
-               </div>
-               <small class="muted">SSH は鍵で入れる必要があります（パスワードは入力できません）。ホスト側で SSH サーバーをオンにしてください（Mac は「リモートログイン」、Windows は「OpenSSH サーバー」）。接続先とユーザー名は、ホストの Agent Kanban のこの画面に出ています。</small>
-             </div>
-             <div class="row">
-               <label class="field" id="rClientHostField" ${viaSsh ? 'hidden' : ''}><span>接続先ホスト</span><input id="rClientHost" value="${esc(c.host || '127.0.0.1')}" /></label>
-               <label class="field"><span>ホストの待ち受けポート</span><input id="rClientPort" type="number" min="1024" max="65535" value="${esc(c.port || 17831)}" /></label>
-             </div>
-             <label class="field"><span>ペアリングコード（初回のみ。トークンがあれば空で再接続）</span><input id="rPairCode" placeholder="6桁" maxlength="8" /></label>
-             <div class="row">
-               <button class="btn small primary" type="button" id="rConnect">${c.hasToken ? '保存したトークンで接続' : 'コードでペアリング'}</button>
-               ${c.hasToken ? '<button class="btn small" type="button" id="rForgetToken">トークンを忘れる</button>' : ''}
-             </div>
-             <small class="muted" id="rDirectHint" ${viaSsh ? 'hidden' : ''}>直接のときは、先に <code>${esc(ssh)}</code> を張り、接続先ホストは 127.0.0.1 のままにします（ホストは 127.0.0.1 でしか待ち受けないので、Tailscale の IP を直接入れてもつながりません）</small>`;
-        box.innerHTML = `${hostBlock}<hr style="border:0;border-top:1px solid var(--line);margin:4px 0" />${clientBlock}`;
-        const busy = (label, fn) => runBusy(label, fn).then((ok) => { if (ok !== undefined) drawRemote(); });
-        if ($('rStartHost')) $('rStartHost').onclick = () => busy('ホストを開始しています…', () => api.remoteStartHost({ port: $('rHostPort').value }));
-        if ($('rStopHost')) $('rStopHost').onclick = () => busy('ホストを停止しています…', () => api.remoteStopHost());
-        if ($('rRefreshPair')) $('rRefreshPair').onclick = () => busy('コードを発行しています…', () => api.remoteRefreshPair());
-        if ($('rClearPairs')) $('rClearPairs').onclick = () => {
-          if (!confirm('ペアリング済みのクライアントをすべて無効にしますか？')) return;
-          busy('ペアを破棄しています…', () => api.remoteClearPairs());
-        };
-        if ($('rClientMode')) $('rClientMode').onchange = () => {
-          const ssh = $('rClientMode').value === 'ssh';
-          $('rSshFields').hidden = !ssh;
-          $('rClientHostField').hidden = ssh;
-          $('rDirectHint').hidden = ssh;
-        };
-        if ($('rConnect')) $('rConnect').onclick = () => {
-          const mode = $('rClientMode').value;
-          if (mode === 'ssh' && !$('rSshHost').value.trim()) return toast('SSH の接続先（Tailscale の IP か名前）を入れてください');
-          busy(mode === 'ssh' ? 'SSH トンネルを張って接続しています…' : '接続しています…', () =>
-            api.remoteConnect({
-              mode,
-              host: $('rClientHost').value,
-              port: $('rClientPort').value,
-              code: $('rPairCode').value.trim(),
-              sshHost: $('rSshHost').value,
-              sshUser: $('rSshUser').value,
-              sshPort: $('rSshPort').value,
-              sshKey: $('rSshKey').value,
-              sshPath: $('rSshPath').value,
-            }),
-          );
-        };
-        if ($('rDisconnect')) $('rDisconnect').onclick = () => busy('切断しています…', () => api.remoteDisconnect());
-        if ($('rForgetToken')) $('rForgetToken').onclick = () => busy('トークンを消しています…', () => api.remoteForgetToken());
-      };
-      drawRemote();
       $('sCancel').onclick = closeModal;
       $('sOk').onclick = async () => {
         const on = using();
@@ -2549,6 +2639,7 @@ $('chatBtn').onclick = openChats;
 $('detailBackdrop').addEventListener('mousedown', closeDetail);
 $('issueBtn').onclick = () => openIssueModal();
 $('settingsBtn').onclick = openSettings;
+$('rcBtn').onclick = openRemoteSettings;
 
 // ---------------- gh（GitHub CLI）の案内 ----------------
 // 入っていなければインストール、ログインしていなければログインまで、この画面からできるようにする
