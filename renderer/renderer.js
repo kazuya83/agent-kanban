@@ -478,7 +478,7 @@ function renderRepoTabs() {
     const tip = on ? `${where}${t.path}\nクリックで、このタブのリポジトリを切り替えます` : `${where}${t.path}\nクリックでこのリポジトリに切り替えます`;
     return `<div class="repo-tab${on ? ' active' : ''}${rc && !t.remote ? ' local' : ''}" data-path="${esc(t.path)}" data-remote="${t.remote ? '1' : ''}" role="tab" aria-selected="${on}">
           <button class="repo-tab-main" title="${esc(tip)}">${icon('folder')}<span class="repo-tab-name">${esc(repoFolderName(t.path))}</span>${badges}</button>
-          ${own.length > 1 ? `<button class="repo-tab-close" title="タブを閉じる（動いているタスクは止まりません）" aria-label="タブを閉じる">${icon('x')}</button>` : ''}
+          ${own.length > 1 || (rc && tabs.length > 1) ? `<button class="repo-tab-close" title="タブを閉じる（動いているタスクは止まりません）" aria-label="タブを閉じる">${icon('x')}</button>` : ''}
         </div>`;
   };
   const hostTabs = tabs.filter((t) => t.remote);
@@ -513,9 +513,11 @@ async function switchRepoTab(dir, remote) {
   if (await run(() => api.switchRepoTab(dir, remoteClient() ? { remote: !!remote } : {}))) await afterRepoChanged();
 }
 async function closeRepoTab(dir, remote, wasCurrent) {
-  const r = await run(() => api.closeRepoTab(dir, remoteClient() ? { remote: !!remote } : {}));
-  if (!r) return;
-  if (wasCurrent) return afterRepoChanged();
+  // 遠隔操作中は、もう片方の側にタブが残るなら、その側の最後のタブも閉じられる
+  const r = await run(() => api.closeRepoTab(dir, remoteClient() ? { remote: !!remote, allowEmpty: sideTabs(remote).length <= 1 && sideTabs(!remote).length > 0 } : {}));
+  if (r === undefined) return;
+  // 片方の側の最後のタブを閉じたとき（r が ''）は、見ている側がもう片方に移るので読み直す
+  if (wasCurrent || r === '') return afterRepoChanged();
   state.board = await api.getBoard();
   renderBoard();
 }

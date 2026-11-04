@@ -158,14 +158,12 @@ function notifyBoard() {
   if (boardTimer) return;
   boardTimer = setTimeout(() => {
     boardTimer = null;
-    // クライアント接続中は、このマシンのボードをホストへは送らない（画面には、ホストのタブと並べて出す）
-    if (remoteClient?.connected) {
-      send('board:changed', viewBoard());
-      return;
-    }
-    const state = withRemoteSession(boardState());
-    send('board:changed', state);
-    remoteHost?.broadcast('board:changed', state);
+    // このマシンにつないでいる操作側へは、いつもこのマシンだけのボードを送る
+    // （このマシンが別のホストにつないでいても、そのホストのタブやカードは混ぜない）
+    const own = withRemoteSession(boardState());
+    remoteHost?.broadcast('board:changed', own);
+    // クライアント接続中の画面には、ホストのタブと並べて出す
+    send('board:changed', remoteClient?.connected ? viewBoard() : own);
   }, 120);
 }
 
@@ -187,12 +185,16 @@ async function dispatch(channel, arg) {
         return viewBoard();
       }
       if (VIEW_CHANNELS.has(channel)) setClientView('host');
+      // ホストの最後のタブを閉じたら、このマシンのタブを見る
+      else if (channel === 'repo:closeTab' && data === '') setClientView('local');
       return data;
     }
     const fn = localHandlers.get(channel);
     if (!fn) throw new Error(`未対応の操作です: ${channel}`);
     const data = await fn(arg);
     if (VIEW_CHANNELS.has(channel) && data) setClientView('local');
+    // このマシンの最後のタブを閉じたら、ホストのタブを見る
+    else if (channel === 'repo:closeTab' && data === '') setClientView('host');
     return data;
   }
   const fn = localHandlers.get(channel);
@@ -250,6 +252,9 @@ async function startRemoteHost() {
       invoke: (channel, arg) => {
         const fn = localHandlers.get(channel);
         if (!fn || !isProxyChannel(channel)) throw new Error(`この操作は遠隔では使えません: ${channel}`);
+        // 操作側へは、このマシンのボードだけを返す（画面用の viewBoard は、このマシンが別のホストにつないでいると
+        // そのホストのタブとカードが混ざり、操作側に「自分の PC のリポジトリ」が出てしまう）
+        if (channel === 'board:get') return withRemoteSession(boardState());
         return fn(arg);
       },
     });
@@ -753,9 +758,16 @@ app.whenReady().then(async () => {
     return openRepo(await resolveRepoDir(picked));
   });
   // タブを閉じる。動いているタスクは止めない。今のタブを閉じたら隣のタブに移る
-  handle('repo:closeTab', ({ path: dir } = {}) => {
+  // allowEmpty: 遠隔操作中に、片方の側（ホスト / このマシン）の最後のタブを閉じる（もう片方の側にタブが残るとき）
+  handle('repo:closeTab', ({ path: dir, allowEmpty } = {}) => {
     const s = store.settings;
     const tabs = cleanRepoTabs(s.repoTabs, s.repoPath);
+    if (tabs.length <= 1 && allowEmpty && tabs[0] === String(dir || '').trim()) {
+      switchRepo('', []);
+      store.save();
+      notifyBoard();
+      return '';
+    }
     if (tabs.length <= 1) throw new Error('最後のタブは閉じられません');
     const r = closeRepoTab(tabs, s.repoPath, dir);
     switchRepo(r.next, r.tabs);
