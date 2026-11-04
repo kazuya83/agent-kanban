@@ -198,33 +198,76 @@ function questionCompactHtml(c) {
   </div>`;
 }
 
+// 質問ひとつずつの選択肢と自由入力（AskUserQuestion の回答フォームと、仕様の確認の回答フォームで使う）
+function questionItemsHtml(name, questions) {
+  return questions
+    .map(
+      (q, i) => `<div class="q-item" data-qi="${i}">
+      <div class="q-head">${q.header ? `<span class="q-chip">${esc(q.header)}</span>` : ''}${esc(q.question)}${q.multiSelect && q.options.length ? '<span class="muted small">（複数選べます）</span>' : ''}</div>
+      <div class="q-opts">
+        ${q.options.length
+          ? q.options
+              .map(
+                (o) => `<label class="q-opt"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="q-${name}-${i}" value="${esc(o.label)}" />
+            <span><b>${esc(o.label)}</b>${o.description ? `<small>${esc(o.description)}</small>` : ''}</span></label>`,
+              )
+              .join('') +
+            `<label class="q-opt other"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="q-${name}-${i}" value="__other__" />
+          <span><b>その他</b><input class="q-other" placeholder="自由に入力" /></span></label>`
+          : '<textarea class="q-other q-free" rows="2" placeholder="自由に入力"></textarea>'}
+      </div>
+    </div>`,
+    )
+    .join('');
+}
+
 // 詳細パネル用の回答フォーム
 function questionFormHtml(c) {
   return (c.questions || [])
     .map(
       (req) => `<div class="qform" data-card="${c.id}" data-req="${req.id}">
       <div class="q-title">${icon('question')}${esc(agentShort(agentOf(c)))} からの質問</div>
-      ${req.questions
-        .map(
-          (q, i) => `<div class="q-item" data-qi="${i}">
-          <div class="q-head">${q.header ? `<span class="q-chip">${esc(q.header)}</span>` : ''}${esc(q.question)}${q.multiSelect ? '<span class="muted small">（複数選べます）</span>' : ''}</div>
-          <div class="q-opts">
-            ${q.options
-              .map(
-                (o) => `<label class="q-opt"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="q-${req.id}-${i}" value="${esc(o.label)}" />
-                <span><b>${esc(o.label)}</b>${o.description ? `<small>${esc(o.description)}</small>` : ''}</span></label>`,
-              )
-              .join('')}
-            <label class="q-opt other"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="q-${req.id}-${i}" value="__other__" />
-              <span><b>その他</b><input class="q-other" placeholder="自由に入力" /></span></label>
-          </div>
-        </div>`,
-        )
-        .join('')}
+      ${questionItemsHtml(req.id, req.questions)}
       <div class="q-actions"><button class="btn primary" data-qact="submit">回答する</button><button class="btn ghost" data-qact="skip" title="${esc(agentShort(agentOf(c)))} に、妥当だと思う方法で進めてもらいます">答えずに続ける</button></div>
     </div>`,
     )
     .join('');
+}
+
+// 仕様の確認の回答フォーム（エージェントが付けた質問の JSON から作る。答えは追加指示として送る）
+function specQuestions(c) {
+  return isSpecPending(c) && Array.isArray(c.specQuestions) && c.specQuestions.length ? c.specQuestions : null;
+}
+function specFormHtml(c) {
+  const qs = specQuestions(c);
+  if (!qs) return '';
+  const can = canSendFollow(c);
+  return `<div class="qform spec-qform" data-card="${c.id}" data-spec="1">
+    <div class="q-title">${icon('question')}仕様の質問に答える</div>
+    ${questionItemsHtml(`spec-${c.id}`, qs)}
+    <div class="q-item"><div class="q-head">補足（任意）</div><textarea class="q-note" rows="2" placeholder="ほかに伝えたいことがあれば"></textarea></div>
+    <div class="q-actions"><button class="btn primary" data-sqact="submit"${can ? '' : ' disabled'}>回答して送る</button><button class="btn ghost" data-sqact="auto"${can ? '' : ' disabled'} title="答えていない質問は、${esc(agentShort(agentOf(c)))} に妥当な案で決めてもらいます">おまかせで進める</button></div>
+    <small class="muted">答えていない質問は「おまかせ」として送ります。下の欄に文章で書いて送ってもかまいません。</small>
+  </div>`;
+}
+const SPEC_AUTO = 'おまかせ（妥当な案で決めてください）';
+// 仕様の確認フォームの答えを、エージェントに送る文章にする
+function specAnswerMessage(questions, answers, note, auto) {
+  const lines = ['仕様の質問への答えです。', ''];
+  questions.forEach((q, i) => {
+    lines.push(`${i + 1}. ${q.question}`, `   → ${(!auto && answers[q.question]) || SPEC_AUTO}`);
+  });
+  if (note) lines.push('', `補足: ${note}`);
+  return lines.join('\n');
+}
+async function sendSpecAnswer(form, c, auto) {
+  const qs = specQuestions(c);
+  if (!qs) return;
+  const answers = auto ? {} : collectAnswers(form, qs);
+  const note = form.querySelector('.q-note').value.trim();
+  if (!auto && !note && !Object.values(answers).some(Boolean)) return toast('どれかの質問に答えてください（すべて任せるときは「おまかせで進める」）');
+  const msg = specAnswerMessage(qs, answers, note, auto);
+  return run(() => api.send(c.id, msg, null).then(() => true), auto ? 'おまかせで進めてもらいます' : '回答を送りました');
 }
 
 // ---- コンフリクト ----
@@ -296,11 +339,10 @@ async function conflictAction(c, act) {
 }
 
 // フォームから回答を集める（複数選択は「, 」でつなぐ）
-function collectAnswers(form, c) {
-  const req = (c.questions || []).find((r) => r.id === form.dataset.req);
-  if (!req) return null;
+function collectAnswers(form, questions) {
+  if (!questions) return null;
   const answers = {};
-  req.questions.forEach((q, i) => {
+  questions.forEach((q, i) => {
     const item = form.querySelector(`.q-item[data-qi="${i}"]`);
     const other = item.querySelector('.q-other').value.trim();
     const picked = [...item.querySelectorAll('input[type=radio]:checked, input[type=checkbox]:checked')].map((x) => x.value);
@@ -682,7 +724,7 @@ function competeBoxHtml(c) {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch])]);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch])]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -730,7 +772,7 @@ function renderDetailHead() {
     ${competeBoxHtml(c)}
     ${conflictBoxHtml(c)}
     ${questionFormHtml(c)}
-    ${isSpecPending(c) ? `<div class="d-awaiting d-spec"><b>${icon('note')}内容が詰まっていないので、開発を開始できません</b><p>${esc(String(c.lastText || '').slice(-1200))}</p><small>下の欄で ${esc(agentShort(agentOf(c)))} の質問に答えて、仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>`
+    ${isSpecPending(c) ? `<div class="d-awaiting d-spec"><b>${icon('note')}内容が詰まっていないので、開発を開始できません</b><p>${esc(String(c.lastText || '').slice(-1200))}</p><small>${specQuestions(c) ? 'このすぐ下のフォーム（または下の欄）' : '下の欄'}で ${esc(agentShort(agentOf(c)))} の質問に答えて、仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>${specFormHtml(c)}`
     : c.awaitingReply && (s === 'review' || s === 'failed') ? `<div class="d-awaiting"><b>${icon('chat')}${esc(agentShort(agentOf(c)))} が質問しています</b><p>${esc(String(c.lastText || '').slice(-600))}</p><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>` : ''}
     ${permissionBlock(c, false)}
     <div class="d-actions">${btns.join('')}</div>`;
@@ -766,7 +808,7 @@ function renderDetailHead() {
 
 $('detailHead').addEventListener('input', (e) => {
   if (!e.target.classList.contains('q-other')) return;
-  const box = e.target.closest('.q-opt').querySelector('input[type=radio], input[type=checkbox]');
+  const box = e.target.closest('.q-opt')?.querySelector('input[type=radio], input[type=checkbox]');
   if (box && e.target.value.trim()) box.checked = true;
 });
 $('detailHead').addEventListener('click', async (e) => {
@@ -776,13 +818,21 @@ $('detailHead').addEventListener('click', async (e) => {
     if (c) conflictAction(c, ca.dataset.cact);
     return;
   }
+  const sq = e.target.closest('[data-sqact]');
+  if (sq) {
+    const form = sq.closest('.qform');
+    const c = card(form.dataset.card);
+    if (c) sendSpecAnswer(form, c, sq.dataset.sqact === 'auto');
+    return;
+  }
   const qa = e.target.closest('[data-qact]');
   if (qa) {
     const form = qa.closest('.qform');
     const c = card(form.dataset.card);
     if (!c) return;
     if (qa.dataset.qact === 'skip') return sendAnswer(c.id, form.dataset.req, null);
-    const answers = collectAnswers(form, c);
+    const req = (c.questions || []).find((r) => r.id === form.dataset.req);
+    const answers = collectAnswers(form, req && req.questions);
     const empty = Object.entries(answers || {}).find(([, v]) => !v);
     if (empty) return toast(`「${empty[0]}」に答えてください`);
     return sendAnswer(c.id, form.dataset.req, answers);
