@@ -91,7 +91,7 @@ function send(channel, payload) {
 function boardState() {
   const { cleanRepoTabs, repoTabSummary } = require('./src/store');
   const repoTabs = repoTabSummary(cleanRepoTabs(store.settings.repoTabs, store.settings.repoPath), store.cards);
-  return { settings: store.settings, repoTabs, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), weeklyCost: store.weeklyCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath) };
+  return { settings: store.settings, repoTabs, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath) };
 }
 
 function remoteSession() {

@@ -149,7 +149,6 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .db-actions { display: flex; justify-content: flex-end; }
 .spacer { flex: 1; }
 .pill { background: var(--panel-2); border: 1px solid var(--line); padding: 3px 10px; border-radius: 999px; color: var(--muted); white-space: nowrap; }
-.pill.cost { font-family: var(--mono); color: var(--text); }
 .pill.remote-pill { color: var(--run); border-color: color-mix(in srgb, var(--run) 45%, var(--line)); cursor: pointer; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .pill.remote-pill.resume { color: var(--muted); border-style: dashed; }
 .pill.remote-pill.resume:hover { color: var(--run); }
@@ -754,7 +753,6 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 @media (max-width: 1500px) {
   .topbar { gap: 8px; padding: 8px 12px; }
   .topbar > .repo { max-width: 320px; }
-  .pill.cost .pill-sub { display: none; }
 }
 @media (max-width: 1320px) {
   .detail { min-width: 320px; }
