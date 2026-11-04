@@ -1795,7 +1795,7 @@ async function openSettings() {
          <label class="field"><span>gemini コマンドのパス</span><input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
          <label class="field"><span>モデル（空なら既定）</span><input id="sGeminiModel" placeholder="例: gemini-2.5-pro" value="${esc(s.geminiModel || '')}" /></label>
        </div>`)}
-     <small class="muted s-note">Codex / Gemini はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可）。</small>
+     <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可）。</small>
      <label class="field"><span>新しいタスク・会話で最初から選んでおくエージェント</span>
        <select id="sDefaultAgent"></select>
        <small>リレー・競争は、タスクを作るときに「エージェント」の欄で選べます。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
