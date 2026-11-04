@@ -400,6 +400,8 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .mtabs { display: flex; gap: 4px; margin: -4px 0 14px; border-bottom: 1px solid var(--line); }
 .mtab { border: 0; background: transparent; padding: 6px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
 .mtab.active { color: var(--text); border-bottom-color: var(--accent); }
+.mtab:disabled { opacity: 0.45; cursor: not-allowed; }
+.remote-box .rc-role-tabs { margin: -4px 0 0; }
 .issue-chip { color: var(--accent); font-weight: 600; cursor: pointer; text-decoration: none; }
 .issue-chip:hover { text-decoration: underline; }
 .gh-panel { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 12.5px; background: var(--panel-2); display: flex; flex-direction: column; gap: 6px; }

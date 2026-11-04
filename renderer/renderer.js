@@ -2222,10 +2222,13 @@ function agentConfigHtml(a, s, body) {
 
 // ---------------- RC設定（遠隔操作） ----------------
 
+// RC設定で最後に選んだ側（host / client）。ホストとクライアントは排他なので、選んだ側の設定だけを出す
+const RC_ROLE_KEY = 'rcRole';
+
 function openRemoteSettings() {
   openModal(
     `<h2>RC設定（遠隔操作）</h2>
-     <small class="muted s-note">作業する PC（ホスト。Mac でも Windows でも）のボードを、別の PC（クライアント）から操作できます。ホストは 127.0.0.1 だけで待ち受けるので、SSH のポート転送を通してつなぎます（手順は README の「遠隔操作」）。</small>
+     <small class="muted s-note">作業する PC（ホスト。Mac でも Windows でも）のボードを、別の PC（クライアント）から操作できます。この PC の役割をホストかクライアントのどちらかに選んでください。ホストは 127.0.0.1 だけで待ち受けるので、SSH のポート転送を通してつなぎます（手順は README の「遠隔操作」）。</small>
      <div class="remote-box" id="rcBox">遠隔の状態を読み込み中…</div>
      <div class="modal-actions"><button class="btn primary" id="rcClose">閉じる</button></div>`,
     () => {
@@ -2290,8 +2293,21 @@ function openRemoteSettings() {
           return;
         }
         // このマシンをホストにするときの接続先（操作側に入れてもらう値）と SSH サーバーの状態
+        // ホストとクライアントは排他。動いている側があればそちらに固定し、なければ前回選んだ側（初回は接続履歴があればクライアント）
+        const hostActive = !!rs.host.listening;
+        const clientActive = !!(rs.client.connected || rs.client.reconnecting);
+        const savedRole = localStorage.getItem(RC_ROLE_KEY);
+        const role = hostActive
+          ? 'host'
+          : clientActive
+            ? 'client'
+            : savedRole === 'host' || savedRole === 'client'
+              ? savedRole
+              : (rs.client.history || []).length || rs.client.canResume
+                ? 'client'
+                : 'host';
         let hi = null;
-        if (!rs.client.connected) {
+        if (role === 'host') {
           try {
             hi = await api.remoteHostInfo();
           } catch {
@@ -2406,7 +2422,25 @@ function openRemoteSettings() {
                ${c.hasToken ? '<button class="btn small" type="button" id="rForgetToken">トークンを忘れる</button>' : ''}
              </div>
              <small class="muted" id="rDirectHint" ${viaSsh ? 'hidden' : ''}>直接のときは、先に <code>${esc(ssh)}</code> を張り、接続先ホストは 127.0.0.1 のままにします（ホストは 127.0.0.1 でしか待ち受けないので、Tailscale の IP を直接入れてもつながりません）</small>`;
-        box.innerHTML = `${hostBlock}<hr style="border:0;border-top:1px solid var(--line);margin:4px 0" />${clientBlock}`;
+        const roleTab = (r, label, lockedBy) =>
+          `<button class="mtab${role === r ? ' active' : ''}" type="button" data-rc-role="${r}" ${lockedBy ? `disabled title="${esc(lockedBy)}"` : ''}>${label}</button>`;
+        const roleTabs = `<div class="mtabs rc-role-tabs">
+            ${roleTab('host', 'ホスト（作業側）', clientActive ? 'クライアントとして接続中は選べません。先に切断してください' : '')}
+            ${roleTab('client', 'クライアント（操作側）', hostActive ? 'ホストとして待ち受け中は選べません。先にホストを停止してください' : '')}
+          </div>`;
+        const lockNote = hostActive
+          ? '<small class="muted">ホストとして待ち受け中なので、クライアントには切り替えられません（ホストを停止すると選べます）。</small>'
+          : clientActive
+            ? '<small class="muted">クライアントとして接続中なので、ホストには切り替えられません（切断すると選べます）。</small>'
+            : '';
+        box.innerHTML = `${roleTabs}${lockNote}${role === 'host' ? hostBlock : clientBlock}`;
+        box.querySelectorAll('[data-rc-role]').forEach((b) => {
+          b.onclick = () => {
+            if (b.disabled || b.dataset.rcRole === role) return;
+            localStorage.setItem(RC_ROLE_KEY, b.dataset.rcRole);
+            drawRemote();
+          };
+        });
         const busy = (label, fn) => runBusy(label, fn).then((ok) => { if (ok !== undefined) drawRemote(); });
         if ($('rStartHost')) $('rStartHost').onclick = () => busy('ホストを開始しています…', () => api.remoteStartHost({ port: $('rHostPort').value }));
         if ($('rStopHost')) $('rStopHost').onclick = () => busy('ホストを停止しています…', () => api.remoteStopHost());
