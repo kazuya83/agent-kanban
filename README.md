@@ -1,6 +1,6 @@
 # Agent Kanban
 
-AI コーディングエージェント（**Claude Code / Codex CLI / Gemini CLI**）のタスクをカンバンボードで管理するデスクトップアプリ（Electron）です。タスクごとに **git worktree** を作り、複数のエージェントを **並列** に動かします。どのエージェントを使うかは ⚙ 設定で選べます。許可が必要な操作は **カード上でそのまま承認** できます。
+AI コーディングエージェント（**Claude Code / Codex CLI / Gemini CLI / Cursor CLI**）のタスクをカンバンボードで管理するデスクトップアプリ（Electron）です。タスクごとに **git worktree** を作り、複数のエージェントを **並列** に動かします。どのエージェントを使うかは ⚙ 設定で選べます。許可が必要な操作は **カード上でそのまま承認** できます。
 
 ![ボード画面：質問・承認待ち・作業中・回答待ち・レビュー待ちのカードが並んでいる](docs/board.png)
 
@@ -96,7 +96,7 @@ Claude が選択肢で聞いてきたら、カードが紫の「質問」にな�
 - worktree やブランチは作らず、リポジトリのフォルダでそのまま動きます。コミット・マージ・PR はしません
 - 手元の作業中のファイルで動くので、ファイルの変更やコマンドは毎回カードで確かめます（設定の権限モードが「計画だけ」「すべて自動で許可」のときはそれに従います）
 - 同時実行数の上限には数えないので、タスクが詰まっていてもすぐに返事が来ます
-- 作業してほしくなったら「📝 タスクにする」を押すと、会話の続きとして worktree で動くタスクを作れます（会話そのものはそのまま残ります）。Claude Code どうしなら会話そのものを引き継ぎ、それ以外（Codex / Gemini の会話や、別のエージェントのタスク）は会話のやりとりを最初の指示に添えて渡します
+- 作業してほしくなったら「📝 タスクにする」を押すと、会話の続きとして worktree で動くタスクを作れます（会話そのものはそのまま残ります）。Claude Code どうしなら会話そのものを引き継ぎ、それ以外（Codex / Gemini / Cursor の会話や、別のエージェントのタスク）は会話のやりとりを最初の指示に添えて渡します
 
 ### 会話（セッション）を切り替える
 詳細画面の「会話」で、次の実行にどの会話を使うかを選べます。既存の会話から引き継いだときは、どこから引き継いだかが表示されます。
@@ -142,11 +142,11 @@ Issue から作ったタスクは、カードの列に合わせて、Issue が�
 
 ### エージェントとオーケストレーション（🤖 / 🔁 / 🏁）
 
-タスクを作るときの「エージェント」で、**Claude Code / Codex CLI / Gemini CLI** のどれで動かすかを選べます（⚙ 設定の「使うエージェント」でチェックを付けたものだけが出ます）。さらに、複数のエージェントを組み合わせる **オーケストレーション** も選べます。
+タスクを作るときの「エージェント」で、**Claude Code / Codex CLI / Gemini CLI / Cursor CLI** のどれで動かすかを選べます（⚙ 設定の「使うエージェント」でチェックを付けたものだけが出ます）。さらに、複数のエージェントを組み合わせる **オーケストレーション** も選べます。
 
 | 選び方 | 動き方 |
 | --- | --- |
-| Claude Code / Codex CLI / Gemini CLI | そのエージェントで1枚のカードとして動きます（worktree・コミット・マージ・PR はこれまでと同じ） |
+| Claude Code / Codex CLI / Gemini CLI / Cursor CLI | そのエージェントで1枚のカードとして動きます（worktree・コミット・マージ・PR はこれまでと同じ） |
 | 🔁 Pipeline | **同じ worktree** で、設定の工程の順にエージェントが作業を引き継ぎます（例: Codex で実装 → Claude でレビュー）。工程が終わるたびに変更をコミットし、最後の報告を次の工程に渡します。途中の工程が失敗・質問で止まったら、そこで止まります（追加指示で直すと、続きの工程へ進みます）。すべての工程が終わるとレビュー列に入ります。進み具合は、カードのバーと、詳細のワークフロー（工程ごとの状態・エージェント・かかった時間・金額・次へ渡した報告）で確かめられます |
 | 🏁 競争 | 同じタスクを、設定のエージェントそれぞれのカード（別々の worktree・ブランチ）で **並列に** 解きます。全員が終わると通知が届きます。詳細画面の「🏁 競争」の欄で候補を見比べ、「🤔 ○○ に比べてもらう」で比較の会話を始めたり（最初から選んでおくエージェントに頼みます）、「🏁 この案を採用」でほかの候補を破棄したりできます。採用した案は、いつもどおりマージ・PR の作成で取り込みます |
 
@@ -156,16 +156,16 @@ Issue から作ったタスクは、カードの列に合わせて、Issue が�
 - **Pipelineと競争は排他** です。⚙ 設定の「オーケストレーション」の「使うオーケストレーション」でどちらか1つを選びます（初期値はPipeline）。選んだ方だけ、その設定欄が出て、タスクを作るときに選べます。選んでいない方の設定は消えずに残るので、切り替えればまた使えます
 - ブランチの命名・コンフリクトの解消・仕様の確認・会話・スキルの提案も、どのエージェントでも動きます（ブランチ名とコンフリクトの解消は、そのタスクのエージェントが行います）
 - Issue から作るときも、同じようにエージェント・Pipeline・競争を選べます（競争なら、1つの Issue につきエージェントの数だけカードができます）
-- Codex は `codex exec --json`、Gemini は `gemini --output-format stream-json` で動かし、追加指示は同じ会話の続き（Codex は `codex exec resume`、Gemini は `--resume`）から動きます
-- Codex / Gemini は、CLI の作りの都合で、カードでの承認・選択肢の質問・btw（実行中のメッセージ）・既存の会話（ターミナルの会話）の引き継ぎ・使った金額の表示には対応していません。権限モードに合わせて CLI 側で許可します
-  - 計画だけ → Codex は読み取りのみの sandbox・Gemini は `plan`
-  - すべて自動で許可 → Codex は `--dangerously-bypass-approvals-and-sandbox`・Gemini は `yolo`
-  - それ以外 → Codex は worktree の中だけ書ける sandbox（`workspace-write`）・Gemini はファイル編集だけ自動で許可（`auto_edit`）
+- Codex は `codex exec --json`、Gemini は `gemini --output-format stream-json`、Cursor は `cursor-agent -p --output-format stream-json`（指示は最後の引数で渡します）で動かし、追加指示は同じ会話の続き（Codex は `codex exec resume`、Gemini・Cursor は `--resume`）から動きます
+- Codex / Gemini / Cursor は、CLI の作りの都合で、カードでの承認・選択肢の質問・btw（実行中のメッセージ）・既存の会話（ターミナルの会話）の引き継ぎ・使った金額の表示には対応していません。権限モードに合わせて CLI 側で許可します
+  - 計画だけ → Codex は読み取りのみの sandbox・Gemini は `plan`・Cursor は `--mode plan`
+  - すべて自動で許可 → Codex は `--dangerously-bypass-approvals-and-sandbox`・Gemini は `yolo`・Cursor は `--force --approve-mcps`
+  - それ以外 → Codex は worktree の中だけ書ける sandbox（`workspace-write`）・Gemini はファイル編集だけ自動で許可（`auto_edit`）・Cursor は `--force`（Cursor はヘッドレスだと `--force` がないとファイルを書けないため。コマンドも許可されるので、止めたいものは Cursor の `cli-config.json` の deny に書きます）
 - スキルを選ぶと、Claude Code には `/スキル名` で、ほかのエージェントには SKILL.md の場所を伝えて手順に従ってもらいます
 
 ## できること
 
-- **カードを作るとすぐに動き出す**: ブランチ `agent/<名前>-<id>` と worktree（`<リポジトリ>.worktrees/<id>`）を自動で作り、その中でエージェントの CLI（`claude -p` / `codex exec` / `gemini`）を起動します
+- **カードを作るとすぐに動き出す**: ブランチ `agent/<名前>-<id>` と worktree（`<リポジトリ>.worktrees/<id>`）を自動で作り、その中でエージェントの CLI（`claude -p` / `codex exec` / `gemini` / `cursor-agent -p`）を起動します
   - 設定の「ブランチの命名規則」に、`feature/<Issue番号>-<内容を表す短い英語> にする` のように自然言語で書いておくと、タスクの開始時にそのタスクのエージェントがその規則に従ってブランチ名を考えます（同じ名前がもうあれば `-2` などを付けます。決められなかったときはいつもの名前になります）
 - **GitHub Issue からタスクを作る**: 「＋ 新しいタスク」の右にある「Issue から作成」を押して、番号を入れるだけで、Issue のタイトル・本文・ラベル・コメントからエージェントへの指示を作ります。`12, 15, 18` のように複数入れると、1つの Issue が1枚のカードになって並列で動きます
   - ブランチは `agent/issue-12-…`、コミットメッセージには `(#12)` が付きます。カードの `#12` を押すと Issue のページが開きます
@@ -283,7 +283,7 @@ $env:AGENT_KANBAN_UNINSTALL = "1"; irm https://raw.githubusercontent.com/kazuya8
 > - **Mac**: 「開発元を検証できません」と出たら、アプリを右クリックして「開く」を選びます。それでも開けないときは、ターミナルで `xattr -cr "/Applications/Agent Kanban.app"` を実行してください
 > - **Windows**: 「Windows によって PC が保護されました」と出たら、「詳細情報」→「実行」を押します
 
-アプリとは別に、**git** と、使うエージェントの CLI（**Claude Code / Codex CLI / Gemini CLI** のどれか。ログイン済み）が必要です。アプリは、ターミナルの PATH にある `claude` / `codex` / `gemini` を自動で探します。見つからないときは、画面の上に案内が出ます（⚙ 設定でフルパスを指定することもできます）。
+アプリとは別に、**git** と、使うエージェントの CLI（**Claude Code / Codex CLI / Gemini CLI / Cursor CLI** のどれか。ログイン済み）が必要です。アプリは、ターミナルの PATH にある `claude` / `codex` / `gemini` / `cursor-agent` を自動で探します。見つからないときは、画面の上に案内が出ます（⚙ 設定でフルパスを指定することもできます）。
 
 ## Windows で WSL（Ubuntu など）のリポジトリを使う
 
@@ -308,7 +308,7 @@ Windows では、「リポジトリを選ぶ」を押すと、**このパソコ�
 
 - Node.js 22 以上（24 推奨）
 - git
-- 使うエージェントの CLI をインストールし、ログインしておく（[Claude Code](https://docs.claude.com/en/docs/claude-code) の `claude`、Codex CLI の `codex`、Gemini CLI の `gemini` のどれか）
+- 使うエージェントの CLI をインストールし、ログインしておく（[Claude Code](https://docs.claude.com/en/docs/claude-code) の `claude`、Codex CLI の `codex`、Gemini CLI の `gemini`、[Cursor CLI](https://cursor.com/cli) の `cursor-agent` のどれか）
 
 ### 起動
 
@@ -363,7 +363,7 @@ GitHub Actions でも自動でビルドします（`.github/workflows/build.yml`
 | 同時に動かす数 | 1〜10 |
 | 新しいタスクで最初から選んでおくスキル | 「＋ 新しいタスク」と「Issue から作成」を開いたときに選ばれているスキル |
 | 仕様を詰める | 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントが質問して仕様を詰めます（初期値はオン） |
-| 使うエージェント | Claude Code / Codex CLI / Gemini CLI のうち、使うものにチェックを付けます。チェックを付けたものだけ、下の項目を設定でき、タスク・会話・Pipeline・競争で選べます |
+| 使うエージェント | Claude Code / Codex CLI / Gemini CLI / Cursor CLI のうち、使うものにチェックを付けます。チェックを付けたものだけ、下の項目を設定でき、タスク・会話・Pipeline・競争で選べます |
 | （エージェントごと）コマンドのパス | Finder などから起動してコマンドが見つからないときに、フルパスを指定します |
 | （エージェントごと）モデル | `--model` / `-m` に渡します。空なら既定のモデル |
 | 最初から選んでおくエージェント | 新しいタスク・会話を開いたときに選ばれているエージェント（使うエージェントの中から1つ） |

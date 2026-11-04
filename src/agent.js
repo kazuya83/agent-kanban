@@ -1,4 +1,4 @@
-// カード（タスク）ごとに worktree を作り、エージェントの CLI（Claude Code / Codex CLI / Gemini CLI）を並列に動かす
+// カード（タスク）ごとに worktree を作り、エージェントの CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を並列に動かす
 const { spawn, execFile } = require('child_process');
 const { EventEmitter } = require('events');
 const fs = require('fs');
@@ -629,7 +629,7 @@ class AgentManager extends EventEmitter {
 
   /**
    * タスクを作る。エージェントの選び方（mode）で作るカードが変わる
-   * - claude / codex / gemini: そのエージェントで1枚
+   * - claude / codex / gemini / cursor: そのエージェントで1枚
    * - relay: 設定のPipelineの工程で1枚（同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ）
    * - compete: 設定の競争のエージェントの数だけ（同じタスクを、それぞれ別の worktree で並列に解く）
    * @returns {object[]} 作ったカード
@@ -1128,7 +1128,7 @@ class AgentManager extends EventEmitter {
       args = ['-p', '--output-format', 'text', '--permission-mode', 'default'];
       if (s.model) args.push('--model', s.model);
     } else {
-      args = providers.buildArgs(agent, { mode: 'plan', model: providers.agentModel(s, agent) });
+      args = providers.buildArgs(agent, { mode: 'plan', model: providers.agentModel(s, agent), prompt });
       parser = providers.createParser(agent, { summarize: summarizeInput });
     }
     const child = await this.spawnAgent(agent, cwd, args);
@@ -1183,7 +1183,8 @@ class AgentManager extends EventEmitter {
         if (code !== 0 || resultError) return reject(new Error(truncate(resultError || err.trim() || out.trim() || `${child.agentCmd} が終了コード ${code} で終わりました`, 300)));
         resolve(out);
       });
-      child.stdin.end(prompt);
+      // 指示を引数で渡した CLI（Cursor）には、stdin は空のまま閉じる
+      child.stdin.end(agent !== 'claude' && providers.promptViaArg(agent) ? '' : prompt);
     });
   }
 
@@ -1226,7 +1227,7 @@ class AgentManager extends EventEmitter {
     return this.spawnAgent('claude', cwd, args, extraEnv);
   }
 
-  // エージェントの CLI を起動する（Claude Code / Codex / Gemini）。child.agentCmd に起動したコマンドの名前を入れる
+  // エージェントの CLI を起動する（Claude Code / Codex / Gemini / Cursor）。child.agentCmd に起動したコマンドの名前を入れる
   async spawnAgent(agent, cwd, args, extraEnv = {}) {
     const s = this.store.settings;
     const w = wsl.parseWslPath(cwd);
@@ -1286,12 +1287,12 @@ class AgentManager extends EventEmitter {
       // 既存の会話を引き継ぐときは、元の会話を変えないようにフォークする（新しい ID になる）
       if (c.sessionId && c.forkNext) args.push('--fork-session');
     } else {
-      // Codex / Gemini は、ほかの CLI の会話は引き継げないので新しい会話で始める
+      // Codex / Gemini / Cursor は、ほかの CLI の会話は引き継げないので新しい会話で始める
       if (c.forkNext) {
         c.sessionId = null;
         c.forkNext = false;
       }
-      args = providers.buildArgs(agent, { mode, model: providers.agentModel(s, agent), sessionId: c.sessionId ? assertSessionId(c.sessionId) : null });
+      args = providers.buildArgs(agent, { mode, model: providers.agentModel(s, agent), sessionId: c.sessionId ? assertSessionId(c.sessionId) : null, prompt: c.pendingPrompt || '' });
     }
 
     const prompt = c.pendingPrompt || '';
@@ -1329,9 +1330,9 @@ class AgentManager extends EventEmitter {
     child.stdin.on('error', () => {});
     if (agent === 'claude') this.writeMessage(run, prompt, null);
     else {
-      // Codex / Gemini は指示を stdin で1回だけ受け取る（実行中のメッセージ（btw）は送れない）
+      // Codex / Gemini は指示を stdin で1回だけ受け取る（Cursor は引数で受け取ったので空で閉じる）。実行中のメッセージ（btw）は送れない
       run.stdinClosed = true;
-      child.stdin.end(prompt);
+      child.stdin.end(providers.promptViaArg(agent) ? '' : prompt);
     }
 
     const finish = async (code, spawnError) => {
@@ -1509,7 +1510,7 @@ class AgentManager extends EventEmitter {
     }
   }
 
-  // Codex / Gemini の出力（providers.js で共通の形に直したもの）を、ログとカードに反映する
+  // Codex / Gemini / Cursor の出力（providers.js で共通の形に直したもの）を、ログとカードに反映する
   applyAction(c, a, run) {
     const who = { agent: run.agent };
     switch (a.type) {

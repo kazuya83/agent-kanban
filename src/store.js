@@ -24,11 +24,13 @@ const DEFAULT_SETTINGS = {
   weeklyResetTime: '00:00', // 週間上限がリセットされる時刻（HH:MM・ローカル時刻）。weeklyResetDay を決めたときに使う
   // ---- エージェント ----
   enabledAgents: DEFAULT_ENABLED_AGENTS, // 使うエージェント（チェックを付けたものだけ、コマンド・モデルを設定してタスクや会話で選べる）
-  defaultAgent: 'claude', // 新しいタスク・会話で最初から選んでおくエージェント（claude / codex / gemini。Pipeline・競争はタスクを作るときに選ぶ）
+  defaultAgent: 'claude', // 新しいタスク・会話で最初から選んでおくエージェント（claude / codex / gemini / cursor。Pipeline・競争はタスクを作るときに選ぶ）
   codexPath: 'codex',
   codexModel: '',
   geminiPath: 'gemini',
   geminiModel: '',
+  cursorPath: 'cursor-agent',
+  cursorModel: '',
   // ---- オーケストレーション ----
   orchestration: 'relay', // Pipelineと競争は排他。使うのはどちらか1つ（'relay' / 'compete'）
   relaySteps: DEFAULT_RELAY_STEPS, // Pipeline: 同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ
