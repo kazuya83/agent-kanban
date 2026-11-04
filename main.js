@@ -8,7 +8,7 @@ const git = require('./src/git');
 const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
-const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory } = require('./src/remote');
+const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, routeSide, stripRouting, composeTabs, VIEW_CHANNELS, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory } = require('./src/remote');
 const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
 const sshKey = require('./src/ssh-key');
 const dirBrowse = require('./src/dir-browse');
@@ -49,6 +49,10 @@ let remoteHost = null;
 let remoteClient = null;
 let sshTunnel = null;
 let reconnector = null; // 前回の接続を再開する（起動時・切れたとき）
+// クライアントとして接続中に、画面で見ているのがホストのタブ（'host'）か、このマシンのタブ（'local'）か
+// 'local' のあいだは、ボードの操作をこのマシンで行う（ホストとこのマシンのエージェントを並べて動かせる）
+let clientView = 'host';
+let hostBoardCache = null; // ホストから最後に届いたボード（このマシンのタブを見ているあいだも、ホストのタブを出すため）
 let updater = null; // アプリの更新（新しい版を調べて、入れ替えて起動し直す）
 let updateResult = null; // 前回の起動で更新したときの結果（{ ok, from, to, log }）。画面に一度だけ知らせる
 let quittingForUpdate = false; // 更新のために終了するところ（実行中のタスクの確認は画面で済ませている）
@@ -98,6 +102,14 @@ function boardState() {
   return { settings: store.settings, repoTabs, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath) };
 }
 
+// 画面に渡すボード。クライアントとして接続中は、見ている側（ホスト / このマシン）のボードに、両方のタブを並べて載せる
+// このマシンのタブは画面に出すだけで、ホストへは送らない（ホストの画面にはホストのタブだけが出る）
+function viewBoard() {
+  const local = boardState();
+  if (!remoteClient?.connected || !hostBoardCache) return withRemoteSession(composeTabs(null, local, 'local'));
+  return withRemoteSession(composeTabs(hostBoardCache, local, clientView));
+}
+
 function remoteSession() {
   const h = remoteHost?.status() || {};
   const c = remoteClient?.status() || {};
@@ -131,6 +143,8 @@ function remoteSession() {
       // これまでつないだ接続先（新しい順・トークンは渡さない）。RC設定でカードにして選べるようにする
       history: publicConnectionHistory(store.settings.remoteClientHistory),
       currentId: connectionKey(currentConnection()),
+      // 接続中に見ているタブの側（'host' / 'local'）
+      view: c.connected ? clientView : 'host',
     },
   };
 }
@@ -144,9 +158,9 @@ function notifyBoard() {
   if (boardTimer) return;
   boardTimer = setTimeout(() => {
     boardTimer = null;
-    // クライアント接続中はホスト側の board:changed を中継するので、ローカルボードは送らない
+    // クライアント接続中は、このマシンのボードをホストへは送らない（画面には、ホストのタブと並べて出す）
     if (remoteClient?.connected) {
-      send('remote:changed', remoteSession());
+      send('board:changed', viewBoard());
       return;
     }
     const state = withRemoteSession(boardState());
@@ -160,19 +174,37 @@ function notifyRemoteOnly() {
   if (!remoteClient?.connected) notifyBoard();
 }
 
-// ローカル処理。クライアント接続中は PROXY 対象をホストへ転送する
+// ローカル処理。クライアント接続中は、見ている側（またはリポジトリの操作で選んだ側）がホストなら PROXY 対象をホストへ転送する
 async function dispatch(channel, arg) {
-  if (remoteClient?.connected && isProxyChannel(channel)) {
-    const data = await remoteClient.invoke(channel, arg);
-    // ホストの board:get に、このマシンの遠隔状態を載せる
-    if (channel === 'board:get' && data && typeof data === 'object') return withRemoteSession(data);
+  if (remoteClient?.connected && !isLocalChannel(channel)) {
+    const side = routeSide(channel, arg, clientView);
+    if (side === 'host') {
+      // 手元のボードを触る操作（リポジトリの選択ダイアログなど）は、ホストの画面に出てしまうので止める
+      if (!isProxyChannel(channel)) throw new Error('ホストのタブではこの操作を使えません（このマシンのタブで行うか、ホスト側で行ってください）');
+      const data = await remoteClient.invoke(channel, stripRouting(arg));
+      if (channel === 'board:get' && data && typeof data === 'object') {
+        hostBoardCache = data;
+        return viewBoard();
+      }
+      if (VIEW_CHANNELS.has(channel)) setClientView('host');
+      return data;
+    }
+    const fn = localHandlers.get(channel);
+    if (!fn) throw new Error(`未対応の操作です: ${channel}`);
+    const data = await fn(arg);
+    if (VIEW_CHANNELS.has(channel) && data) setClientView('local');
     return data;
   }
-  // 接続中に手元のボードを触る操作（リポジトリの選択ダイアログなど）は、ホストと食い違うので止める
-  if (remoteClient?.connected && !isLocalChannel(channel)) throw new Error('遠隔操作中はこの操作を使えません（ホスト側で行うか、切断してから使ってください）');
   const fn = localHandlers.get(channel);
   if (!fn) throw new Error(`未対応の操作です: ${channel}`);
   return fn(arg);
+}
+
+// 見ている側を変える（タブを切り替えた・リポジトリを開いた）
+function setClientView(side) {
+  if (clientView === side) return;
+  clientView = side;
+  notifyBoard();
 }
 
 // エラーはメッセージだけをきれいに返す
@@ -346,8 +378,8 @@ async function connectRemote({ code = '' } = {}) {
   resumeError = '';
   notifyRemoteOnly();
   // 接続直後にホストのボードを取る
-  const board = await remoteClient.invoke('board:get');
-  send('board:changed', withRemoteSession(board));
+  hostBoardCache = await remoteClient.invoke('board:get');
+  send('board:changed', viewBoard());
   return remoteSession();
 }
 
@@ -363,7 +395,8 @@ function resumeRemote() {
 // 自分で切断したのではなく、接続が切れたとき
 function onRemoteLost() {
   if (quitState !== 'idle') return;
-  send('board:changed', withRemoteSession(boardState()));
+  hostBoardCache = null;
+  send('board:changed', viewBoard());
   if (store.settings.remoteClientResume) resumeRemote();
 }
 
@@ -381,6 +414,8 @@ function disconnectRemote() {
   store.save();
   remoteClient?.disconnect();
   sshTunnel?.close();
+  hostBoardCache = null;
+  clientView = 'host'; // 次につないだときは、ホストのタブから見せる
 }
 
 app.whenReady().then(async () => {
@@ -412,12 +447,18 @@ app.whenReady().then(async () => {
     notifyBoard();
     if (Notification.isSupported()) {
       const dn = new Notification({ title: n.title, body: String(n.body || '').slice(0, 200) });
-      dn.on('click', () => {
-        if (win) {
-          win.show();
-          win.focus();
-          send('card:focus', n.cardId);
+      dn.on('click', async () => {
+        if (!win) return;
+        win.show();
+        win.focus();
+        // ホストのタブを見ているときは、このマシンのタブに移ってから開く
+        if (remoteClient?.connected && clientView === 'host') {
+          const c = store.cards.find((x) => x.id === n.cardId);
+          clientView = 'local';
+          if (c && c.repoPath && c.repoPath !== store.settings.repoPath) await dispatch('repo:open', { path: c.repoPath, target: 'local' }).catch(() => {});
+          send('board:changed', viewBoard());
         }
+        send('card:focus', n.cardId);
       });
       dn.show();
     }
@@ -427,7 +468,8 @@ app.whenReady().then(async () => {
   remoteClient = new RemoteClient();
   remoteClient.on('event', (channel, payload) => {
     if (channel === 'board:changed' && payload && typeof payload === 'object') {
-      send('board:changed', withRemoteSession(payload));
+      hostBoardCache = payload;
+      send('board:changed', viewBoard());
       return;
     }
     send(channel, payload);
@@ -446,7 +488,7 @@ app.whenReady().then(async () => {
     notifyRemoteOnly();
   });
 
-  handle('board:get', () => withRemoteSession(boardState()));
+  handle('board:get', () => viewBoard());
   handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
   setupUpdater(userData);
   handle('remote:status', () => remoteSession());
@@ -570,7 +612,7 @@ app.whenReady().then(async () => {
   });
   handle('remote:disconnect', () => {
     disconnectRemote();
-    send('board:changed', withRemoteSession(boardState()));
+    send('board:changed', viewBoard());
     return remoteSession();
   });
   // これまでの接続から1つ消す（いまの設定の接続先なら、そのトークンも忘れる）

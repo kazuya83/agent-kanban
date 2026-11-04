@@ -20,10 +20,12 @@ contextBridge.exposeInMainWorld('api', {
   checkEnv: () => call('env:check'),
   chooseRepo: (opts) => call('repo:choose', opts || {}),
   openRepo: (dir, opts) => call('repo:open', { ...(opts || {}), path: dir }),
-  switchRepoTab: (dir) => call('repo:switchTab', { path: dir }),
-  closeRepoTab: (dir) => call('repo:closeTab', { path: dir }),
+  // opts.remote: 遠隔操作中に、ホストのタブ（true）か、このマシンのタブ（false）か
+  switchRepoTab: (dir, opts) => call('repo:switchTab', { ...(opts || {}), path: dir }),
+  closeRepoTab: (dir, opts) => call('repo:closeTab', { ...(opts || {}), path: dir }),
   browseDirs: (opts) => call('repo:browse', opts || {}),
-  wslDistros: () => call('wsl:distros'),
+  // opts.target: 遠隔操作中に、ホスト（'host'）とこのマシン（'local'）のどちらで行うか（repo の操作も同じ）
+  wslDistros: (opts) => call('wsl:distros', opts || {}),
   repoDefaultParent: (opts) => call('repo:defaultParent', opts || {}),
   chooseRepoParent: (opts) => call('repo:chooseParent', opts || {}),
   cloneRepo: (p) => call('repo:clone', p),
