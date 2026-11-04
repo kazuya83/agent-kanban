@@ -74,8 +74,7 @@ function readSkillDir(skillsDir, source, prefix) {
   return out;
 }
 
-function pluginSkills() {
-  const dir = configDir();
+function pluginSkills(dir = configDir()) {
   const installed = readJson(path.join(dir, 'plugins', 'installed_plugins.json'));
   if (!installed || !installed.plugins) return [];
   const settings = readJson(path.join(dir, 'settings.json')) || {};
@@ -88,7 +87,7 @@ function pluginSkills() {
     const installs = Array.isArray(val) ? val : [val];
     const install = installs.find((x) => x && x.installPath);
     if (!install) continue;
-    out.push(...readSkillDir(path.join(install.installPath, 'skills'), 'plugin', pluginName));
+    out.push(...readSkillDir(path.join(require('./wsl').fromLinux(dir, install.installPath), 'skills'), 'plugin', pluginName));
   }
   return out;
 }
@@ -97,11 +96,13 @@ function pluginSkills() {
  * @param {string} repoPath
  * @returns {Array<{name: string, description: string, source: 'project'|'user'|'plugin', plugin?: string}>}
  */
-function listSkills(repoPath) {
+// opts.configDir: Claude Code の設定フォルダ（WSL のリポジトリなら、WSL の中の ~/.claude）
+function listSkills(repoPath, opts = {}) {
+  const cfg = opts.configDir || configDir();
   const list = [
     ...(repoPath ? readSkillDir(path.join(repoPath, '.claude', 'skills'), 'project') : []),
-    ...readSkillDir(path.join(configDir(), 'skills'), 'user'),
-    ...pluginSkills(),
+    ...readSkillDir(path.join(cfg, 'skills'), 'user'),
+    ...pluginSkills(cfg),
   ];
   // 同じ名前はプロジェクト → 自分用 → プラグインの順で優先
   const seen = new Set();

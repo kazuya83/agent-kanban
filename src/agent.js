@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const git = require('./git');
+const wsl = require('./wsl');
 const { resolveCommand, isWin } = require('./env');
 const github = require('./github');
 const ghCli = require('./gh');
@@ -101,8 +102,41 @@ function summarizeInput(input) {
 
 function toolResultText(content) {
   if (typeof content === 'string') return content;
-  if (Array.isArray(content)) return content.map((c) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
+  if (Array.isArray(content)) return content.filter((c) => c && c.type !== 'image').map((c) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
   return '';
+}
+
+// ツールの結果に入っている画像（スクリーンショットなど）を、表示できる形で取り出す
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // base64 の長さで見る。これより大きい画像は保存しない
+const MAX_IMAGES_PER_CARD = 30; // board.json が大きくなりすぎないよう、古い画像から消す
+function toolResultImages(content) {
+  if (!Array.isArray(content)) return [];
+  const out = [];
+  for (const c of content) {
+    if (!c || c.type !== 'image') continue;
+    const src = c.source || {};
+    const mediaType = String(src.media_type || '').toLowerCase();
+    const data = typeof src.data === 'string' ? src.data.replace(/\s+/g, '') : '';
+    if (src.type !== 'base64' || !IMAGE_TYPES.has(mediaType) || !data || !/^[A-Za-z0-9+/]+=*$/.test(data)) out.push({ omitted: '表示できない形式の画像です' });
+    else if (data.length > MAX_IMAGE_BYTES) out.push({ omitted: '大きすぎるので保存しませんでした' });
+    else out.push({ mediaType, data });
+  }
+  return out;
+}
+
+// カードのログに残す画像を MAX_IMAGES_PER_CARD 枚までにする（古いものは「消しました」に置きかえる）
+function pruneImages(logs) {
+  let kept = 0;
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const ims = logs[i].images;
+    if (!ims) continue;
+    for (let j = ims.length - 1; j >= 0; j--) {
+      if (!ims[j].data) continue;
+      if (kept < MAX_IMAGES_PER_CARD) kept++;
+      else ims[j] = { omitted: '古い画像なので消しました' };
+    }
+  }
 }
 
 function notFoundMessage(cmd, agent = 'claude') {
@@ -247,6 +281,13 @@ function cleanBranchName(text) {
 
 function killTree(child) {
   if (!child || child.exitCode !== null) return;
+  if (child.viaWsl) {
+    try {
+      child.stdin.end();
+    } catch {
+      /* もう閉じている */
+    }
+  }
   if (process.platform === 'win32') {
     execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], () => {});
   } else {
@@ -453,6 +494,7 @@ class AgentManager extends EventEmitter {
     card.logs = card.logs || [];
     card.logs.push(entry);
     if (card.logs.length > MAX_LOGS) card.logs.splice(0, card.logs.length - MAX_LOGS);
+    if (entry.images && entry.images.some((im) => im.data)) pruneImages(card.logs);
     this.emit('log', card.id, entry);
   }
 
@@ -963,18 +1005,13 @@ class AgentManager extends EventEmitter {
    * 設定の命名規則（自然言語）に従ったブランチ名を、claude に1回だけ聞いて決める
    * @returns {Promise<string>}
    */
-  generateBranchName(c, rule, cwd) {
+  async generateBranchName(c, rule, cwd) {
     const s = this.store.settings;
-    const cmd = s.claudePath || 'claude';
-    const resolved = resolveCommand(cmd);
-    if (!resolved) return Promise.reject(new Error(notFoundMessage(cmd)));
-    this.log(c, 'system', '命名規則に従ってブランチ名を考えてもらっています…');
     const args = ['-p', '--output-format', 'text', '--permission-mode', 'default'];
     if (s.model) args.push('--model', s.model);
-    const useShell = isWin && /\.(cmd|bat)$/i.test(resolved);
-    const quote = (a) => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
+    const child = await this.spawnClaude(cwd, args);
+    this.log(c, 'system', '命名規則に従ってブランチ名を考えてもらっています…');
     return new Promise((resolve, reject) => {
-      const child = spawn(useShell ? quote(resolved) : resolved, useShell ? args.map(quote) : args, { cwd, shell: useShell, windowsHide: true });
       let out = '';
       let err = '';
       const timer = setTimeout(() => {
@@ -1001,7 +1038,7 @@ class AgentManager extends EventEmitter {
     });
   }
 
-  writeMcpConfig(c) {
+  writeMcpConfig(c, wslDistro) {
     if (!this.permission) return null;
     // 承認サーバーのトークンを含むので、自分だけが読めるようにする
     fs.mkdirSync(this.opts.mcpDir, { recursive: true, mode: 0o700 });
@@ -1011,13 +1048,16 @@ class AgentManager extends EventEmitter {
       mcpServers: {
         [MCP_SERVER_NAME]: {
           type: 'stdio',
-          command: this.opts.nodeBin,
+          // WSL の中の claude からは、Windows 側のアプリ（/mnt/c/...exe）を呼ぶ。
+          // Windows のプログラムには WSLENV に書いた環境変数だけが渡るので、ここに並べる
+          command: wslDistro ? wsl.toLinux(this.opts.nodeBin) : this.opts.nodeBin,
           args: [this.opts.mcpScript],
           env: {
             ELECTRON_RUN_AS_NODE: '1',
             KANBAN_PORT: String(this.permission.port),
             KANBAN_TOKEN: this.permission.token,
             KANBAN_CARD: c.id,
+            ...(wslDistro ? { WSLENV: 'ELECTRON_RUN_AS_NODE/u:KANBAN_PORT/u:KANBAN_TOKEN/u:KANBAN_CARD/u' } : {}),
           },
         },
       },
@@ -1025,6 +1065,46 @@ class AgentManager extends EventEmitter {
     fs.writeFileSync(file, JSON.stringify(config, null, 2), { mode: 0o600 });
     if (!isWin) fs.chmodSync(file, 0o600);
     return file;
+  }
+
+  /**
+   * claude を起動する。WSL のフォルダなら、WSL の中の claude を動かす
+   * @param {string} cwd
+   * @param {string[]} args
+   * @param {Record<string,string>} extraEnv
+   */
+  spawnClaude(cwd, args, extraEnv = {}) {
+    return this.spawnAgent('claude', cwd, args, extraEnv);
+  }
+
+  // エージェントの CLI を起動する（Claude Code / Codex / Gemini）。child.agentCmd に起動したコマンドの名前を入れる
+  async spawnAgent(agent, cwd, args, extraEnv = {}) {
+    const s = this.store.settings;
+    const w = wsl.parseWslPath(cwd);
+    if (w) {
+      // Windows のパス（MCP の設定ファイルなど）は、WSL の中から見えるパス（/mnt/c/...）にして渡す
+      const mapped = args.map((a) => (/^[A-Za-z]:[\\/]/.test(a) || wsl.isWslPath(a) ? wsl.toLinux(a) : a));
+      // 設定のパスは Windows 側のものなので、WSL の中では Claude 以外はコマンド名で探す
+      const cmd = agent === 'claude' ? s.wslClaudePath || 'claude' : providers.AGENTS[agent].defaultCmd;
+      const cm = wsl.command(w.distro, w.linux, cmd, mapped, { path: await wsl.shellPath(w.distro), env: extraEnv });
+      const child = spawn(cm.file, cm.args, { env: process.env, windowsHide: true });
+      child.viaWsl = w.distro;
+      child.agentCmd = cmd;
+      return child;
+    }
+    const cmd = providers.agentCommand(s, agent);
+    const resolved = resolveCommand(cmd);
+    if (!resolved) throw Object.assign(new Error(notFoundMessage(cmd, agent)), { code: 'ENOENT' });
+    // Windows の .cmd / .bat はシェル経由でしか起動できない。.exe は直接起動する
+    const useShell = isWin && /\.(cmd|bat)$/i.test(resolved);
+    const child = spawn(useShell ? quoteForCmd(resolved) : resolved, useShell ? args.map(quoteForCmd) : args, {
+      cwd,
+      env: { ...process.env, ...extraEnv },
+      shell: useShell,
+      windowsHide: true,
+    });
+    child.agentCmd = cmd;
+    return child;
   }
 
   // 会話（チャット）の権限モード。リポジトリのフォルダ（手元の作業中のファイル）でそのまま動くので、
@@ -1051,7 +1131,7 @@ class AgentManager extends EventEmitter {
       if (s.model) args.push('--model', s.model);
       const allowed = splitList(s.allowedTools);
       if (allowed.length) args.push('--allowedTools', ...allowed);
-      const mcpConfig = this.writeMcpConfig(c);
+      const mcpConfig = this.writeMcpConfig(c, wsl.parseWslPath(cwd)?.distro);
       if (mcpConfig) args.push('--mcp-config', mcpConfig, '--permission-prompt-tool', PERMISSION_TOOL);
       if (c.sessionId) args.push('--resume', assertSessionId(c.sessionId));
       // 既存の会話を引き継ぐときは、元の会話を変えないようにフォークする（新しい ID になる）
@@ -1069,21 +1149,10 @@ class AgentManager extends EventEmitter {
     c.pendingPrompt = null;
     c.lastPromptSent = prompt;
     for (const m of c.btw || []) if (m.state === 'queued') m.state = 'delivered';
-    const cmd = providers.agentCommand(s, agent);
-    const resolved = resolveCommand(cmd);
-    if (!resolved) {
-      throw Object.assign(new Error(notFoundMessage(cmd, agent)), { code: 'ENOENT' });
-    }
     if (agent !== 'claude') this.log(c, 'system', `${label} で動かします${c.sessionId ? `（会話 ${c.sessionId.slice(0, 8)} の続き）` : ''}`);
-    // Windows の .cmd / .bat はシェル経由でしか起動できない。.exe は直接起動する
-    const useShell = isWin && /\.(cmd|bat)$/i.test(resolved);
-    const child = spawn(useShell ? quoteForCmd(resolved) : resolved, useShell ? args.map(quoteForCmd) : args, {
-      cwd,
-      // 承認待ちの MCP ツール呼び出しがタイムアウトしないようにする
-      env: { ...process.env, MCP_TOOL_TIMEOUT: '86400000' },
-      shell: useShell,
-      windowsHide: true,
-    });
+    // 承認待ちの MCP ツール呼び出しがタイムアウトしないようにする
+    const child = await this.spawnAgent(agent, cwd, args, { MCP_TOOL_TIMEOUT: '86400000' });
+    const cmd = child.agentCmd;
     this.procs.set(c.id, child);
     // sent: stdin に書いたメッセージ（acked = claude が受け取ったことをリプレイで確認済み）
     const run = { agent, resultError: null, finished: false, child, sent: [], stdinClosed: false, idleTimer: null };
@@ -1182,7 +1251,12 @@ class AgentManager extends EventEmitter {
         }
       } else {
         c.status = 'failed';
-        c.error = run.resultError || run.lastError || `${cmd} が終了コード ${code} で終了しました`;
+        c.error =
+          run.resultError ||
+          run.lastError ||
+          (child.viaWsl && code === 127
+            ? `${child.viaWsl}（WSL）の中に ${cmd} が見つかりません。${child.viaWsl} のターミナルで ${label} をインストールしてログインしてください`
+            : `${cmd} が終了コード ${code} で終了しました`);
       }
       if (c.status === 'failed') this.notify(c, 'failed', `失敗: ${c.title}`, c.error);
       c.stopRequested = false;
@@ -1236,7 +1310,9 @@ class AgentManager extends EventEmitter {
         }
         const content = ev.message && Array.isArray(ev.message.content) ? ev.message.content : [];
         for (const b of content) {
-          if (b.type === 'tool_result') this.log(c, b.is_error ? 'tool_error' : 'tool_result', truncate(toolResultText(b.content), 1500));
+          if (b.type !== 'tool_result') continue;
+          const images = toolResultImages(b.content);
+          this.log(c, b.is_error ? 'tool_error' : 'tool_result', truncate(toolResultText(b.content), 1500), images.length ? { images } : undefined);
         }
         break;
       }
@@ -1244,6 +1320,7 @@ class AgentManager extends EventEmitter {
         if (ev.session_id) c.sessionId = ev.session_id;
         const cost = Number(ev.total_cost_usd) || 0;
         c.costUsd = (c.costUsd || 0) + cost;
+        this.store.addCost(c.repoPath, cost);
         const secs = Math.round((Number(ev.duration_ms) || 0) / 1000);
         if (ev.is_error || (ev.subtype && ev.subtype !== 'success')) {
           run.resultError = (typeof ev.result === 'string' && ev.result) || `エラー（${ev.subtype}）`;
@@ -1254,6 +1331,15 @@ class AgentManager extends EventEmitter {
         }
         this.changed(c);
         this.afterResult(c, run, !!run.resultError);
+        break;
+      }
+      case 'rate_limit_event': {
+        // 週間上限（seven_day 系）のリセット日時を覚えて、上部の週の合計金額の区切りに使う
+        const info = ev.rate_limit_info || {};
+        const resetsAt = Number(info.resetsAt) || 0;
+        if (resetsAt && /^seven_day/.test(String(info.rateLimitType || ''))) {
+          if (this.store.setWeeklyResetAt(resetsAt < 1e12 ? resetsAt * 1000 : resetsAt)) this.store.save();
+        }
         break;
       }
       default:
@@ -1567,7 +1653,7 @@ class AgentManager extends EventEmitter {
             dir = temp;
           } catch (err) {
             // 「main は <フォルダ> で使われています」と断られたら、そのフォルダでマージする
-            const at = git.checkedOutAtFromError(err);
+            const at = git.checkedOutAtFromError(err, top);
             if (!at) throw err;
             temp = null;
             dir = at;
@@ -1671,8 +1757,10 @@ class AgentManager extends EventEmitter {
       await git.push(c.worktreePath, 'origin', c.branch, true);
       this.log(c, 'system', `ブランチ ${c.branch} を origin に push しました`);
       const def = this.prDefaults(c);
+      const slug = await github.repoSlug(top).catch(() => null);
       const pr = await ghCli.createPullRequest({
         cwd: c.worktreePath,
+        repo: slug ? `${slug.owner}/${slug.repo}` : undefined,
         head: c.branch,
         base,
         title: String(opts.title || '').trim() || def.title,
@@ -2043,4 +2131,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
+module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };

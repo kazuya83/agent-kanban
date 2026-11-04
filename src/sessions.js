@@ -74,8 +74,9 @@ function parseSession(file) {
  * @param {string} repoPath  このリポジトリ（と、そのタスク用 worktree）の会話を「関係あり」にする
  * @returns {Array<{id, title, cwd, branch, updatedAt, related: boolean}>} 新しい順
  */
-function listSessions(repoPath) {
-  const dir = projectsDir();
+// opts.configDir: Claude Code の設定フォルダ（WSL のリポジトリなら、WSL の中の ~/.claude）
+function listSessions(repoPath, opts = {}) {
+  const dir = opts.configDir ? path.join(opts.configDir, 'projects') : projectsDir();
   let files = [];
   try {
     for (const p of fs.readdirSync(dir)) {
@@ -101,8 +102,11 @@ function listSessions(repoPath) {
   }
   files.sort((a, b) => b.mtime - a.mtime);
   files = files.slice(0, MAX_FILES);
-  const norm = (p) => path.resolve(String(p || '')).replace(/[\\/]+$/, '');
-  const repo = repoPath ? norm(repoPath) : '';
+  // WSL のリポジトリなら、会話に記録された場所（/home/...）と Linux のパスで比べる
+  const w = require('./wsl').parseWslPath(repoPath);
+  const P = w ? path.posix : path;
+  const norm = (p) => P.resolve(String(p || '')).replace(/[\\/]+$/, '');
+  const repo = repoPath ? norm(w ? w.linux : repoPath) : '';
   const wtRoot = repo ? `${repo}.worktrees` : '';
   const out = [];
   const seen = new Set();
@@ -116,7 +120,7 @@ function listSessions(repoPath) {
     if (!s || seen.has(s.id)) continue; // 同じ会話が複数のフォルダにあるときは新しいほうだけ
     seen.add(s.id);
     const cwd = s.cwd ? norm(s.cwd) : '';
-    s.related = !!repo && !!cwd && (cwd === repo || cwd.startsWith(repo + path.sep) || cwd.startsWith(wtRoot + path.sep));
+    s.related = !!repo && !!cwd && (cwd === repo || cwd.startsWith(repo + P.sep) || cwd.startsWith(wtRoot + P.sep));
     out.push(s);
   }
   return out;

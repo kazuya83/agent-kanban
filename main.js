@@ -5,6 +5,7 @@ const { Store } = require('./src/store');
 const { AgentManager } = require('./src/agent');
 const { PermissionServer } = require('./src/permission-server');
 const git = require('./src/git');
+const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
 
@@ -78,7 +79,7 @@ function send(channel, payload) {
 }
 
 function boardState() {
-  return { settings: store.settings, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath) };
+  return { settings: store.settings, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), weeklyCost: store.weeklyCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath) };
 }
 
 let boardTimer = null;
@@ -138,17 +139,47 @@ app.whenReady().then(async () => {
 
   handle('board:get', () => boardState());
   handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
-  handle('env:check', () => ({
-    git: resolveCommand('git'),
-    claude: resolveCommand(store.settings.claudePath || 'claude'),
-    agents: Object.fromEntries(providers.AGENT_IDS.map((a) => [a, resolveCommand(providers.agentCommand(store.settings, a))])),
-    platform: process.platform,
-  }));
-  handle('repo:choose', async () => {
-    const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: 'git リポジトリを選択' });
+  handle('env:check', async () => {
+    // WSL のリポジトリなら、WSL の中に git と claude があるかを見る
+    const w = wsl.parseWslPath(store.settings.repoPath);
+    if (w) {
+      return {
+        git: await wsl.which(w.distro, 'git'),
+        claude: await wsl.which(w.distro, store.settings.wslClaudePath || 'claude'),
+        agents: Object.fromEntries(await Promise.all(providers.AGENT_IDS.map(async (a) => [a, await wsl.which(w.distro, a === 'claude' ? store.settings.wslClaudePath || 'claude' : providers.AGENTS[a].defaultCmd)]))),
+        platform: process.platform,
+        wsl: w.distro,
+      };
+    }
+    return {
+      git: resolveCommand('git'),
+      claude: resolveCommand(store.settings.claudePath || 'claude'),
+      agents: Object.fromEntries(providers.AGENT_IDS.map((a) => [a, resolveCommand(providers.agentCommand(store.settings, a))])),
+      platform: process.platform,
+    };
+  });
+  // Windows: WSL のディストリビューション（Ubuntu など）。リポジトリを選ぶときに、その中のフォルダも選べるようにする
+  handle('wsl:distros', () => (process.platform === 'win32' || process.env.AGENT_KANBAN_WSL ? wsl.listDistros() : []));
+  handle('repo:choose', async (opts = {}) => {
+    const distro = opts && opts.wsl;
+    const home = distro ? await wsl.homeDir(distro) : '';
+    const r = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+      title: distro ? `git リポジトリを選択（${distro}）` : 'git リポジトリを選択',
+      ...(distro ? { defaultPath: wsl.toUnc(distro, home || '/home') } : {}),
+    });
     if (r.canceled || !r.filePaths[0]) return null;
-    const top = await git.toplevel(r.filePaths[0]);
-    if (!top) throw new Error('選んだフォルダは git リポジトリではありません');
+    const picked = r.filePaths[0];
+    const pw = wsl.parseWslPath(picked);
+    let top = '';
+    try {
+      top = wsl.fromLinux(picked, (await git.git(picked, ['rev-parse', '--show-toplevel'])).trim());
+    } catch (err) {
+      if (/not a git repository/i.test(err.message)) throw new Error(`選んだフォルダは git リポジトリではありません（${picked}）`);
+      if (pw && /not found|No such file|127/i.test(err.message)) throw new Error(`${pw.distro}（WSL）の中に git が見つかりません。${pw.distro} のターミナルで sudo apt install git を実行してください。\n${err.message}`);
+      throw new Error(`git でフォルダを調べられませんでした（${picked}）\n${err.message}`);
+    }
+    if (!top) throw new Error(`git から答えが返ってきませんでした（${picked}）`);
     store.settings.repoPath = top;
     store.settings.baseBranch = '';
     store.save();
@@ -165,10 +196,12 @@ app.whenReady().then(async () => {
     };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'relaySteps', 'competeAgents'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'relaySteps', 'competeAgents', 'weeklyResetDay', 'weeklyResetTime'];
     if (patch && 'branchNamingRule' in patch) patch = { ...patch, branchNamingRule: String(patch.branchNamingRule || '').trim() };
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     if (patch && 'suggestSkillsOnDone' in patch) patch = { ...patch, suggestSkillsOnDone: !!patch.suggestSkillsOnDone };
+    if (patch && 'weeklyResetDay' in patch) patch = { ...patch, weeklyResetDay: /^[0-6]$/.test(String(patch.weeklyResetDay)) ? String(patch.weeklyResetDay) : '' };
+    if (patch && 'weeklyResetTime' in patch) patch = { ...patch, weeklyResetTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(String(patch.weeklyResetTime)) ? String(patch.weeklyResetTime) : '00:00' };
     if (patch && 'issueStatusSync' in patch) patch = { ...patch, issueStatusSync: !!patch.issueStatusSync };
     if (patch && 'baseBranch' in patch) {
       const b = String(patch.baseBranch || '').trim();
@@ -245,10 +278,15 @@ app.whenReady().then(async () => {
   handle('notifications:read', ({ ids } = {}) => agents.readNotifications(store.settings.repoPath, ids));
   handle('notifications:clear', ({ ids } = {}) => agents.clearNotifications(store.settings.repoPath, ids));
   handle('notifications:act', ({ id }) => agents.actNotification(id));
-  handle('skills:list', () => require('./src/skills').listSkills(store.settings.repoPath));
+  // WSL のリポジトリなら、WSL の中の ~/.claude からスキルと会話を読む
+  const claudeConfigFor = async (repo) => {
+    const w = wsl.parseWslPath(repo);
+    return w ? (await wsl.claudeConfigDir(w.distro)) || undefined : undefined;
+  };
+  handle('skills:list', async () => require('./src/skills').listSkills(store.settings.repoPath, { configDir: await claudeConfigFor(store.settings.repoPath) }));
   handle('card:btw', ({ id, text }) => agents.btw(id, text));
   handle('card:setSession', ({ id, session }) => agents.setSession(id, session));
-  handle('sessions:list', () => require('./src/sessions').listSessions(store.settings.repoPath));
+  handle('sessions:list', async () => require('./src/sessions').listSessions(store.settings.repoPath, { configDir: await claudeConfigFor(store.settings.repoPath) }));
   handle('card:logs', (id) => agents.logs(id));
   handle('card:diff', (id) => agents.diff(id));
   handle('card:worktree', (id) => agents.worktree(id));
