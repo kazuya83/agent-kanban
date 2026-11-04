@@ -8,6 +8,12 @@ const { execFileSync } = require('child_process');
 const { Store, migrateSettings } = require('../src/store');
 const { AgentManager, promptWithSkill } = require('../src/agent');
 const providers = require('../src/providers');
+const FlowModel = require('../renderer/flow-model');
+
+// Pipelineの工程を、前のバージョンの工程のリストの形で決める（フローチャートにして、今のプロジェクトの設定に入れる）
+function useSteps(store, steps) {
+  store.settings.relayFlow = FlowModel.flowFromSteps(providers.cleanRelaySteps(steps));
+}
 
 const FAKE_CLAUDE = path.join(__dirname, 'fake-claude.js');
 const FAKE_CLI = path.join(__dirname, 'fake-agent-cli.js');
@@ -239,11 +245,11 @@ test('Gemini のタスク: 失敗はエラー列に、見つからないとわ�
 
 test('Pipeline: Codex で実装 → Claude でレビューと、同じ worktree で順番に引き継ぐ', async () => {
   const { agents, store } = setup();
-  store.settings.relaySteps = [
+  useSteps(store, [
     { agent: 'codex', label: '実装', instruction: '実装して' },
     { agent: 'gemini', label: 'テスト', instruction: 'テストして' },
     { agent: 'claude', label: 'レビュー', instruction: 'レビューして' },
-  ];
+  ]);
   const [c] = agents.createTask({ title: 'relay', prompt: 'Pipelineのタスク', agent: 'relay' });
   assert.strictEqual(c.agent, 'codex');
   agents.start(c.id);
@@ -277,10 +283,10 @@ test('Pipeline: Codex で実装 → Claude でレビューと、同じ worktree 
 
 test('Pipeline: 途中の工程が失敗したら止まり、追加指示で直すと続きの工程へ進む', async () => {
   const { agents, store } = setup();
-  store.settings.relaySteps = [
+  useSteps(store, [
     { agent: 'codex', label: '実装', instruction: '' },
     { agent: 'gemini', label: '仕上げ', instruction: '' },
-  ];
+  ]);
   const [c] = agents.createTask({ title: 'relay2', prompt: '[fail] だめ', agent: 'relay' });
   agents.start(c.id);
   await waitFor(() => c.status === 'failed');
@@ -308,31 +314,31 @@ test('Pipeline: 分岐・ループの設定を整える（落とした工程の�
 
 test('Pipeline: ループ — レビューで差し戻されたら実装に戻り、合格したら終える', async () => {
   const { agents, store } = setup();
-  store.settings.relaySteps = [
+  useSteps(store, [
     { agent: 'gemini', label: '実装', instruction: '実装して' },
     { agent: 'codex', label: 'レビュー', instruction: 'レビューして', onFail: 0, maxLoops: 3 },
-  ];
+  ]);
   const [c] = agents.createTask({ title: 'loop', prompt: '[judge] ループのタスク', agent: 'relay' });
   agents.start(c.id);
   await waitFor(() => c.status === 'review' && c.relay.done, 20000);
-  assert.deepStrictEqual(c.relay.history.map((h) => [h.index, h.run, h.verdict || null]), [[0, 1, null], [1, 1, 'fail'], [0, 2, null]]);
+  assert.deepStrictEqual(c.relay.history.map((h) => [h.index, h.run, h.result || null]), [[0, 1, null], [1, 1, 'fail'], [0, 2, null]]);
   assert.strictEqual(c.relay.index, 1);
-  assert.strictEqual(c.relay.lastVerdict, 'pass');
-  assert.deepStrictEqual(c.relay.loops, { 1: 1 });
+  assert.strictEqual(c.relay.lastResult, 'pass');
+  assert.deepStrictEqual(c.relay.counts, { e5: 1 }, 'レビューの差し戻しから実装へ戻る線を1回通った');
   assert.ok(!c.relay.limitReached);
   assert.strictEqual(store.notifications.filter((n) => n.cardId === c.id && n.kind === 'review').length, 1);
   const diff = await agents.diff(c.id);
   assert.match(diff, /工程 1\/2「実装」（2回目）/, '戻ってきた工程は2回目と分かる');
   assert.match(diff, /差し戻し）の報告/, '差し戻しの報告を実装に渡す');
-  assert.match(diff, /\[\[PASS\]\]/, '判定の印の書き方を伝える');
+  assert.match(diff, /\[\[RESULT:pass\]\]/, '判定の値の書き方を伝える');
 });
 
 test('Pipeline: ループの上限に達したら、Pipelineを終えてレビューに回す（その後の追加指示では進まない）', async () => {
   const { agents, store } = setup();
-  store.settings.relaySteps = [
+  useSteps(store, [
     { agent: 'gemini', label: '実装', instruction: '' },
     { agent: 'codex', label: 'レビュー', instruction: '', onFail: 0, maxLoops: 1 },
-  ];
+  ]);
   const [c] = agents.createTask({ title: 'limit', prompt: '[judge-always-fail] だめなタスク', agent: 'relay' });
   agents.start(c.id);
   await waitFor(() => c.status === 'review' && c.relay.done, 20000);
@@ -348,30 +354,30 @@ test('Pipeline: ループの上限に達したら、Pipelineを終えてレビ�
 
 test('Pipeline: 分岐 — 判定で行き先を変え、飛ばした工程は動かさない', async () => {
   const { agents, store } = setup();
-  store.settings.relaySteps = [
+  useSteps(store, [
     { agent: 'codex', label: '確認', instruction: '', onFail: 2 },
     { agent: 'gemini', label: '飛ばす', instruction: '' },
     { agent: 'gemini', label: '直す', instruction: '' },
-  ];
+  ]);
   const [c] = agents.createTask({ title: 'branch', prompt: '[judge] 分岐のタスク', agent: 'relay' });
   agents.start(c.id);
   await waitFor(() => c.status === 'review' && c.relay.done, 20000);
-  assert.deepStrictEqual(c.relay.history.map((h) => [h.index, h.verdict]), [[0, 'fail']]);
+  assert.deepStrictEqual(c.relay.history.map((h) => [h.index, h.result]), [[0, 'fail']]);
   assert.strictEqual(c.relay.index, 2);
   assert.deepStrictEqual(c.sessions.map((x) => x.agent), ['codex', 'gemini']);
 });
 
-test('Pipeline: 判定する工程の返事に印がなければ、合格として次へ進む', async () => {
+test('Pipeline: 判定する工程の返事に値がなければ、「どれにも合わないとき」の線（合格）へ進む', async () => {
   const { agents, store } = setup();
-  store.settings.relaySteps = [
+  useSteps(store, [
     { agent: 'gemini', label: '確認', instruction: '', onFail: 'end' },
     { agent: 'codex', label: '実装', instruction: '' },
-  ];
+  ]);
   const [c] = agents.createTask({ title: 'nomark', prompt: '印なし', agent: 'relay' });
   agents.start(c.id);
   await waitFor(() => c.status === 'review' && c.relay.done, 20000);
-  assert.deepStrictEqual(c.relay.history.map((h) => [h.index, h.verdict]), [[0, 'pass']]);
-  assert.ok(c.logs.some((l) => /判定の印.*がなかったので、合格として扱いました/.test(l.text)));
+  assert.deepStrictEqual(c.relay.history.map((h) => [h.index, h.result]), [[0, undefined]]);
+  assert.ok(c.logs.some((l) => /判定の値.*がなかったので.*どれにも合わないとき/.test(l.text)));
 });
 
 test('競争: 同じタスクを複数のエージェントで並列に解き、比べて1つを採用する', async () => {
@@ -440,10 +446,10 @@ test('使うエージェント: チェックを付けていないエージェン
   store.settings.enabledAgents = ['claude', 'codex'];
   assert.throws(() => agents.createTask({ prompt: 'x', agent: 'gemini' }), /使わない設定/);
   assert.throws(() => agents.createChat({ message: 'x', agent: 'gemini' }), /使わない設定/);
-  store.settings.relaySteps = [
+  useSteps(store, [
     { agent: 'codex', label: '実装', instruction: '' },
     { agent: 'gemini', label: 'テスト', instruction: '' },
-  ];
+  ]);
   assert.throws(() => agents.createTask({ prompt: 'x', agent: 'relay' }), /工程「テスト」の Gemini CLI は使わない設定/);
   // 競争は使うエージェントだけで（2つ未満ならエラー）
   store.settings.orchestration = 'compete';
@@ -459,7 +465,7 @@ test('使うエージェント: チェックを付けていないエージェン
 
 test('Pipelineと競争は排他: 設定で選んだ方だけ使え、もう片方ではタスクを作れない', async () => {
   const { agents, store } = setup();
-  store.settings.relaySteps = [{ agent: 'codex', label: '実装', instruction: '' }];
+  useSteps(store, [{ agent: 'codex', label: '実装', instruction: '' }]);
   store.settings.competeAgents = ['claude', 'codex'];
   // 初期値はPipeline
   assert.strictEqual(store.settings.orchestration, 'relay');

@@ -1,7 +1,18 @@
 // ボードの状態を JSON ファイルに保存する
 const fs = require('fs');
 const path = require('path');
-const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isAgent, cleanEnabledAgents, cleanOrchestration } = require('./providers');
+const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isAgent, cleanEnabledAgents, cleanOrchestration, cleanRelaySteps } = require('./providers');
+const FlowModel = require('../renderer/flow-model');
+
+// Pipelineのフローチャート（プロジェクトごと）の初期値: 前と同じ「実装 → レビュー」
+const DEFAULT_RELAY_FLOW = FlowModel.flowFromSteps(DEFAULT_RELAY_STEPS);
+function cloneFlow(f) {
+  return JSON.parse(JSON.stringify(f));
+}
+// 保存されていたフローを整える（形になっていなければ初期値）
+function cleanRelayFlow(f) {
+  return FlowModel.cleanFlow(f, { isAgent }) || cloneFlow(DEFAULT_RELAY_FLOW);
+}
 
 const MAX_RECENT_REPOS = 10; // 最近開いたリポジトリを覚えておく件数
 
@@ -132,6 +143,7 @@ const DEFAULT_SETTINGS = {
   issueStatusSync: true, // Issue から作ったタスクの列に合わせて、GitHub Projects の Status（In progress / In review / Done）を変える
   statusFieldName: '', // Projects で変える項目（単一選択）の名前。空なら「Status」
   statusMapping: { inProgress: '', inReview: '', done: '' }, // 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空なら名前から自動で探す
+  relayFlow: DEFAULT_RELAY_FLOW, // Pipelineのフローチャート（工程・分岐・並列・合流・ループ）。設定の「フローチャートを編集」で決める
   pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
   suggestSkillsOnDone: true, // タスクが完了したとき、前に完了したタスクと似た作業なら「スキルにしませんか？」と通知する
   deleteSessionsOnMerge: true, // マージして完了したら、そのタスクが作業に使った Claude Code の会話を消す
@@ -152,7 +164,7 @@ const DEFAULT_SETTINGS = {
   cursorModel: '',
   // ---- オーケストレーション ----
   orchestration: 'relay', // Pipelineと競争は排他。使うのはどちらか1つ（'relay' / 'compete'）
-  relaySteps: DEFAULT_RELAY_STEPS, // Pipeline: 同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ
+  relaySteps: DEFAULT_RELAY_STEPS, // 前のバージョンのPipelineの工程のリスト（アプリ全体で1つ）。今はプロジェクトごとの relayFlow を使う。読み込むときに relayFlow へ移す
   competeAgents: DEFAULT_COMPETE_AGENTS, // 競争: 同じタスクを、これらのエージェントで並列に解かせる
   // ---- 遠隔操作（SSH トンネル前提。アプリ同士） ----
   remoteHostEnabled: false, // このマシンをホスト（作業側）として 127.0.0.1 で待ち受ける
@@ -194,13 +206,13 @@ const MAX_NOTIFICATIONS = 200;
 
 // ---------- プロジェクト（リポジトリ）ごとの設定 ----------
 // リポジトリに関わる設定だけをプロジェクトごとに持つ。コマンドのパス・モデル・同時に動かす数・自動更新などはアプリ全体で1つ
-const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'pushAfterMerge'];
+const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'pushAfterMerge', 'relayFlow'];
 const MAX_REPO_SETTINGS = 200;
 
 // 初めて開いたプロジェクトの設定（初期値。取り込み方は PR を作成。GitHub でないリポジトリは開いたときに直接マージにする）
 function defaultRepoSettings() {
   const out = {};
-  for (const k of REPO_SETTING_KEYS) out[k] = k === 'statusMapping' ? { ...DEFAULT_SETTINGS.statusMapping } : DEFAULT_SETTINGS[k];
+  for (const k of REPO_SETTING_KEYS) out[k] = k === 'statusMapping' ? { ...DEFAULT_SETTINGS.statusMapping } : k === 'relayFlow' ? cloneFlow(DEFAULT_RELAY_FLOW) : DEFAULT_SETTINGS[k];
   return out;
 }
 
@@ -210,6 +222,7 @@ function pickRepoSettings(src) {
   if (!src || typeof src !== 'object') return out;
   for (const k of REPO_SETTING_KEYS) if (src[k] !== undefined) out[k] = k === 'statusMapping' ? { ...out.statusMapping, ...(src[k] || {}) } : src[k];
   if (!['merge', 'pr'].includes(out.integration)) out.integration = DEFAULT_SETTINGS.integration;
+  out.relayFlow = cleanRelayFlow(out.relayFlow);
   return out;
 }
 
@@ -270,6 +283,17 @@ function setRepoSettings(settings, dir, patch) {
 // プロジェクトごとの設定がなかったころの設定: 今まで使っていたリポジトリには、今までの値（ベースブランチはリポジトリごとに覚えていた分）を入れておく
 // 取り込み方を保存していなければ、そのころの初期値（直接マージ）にする
 function migrateRepoSettings(settings, raw, cards) {
+  // Pipelineがフローチャートになる前の設定: アプリ全体の工程のリストを、それぞれのプロジェクトのフローにする
+  if (raw.relayFlow === undefined && Array.isArray(raw.relaySteps)) {
+    const legacy = FlowModel.flowFromSteps(cleanRelaySteps(raw.relaySteps));
+    settings.relayFlow = legacy;
+    raw = { ...raw, relayFlow: legacy };
+    if (raw.repoSettings && typeof raw.repoSettings === 'object' && !Array.isArray(raw.repoSettings)) {
+      const map = {};
+      for (const [p, v] of Object.entries(raw.repoSettings)) map[p] = v && typeof v === 'object' && v.relayFlow === undefined ? { ...v, relayFlow: cloneFlow(legacy) } : v;
+      raw = { ...raw, repoSettings: map };
+    }
+  }
   if (raw.repoSettings && typeof raw.repoSettings === 'object' && !Array.isArray(raw.repoSettings)) {
     settings.repoSettings = cleanRepoSettingsMap(raw.repoSettings);
     if (settings.repoPath && !settings.repoSettings[settings.repoPath]) settings.repoSettings[settings.repoPath] = pickRepoSettings(settings);
@@ -321,6 +345,7 @@ function migrateSettings(settings, raw, cards) {
   // タブがなかったころの設定: 今のリポジトリだけのタブにする
   settings.repoTabs = cleanRepoTabs(settings.repoTabs, settings.repoPath);
   migrateRepoSettings(settings, raw, cards);
+  settings.relayFlow = cleanRelayFlow(settings.relayFlow);
 }
 
 class Store {
@@ -459,6 +484,8 @@ class Store {
 
 module.exports = {
   migrateSettings,
+  cleanRelayFlow,
+  DEFAULT_RELAY_FLOW,
   REPO_SETTING_KEYS,
   defaultRepoSettings,
   pickRepoSettings,

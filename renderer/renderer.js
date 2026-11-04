@@ -188,6 +188,7 @@ function badgeFor(c) {
   if ((c.permissions || []).length) return ['waiting', '承認待ち'];
   if (c.conflict && !c.conflict.resolving && c.status !== 'running' && c.status !== 'queued') return ['conflict', 'コンフリクト'];
   if (isSpecPending(c)) return ['spec', '仕様の確認'];
+  if (c.relay && c.relay.waiting && c.status === 'review') return ['queued', '並列の枝を待機中'];
   if (c.awaitingReply && (c.status === 'review' || c.status === 'failed')) return ['awaiting', '回答待ち'];
   return [c.status, (isChat(c) ? CHAT_STATUS_LABEL : STATUS_LABEL)[c.status]];
 }
@@ -414,7 +415,13 @@ function cardHtml(c) {
 // カードに出すエージェント・Pipeline・競争の印
 function orchChipsHtml(c) {
   const chips = [];
-  if (c.relay) chips.push(`<span class="orch-chip relay" title="Pipeline: 工程ごとに別のエージェントへ順番に引き継ぎます">${icon('pipeline')}${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${agentIcon(agentOf(c))} ${esc(agentShort(agentOf(c)))}</span>`);
+  if (c.relay && c.relay.waiting) {
+    const n = FlowModel.nodeOf(c.relay.flow, c.relay.waiting.node);
+    chips.push(`<span class="orch-chip relay" title="Pipeline: 並列の枝が、それぞれ別の worktree で動いています。すべて終わったら合流でマージします">${icon('pipeline')}並列「${esc((n && n.label) || '')}」の枝 ${c.relay.waiting.children.length} 本を待機中</span>`);
+  } else if (c.relay) {
+    const b = c.relay.branchOf;
+    chips.push(`<span class="orch-chip relay" title="${b ? 'Pipelineの並列の枝: 合流で元のタスクにマージします' : 'Pipeline: フローチャートの工程ごとに、エージェントが作業を引き継ぎます'}">${icon('pipeline')}${b ? `枝${b.index + 1} · ` : ''}${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${agentIcon(agentOf(c))} ${esc(agentShort(agentOf(c)))}</span>`);
+  }
   else chips.push(`<span class="orch-chip agent">${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</span>`);
   if (c.compete) {
     const n = competitors(c).length;
@@ -855,19 +862,21 @@ const RELAY_STATE = {
   skipped: ['–', 'スキップ'],
   done: ['✓', '完了'],
 };
-// 設定: 分岐の行き先の選択肢（'' = 次の工程 / 'end' = 終了 / 工程の番号）
-function relayTargetOptions(v, n) {
-  const o = (val, label) => `<option value="${val}" ${String(v === undefined ? '' : v) === String(val) ? 'selected' : ''}>${label}</option>`;
-  return [o('', '次の工程'), ...Array.from({ length: n }, (_, j) => o(j, `工程${j + 1}へ`)), o('end', '終了（レビューへ）')].join('');
-}
 function relayStepState(c, i) {
   const r = c.relay;
   const ran = (r.history || []).some((h) => h.index === i);
+  // 並列の枝を待っているあいだは、枝のタスクで動いている工程の状態を見せる
+  if (r.waiting) {
+    for (const id of r.waiting.children) {
+      const k = state.board.cards.find((x) => x.id === id);
+      if (k && k.relay && k.relay.index === i) return k.relay.atJoin ? 'done' : relayStepState(k, i);
+    }
+    return ran ? 'done' : 'pending';
+  }
   // 分岐で飛ばした工程・Pipelineを終えたあとの、まだ動かしていない工程は「スキップ」
-  if (i < r.index) return ran ? 'done' : 'skipped';
-  if (i > r.index) return r.done ? (ran ? 'done' : 'skipped') : 'pending';
+  if (i !== r.index) return ran ? 'done' : r.done ? 'skipped' : 'pending';
   const b = badgeFor(c)[0];
-  if (b === 'review') return r.done || i === r.steps.length - 1 ? 'done' : 'stopped'; // 途中の工程で止まっている（停止したとき）
+  if (b === 'review') return r.done || r.atJoin ? 'done' : 'stopped'; // 途中の工程で止まっている（停止したとき・分岐の行き先がないとき）
   if (b === 'todo') return 'pending';
   return RELAY_STATE[b] ? b : 'done';
 }
@@ -892,14 +901,14 @@ function relayFlowHtml(c) {
   if (!c.relay || isChat(c)) return '';
   const r = c.relay;
   const hist = new Map((r.history || []).map((h) => [h.index, h])); // 同じ工程を何度か動かしたら、最後の回
-  const runs = (i) => (r.history || []).filter((h) => h.index === i).length + (i === r.index ? 1 : 0);
+  const runs = (i) => (r.history || []).filter((h) => h.index === i).length + (i === r.index && !r.waiting && !r.atJoin ? 1 : 0);
   const doneN = r.steps.filter((_, i) => relayStepState(c, i) === 'done').length;
-  const loopN = Object.values(r.loops || {}).reduce((a, b) => a + b, 0);
+  const loopN = Object.values(r.counts || {}).reduce((a, b) => a + b, 0);
   const nodes = r.steps.map((st, i) => {
     const stt = relayStepState(c, i);
     const [mark, label] = RELAY_STATE[stt]; // icon() を隠さないよう、別の名前にする
     // 今の工程は、今の回の情報を見せる（今の回は履歴にまだない。前の回の報告は残す）
-    const h = i === r.index ? null : hist.get(i);
+    const h = i === r.index && !r.waiting && !r.atJoin ? null : hist.get(i);
     const prev = hist.get(i);
     const info = [];
     const n = runs(i);
@@ -907,32 +916,35 @@ function relayFlowHtml(c) {
     if (h) {
       if (h.startedAt && h.at) info.push(`${icon('clock')}${durText(h.at - h.startedAt) || '1分未満'}`);
       if (h.costUsd) info.push(`$${h.costUsd.toFixed(3)}`);
-    } else if (i === r.index && r.stepStartedAt) {
+    } else if (i === r.index && r.stepStartedAt && !r.waiting) {
       if (stt === 'running') info.push(`${icon('clock')}<span class="elapsed" data-since="${r.stepStartedAt}">${elapsed(r.stepStartedAt)}</span>（${hhmm(r.stepStartedAt)} から）`);
       else info.push(`${hhmm(r.stepStartedAt)} に開始`);
       const cost = (c.costUsd || 0) - (r.stepCostStart || 0);
       if (cost > 0) info.push(`$${cost.toFixed(3)}`);
     }
-    // 判定する工程: 行き先と、最後の判定
-    const judge = st.onPass !== undefined || st.onFail !== undefined;
-    // 「次の工程」でも最後の工程なら終了（agent.js の relayPlan と同じ）
-    const tgt = (to) => {
-      const j = to === undefined ? i + 1 : to;
-      if (to === 'end' || j >= r.steps.length) return '終了';
-      return to === undefined ? '次へ' : `工程${j + 1}${j <= i ? 'に戻る' : 'へ'}`;
+    // すぐあとが分岐の工程: 期待値ごとの行き先と、最後の判定の値・ループで戻った回数
+    const judge = FlowModel.judgeOf(r.flow, st.id);
+    const back = FlowModel.backEdges(r.flow);
+    const tgt = (e) => {
+      const n = FlowModel.nodeOf(r.flow, e.to);
+      if (!n || n.type === 'end') return '終了';
+      if (n.type === 'step') return `工程${r.steps.findIndex((x) => x.id === n.id) + 1}${back.has(e.id) ? 'に戻る' : 'へ'}`;
+      return `${FlowModel.TYPE_LABEL[n.type]}「${FlowModel.labelOf(n)}」へ`;
     };
-    const verdict = (i === r.index && r.lastVerdict) || (prev && prev.verdict);
+    const result = (i === r.index && r.lastResult) || (prev && prev.result);
     const judgeHtml = judge
-      ? `<div class="rf-info">分岐: 合格 → ${esc(tgt(st.onPass))} ・ 差し戻し → ${esc(tgt(st.onFail))}${(r.loops || {})[i] ? ` ・ 戻した回数 ${r.loops[i]}/${st.maxLoops || 3}` : ''}${verdict ? ` <span class="rf-verdict v-${verdict}">${verdict === 'fail' ? '差し戻し' : '合格'}</span>` : ''}</div>`
+      ? `<div class="rf-info">分岐「${esc(judge.node.label)}」: ${FlowModel.outEdges(r.flow, judge.node.id)
+          .map((e) => `${esc(e.value || 'それ以外')}${e.value && e.else ? '（それ以外も）' : ''} → ${esc(tgt(e))}${back.has(e.id) && (r.counts || {})[e.id] ? `（戻った回数 ${r.counts[e.id]}/${e.maxLoops || 3}）` : ''}`)
+          .join(' ・ ')}${result ? ` <span class="rf-verdict v-${result === 'fail' ? 'fail' : result === 'pass' ? 'pass' : 'other'}">${esc(result === 'fail' ? '差し戻し' : result === 'pass' ? '合格' : result)}</span>` : ''}</div>`
       : '';
     const key = `${c.id}:${i}`;
     const report = prev && String(prev.report || '').trim()
       ? `<details class="rf-report" data-rkey="${esc(key)}" ${state.relayOpen.has(key) ? 'open' : ''}><summary>${(r.history || []).filter((x) => x.index === i).length > 1 ? '最後に' : ''}次の工程へ渡した報告</summary><div class="rf-report-body">${esc(prev.report)}</div></details>`
       : '';
-    return `<li class="rf-node rs-${stt} ${i === r.index ? 'cur' : ''}">
+    return `<li class="rf-node rs-${stt} ${i === r.index && !r.waiting ? 'cur' : ''}">
       <span class="rf-dot">${mark}</span>
       <div class="rf-body">
-        <div class="rf-head"><b>${i + 1}. ${esc(st.label)}</b> <span class="rf-agent">${agentIcon(st.agent)}${esc(agentLabel(st.agent))}</span> <span class="rf-state">${label}</span></div>
+        <div class="rf-head"><b>${i + 1}. ${esc(st.label)}</b>${h && h.branch ? ` <span class="rf-branch">並列の枝</span>` : ''} <span class="rf-agent">${agentIcon(st.agent)}${esc(agentLabel(st.agent))}</span> <span class="rf-state">${label}</span></div>
         ${info.length ? `<div class="rf-info">${info.join(' ・ ')}</div>` : ''}
         ${judgeHtml}
         ${st.instruction ? `<div class="rf-inst" title="${esc(st.instruction)}">${esc(st.instruction)}</div>` : ''}
@@ -940,7 +952,35 @@ function relayFlowHtml(c) {
       </div>
     </li>`;
   });
-  return `<div class="relay-flow"><div class="rf-title">${icon('pipeline')}Pipeline <span class="muted small">${doneN}/${r.steps.length} 工程が完了${loopN ? `・ループ ${loopN} 回` : ''}${r.limitReached ? '・ループの上限で終了' : ''}</span></div><ol class="rf-list">${nodes.join('')}</ol></div>`;
+  return `<div class="relay-flow"><div class="rf-title">${icon('pipeline')}Pipeline <span class="muted small">${doneN}/${r.steps.length} 工程が完了${loopN ? `・ループ ${loopN} 回` : ''}${r.limitReached ? '・ループの上限で終了' : ''}</span></div>${relayWaitHtml(c)}<ol class="rf-list">${nodes.join('')}</ol></div>`;
+}
+
+// 並列の枝のタスクの状態が変わったら、元のタスクの詳細も描き直す
+function relayKidsSig(c) {
+  const w = c.relay && c.relay.waiting;
+  if (!w) return null;
+  return w.children.map((id) => {
+    const k = card(id);
+    return k ? [id, k.status, k.awaitingReply, k.relay && k.relay.index, k.relay && k.relay.atJoin, (k.permissions || []).length] : [id];
+  });
+}
+
+// 詳細: 並列の枝を待っているあいだの、枝ごとの状態（押すと枝のタスクを開く）。枝のタスクなら、元のタスク
+function relayWaitHtml(c) {
+  const r = c.relay;
+  if (r.branchOf) {
+    const p = state.board.cards.find((x) => x.id === r.branchOf.parent);
+    return `<div class="rf-wait">並列の枝 ${r.branchOf.index + 1}「${esc(r.branchOf.label)}」です。合流で${p ? ` <a href="#" data-open-card="${esc(p.id)}">${esc(p.title)}</a> に` : '元のタスクに'}マージします。${r.atJoin ? '（この枝は終わり、ほかの枝を待っています）' : ''}</div>`;
+  }
+  if (!r.waiting) return '';
+  const n = FlowModel.nodeOf(r.flow, r.waiting.node);
+  const kids = r.waiting.children.map((id) => {
+    const k = state.board.cards.find((x) => x.id === id);
+    if (!k) return '<li>（削除された枝）</li>';
+    const st = k.relay.atJoin ? (r.waiting.merged.includes(k.id) ? 'マージ済み' : '合流待ち') : badgeFor(k)[1];
+    return `<li><a href="#" data-open-card="${esc(k.id)}">${esc(k.relay.branchOf.label)}</a>（${esc(agentShort(agentOf(k)))}・${esc(st)}）</li>`;
+  });
+  return `<div class="rf-wait">並列「${esc((n && n.label) || '')}」の枝を、それぞれ別の worktree で動かしています。すべて終わったら、このブランチにマージして先へ進みます。<ul>${kids.join('')}</ul></div>`;
 }
 
 // 詳細: 競争の候補（同じタスクをほかのエージェントで解いたもの）
@@ -970,7 +1010,7 @@ function competeBoxHtml(c) {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch])]);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch]), relayKidsSig(c)]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -1019,6 +1059,8 @@ function renderDetailHead() {
     tt.classList.toggle('expanded', state.titleExpanded);
   };
   $('detailHead').querySelectorAll('details[data-rkey]').forEach((d) => (d.ontoggle = () => (d.open ? state.relayOpen.add(d.dataset.rkey) : state.relayOpen.delete(d.dataset.rkey))));
+  // Pipelineの並列: 枝のタスク・元のタスクを開く
+  $('detailHead').querySelectorAll('[data-open-card]').forEach((a) => (a.onclick = (e) => (e.preventDefault(), card(a.dataset.openCard) && select(a.dataset.openCard))));
   if (state.tab === 'info') renderInfo(c);
   drawLogActions(c);
   const canFollow = canSendFollow(c);
@@ -2069,6 +2111,30 @@ function agentLimitHint(a) {
   return a === 'claude' ? '' : `${agentLabel(a)} は CLI の作りの都合で、カードでの承認・選択肢の質問・作業途中へのメッセージ差し込み・既存の会話の引き継ぎに対応していません（btw は終了後の追加指示として送られます）。権限は設定の権限モードに合わせて CLI 側で許可します。`;
 }
 
+// Pipelineのフローの要点（工程の並び・直すところ・最初の工程・分岐などの数）
+function relayFlowInfo(flow) {
+  if (!flow || !Array.isArray(flow.nodes)) return { steps: [], errors: ['フローチャートがありません'], first: null, ifs: 0, pars: 0, loops: 0 };
+  const start = FlowModel.startNode(flow);
+  const e = start && FlowModel.outEdges(flow, start.id)[0];
+  const count = (t) => flow.nodes.filter((n) => n.type === t).length;
+  return { steps: FlowModel.orderSteps(flow), errors: FlowModel.validateFlow(flow), first: e ? FlowModel.nodeOf(flow, e.to) : null, ifs: count('if'), pars: count('parallel'), loops: FlowModel.backEdges(flow).size };
+}
+function relayFlowLabel(info) {
+  const extra = [info.ifs && `分岐${info.ifs}`, info.pars && `並列${info.pars}`, info.loops && `ループ${info.loops}`].filter(Boolean).join('・');
+  return (info.steps.map((x) => `${x.label}(${agentShort(x.agent)})`).join(' → ') || '未設定') + (extra ? `（${extra}）` : '');
+}
+// 設定: Pipelineのフローの要約
+function relayFlowSummaryHtml(flow, enabled) {
+  const info = relayFlowInfo(flow);
+  const steps = info.steps
+    .map((x, i) => `<li><span class="relay-no">${i + 1}</span> ${agentIcon(x.agent)}<b>${esc(x.label)}</b> <span class="muted">${esc(agentLabel(x.agent))}${enabled.includes(x.agent) ? '' : '（使わない設定）'}</span>${x.instruction ? `<div class="muted small rs-inst">${esc(x.instruction)}</div>` : ''}</li>`)
+    .join('');
+  const extra = [info.ifs && `分岐（if） ${info.ifs}`, info.pars && `並列 ${info.pars}`, info.loops && `ループ ${info.loops}`].filter(Boolean).join(' ・ ');
+  return `${steps ? `<ol class="relay-sum-list">${steps}</ol>` : '<div class="muted small">工程がありません</div>'}
+    ${extra ? `<div class="small muted">${esc(extra)}</div>` : ''}
+    ${info.errors.length ? `<div class="relay-sum-err small">${icon('alert')}直すところがあります: ${esc(info.errors[0])}${info.errors.length > 1 ? ` ほか ${info.errors.length - 1} 件` : ''}</div>` : ''}`;
+}
+
 // Pipelineと競争は排他。設定で選んだ方だけを使える（'relay' / 'compete' / 'none'＝どちらも使わない）
 function orchestrationOf(s) {
   return s && (s.orchestration === 'compete' || s.orchestration === 'none') ? s.orchestration : 'relay';
@@ -2079,8 +2145,9 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
   const s = state.board.settings;
   const on = enabledAgents(s);
   const orch = orchestration ? orchestrationOf(s) : 'none';
-  const steps = s.relaySteps || [];
-  const relayOff = !steps.length || steps.some((x) => !on.includes(x.agent));
+  const info = relayFlowInfo(s.relayFlow);
+  const steps = info.steps;
+  const relayOff = !steps.length || info.errors.length > 0 || steps.some((x) => !on.includes(x.agent));
   const comp = (s.competeAgents || []).filter((a) => on.includes(a));
   // 設定でPipeline・競争を選んでいれば、それを最初から選んでおく（使えない状態なら、最初から選んでおくエージェント）
   const orchUsable = (orch === 'relay' && !relayOff) || (orch === 'compete' && comp.length >= 2);
@@ -2088,13 +2155,13 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
   const opt = (val, label, disabled) => `<option value="${val}" ${val === v && !disabled ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(label)}</option>`;
   const single = AGENTS.filter(([a]) => on.includes(a)).map(([a, l]) => opt(a, l)).join('');
   if (orch === 'none') return `<label class="field"><span>エージェント</span><select id="${idp}Agent">${single}</select><small id="${idp}AgentHint" class="muted"></small></label>`;
-  const stepsLabel = steps.map((x) => `${x.label}(${agentShort(x.agent)})`).join(' → ') || '未設定';
+  const stepsLabel = relayFlowLabel(info);
   return `<label class="field"><span>エージェント</span>
     <select id="${idp}Agent">
       <optgroup label="1つのエージェントで動かす">${single}</optgroup>
       <optgroup label="オーケストレーション">
         ${orch === 'relay'
-          ? opt('relay', `Pipeline: ${stepsLabel}${relayOff ? '（設定で工程のエージェントを使う設定にしてください）' : ''}`, relayOff)
+          ? opt('relay', `Pipeline: ${stepsLabel}${info.errors.length ? '（設定のフローチャートを直してください）' : relayOff ? '（設定で工程のエージェントを使う設定にしてください）' : ''}`, relayOff)
           : opt('compete', comp.length >= 2 ? `競争: ${comp.map(agentShort).join('・')} で同じタスクを解いて比べる` : '競争（設定で使うエージェントを2つ以上選んでください）', comp.length < 2)}
       </optgroup>
     </select>
@@ -2106,7 +2173,7 @@ function bindAgentField(idp, onChange) {
   const hint = () => {
     const v = sel.value;
     $(`${idp}AgentHint`).textContent =
-      v === 'relay' ? '同じ worktree で、設定の工程の順にエージェントが作業を引き継ぎます（前の工程の報告を次に渡します）。工程は「設定」で変えられます。'
+      v === 'relay' ? '設定のフローチャートに沿って、工程ごとにエージェントが作業を引き継ぎます（前の工程の報告を次に渡します。分岐・ループ・並列もフローのとおりに動きます）。フローチャートは「設定」で変えられます。'
       : v === 'compete' ? 'エージェントごとにカードと worktree を作って並列に解きます。終わったら差分を見比べ、よい案を採用してマージします。'
       : agentLimitHint(v);
     onChange?.(v);
@@ -2117,7 +2184,7 @@ function bindAgentField(idp, onChange) {
 // 既存の会話（Claude Code の会話）を選べるのは、最初に動くのが Claude Code のときだけ
 function firstAgentOf(v) {
   const s = state.board.settings;
-  if (v === 'relay') return ((s.relaySteps || [])[0] || {}).agent || 'claude';
+  if (v === 'relay') return (relayFlowInfo(s.relayFlow).first || {}).agent || 'claude';
   if (v === 'compete') return (s.competeAgents || []).includes('claude') ? 'claude' : '';
   return v;
 }
@@ -3099,17 +3166,17 @@ async function openSettings() {
          <label class="check"><input type="radio" name="sOrch" value="none" ${orchestrationOf(s) === 'none' ? 'checked' : ''} /> なし</label>
        </div>
        <small>選んだ方だけ、タスクを作るときに「エージェント」の欄で選べます。「なし」なら、いつも1つのエージェントで動かします（Pipeline・競争の設定は消えずに残ります）。</small></div>
-     <div class="field" id="sRelayField"><span>${icon('pipeline')}Pipelineの工程（上から順に、同じ worktree で引き継ぎます）</span>
-       <div id="sRelay" class="relay-edit"></div>
-       <button class="btn small" id="sRelayAdd" type="button">＋ 工程を足す</button>
-       <small>工程ごとにエージェントと担当の説明を決めます。前の工程の変更はコミットしてから、最後の報告と一緒に次の工程へ渡します。</small></div>
+     <div class="field" id="sRelayField"><span>${icon('pipeline')}Pipelineのフローチャート（このプロジェクトの設定）</span>
+       <div id="sRelay" class="relay-summary"></div>
+       <button class="btn small" id="sRelayEdit" type="button">${icon('pipeline')}フローチャートを編集</button>
+       <small>工程（エージェントと担当の説明）を線でつなぎ、分岐（if）・ループ・並列を組めます。工程が終わるたびに変更をコミットし、最後の報告と一緒に次の工程へ渡します。フローチャートの画面の「保存」で、すぐに保存します。</small></div>
      <div class="field" id="sCompeteField"><span>${icon('flag')}競争させるエージェント（2つ以上）</span>
        <div class="check-row" id="sCompeteBox"></div>
        <small>使うエージェントにチェックを付けたものから選べます。</small></div>
 
      <div class="modal-actions"><button class="btn ghost" id="sCancel">キャンセル</button><button class="btn primary" id="sOk">保存</button></div>`,
     () => {
-      let relay = (s.relaySteps || []).map((x) => ({ ...x }));
+      let relayFlow = s.relayFlow || null;
       // 画面でチェックを付けている「使うエージェント」
       const using = () => AGENTS.map((x) => x[0]).filter((a) => document.querySelector(`.sUse[value="${a}"]`)?.checked);
       let competeSel = new Set(s.competeAgents || []);
@@ -3125,53 +3192,9 @@ async function openSettings() {
         document.querySelectorAll('.sCompete').forEach((x) => (x.checked ? competeSel.add(x.value) : competeSel.delete(x.value)));
         $('sCompeteBox').innerHTML = list.map((a) => `<label class="check"><input type="checkbox" class="sCompete" value="${a}" ${competeSel.has(a) ? 'checked' : ''} /> ${agentIcon(a)}${esc(agentLabel(a))}</label>`).join('');
       };
+      // Pipelineのフローの要約（工程の並びと、分岐・並列・ループの数）
       const drawRelay = () => {
-        const on = using();
-        $('sRelay').innerHTML = relay
-          .map(
-            (st, i) => `<div class="relay-edit-row" data-i="${i}">
-              <span class="relay-no">${i + 1}</span>
-              <select class="rAgent">${AGENTS.filter(([a]) => on.includes(a) || a === st.agent).map(([a, l]) => `<option value="${a}" ${a === st.agent ? 'selected' : ''}>${esc(l)}${on.includes(a) ? '' : '（使わない設定）'}</option>`).join('')}</select>
-              <input class="rLabel" placeholder="工程の名前（例: 実装）" value="${esc(st.label)}" />
-              <button class="icon rUp" type="button" title="上へ" ${i === 0 ? 'disabled' : ''}>↑</button>
-              <button class="icon rDel" type="button" title="この工程を消す">✕</button>
-              <textarea class="rInst" rows="2" placeholder="この工程の担当の説明（例: 前の工程の変更をレビューして直す）">${esc(st.instruction)}</textarea>
-              <div class="relay-branch" title="合格・差し戻しの行き先を「次の工程」以外にすると、この工程のエージェントに結果を判定してもらい（返事の最後に [[PASS]] / [[FAIL]]）、行き先を変えます。前の工程に戻すとループになります">
-                <label>合格なら <select class="rPass">${relayTargetOptions(st.onPass, relay.length)}</select></label>
-                <label>差し戻しなら <select class="rFail">${relayTargetOptions(st.onFail, relay.length)}</select></label>
-                <label class="rLoopBox" ${st.onPass === undefined && st.onFail === undefined ? 'hidden' : ''}>戻る上限 <input class="rLoops" type="number" min="1" max="10" value="${esc(st.maxLoops || 3)}" /> 回</label>
-              </div>
-            </div>`,
-          )
-          .join('') || '<div class="muted small">工程がありません</div>';
-      };
-      const readRelay = () => {
-        document.querySelectorAll('#sRelay .relay-edit-row').forEach((row) => {
-          const st = relay[Number(row.dataset.i)];
-          st.agent = row.querySelector('.rAgent').value;
-          st.label = row.querySelector('.rLabel').value.trim();
-          st.instruction = row.querySelector('.rInst').value.trim();
-          const tv = (v) => (v === '' ? undefined : v === 'end' ? 'end' : Number(v));
-          st.onPass = tv(row.querySelector('.rPass').value);
-          st.onFail = tv(row.querySelector('.rFail').value);
-          if (st.onPass === undefined) delete st.onPass;
-          if (st.onFail === undefined) delete st.onFail;
-          if (st.onPass === undefined && st.onFail === undefined) delete st.maxLoops;
-          else st.maxLoops = Math.min(10, Math.max(1, Math.round(Number(row.querySelector('.rLoops').value) || 3)));
-        });
-        return relay;
-      };
-      // 工程を消す・並べ替えたとき、分岐の行き先の番号を合わせる（map: 元の番号 → 新しい番号。消した工程は undefined）
-      const remapTargets = (map) => {
-        for (const st of relay) {
-          for (const k of ['onPass', 'onFail']) {
-            if (typeof st[k] !== 'number') continue;
-            const n = map(st[k]);
-            if (n === undefined) delete st[k];
-            else st[k] = n;
-          }
-          if (st.onPass === undefined && st.onFail === undefined) delete st.maxLoops;
-        }
+        $('sRelay').innerHTML = relayFlowSummaryHtml(relayFlow, using());
       };
       drawRelay();
       drawAgents();
@@ -3189,38 +3212,24 @@ async function openSettings() {
           const box = cb.closest('.agent-cfg');
           box.classList.toggle('on', cb.checked);
           box.querySelector('.agent-cfg-body').hidden = !cb.checked;
-          readRelay();
           drawRelay();
           drawAgents();
         };
       });
-      $('sRelayAdd').onclick = () => {
-        readRelay();
-        relay.push({ agent: $('sDefaultAgent').value || 'claude', label: '', instruction: '' });
-        drawRelay();
-      };
-      $('sRelay').onclick = (e) => {
-        const row = e.target.closest('.relay-edit-row');
-        if (!row) return;
-        const i = Number(row.dataset.i);
-        if (e.target.closest('.rDel')) {
-          readRelay();
-          relay.splice(i, 1);
-          remapTargets((n) => (n === i ? undefined : n > i ? n - 1 : n));
-          drawRelay();
-        } else if (e.target.closest('.rUp') && i > 0) {
-          readRelay();
-          [relay[i - 1], relay[i]] = [relay[i], relay[i - 1]];
-          remapTargets((n) => (n === i ? i - 1 : n === i - 1 ? i : n));
-          drawRelay();
-        }
-      };
-      // 分岐の行き先を決めたら、戻る上限の欄を出す
-      $('sRelay').onchange = (e) => {
-        if (!e.target.closest('.rPass, .rFail')) return;
-        const row = e.target.closest('.relay-edit-row');
-        row.querySelector('.rLoopBox').hidden = !row.querySelector('.rPass').value && !row.querySelector('.rFail').value;
-      };
+      $('sRelayEdit').onclick = () =>
+        FlowEditor.open({
+          flow: relayFlow || { nodes: [], edges: [] },
+          agents: AGENTS,
+          enabled: using(),
+          defaultAgent: $('sDefaultAgent').value || 'claude',
+          onSave: async (flow) => {
+            const r = await runBusy('フローチャートを保存しています…', () => api.updateSettings({ relayFlow: flow }), '保存しました');
+            if (!r) return false;
+            relayFlow = r.relayFlow || flow;
+            drawRelay();
+            return true;
+          },
+        });
       let defSkill = s.defaultSkill || null;
       const drawDef = () => renderSkillSlot('sSkill', defSkill, (v) => ((defSkill = v), drawDef()));
       drawDef();
@@ -3243,8 +3252,8 @@ async function openSettings() {
       $('sOk').onclick = async () => {
         const on = using();
         if (!on.length) return toast('使うエージェントを1つ以上選んでください');
-        const steps = readRelay();
-        const offStep = steps.find((st) => (st.label || st.instruction) && !on.includes(st.agent));
+        const steps = relayFlow ? FlowModel.orderSteps(relayFlow) : [];
+        const offStep = steps.find((st) => !on.includes(st.agent));
         if (offStep && orch() === 'relay' && !confirm(`Pipelineの工程「${offStep.label || '（名前なし）'}」の ${agentLabel(offStep.agent)} は使わない設定です。このままだとPipelineを始められません。保存しますか？`)) return;
         const r = await runBusy('設定を保存しています…', () =>
           api.updateSettings({
@@ -3265,7 +3274,6 @@ async function openSettings() {
             defaultAgent: $('sDefaultAgent').value,
             enabledAgents: on,
             orchestration: orch(),
-            relaySteps: steps,
             // 使わない設定にしたエージェントの競争の選択は覚えておく（また使う設定にしたら戻る）
             competeAgents: [...new Set([...[...document.querySelectorAll('.sCompete:checked')].map((x) => x.value), ...[...competeSel].filter((a) => !on.includes(a))])],
             defaultSkill: defSkill || '',

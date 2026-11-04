@@ -15,7 +15,8 @@ const attachments = require('./attachments');
 const { findSimilarTasks } = require('./similar');
 const os = require('os');
 const { agentLabel, agentShort } = providers;
-const { isNoGitRepo } = require('./store');
+const { isNoGitRepo, cleanRelayFlow } = require('./store');
+const FlowModel = require('../renderer/flow-model');
 
 const MAX_LOGS = 2000;
 const MCP_SERVER_NAME = 'agent_kanban';
@@ -372,90 +373,102 @@ function promptWithSkill(agent, skill, prompt) {
   return `（スキル「${skill}」の手順に従ってください。手順は .claude/skills/${name}/SKILL.md か ~/.claude/skills/${name}/SKILL.md に書かれています）\n\n${prompt}`;
 }
 
-// ---------- Pipeline（工程ごとに別のエージェントへ順番に引き継ぐ） ----------
+// ---------- Pipeline（フローチャートの工程ごとに、別のエージェントへ引き継ぐ） ----------
+// c.relay = {
+//   flow,      設定のフローチャート（タスクを作ったときのもの）
+//   steps,     工程のノード（{ id, agent, label, instruction }。番号「工程N」の順）
+//   index,     今の工程（steps の番号）
+//   history,   終わった工程の記録（{ index, run, agent, report, result?, branch?, ... }）
+//   counts,    ループ（前のノードへ戻る線）を通った回数（線の ID ごと）
+//   waiting?,  並列の枝が終わるのを待っている: { node, join, children, merged }
+//   branchOf?, 並列の枝のタスク: { parent, node, join, index, label, histStart }
+//   atJoin?,   枝のタスクが合流まで来た
+// }
 
-// 分岐: 判定する工程のエージェントに、返事の最後に書いてもらう印
-const RELAY_PASS = '[[PASS]]';
-const RELAY_FAIL = '[[FAIL]]';
+// 工程のノードを、カードに持たせる形にする
+function relayStepsOf(flow) {
+  return FlowModel.orderSteps(flow).map((n) => ({ id: n.id, agent: n.agent, label: n.label, instruction: n.instruction || '' }));
+}
+function relayStepIndex(c, nodeId) {
+  return c.relay.steps.findIndex((st) => st.id === nodeId);
+}
+
+// 前のバージョンのPipelineのカード（工程のリストと分岐の行き先）を、フローの形にする
+function migrateRelayCard(c) {
+  const r = c && c.relay;
+  if (!r || r.flow || !Array.isArray(r.steps)) return;
+  r.flow = FlowModel.flowFromSteps(providers.cleanRelaySteps(r.steps));
+  r.steps = r.steps.map((st, i) => ({ id: `s${i + 1}`, agent: st.agent, label: st.label, instruction: st.instruction || '' }));
+  r.counts = {};
+  if (r.lastVerdict) r.lastResult = r.lastVerdict;
+  delete r.lastVerdict;
+  delete r.loops;
+  for (const h of r.history || []) if (h.verdict && !h.result) h.result = h.verdict;
+}
 
 // 工程 i を何回目に実行するか（ループで戻ってきたら 2回目以降）
 function relayRunNo(c, i) {
-  return (c.relay.history || []).filter((h) => h.index === i).length + 1;
+  return (c.relay.history || []).filter((h) => h.index === i && !h.branch).length + 1;
 }
 
 function relayHeader(c, i) {
   const st = c.relay.steps[i];
   const n = relayRunNo(c, i);
-  return `あなたは、複数のエージェントで順番に作業を引き継ぐ「Pipeline」の、工程 ${i + 1}/${c.relay.steps.length}「${st.label}」${n > 1 ? `（${n}回目）` : ''}の担当です。`;
+  const b = c.relay.branchOf;
+  return `あなたは、複数のエージェントで作業を引き継ぐ「Pipeline」の、工程 ${i + 1}/${c.relay.steps.length}「${st.label}」${n > 1 ? `（${n}回目）` : ''}の担当です。${b ? `（並列の枝 ${b.index + 1}。ほかの枝は別の worktree で同時に動いていて、すべての枝が終わったらマージします）` : ''}`;
 }
 
-// 分岐の行き先の説明
-function relayTargetText(c, i, to) {
-  if (to === 'end') return 'Pipelineを終えてレビューに回します';
-  const j = to === undefined || to === null ? i + 1 : to;
-  if (j >= c.relay.steps.length) return 'Pipelineを終えてレビューに回します';
-  const st = c.relay.steps[j];
-  return `工程${j + 1}「${st.label}」（${agentLabel(st.agent)}）${j <= i ? 'に戻ってやり直します' : 'へ進みます'}`;
+// 線の行き先の説明
+function relayTargetText(c, edge) {
+  const flow = c.relay.flow;
+  const n = edge && FlowModel.nodeOf(flow, edge.to);
+  if (!n || n.type === 'end') return 'Pipelineを終えてレビューに回します';
+  if (n.type === 'step') {
+    const j = relayStepIndex(c, n.id);
+    const back = FlowModel.backEdges(flow).has(edge.id);
+    return `工程${j + 1}「${n.label}」（${agentLabel(n.agent)}）${back ? 'に戻ってやり直します' : 'へ進みます'}`;
+  }
+  if (n.type === 'parallel') {
+    const names = FlowModel.outEdges(flow, n.id).map((e) => `「${(FlowModel.nodeOf(flow, e.to) || {}).label || ''}」`).join('・');
+    return `並列「${n.label}」で ${names} を同時に進めます`;
+  }
+  if (n.type === 'join') return `合流「${n.label}」で、ほかの枝が終わるのを待ちます`;
+  return `${FlowModel.TYPE_LABEL[n.type]}「${FlowModel.labelOf(n)}」へ進みます`;
 }
 
-// 判定する工程に付ける、印の書き方の説明
+// すぐあとが分岐の工程に付ける、判定の値の書き方の説明
 function relayJudgeNote(c, i) {
   const st = c.relay.steps[i];
-  if (!providers.relayJudges(st)) return '';
-  return [
-    '',
-    '## 判定（必ず書いてください）',
-    `この工程では、作業の結果を判定してもらいます。返事の最後の行に、次のどちらか1つだけを書いてください。`,
-    `- 問題がない（合格）: \`${RELAY_PASS}\` → ${relayTargetText(c, i, st.onPass)}`,
-    `- 直す必要がある（差し戻し）: \`${RELAY_FAIL}\` → ${relayTargetText(c, i, st.onFail)}`,
-    '差し戻すときは、何を直してほしいかを報告に具体的に書いてください（次の工程に渡します）。',
-  ].join('\n');
-}
-
-// 返事の最後の判定の印（なければ null）
-function relayVerdict(text) {
-  const s = String(text || '');
-  const p = s.lastIndexOf(RELAY_PASS);
-  const f = s.lastIndexOf(RELAY_FAIL);
-  if (p < 0 && f < 0) return null;
-  return f > p ? 'fail' : 'pass';
+  const j = FlowModel.judgeOf(c.relay.flow, st.id);
+  if (!j) return '';
+  const lines = ['', '## 判定（必ず書いてください）', `この工程のあと、分岐「${j.node.label}」で行き先を分けます。${j.node.question ? `判定すること: ${j.node.question}` : ''}`.trim()];
+  lines.push('返事の最後の行に、次のどれか1つだけを、この形のまま書いてください。');
+  for (const o of j.options) lines.push(`- \`[[RESULT:${o.value}]]\`${o.when ? `: ${o.when}` : ''} → ${relayTargetText(c, o.edge)}`);
+  if (j.elseEdge && !j.elseEdge.value) lines.push(`- どれにも当てはまらないとき（書かなかったときも）→ ${relayTargetText(c, j.elseEdge)}`);
+  else if (j.elseEdge) lines.push(`（どれも書かなかったときは \`[[RESULT:${j.elseEdge.value}]]\` と同じに扱います）`);
+  lines.push('やり直しや別の工程に回すときは、何をしてほしいかを報告に具体的に書いてください（次の工程に渡します）。');
+  return lines.join('\n');
 }
 
 /**
- * 工程が終わったあと、次にどこへ進むかを決める
- * @returns {{ to: number|null, verdict: string|null, missing?: boolean, limit?: boolean }} to が null なら Pipeline を終える
+ * 工程が終わったあと、次にどこへ進むかを決める（FlowModel.route に、返事の判定の値を渡す）
+ * @returns {ReturnType<typeof FlowModel.route> & { result: string|null, judge: object|null, missing: boolean }}
  */
 function relayPlan(c) {
   const r = c.relay;
-  const i = r.index;
-  const st = r.steps[i];
-  let verdict = null;
-  let missing = false;
-  let target = null;
-  if (providers.relayJudges(st)) {
-    verdict = relayVerdict(c.lastText);
-    if (!verdict) {
-      verdict = 'pass';
-      missing = true;
-    }
-    target = verdict === 'fail' ? st.onFail : st.onPass;
-  }
-  if (target === 'end') return { to: null, verdict, missing };
-  const to = target === undefined || target === null ? i + 1 : target;
-  if (to >= r.steps.length) return { to: null, verdict, missing };
-  // ループ（今の工程か前の工程へ戻る）は、工程ごとの上限回数まで
-  if (to <= i) {
-    const max = st.maxLoops || providers.RELAY_MAX_LOOPS_DEFAULT;
-    if (((r.loops || {})[i] || 0) >= max) return { to: null, verdict, missing, limit: true };
-  }
-  return { to, verdict, missing };
+  const st = r.steps[r.index];
+  const judge = FlowModel.judgeOf(r.flow, st.id);
+  const result = judge ? FlowModel.resultValue(c.lastText) : null;
+  const plan = FlowModel.route(r.flow, st.id, { result, counts: r.counts });
+  return { ...plan, result, judge, missing: !!judge && result === null };
 }
 
 // 最初の工程の指示（タスクの指示 + 担当の説明）
 function buildRelayFirstPrompt(c, prompt) {
-  const st = c.relay.steps[0];
-  const next = c.relay.steps.slice(1).map((x, j) => `工程${j + 2}「${x.label}」（${agentLabel(x.agent)}）`).join(' → ');
-  return [prompt, '', '---', relayHeader(c, 0), next ? `このあと ${next} が続きます。` : '', st.instruction ? `\n## あなたの担当\n${st.instruction}` : '', relayJudgeNote(c, 0)]
+  const r = c.relay;
+  const st = r.steps[r.index];
+  const next = r.steps.filter((_, j) => j !== r.index).map((x) => `「${x.label}」（${agentLabel(x.agent)}）`).join('・');
+  return [prompt, '', '---', relayHeader(c, r.index), next ? `このあと、フローに沿って ${next} の工程があります。` : '', st.instruction ? `\n## あなたの担当\n${st.instruction}` : '', relayJudgeNote(c, r.index)]
     .filter((x) => x !== '')
     .join('\n');
 }
@@ -472,9 +485,10 @@ function buildRelayStepPrompt(c, i) {
   if (hist.length > 10) lines.push(`（前の ${hist.length - 10} 件の報告は省きました）`, '');
   for (const h of hist.slice(-10)) {
     const s = c.relay.steps[h.index] || {};
-    const v = h.verdict === 'fail' ? '・差し戻し' : h.verdict === 'pass' ? '・合格' : '';
+    const v = h.result === 'fail' ? '・差し戻し' : h.result === 'pass' ? '・合格' : h.result ? `・判定 ${h.result}` : '';
     const n = h.run > 1 ? `・${h.run}回目` : '';
-    lines.push(`### 工程${h.index + 1}「${s.label || ''}」（${agentLabel(h.agent)}${n}${v}）の報告`, truncate(String(h.report || '（報告なし）').trim(), 3000), '');
+    const b = h.branch ? `・並列の枝 ${h.branch}` : '';
+    lines.push(`### 工程${h.index + 1}「${s.label || ''}」（${agentLabel(h.agent)}${n}${b}${v}）の報告`, truncate(String(h.report || '（報告なし）').trim(), 3000), '');
   }
   lines.push(
     '## 作業の場所',
@@ -616,6 +630,7 @@ class AgentManager extends EventEmitter {
     this.permission = null; // { port, token }
     // 指示に添付したファイルの置き場所（作業フォルダの外）
     this.attachRoot = (opts && opts.attachDir) || path.join(os.tmpdir(), 'agent-kanban-attachments');
+    for (const c of this.store.cards) migrateRelayCard(c);
     this.recoverInterrupted();
   }
 
@@ -952,11 +967,17 @@ class AgentManager extends EventEmitter {
     }
     if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from, parsed });
     if (mode === 'relay') {
-      const steps = providers.cleanRelaySteps(s.relaySteps);
-      if (!steps.length) throw new Error('Pipelineの工程がありません。設定の「Pipelineの工程」を決めてください');
+      // Pipelineのフローチャートは、プロジェクトごとの設定
+      const flow = cleanRelayFlow(this.store.repoSettings(s.repoPath).relayFlow);
+      const errs = FlowModel.validateFlow(flow);
+      if (errs.length) throw new Error(`Pipelineのフローチャートを直してください（設定の「フローチャートを編集」）: ${errs[0]}`);
+      const steps = relayStepsOf(flow);
       const off = steps.find((st) => !providers.isEnabled(s, st.agent));
       if (off) throw new Error(`Pipelineの工程「${off.label}」の ${agentLabel(off.agent)} は使わない設定になっています。「設定」で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
-      const c = this.createCard({ title, prompt, issue, session, skill, agent: steps[0].agent, relay: { steps, index: 0, history: [] }, fromChat: from, parsed });
+      if (isNoGitRepo(s, s.repoPath) && flow.nodes.some((n) => n.type === 'parallel')) throw new Error('git で管理していないフォルダでは、並列のあるPipelineは使えません（枝ごとに別の作業場所を作れないため）。フローチャートから並列を外してください');
+      const first = FlowModel.route(flow, FlowModel.startNode(flow).id, {});
+      const index = relayStepIndex({ relay: { steps } }, first.node.id);
+      const c = this.createCard({ title, prompt, issue, session, skill, agent: steps[index].agent, relay: { flow, steps, index, history: [], counts: {} }, fromChat: from, parsed });
       return [c];
     }
     return [this.createCard({ title, prompt, issue, session, skill, agent: mode, model: m, fromChat: from, parsed })];
@@ -1043,39 +1064,65 @@ class AgentManager extends EventEmitter {
 
   // ---------- オーケストレーション ----------
 
-  // 工程が終わったとき: 次の工程（分岐・ループの行き先）を決める。Pipelineを終えるなら to: null で、終えた印を付ける
-  // （終えたあとの追加指示では、もう次の工程へは進まない）
-  // @returns {{ to: number|null, limitMsg?: string }|null} Pipelineでなければ null
+  // 工程が終わったとき: フローの線をたどって、次に動かすところ（分岐・ループの行き先）を決める
+  // （Pipelineを終えたあとの追加指示では、もう次の工程へは進まない）
+  // @returns {{ to?: number|null, parallel?: object, join?: boolean, stop?: string, limitMsg?: string }|null} Pipelineでなければ null
   relayNextStep(c) {
-    if (!c.relay || isChat(c) || c.relay.done) return null;
+    if (!c.relay || isChat(c) || c.relay.done || c.relay.waiting) return null;
     const r = c.relay;
     const st = r.steps[r.index];
     const plan = relayPlan(c);
-    r.lastVerdict = plan.verdict;
-    if (plan.missing) this.log(c, 'system', `Pipeline: 工程「${st.label}」の返事に判定の印（${RELAY_PASS} / ${RELAY_FAIL}）がなかったので、合格として扱いました`);
-    else if (plan.verdict) this.log(c, 'system', `Pipeline: 工程「${st.label}」の判定は「${plan.verdict === 'fail' ? '差し戻し' : '合格'}」でした`);
-    if (plan.to !== null) return { to: plan.to };
+    r.lastResult = plan.result;
+    if (plan.judge) {
+      const where = plan.branch ? ` → ${relayTargetText(c, plan.branch.edge)}` : '';
+      if (plan.missing) this.log(c, 'system', `Pipeline: 工程「${st.label}」の返事に判定の値（[[RESULT:値]]）がなかったので、分岐「${plan.judge.node.label}」の「どれにも合わないとき」の線へ進みます${where}`);
+      else this.log(c, 'system', `Pipeline: 工程「${st.label}」の判定は「${plan.result}」でした${plan.branch && plan.branch.edge.value && FlowModel.normValue(plan.branch.edge.value) === plan.result ? where : plan.branch ? `（どの期待値にも合わないので「どれにも合わないとき」の線へ）${where}` : ''}`);
+    }
+    if (plan.kind === 'nomatch') {
+      const vals = plan.judge ? plan.judge.options.map((o) => o.value).join(' / ') : '';
+      const msg = `分岐「${plan.node.label}」で、判定の値「${plan.result || '（なし）'}」に合う線がないので止まりました（期待値: ${vals || 'なし'}）。追加指示で判定の値を書き直してもらうか、フローチャートに「どれにも合わないとき」の線を足してください`;
+      this.log(c, 'error', `Pipeline: ${msg}`);
+      return { stop: msg };
+    }
+    r.counts = plan.counts;
+    if (plan.kind === 'step') return { to: relayStepIndex(c, plan.node.id) };
+    if (plan.kind === 'parallel') return { parallel: plan.node };
+    if (plan.kind === 'join') return { join: true };
+    if (plan.kind === 'limit') {
+      const back = FlowModel.nodeOf(r.flow, plan.edge.to);
+      // 並列の枝の中のループが上限に達したら、その時点の変更で合流する（Pipelineは止めない）
+      if (r.branchOf) {
+        r.limitReached = true;
+        this.log(c, 'error', `Pipeline: 「${FlowModel.labelOf(back)}」へ戻れる上限（${plan.edge.maxLoops}回）に達したので、この枝はここまでの変更で合流します`);
+        return { join: true, limitMsg: `並列の枝「${r.branchOf.label}」がループの上限に達したので、ここまでの変更で合流します` };
+      }
+      r.done = true;
+      r.limitReached = true;
+      const limitMsg = `「${FlowModel.labelOf(back)}」へ戻れる上限（${plan.edge.maxLoops}回）に達したので、Pipelineを終えてレビューに回しました。差分と最後の報告を確かめてください`;
+      this.log(c, 'error', `Pipeline: ${limitMsg}`);
+      return { to: null, limitMsg };
+    }
     r.done = true;
-    if (!plan.limit) return { to: null };
-    r.limitReached = true;
-    const limitMsg = `工程「${st.label}」から戻れる上限（${st.maxLoops || providers.RELAY_MAX_LOOPS_DEFAULT}回）に達したので、Pipelineを終えてレビューに回しました。差分と最後の報告を確かめてください`;
-    this.log(c, 'error', `Pipeline: ${limitMsg}`);
-    return { to: null, limitMsg };
+    return { to: null };
+  }
+
+  // 終わった工程を、ワークフローの記録に残す
+  recordRelayStep(c) {
+    const r = c.relay;
+    const from = r.index;
+    const cost = Math.max(0, (c.costUsd || 0) - (r.stepCostStart || 0));
+    const entry = { index: from, run: relayRunNo(c, from), agent: agentOf(c), sessionId: c.sessionId || null, report: truncate(c.lastText || c.lastMessage || '', 4000), startedAt: r.stepStartedAt || null, at: Date.now(), costUsd: cost };
+    if (r.lastResult) entry.result = r.lastResult;
+    r.history = [...(r.history || []), entry];
+    r.lastResult = null;
   }
 
   // Pipelineの次の工程（to。省略したら次の番号）へ進める（同じ worktree のまま、次のエージェントで新しい会話を始める）
-  advanceRelay(c, to) {
+  // record: false なら、今の工程の記録は残さない（合流のあとなど、このカードで工程を動かしていないとき）
+  advanceRelay(c, to, { record = true } = {}) {
     const r = c.relay;
-    const from = r.index;
-    const next = to === undefined ? from + 1 : to;
-    const cost = Math.max(0, (c.costUsd || 0) - (r.stepCostStart || 0));
-    const entry = { index: from, run: relayRunNo(c, from), agent: agentOf(c), sessionId: c.sessionId || null, report: truncate(c.lastText || c.lastMessage || '', 4000), startedAt: r.stepStartedAt || null, at: Date.now(), costUsd: cost };
-    if (r.lastVerdict) entry.verdict = r.lastVerdict;
-    r.history = [...(r.history || []), entry];
-    r.lastVerdict = null;
-    // ループ（今の工程か前の工程へ戻る）の回数を、戻した工程ごとに数える
-    if (next <= from) r.loops = { ...(r.loops || {}), [from]: ((r.loops || {})[from] || 0) + 1 };
-    r.index = next;
+    if (record) this.recordRelayStep(c);
+    r.index = to === undefined ? r.index + 1 : to;
     // ワークフロー表示のため、工程ごとの開始時刻と、開始したときの金額を残す
     r.stepStartedAt = null;
     r.stepCostStart = c.costUsd || 0;
@@ -1086,6 +1133,144 @@ class AgentManager extends EventEmitter {
     const n = relayRunNo(c, r.index);
     this.log(c, 'system', `Pipeline: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」${n > 1 ? `（${n}回目）` : ''}を ${agentLabel(st.agent)} に引き継ぎます`);
     this.enqueue(c, buildRelayStepPrompt(c, r.index));
+  }
+
+  /**
+   * 並列: 枝ごとに、今のブランチから分けた worktree の「枝のタスク」を作って同時に動かす。
+   * このカードは、すべての枝が合流まで来るのを待つ（tryJoin でマージして先へ進む）
+   */
+  forkParallel(c, node, { record = true } = {}) {
+    const r = c.relay;
+    if (record) this.recordRelayStep(c);
+    const info = FlowModel.parallelInfo(r.flow, node.id);
+    r.waiting = { node: node.id, join: info.join, children: [], merged: [], at: Date.now() };
+    r.stepStartedAt = null;
+    const kids = info.branches.map((b, k) => this.createBranchCard(c, node, info.join, k, relayStepIndex(c, b.edge.to)));
+    r.waiting.children = kids.map((k) => k.id);
+    const join = FlowModel.nodeOf(r.flow, info.join);
+    this.log(c, 'system', `Pipeline: 並列「${node.label}」で、${kids.length} 本の枝（${kids.map((k) => `「${k.relay.branchOf.label}」`).join('・')}）を別々の worktree で同時に動かします。すべての枝が終わったら、合流「${FlowModel.labelOf(join)}」でこのブランチにマージします`);
+    this.changed(c);
+    for (const k of kids) {
+      this.log(k, 'system', `Pipeline: 「${c.title}」の並列「${node.label}」の枝 ${k.relay.branchOf.index + 1} です。ブランチ ${c.branch} から分けた worktree で動かします`);
+      this.enqueue(k, buildRelayStepPrompt(k, k.relay.index));
+    }
+  }
+
+  // 並列の枝のタスク（ボードに出す。質問・失敗のときは、このカードから答える・直す）
+  createBranchCard(parent, node, join, k, index) {
+    const st = parent.relay.steps[index];
+    const card = {
+      id: crypto.randomBytes(4).toString('hex'),
+      title: `${parent.title} [枝${k + 1}: ${st.label}]`,
+      prompt: parent.prompt,
+      status: 'todo',
+      repoPath: parent.repoPath,
+      createdAt: Date.now(),
+      permissions: [],
+      alwaysAllow: [],
+      logs: [],
+      sessions: [],
+      agent: st.agent,
+      skill: parent.skill || null,
+      flowBase: parent.branch,
+      relay: {
+        flow: parent.relay.flow,
+        steps: parent.relay.steps,
+        index,
+        history: [...(parent.relay.history || [])],
+        counts: {},
+        stepCostStart: 0,
+        branchOf: { parent: parent.id, node: node.id, join, index: k, label: st.label, histStart: (parent.relay.history || []).length },
+      },
+    };
+    if (parent.attachments) card.attachments = parent.attachments;
+    this.store.cards.push(card);
+    this.changed(card);
+    return card;
+  }
+
+  // 並列の枝のタスクの、待っている親のカード
+  relayParentOf(c) {
+    const b = c && c.relay && c.relay.branchOf;
+    const p = b && this.store.card(b.parent);
+    return p && p.relay && p.relay.waiting && p.relay.waiting.children.includes(c.id) ? p : null;
+  }
+
+  /**
+   * 合流: 並列の枝がすべて合流まで来たら、枝のブランチを順にこのカードの worktree にマージして、合流の先へ進む。
+   * コンフリクトしたら止めて知らせる（解消すると、残りの枝のマージと先の工程へ進む）
+   */
+  async tryJoin(id) {
+    const p = this.store.card(id);
+    if (!p || !p.relay || !p.relay.waiting || this.shuttingDown) return;
+    if (p.status === 'running' || p.status === 'queued' || p.conflict) return;
+    this.joining = this.joining || new Set();
+    if (this.joining.has(id)) return;
+    const r = p.relay;
+    const w = r.waiting;
+    const kids = w.children.map((cid) => this.store.card(cid));
+    if (kids.some((k) => !k)) {
+      p.status = 'failed';
+      p.error = '並列の枝のタスクが削除されたので、合流できません。このタスクを削除して、もう一度Pipelineで作り直してください';
+      this.log(p, 'error', p.error);
+      this.changed(p);
+      return;
+    }
+    if (!kids.every((k) => k.relay.atJoin && k.status === 'review')) return;
+    this.joining.add(id);
+    try {
+      const join = FlowModel.nodeOf(r.flow, w.join);
+      for (const k of kids) {
+        if (w.merged.includes(k.id)) continue;
+        const label = k.relay.branchOf.label;
+        try {
+          await git.merge(p.worktreePath, k.branch, `Merge parallel branch: ${label} (${k.branch})`, p.branch);
+        } catch (err) {
+          if (!err.conflictFiles) throw err;
+          // 解消の画面（エージェントに頼む・自分で直す）は、マージ先と同じものを使う。解消したら markResolved から続ける
+          p.conflict = { target: k.branch, files: err.conflictFiles, join: k.id, at: Date.now() };
+          p.conflictResolved = null;
+          p.status = 'failed';
+          p.error = `合流「${FlowModel.labelOf(join)}」で、並列の枝「${label}」のマージがコンフリクトしました（${err.conflictFiles.join(', ')}）。解消すると、残りの枝のマージと次の工程へ進みます`;
+          this.log(p, 'error', p.error);
+          this.notify(p, 'conflict', `合流でコンフリクト: ${p.title}`, p.error);
+          return;
+        }
+        w.merged.push(k.id);
+        this.log(p, 'system', `Pipeline: 並列の枝「${label}」の変更をマージしました（${k.branch}）`);
+      }
+      // すべてマージできた: 枝の記録を引き取って、枝のタスクを片付ける
+      for (const k of kids) {
+        const from = k.relay.branchOf.histStart || 0;
+        for (const h of (k.relay.history || []).slice(from)) r.history.push({ ...h, branch: k.relay.branchOf.label });
+      }
+      r.waiting = null;
+      r.lastResult = null;
+      p.error = null;
+      this.log(p, 'system', `Pipeline: 合流「${FlowModel.labelOf(join)}」で、${kids.length} 本の枝をすべてマージしました`);
+      for (const k of kids) await this.discard(k.id).catch((err) => this.log(p, 'error', `枝のタスク「${k.title}」を片付けられませんでした: ${err.message}`));
+      const plan = FlowModel.route(r.flow, w.join, { counts: r.counts });
+      r.counts = plan.counts;
+      if (plan.kind === 'step') return this.advanceRelay(p, relayStepIndex(p, plan.node.id), { record: false });
+      if (plan.kind === 'parallel') return this.forkParallel(p, plan.node, { record: false });
+      r.done = true;
+      p.status = 'review';
+      if (plan.kind === 'limit') {
+        r.limitReached = true;
+        const msg = `「${FlowModel.labelOf(FlowModel.nodeOf(r.flow, plan.edge.to))}」へ戻れる上限（${plan.edge.maxLoops}回）に達したので、Pipelineを終えてレビューに回しました`;
+        this.log(p, 'error', `Pipeline: ${msg}`);
+        this.notify(p, 'review', `ループの上限: ${p.title}`, msg);
+      } else this.notify(p, 'review', `レビュー待ち: ${p.title}`, '並列の枝をすべてマージして、Pipelineが終わりました。差分を確かめてください');
+    } catch (err) {
+      p.status = 'failed';
+      p.error = `合流に失敗しました: ${err.message}`;
+      this.log(p, 'error', p.error);
+      this.notify(p, 'failed', `失敗: ${p.title}`, p.error);
+    } finally {
+      this.joining.delete(id);
+      if (this.store.card(id)) this.changed(p);
+      this.pump();
+    }
   }
 
   // 競争の同じグループのカード（自分も含む）
@@ -1373,6 +1558,7 @@ class AgentManager extends EventEmitter {
     const c = this.must(id);
     if (!['review', 'failed', 'done'].includes(c.status)) throw new Error('実行中・待機中は追加指示を送れません');
     if (!message || !message.trim()) throw new Error('追加指示を入力してください');
+    if (c.relay && c.relay.waiting) throw new Error(c.conflict ? '合流でのコンフリクトを、上の「コンフリクト」の欄から解消してください' : 'Pipelineの並列の枝が終わるのを待っています。直したいときは、枝のタスクに追加指示を送ってください');
     skill = cleanSkill(skill);
     const parsed = attachments.parseAttachments(files);
     const atts = attachments.saveAttachments(this.attachRoot, c.id, parsed);
@@ -1523,11 +1709,13 @@ class AgentManager extends EventEmitter {
     const top = await git.toplevel(c.repoPath);
     if (!top) throw new Error(`${c.repoPath} は git リポジトリではありません`);
     const reopen = c.reopenBase && (await git.branchExists(top, c.reopenBase)) ? c.reopenBase : null;
-    const base = reopen || this.store.repoSettings(c.repoPath).baseBranch || (await git.currentBranch(top));
+    // Pipelineの並列の枝は、親のカードのブランチから分ける
+    if (c.flowBase && !(await git.branchExists(top, c.flowBase))) throw new Error(`並列の枝を分ける元のブランチ ${c.flowBase} が見つかりません`);
+    const base = c.flowBase || reopen || this.store.repoSettings(c.repoPath).baseBranch || (await git.currentBranch(top));
     if (base === 'HEAD') throw new Error('ベースブランチが決まりません（detached HEAD）。設定でベースブランチを指定してください');
     const baseCommit = await git.revParse(top, base);
     let branch = c.issue ? `agent/issue-${c.issue.number}-${c.id}` : `agent/${slugify(c.title)}-${c.id}`;
-    const rule = String(this.store.repoSettings(c.repoPath).branchNamingRule || '').trim();
+    const rule = c.flowBase ? '' : String(this.store.repoSettings(c.repoPath).branchNamingRule || '').trim(); // 並列の枝は、あとでマージして消すのでいつもの名前
     if (rule) {
       // 続きのときは前と同じ名前から番号を付けていく
       const prev = c.reopenFrom !== undefined && c.namedBranch ? c.namedBranch : null;
@@ -1882,10 +2070,21 @@ class AgentManager extends EventEmitter {
         // Pipelineの途中なら、レビューに回さずに次の工程へ引き継ぐ（質問で止まったとき・仕様の確認中は、答えてもらってから）
         // btw で追加指示待ちがあるときは、今の工程の続きを優先する
         const plan = c.awaitingReply || hasFollowBtw(c) ? null : this.relayNextStep(c);
-        relayNext = !!plan && plan.to !== null;
-        if (relayNext) relayTo = plan.to;
+        relayNext = !!plan && (typeof plan.to === 'number' || !!plan.parallel);
+        if (relayNext) relayTo = plan;
         if (relayNext) {
           /* 通知はPipelineが終わってから */
+        } else if (plan && plan.join) {
+          // 並列の枝が合流まで来た: 親のカードがほかの枝を待ってマージする（通知は親のPipelineが終わってから）
+          this.recordRelayStep(c); // 枝の最後の工程の報告を、親が引き取って次の工程に渡す
+          c.relay.atJoin = true;
+          c.relay.done = true;
+          this.log(c, 'system', 'Pipeline: この枝の工程が終わりました。合流で、ほかの枝が終わるのを待ってマージします');
+          if (plan.limitMsg) this.notify(c, 'review', `ループの上限: ${c.title}`, plan.limitMsg);
+        } else if (plan && plan.stop) {
+          this.notify(c, 'review', `分岐の行き先がありません: ${c.title}`, plan.stop);
+        } else if (c.relay && c.relay.waiting) {
+          /* 合流のコンフリクトを解消した: 残りの枝のマージと次の工程へ（tryJoin） */
         } else if (c.specState === 'pending') {
           this.log(c, 'question', `内容が詰まっていないので、開発を開始できません。${agentShort(agent)} の質問に下の欄から答えて、仕様を詰めてください（詰まったら、そのまま開発を始めます）`);
           this.emit('awaiting', c);
@@ -1918,7 +2117,13 @@ class AgentManager extends EventEmitter {
       this.changed(c);
       // Claude 以外で予約した btw は、終わったあとに追加指示として送る
       if (keepFollow ? this.flushFollowBtw(c) : this.dropFollowBtw(c)) return;
-      if (relayNext) return this.advanceRelay(c, relayTo);
+      if (relayNext) return relayTo.parallel ? this.forkParallel(c, relayTo.parallel) : this.advanceRelay(c, relayTo.to);
+      if (c.relay && c.relay.waiting) this.tryJoin(c.id);
+      const relayParent = this.relayParentOf(c);
+      if (relayParent) {
+        if (c.relay.atJoin) this.tryJoin(relayParent.id);
+        else if (c.status === 'failed' || c.awaitingReply) this.log(relayParent, 'system', `Pipeline: 並列の枝「${c.relay.branchOf.label}」が止まっています（${c.status === 'failed' ? '失敗' : '回答待ち'}）。枝のタスクで直すか答えると、続きから進みます`);
+      }
       this.checkCompetitionDone(c);
       this.pump();
     };
@@ -2382,6 +2587,7 @@ class AgentManager extends EventEmitter {
     const c = this.must(id);
     if (isChat(c)) throw new Error('会話はマージできません（タスクにすると、worktree で作業してマージできます）');
     if (isNoGit(c)) throw new Error('git で管理していないフォルダのタスクはマージできません。「完了にする」で完了にしてください');
+    this.assertNotInRelayJoin(c);
     if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけマージできます');
     if (!c.worktreePath) throw new Error('worktree がありません');
     if (this.merging?.has(id)) throw new Error('マージ中です');
@@ -2509,6 +2715,7 @@ class AgentManager extends EventEmitter {
     const c = this.must(id);
     if (isChat(c)) throw new Error('会話からは PR を作れません（タスクにすると、worktree で作業して PR を作れます）');
     if (isNoGit(c)) throw new Error('git で管理していないフォルダのタスクからは PR を作れません。「完了にする」で完了にしてください');
+    this.assertNotInRelayJoin(c);
     if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけ PR を作れます');
     if (!c.worktreePath) throw new Error('worktree がありません');
     if (this.merging?.has(id)) throw new Error('処理中です');
@@ -2861,6 +3068,18 @@ class AgentManager extends EventEmitter {
   }
 
   markResolved(c, msg) {
+    // Pipelineの合流でのコンフリクト: その枝はマージできたので、残りの枝のマージと次の工程へ進む
+    if (c.conflict.join && c.relay && c.relay.waiting) {
+      const w = c.relay.waiting;
+      if (!w.merged.includes(c.conflict.join)) w.merged.push(c.conflict.join);
+      c.conflict = null;
+      c.conflictResolved = null;
+      c.error = null;
+      this.log(c, 'system', `${msg}。合流の続き（残りの枝のマージと次の工程）へ進みます`);
+      this.changed(c);
+      setImmediate(() => this.tryJoin(c.id)); // エージェントが解消したときは、動き終わってから（tryJoin は動いている間は何もしない）
+      return;
+    }
     const pr = !!c.conflict.pr;
     c.conflictResolved = { target: c.conflict.target, push: c.conflict.push, keep: c.conflict.keep, ...(pr ? { pr: true } : {}) };
     c.conflict = null;
@@ -2912,9 +3131,18 @@ class AgentManager extends EventEmitter {
     return !!c && !isChat(c) && (c.status === 'done' || !!c.afterDone);
   }
 
+  // Pipelineの並列の途中（枝を待っている・枝のタスク）は、マージ・PR の作成ができない
+  assertNotInRelayJoin(c) {
+    if (c.relay && c.relay.waiting) throw new Error('Pipelineの並列の枝が終わるのを待っています。合流してPipelineが終わってから取り込んでください');
+    if (this.relayParentOf(c)) throw new Error('Pipelineの並列の枝のタスクは、合流で元のタスクにマージします。元のタスクから取り込んでください');
+  }
+
   async discard(id) {
     const c = this.must(id);
     if (this.isUndeletable(c)) throw new Error('完了したタスクは削除できません');
+    // 並列の枝を待っているカードを消すときは、枝のタスクも消す。枝のタスクを消したら、親は合流できなくなる
+    const kids = c.relay && c.relay.waiting ? c.relay.waiting.children : [];
+    const parent = this.relayParentOf(c);
     const child = this.procs.get(id);
     this.store.removeCard(id);
     this.denyAllPending(id, '破棄されました');
@@ -2927,6 +3155,8 @@ class AgentManager extends EventEmitter {
     fs.rmSync(path.join(this.opts.mcpDir, `${id}.json`), { force: true });
     attachments.removeCardAttachments(this.attachRoot, id);
     this.changed(null);
+    for (const k of kids) if (this.store.card(k)) await this.discard(k);
+    if (parent) this.tryJoin(parent.id);
   }
 }
 
