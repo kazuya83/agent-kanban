@@ -268,6 +268,18 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .d-foot { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--line); }
 .d-foot-row { display: flex; gap: 8px; align-items: flex-end; }
 .d-foot textarea { flex: 1; }
+/* 送信ボタンを入力欄の中の右下に置く（Claude Desktop のような形） */
+.composer { position: relative; display: flex; }
+.composer > textarea { flex: 1; padding-right: 48px; }
+.composer-send {
+  position: absolute; right: 8px; bottom: 8px;
+  width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #fff; cursor: pointer;
+}
+.composer-send:hover { background: var(--accent-2); }
+.composer-send:disabled { opacity: 0.4; cursor: not-allowed; }
+.composer-send .ic { margin: 0; width: 16px; height: 16px; stroke-width: 2.4; }
 
 /* ログ（Claude Desktop のようなチャットの形） */
 .chat-log { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px 18px; }

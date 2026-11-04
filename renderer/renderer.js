@@ -1654,9 +1654,11 @@ async function renderDetailBody() {
     body.innerHTML = `<div class="pad btw">
       <p class="muted small">${help}</p>
       <div id="btwList" class="btw-list">${btwListHtml(c)}</div>
-      <textarea id="btwInput" rows="3" placeholder="${live ? 'btw: …（Ctrl/⌘ + Enter で送信）' : 'エージェントが実行中のときに送れます'}" ${live ? '' : 'disabled'}></textarea>
-      <div class="btw-actions"><span class="muted small">${hint}</span>
-        <button class="btn primary" id="btwSend" ${live ? '' : 'disabled'}>送信</button></div>
+      <div class="composer">
+        <textarea id="btwInput" rows="3" placeholder="${live ? 'btw: …（Ctrl/⌘ + Enter で送信）' : 'エージェントが実行中のときに送れます'}" ${live ? '' : 'disabled'}></textarea>
+        <button class="composer-send" id="btwSend" title="送信（Ctrl/⌘ + Enter）" aria-label="送信" ${live ? '' : 'disabled'}>${icon('send')}</button>
+      </div>
+      <div class="btw-actions"><span class="muted small">${hint}</span></div>
     </div>`;
     const send = async () => {
       const text = $('btwInput').value.trim();
@@ -1668,9 +1670,7 @@ async function renderDetailBody() {
       }
     };
     $('btwSend').onclick = send;
-    $('btwInput').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send();
-    });
+    onSendKey($('btwInput'), send);
     if (live) $('btwInput').focus();
   } else {
     const editable = c.status === 'todo';
@@ -1812,6 +1812,17 @@ function drawFollowSkill() {
   renderSkillSlot('followSkill', state.followSkill, (v) => ((state.followSkill = v), drawFollowSkill()), { disabled: !can });
 }
 
+// 入力欄で Ctrl/⌘ + Enter を押したら送る（Claude Desktop のように）。
+// Shift + Enter と Enter だけはふつうに改行する。日本語の変換中の Enter は送らない
+function onSendKey(el, send) {
+  el.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+    if (e.shiftKey || !(e.metaKey || e.ctrlKey)) return;
+    e.preventDefault();
+    send();
+  });
+}
+
 // 会話の入力欄にだけ、添付ファイルを付けられる（タスクの追加の指示には付けない）
 const followAttach = attachField({
   box: $('followAttach'),
@@ -1837,9 +1848,7 @@ async function sendFollow() {
   }
 }
 $('followBtn').onclick = sendFollow;
-$('followInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendFollow();
-});
+onSendKey($('followInput'), sendFollow);
 
 // ---------------- モーダル ----------------
 
