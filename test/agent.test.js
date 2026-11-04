@@ -577,8 +577,10 @@ test('スキルを付けて実行する（最初の指示と追加指示）', as
   assert.strictEqual(c.skill, 'docs-writer');
   agents.start(c.id);
   await waitFor(() => c.status === 'review');
-  // claude には「/スキル名 指示」の形で渡る
-  assert.match(await agents.diff(c.id), /\+\/docs-writer READMEを整える/);
+  // claude には「/スキル名 指示」の形で渡る（仕様の確認の指示はスキル名のあとに付く）
+  const first = await agents.diff(c.id);
+  assert.match(first, /\+\/docs-writer # 開発を始める前に/);
+  assert.match(first, /## タスク\n\+\n\+READMEを整える/);
   assert.strictEqual(c.logs.find((l) => l.kind === 'user').skill, 'docs-writer');
   // 追加指示は、そのときに選んだスキルで
   agents.send(c.id, 'テストも', 'test-writer');
@@ -590,6 +592,70 @@ test('スキルを付けて実行する（最初の指示と追加指示）', as
   await waitFor(() => c.status === 'review');
   assert.match(await agents.diff(c.id), /\+スキルなしで/);
   assert.strictEqual(c.logs.filter((l) => l.kind === 'user')[2].skill, undefined);
+});
+
+test('仕様の確認: 内容が詰まっていなければ開発を始めずに質問し、答えると仕様が詰まって開発を始める', async () => {
+  const { store, agents } = setup();
+  const server = new PermissionServer((p, s) => agents.requestPermission(p, s));
+  await server.start();
+  agents.setPermissionEndpoint(server.port, server.token);
+  try {
+    const c = agents.createCard({ title: 'vague', prompt: '[vague] いい感じにして' });
+    assert.strictEqual(c.specState, 'checking');
+    agents.start(c.id);
+    await waitFor(() => c.status === 'review');
+    assert.strictEqual(c.specState, 'pending');
+    assert.strictEqual(c.awaitingReply, true);
+    assert.ok(!c.lastText.includes('[[SPEC_UNCLEAR]]'), '印は画面に出さない');
+    assert.ok(!c.logs.some((l) => l.kind === 'text' && String(l.text).trimStart().startsWith('[[SPEC_UNCLEAR]]')));
+    assert.ok(c.logs.some((l) => l.kind === 'text' && /^内容が詰まっていないので/.test(l.text)));
+    assert.ok(c.logs.some((l) => l.kind === 'question' && /開発を開始できません/.test(l.text)));
+    assert.ok(store.notifications.some((n) => n.kind === 'awaiting' && /仕様の確認/.test(n.title)));
+    assert.strictEqual(agents.issueStatusKey(c), null, '仕様の確認中はレビューにしない');
+    assert.strictEqual(await agents.diff(c.id), '', 'まだファイルは変えていない');
+
+    // まだ足りない答え → 続きの質問
+    agents.send(c.id, '[vague] まだ決めていない');
+    await waitFor(() => c.status === 'review');
+    assert.strictEqual(c.specState, 'pending');
+
+    // 答えると仕様が詰まって、開発を始める
+    agents.send(c.id, '設定画面で [spec-ok]');
+    await waitFor(() => c.permissions.length === 1);
+    agents.answerPermission(c.id, c.permissions[0].id, 'allow');
+    await waitFor(() => c.status === 'review');
+    assert.strictEqual(c.specState, 'settled');
+    assert.strictEqual(c.awaitingReply, false);
+    assert.match(await agents.diff(c.id), /設定画面で/);
+    assert.ok(c.logs.some((l) => l.kind === 'system' && /仕様が詰まった/.test(l.text)));
+
+    // 詰まったあとの追加指示には、仕様の確認を付けない
+    agents.send(c.id, '[vague] もう少し');
+    await waitFor(() => c.permissions.length === 1);
+    agents.answerPermission(c.id, c.permissions[0].id, 'allow');
+    await waitFor(() => c.status === 'review');
+    assert.strictEqual(c.specState, 'settled');
+
+    // 内容が足りていれば、そのまま開発を始める
+    const d = agents.createCard({ title: 'clear', prompt: 'README を直して' });
+    agents.start(d.id);
+    await waitFor(() => d.permissions.length === 1);
+    agents.answerPermission(d.id, d.permissions[0].id, 'allow');
+    await waitFor(() => d.status === 'review');
+    assert.strictEqual(d.specState, 'settled');
+
+    // 設定で切ると、仕様の確認はしない
+    store.settings.specCheck = false;
+    const e = agents.createCard({ title: 'off', prompt: '[vague] いい感じに' });
+    assert.strictEqual(e.specState, undefined);
+    agents.start(e.id);
+    await waitFor(() => e.permissions.length === 1);
+    agents.answerPermission(e.id, e.permissions[0].id, 'allow');
+    await waitFor(() => e.status === 'review');
+    assert.strictEqual(e.awaitingReply, false);
+  } finally {
+    server.close();
+  }
 });
 
 test('エージェントからの質問: 選択肢（複数選択・その他）に答える / 答えずに続ける / 文章の質問は「回答待ち」', async () => {

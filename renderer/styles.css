@@ -375,6 +375,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 /* エージェントからの質問 */
 .b-question { background: color-mix(in srgb, #b57bff 25%, transparent); color: #b57bff; font-weight: 600; }
+.b-spec { background: color-mix(in srgb, #3fb6c9 18%, transparent); color: #3fb6c9; font-weight: 600; }
 .b-awaiting { background: color-mix(in srgb, #b57bff 18%, transparent); color: #b57bff; font-weight: 600; }
 .qbox, .qform { margin-top: 8px; padding: 8px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, #b57bff 50%, transparent); background: color-mix(in srgb, #b57bff 8%, var(--panel)); cursor: default; }
 .q-title { font-size: 12px; font-weight: 600; margin-bottom: 6px; word-break: break-word; }
@@ -394,6 +395,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 .d-awaiting { margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, #b57bff 50%, transparent); background: color-mix(in srgb, #b57bff 8%, var(--panel)); }
 .d-awaiting p { margin: 6px 0; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; }
 .d-awaiting small { color: var(--muted); }
+.card-spec { color: #3fb6c9; }
+.d-spec { border-color: color-mix(in srgb, #3fb6c9 55%, transparent); background: color-mix(in srgb, #3fb6c9 8%, var(--panel)); }
+.d-spec p { max-height: 260px; }
 .k-question .log-k, .k-question .log-x { color: #b57bff; }
 .card.asking { border-left-color: #b57bff; border-color: color-mix(in srgb, #b57bff 60%, transparent); animation: pulse-q 2s infinite; }
 @keyframes pulse-q { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, #b57bff 25%, transparent); } }

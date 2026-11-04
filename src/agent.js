@@ -53,7 +53,40 @@ function buildSkillSuggestPrompt(c) {
   lines.push('---', '', SKILL_SUGGEST_PROMPT.replace('ここまでの作業を振り返って', 'このタスクの作業をもとに'));
   return lines.join('\n');
 }
-const RESUME_PROMPT = '前回の作業は、アプリの終了で途中で中断されました。worktree の今の状態（git status / git diff など）を確かめて、中断したところから作業を続けてください。';
+// 仕様が詰まっていないと Claude が判断したときに、返事の1行目に付けてもらう印（アプリが見て「仕様の確認」にする。画面には出さない）
+const SPEC_MARKER = '[[SPEC_UNCLEAR]]';
+// 新しいタスク・Issue から作ったタスクの最初の指示に付ける。内容が足りなければ、開発を始めずに質問してもらう
+const SPEC_CHECK_PROMPT = [
+  '# 開発を始める前に、タスクの内容が足りているかを確かめてください',
+  '',
+  'ファイルを変える前に、下の「タスク」（GitHub Issue のときはタイトル・本文・コメント）を読み、必要ならリポジトリのコードも読んで、開発を始められるくらい仕様が詰まっているかを判断してください。',
+  '',
+  '- 詰まっている（何を作る・直すのか、どうなれば完了かが分かり、残りは妥当な判断で決められる）ときは、そのまま開発を進めてください。細かいことは自分で妥当に決めてかまいません',
+  '- 詰まっていない（目的・対象・期待する動きが分からない、やり方が大きく分かれて結果が変わる、など）ときは、ファイルを変えずに次の形で返事をして、そこで止まってください',
+  `  1. 1行目に \`${SPEC_MARKER}\` とだけ書く（アプリがこの印で「仕様の確認中」にします。ユーザーには表示されません）`,
+  '  2. 「内容が詰まっていないので、開発を開始できません。」と書き、何が足りないかを短く説明する',
+  '  3. 決めてほしいことを番号付きの質問にする（1回に5つまで。答えやすいように選択肢やおすすめの案も添える）',
+  '  4. 最後は質問（？）で終える',
+  '- AskUserQuestion ツールは使わず、文章で質問してください',
+  `- ユーザーが答えたら、もう一度判断してください。まだ足りなければ、同じ形（1行目に \`${SPEC_MARKER}\`）で続きの質問をしてください`,
+  '- 詰まったら、決まった仕様を「## 決まった仕様」として箇条書きでまとめてから、開発を始めてください（この返事には印を付けないでください）',
+].join('\n');
+const SPEC_FOLLOW_NOTE = `（仕様の確認の続きです。この答えで開発を始められるなら、決まった仕様をまとめてから開発を始めてください。まだ足りなければ、1行目に \`${SPEC_MARKER}\` を付けて続きの質問をしてください）`;
+function withSpecCheck(prompt) {
+  return `${SPEC_CHECK_PROMPT}\n\n---\n\n## タスク\n\n${prompt}`;
+}
+// 印は返事の1行目にあるときだけ見る（本文で印に触れただけのときは数えない）
+function hasSpecMarker(text) {
+  return String(text || '').trimStart().startsWith(SPEC_MARKER);
+}
+function stripSpecMarker(text) {
+  return hasSpecMarker(text) ? String(text).trimStart().slice(SPEC_MARKER.length).replace(/^[ \t]*\n?/, '') : String(text || '');
+}
+// 仕様の確認をしているあいだか（checking: 最初の判断の前 / pending: 足りないと言われて答えを待っている）
+function inSpecCheck(c) {
+  return !!c && (c.specState === 'checking' || c.specState === 'pending');
+}
+const RESUME_PROMPT ='前回の作業は、アプリの終了で途中で中断されました。worktree の今の状態（git status / git diff など）を確かめて、中断したところから作業を続けてください。';
 const CHAT_RESUME_PROMPT = '前回の返事は、アプリの終了で途中で中断されました。中断したところから続けてください。';
 
 // タスクに紐づかない会話（チャット）か。worktree もブランチも作らず、リポジトリのフォルダでそのまま話す
@@ -428,6 +461,8 @@ class AgentManager extends EventEmitter {
   // カードの状態に合う Projects のステータス（変えないときは null）
   issueStatusKey(c) {
     if (c.status === 'running' || c.status === 'queued') return 'inProgress';
+    // 仕様の確認中は、まだ開発を始めていないのでレビューにはしない（In progress のまま）
+    if (c.status === 'review' && c.specState === 'pending') return null;
     if (c.status === 'review' || c.status === 'failed') return 'inReview';
     // PR を作って片付けただけのときは、まだ取り込まれていないので In review のまま（PR のマージを見つけたら Done にする）
     if (c.status === 'done') return (c.mergedInto && c.mergedInto.length) || c.prMergedAt ? 'done' : 'inReview';
@@ -631,6 +666,8 @@ class AgentManager extends EventEmitter {
     // 既存の会話（Claude Code の会話）を引き継げるのは Claude Code だけ
     if (session && session.id && card.agent === 'claude') this.applySession(card, session);
     card.skill = cleanSkill(skill);
+    // 内容が詰まっていなければ、開発を始める前に Claude と対話して仕様を詰める
+    if (s.specCheck !== false) card.specState = 'checking';
     this.store.cards.push(card);
     this.changed(card);
     return card;
@@ -638,7 +675,8 @@ class AgentManager extends EventEmitter {
 
   // 最初の指示（スキル・リレーの担当の説明を付けたもの）
   firstPrompt(c) {
-    const p = promptWithSkill(agentOf(c), c.skill, c.prompt);
+    // 仕様の確認中は、開発を始める前に内容が足りているかを判断してもらう指示を付ける
+    const p = promptWithSkill(agentOf(c), c.skill, inSpecCheck(c) ? withSpecCheck(c.prompt) : c.prompt);
     return c.relay && !isChat(c) ? buildRelayFirstPrompt(c, p) : p;
   }
 
@@ -837,6 +875,7 @@ class AgentManager extends EventEmitter {
     const c = this.must(id);
     if (c.status !== 'todo') throw new Error('このタスクはもう開始しています');
     this.log(c, 'user', c.prompt, c.skill ? { skill: c.skill } : undefined);
+    if (inSpecCheck(c) && this.store.settings.specCheck === false) c.specState = null; // 作ったあとで設定を切った
     this.enqueue(c, this.firstPrompt(c));
   }
 
@@ -847,7 +886,9 @@ class AgentManager extends EventEmitter {
     skill = cleanSkill(skill);
     if (c.status === 'done') this.reopen(c);
     this.log(c, 'user', message.trim(), skill ? { skill } : undefined);
-    this.enqueue(c, promptWithSkill(agentOf(c), skill, message.trim()));
+    // 仕様の確認中の答えには、続けて判断してもらうための一言を添える
+    const body = inSpecCheck(c) ? `${message.trim()}\n\n${SPEC_FOLLOW_NOTE}` : message.trim();
+    this.enqueue(c, promptWithSkill(agentOf(c), skill, body));
   }
 
   /**
@@ -889,6 +930,7 @@ class AgentManager extends EventEmitter {
     c.interrupted = null;
     c.awaitingReply = false;
     c.lastText = '';
+    c.lastSpecUnclear = false;
     c.pendingPrompt = prompt;
     c.status = 'queued';
     c.queuedAt = Date.now();
@@ -1235,12 +1277,21 @@ class AgentManager extends EventEmitter {
       } else if (code === 0 && !run.resultError) {
         c.status = 'review';
         c.error = null;
+        // 仕様の確認: 返事に印があれば「仕様の確認」のまま答えを待つ。なければ仕様は詰まったとみなす
+        if (inSpecCheck(c)) {
+          if (!c.lastSpecUnclear && c.specState === 'pending') this.log(c, 'system', '仕様が詰まったので、開発を進めました');
+          c.specState = c.lastSpecUnclear ? 'pending' : 'settled';
+        }
         // 会話は返事が来たらいつでも続きを話せるので、「回答待ち」にはしない
-        c.awaitingReply = !chat && endsWithQuestion(c.lastText);
-        // リレーの途中なら、レビューに回さずに次の工程へ引き継ぐ（質問で止まったときは、答えてもらってから）
+        c.awaitingReply = !chat && (c.specState === 'pending' || endsWithQuestion(c.lastText));
+        // リレーの途中なら、レビューに回さずに次の工程へ引き継ぐ（質問で止まったとき・仕様の確認中は、答えてもらってから）
         relayNext = !c.awaitingReply && this.relayHasNext(c);
         if (relayNext) {
           /* 通知はリレーが終わってから */
+        } else if (c.specState === 'pending') {
+          this.log(c, 'question', `内容が詰まっていないので、開発を開始できません。${agentShort(agent)} の質問に下の欄から答えて、仕様を詰めてください（詰まったら、そのまま開発を始めます）`);
+          this.emit('awaiting', c);
+          this.notify(c, 'awaiting', `仕様の確認: ${c.title}`, `内容が詰まっていないので、開発を開始できません。\n${c.lastText || ''}`.trim());
         } else if (c.awaitingReply) {
           this.log(c, 'question', `${agentShort(agent)} が質問しています。下の欄から答えると、続きから進めます`);
           this.emit('awaiting', c);
@@ -1293,9 +1344,13 @@ class AgentManager extends EventEmitter {
       case 'assistant':
         for (const b of (ev.message && ev.message.content) || []) {
           if (b.type === 'text' && b.text && b.text.trim()) {
-            this.log(c, 'text', b.text);
-            c.lastText = b.text.trim();
-            c.lastMessage = truncate(b.text.trim(), 200);
+            // 仕様の確認の印は覚えておいて、画面には出さない
+            c.lastSpecUnclear = hasSpecMarker(b.text);
+            const text = c.lastSpecUnclear ? stripSpecMarker(b.text) : b.text;
+            if (!text.trim()) continue;
+            this.log(c, 'text', text);
+            c.lastText = text.trim();
+            c.lastMessage = truncate(text.trim(), 200);
           } else if (b.type === 'tool_use') {
             this.log(c, 'tool', `${b.name}  ${summarizeInput(b.input)}`);
             c.lastMessage = `🔧 ${b.name} ${truncate(summarizeInput(b.input), 80)}`;
@@ -1357,12 +1412,17 @@ class AgentManager extends EventEmitter {
         this.log(c, 'system', `セッション開始（${agentLabel(run.agent)}${a.model ? ` / モデル: ${a.model}` : ''}）`);
         this.changed(c);
         break;
-      case 'text':
-        this.log(c, 'text', a.text, who);
-        c.lastText = String(a.text).trim();
+      case 'text': {
+        // 仕様の確認の印は覚えておいて、画面には出さない（Claude のときと同じ）
+        c.lastSpecUnclear = hasSpecMarker(a.text);
+        const text = c.lastSpecUnclear ? stripSpecMarker(a.text) : String(a.text);
+        if (!text.trim()) break;
+        this.log(c, 'text', text, who);
+        c.lastText = text.trim();
         c.lastMessage = truncate(c.lastText, 200);
         this.changed(c);
         break;
+      }
       case 'tool':
         this.log(c, 'tool', `${a.name}  ${a.summary || ''}`.trim());
         c.lastMessage = `🔧 ${a.name} ${truncate(a.summary || '', 80)}`;
@@ -2131,4 +2191,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
+module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };

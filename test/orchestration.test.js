@@ -35,6 +35,7 @@ function setup() {
     codexPath: bin('codex', FAKE_CLI, 'codex'),
     geminiPath: bin('gemini', FAKE_CLI, 'gemini'),
     maxParallel: 3,
+    specCheck: false, // ここでは指示をそのまま渡したときの流れを確かめる（仕様の確認は agent.test.js で確かめる）
   });
   const agents = new AgentManager(store, { mcpScript: path.join(__dirname, '..', 'src', 'permission-mcp.js'), mcpDir: path.join(tmp, 'data', 'mcp'), nodeBin: process.execPath });
   const calls = () =>

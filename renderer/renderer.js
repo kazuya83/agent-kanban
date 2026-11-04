@@ -153,11 +153,16 @@ function permissionBlock(c, compact) {
 function isInterrupted(c) {
   return !!c.interrupted && c.status !== 'running' && c.status !== 'queued';
 }
+// 内容が詰まっていないので、開発を始める前に仕様を詰めているところか
+function isSpecPending(c) {
+  return c.specState === 'pending' && (c.status === 'review' || c.status === 'failed');
+}
 function badgeFor(c) {
   if (isInterrupted(c)) return ['interrupted', '中断'];
   if ((c.questions || []).length) return ['question', '質問'];
   if ((c.permissions || []).length) return ['waiting', '承認待ち'];
   if (c.conflict && !c.conflict.resolving && c.status !== 'running' && c.status !== 'queued') return ['conflict', 'コンフリクト'];
+  if (isSpecPending(c)) return ['spec', '仕様の確認'];
   if (c.awaitingReply && (c.status === 'review' || c.status === 'failed')) return ['awaiting', '回答待ち'];
   return [c.status, (isChat(c) ? CHAT_STATUS_LABEL : STATUS_LABEL)[c.status]];
 }
@@ -307,6 +312,7 @@ function cardHtml(c) {
       ${c.skill ? `<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">⚡ /${esc(c.skill)}</span></div>` : ''}
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
       ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(plainText(c.lastMessage))}</div>` : ''}
+      ${isSpecPending(c) ? '<div class="card-msg card-spec">📝 内容が詰まっていないので、開発を開始できません。開いて質問に答えてください</div>' : ''}
       ${isInterrupted(c) ? `<div class="int-quick"><button class="btn small primary" data-resume="${c.id}" title="中断したところから続けます">▶ 再開</button></div>` : ''}
       ${questionCompactHtml(c)}
       ${permissionBlock(c, true)}
@@ -579,7 +585,7 @@ function competeBoxHtml(c) {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch])]);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch])]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -624,7 +630,8 @@ function renderDetailHead() {
     ${competeBoxHtml(c)}
     ${conflictBoxHtml(c)}
     ${questionFormHtml(c)}
-    ${c.awaitingReply && (s === 'review' || s === 'failed') ? `<div class="d-awaiting"><b>💬 ${esc(agentShort(agentOf(c)))} が質問しています</b><p>${esc(String(c.lastText || '').slice(-600))}</p><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>` : ''}
+    ${isSpecPending(c) ? `<div class="d-awaiting d-spec"><b>📝 内容が詰まっていないので、開発を開始できません</b><p>${esc(String(c.lastText || '').slice(-1200))}</p><small>下の欄で ${esc(agentShort(agentOf(c)))} の質問に答えて、仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>`
+    : c.awaitingReply && (s === 'review' || s === 'failed') ? `<div class="d-awaiting"><b>💬 ${esc(agentShort(agentOf(c)))} が質問しています</b><p>${esc(String(c.lastText || '').slice(-600))}</p><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>` : ''}
     ${permissionBlock(c, false)}
     <div class="d-actions">${btns.join('')}</div>`;
   $('closeDetail').onclick = closeDetail;
@@ -647,6 +654,7 @@ function renderDetailHead() {
   $('followBtn').disabled = !canFollow;
   $('followInput').placeholder =
     chat ? (canFollow ? 'メッセージを送る（Ctrl/⌘ + Enter で送信）。同じ会話の続きとして話せます' : '返事が来たら、続きを話せます')
+    : canFollow && isSpecPending(c) ? '質問への答えを書く（Ctrl/⌘ + Enter で送信）。分からないところは「おまかせ」と書いてもかまいません'
     : canFollow && c.awaitingReply ? `${agentShort(agentOf(c))} への回答を書く（Ctrl/⌘ + Enter で送信）`
     : s === 'done' ? '完了したタスクの続きを話す（Ctrl/⌘ + Enter で送信）。同じ場所に worktree を作り直して、同じ会話の続きから動きます'
     : canFollow ? '追加の指示を送る（Ctrl/⌘ + Enter で送信）。同じセッションの続きとして動きます'
@@ -1714,6 +1722,7 @@ async function openSettings() {
      </div>
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
        <small>「＋ 新しいタスク」と「Issue から作成」を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
+     <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前に Claude と対話して仕様を詰める</label>
      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上の 🔔）</label>
      <div class="row">
        <label class="field"><span>週間上限のリセット曜日（上部の「今週」の区切り）</span>
@@ -1828,6 +1837,7 @@ async function openSettings() {
             defaultSkill: defSkill || '',
             issueStatusSync: $('sIssueSync').checked,
             suggestSkillsOnDone: $('sSuggestSkills').checked,
+            specCheck: $('sSpecCheck').checked,
             weeklyResetDay: $('sResetDay').value,
             weeklyResetTime: $('sResetTime').value || '00:00',
             statusFieldName: $('sStatusField').value.trim(),
