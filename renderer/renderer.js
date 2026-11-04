@@ -682,6 +682,11 @@ async function select(id) {
   $('followInput').value = '';
   followAttach.clear();
   state.followSkill = null;
+  // 承認や回答が必要なものはログの最後に出すので、そのときはログタブで開く
+  if (hasLogActions(card(id)) && state.tab !== 'log') {
+    state.tab = 'log';
+    document.querySelectorAll('#tabs .tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === 'log'));
+  }
   renderBoard();
   renderDetailHead();
   updateBtwTab(card(id));
@@ -880,10 +885,6 @@ function renderDetailHead() {
     ${relayFlowHtml(c)}
     ${competeBoxHtml(c)}
     ${conflictBoxHtml(c)}
-    ${questionFormHtml(c)}
-    ${isSpecPending(c) ? `<div class="d-awaiting d-spec"><b>${icon('note')}内容が詰まっていないので、開発を開始できません</b><p>${esc(String(c.lastText || '').slice(-1200))}</p><small>${specQuestions(c) ? 'このすぐ下のフォーム（または下の欄）' : '下の欄'}で ${esc(agentShort(agentOf(c)))} の質問に答えて、仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>${specFormHtml(c)}`
-    : c.awaitingReply && (s === 'review' || s === 'failed') ? `<div class="d-awaiting"><b>${icon('chat')}${esc(agentShort(agentOf(c)))} が質問しています</b><p>${esc(String(c.lastText || '').slice(-600))}</p><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>` : ''}
-    ${permissionBlock(c, false)}
     <div class="d-actions">${btns.join('')}</div>`;
   $('closeDetail').onclick = closeDetail;
   // 長いタイトルは2行までにして、クリックで全文を開いたり閉じたりする
@@ -896,6 +897,7 @@ function renderDetailHead() {
   };
   $('detailHead').querySelectorAll('details[data-rkey]').forEach((d) => (d.ontoggle = () => (d.open ? state.relayOpen.add(d.dataset.rkey) : state.relayOpen.delete(d.dataset.rkey))));
   if (state.tab === 'info') renderInfo(c);
+  drawLogActions(c);
   const canFollow = canSendFollow(c);
   $('followInput').disabled = !canFollow;
   drawFollowSkill();
@@ -957,18 +959,16 @@ $('detailBody').addEventListener('click', (e) => {
   if (c && e.target.closest('[data-act="prConflict"]')) run(() => api.reopenPrConflict(c.id));
 });
 
-$('detailHead').addEventListener('input', (e) => {
+// ログの最後の、承認・質問・仕様の確認のフォーム
+$('detailBody').addEventListener('input', (e) => {
   if (!e.target.classList.contains('q-other')) return;
   const box = e.target.closest('.q-opt')?.querySelector('input[type=radio], input[type=checkbox]');
   if (box && e.target.value.trim()) box.checked = true;
 });
-$('detailHead').addEventListener('click', async (e) => {
-  const ca = e.target.closest('[data-cact]');
-  if (ca) {
-    const c = card(state.selected);
-    if (c) conflictAction(c, ca.dataset.cact);
-    return;
-  }
+$('detailBody').addEventListener('click', (e) => {
+  if (e.target.closest('.log-actions')) logActionClick(e);
+});
+function logActionClick(e) {
   const sq = e.target.closest('[data-sqact]');
   if (sq) {
     const form = sq.closest('.qform');
@@ -985,19 +985,28 @@ $('detailHead').addEventListener('click', async (e) => {
     const req = (c.questions || []).find((r) => r.id === form.dataset.req);
     const answers = collectAnswers(form, req && req.questions);
     const empty = Object.entries(answers || {}).find(([, v]) => !v);
-    if (empty) return toast(`「${empty[0]}」に答えてください`);
-    return sendAnswer(c.id, form.dataset.req, answers);
+    if (empty) toast(`「${empty[0]}」に答えてください`);
+    else sendAnswer(c.id, form.dataset.req, answers);
+    return;
   }
-  const chip = e.target.closest('.issue-chip');
-  if (chip) return run(() => api.openExternal(chip.dataset.url));
-  const go = e.target.closest('[data-goto]');
-  if (go) return select(go.dataset.goto);
   const dec = e.target.closest('[data-decision]');
   if (dec) {
     const p = dec.closest('.perm');
     answer(p.dataset.card, p.dataset.req, dec.dataset.decision, p.querySelector('.deny-reason')?.value || '');
     return;
   }
+}
+$('detailHead').addEventListener('click', async (e) => {
+  const ca = e.target.closest('[data-cact]');
+  if (ca) {
+    const c = card(state.selected);
+    if (c) conflictAction(c, ca.dataset.cact);
+    return;
+  }
+  const chip = e.target.closest('.issue-chip');
+  if (chip) return run(() => api.openExternal(chip.dataset.url));
+  const go = e.target.closest('[data-goto]');
+  if (go) return select(go.dataset.goto);
   const act = e.target.closest('[data-act]')?.dataset.act;
   const c = card(state.selected);
   if (!act || !c) return;
@@ -1092,7 +1101,49 @@ function renderChatLog(body, c, logs) {
   const agent = agentOf(c);
   const items = ChatLog.build(logs, agent);
   state.chat = { id: c.id, items };
-  body.innerHTML = `<div class="chat-log">${items.map((it) => chatItemHtml(it, agent)).join('')}</div>`;
+  body.innerHTML = `<div class="chat-log">${items.map((it) => chatItemHtml(it, agent)).join('')}</div><div id="logActions" class="log-actions"></div>`;
+  drawLogActions(c, true);
+}
+
+// ログの最後に出す、あなたの操作が必要なもの（承認・質問の回答・仕様の確認・回答待ちの案内）
+function logActionsHtml(c) {
+  const s = c.status;
+  const who = esc(agentShort(agentOf(c)));
+  const spec = isSpecPending(c);
+  const parts = [
+    permissionBlock(c, false),
+    questionFormHtml(c),
+    spec
+      ? `<div class="d-awaiting d-spec"><b>${icon('note')}内容が詰まっていないので、開発を開始できません</b><small>${specQuestions(c) ? 'このすぐ下のフォーム（または下の欄）' : '下の欄'}で、上の ${who} の質問に答えて仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>${specFormHtml(c)}`
+      : c.awaitingReply && (s === 'review' || s === 'failed')
+        ? `<div class="d-awaiting"><b>${icon('chat')}${who} が質問しています</b><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>`
+        : '',
+  ];
+  return parts.join('');
+}
+function hasLogActions(c) {
+  return !!(c && ((c.permissions || []).length || (c.questions || []).length || isSpecPending(c) || (c.awaitingReply && (c.status === 'review' || c.status === 'failed'))));
+}
+// 中身が変わったときだけ描き直す（選びかけのラジオや入力中の文字を消さない）
+function drawLogActions(c, force) {
+  const tab = $('logTab');
+  const attn = hasLogActions(c);
+  tab.classList.toggle('attn', attn);
+  tab.title = attn ? 'ログの最後に、承認や回答が必要なものがあります' : '';
+  if (state.tab !== 'log') return;
+  const box = $('logActions');
+  if (!box) return;
+  const html = logActionsHtml(c);
+  if (!force && box.dataset.card === c.id && box.dataset.html === html) return;
+  const body = $('detailBody');
+  const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+  const grew = !box.dataset.html && html;
+  box.dataset.card = c.id;
+  box.dataset.html = html;
+  box.innerHTML = html;
+  box.classList.toggle('hidden', !html);
+  // 新しく承認や質問が出たら、見えるところまで送る
+  if (atBottom || grew) body.scrollTop = body.scrollHeight;
 }
 // 実行中に届いたログを1件ずつ足す（ツールの結果は、呼び出しの折りたたみの中に入れ直す）
 function appendChatLog(body, c, entry) {
@@ -1557,7 +1608,8 @@ async function renderDetailBody() {
     if (logs.length) renderChatLog(body, c, logs);
     else {
       state.chat = null;
-      body.innerHTML = `<div class="muted pad">${isChat(c) ? 'まだ会話はありません。' : `まだログはありません。「開始」を押すと ${agentLabel(agentOf(c))} が動き出します。`}</div>`;
+      body.innerHTML = `<div class="muted pad">${isChat(c) ? 'まだ会話はありません。' : `まだログはありません。「開始」を押すと ${agentLabel(agentOf(c))} が動き出します。`}</div><div id="logActions" class="log-actions"></div>`;
+      drawLogActions(c, true);
     }
     body.scrollTop = body.scrollHeight;
   } else if (state.tab === 'diff') {
@@ -3480,6 +3532,7 @@ api.onBoard((board) => {
     const c = card(state.selected);
     if (c) {
       updateBtwTab(c);
+      drawLogActions(c);
       // 実行が終わった・マージしたなど状態が変わったら worktree タブを読み直す
       if (state.tab === 'worktree' && state.wtStatus !== `${c.id}:${c.status}:${c.worktreePath || ''}`) {
         if (state.wtStatus) renderWorktree(c, { quiet: true });

@@ -147,6 +147,52 @@ function extractSpecQuestions(text) {
   });
   return { text: body.replace(/\s+$/, ''), questions };
 }
+// JSON のブロックが付いていなかったときの代わり: 本文の番号付きの質問と、その下の箇条書きの選択肢からフォームを作る
+//   1. **質問？**
+//      - A（おすすめ）: 選択肢の説明
+//      - B: …
+// 選択肢が2つ以上あるか、質問（？で終わる）のものだけを拾う。読めなければ null
+function parseMarkdownQuestions(text) {
+  const qs = [];
+  let cur = null;
+  const plain = (s) => s.replace(/\*\*|__|`/g, '').trim();
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const num = line.match(/^ {0,3}(\d{1,2})[.)．]\s+(.+)$/);
+    if (num) {
+      cur = { question: plain(num[2]), options: [] };
+      qs.push(cur);
+      continue;
+    }
+    const opt = cur && line.match(/^\s*[-*・]\s+(.+)$/);
+    if (opt) {
+      let s = plain(opt[1]);
+      if (/^(その他|ほか)/.test(s.replace(/^[A-Za-z][:：.)）]\s*/, ''))) continue; // 自由入力の欄はフォームに必ずある
+      const m = s.match(/^([A-Za-z]|\d{1,2})\s*((?:（|\()おすすめ(?:）|\)))?\s*[:：.)）]\s*(.+)$/);
+      const rec = /おすすめ/.test(m ? m[2] || '' : '') || /^(?:（|\()おすすめ(?:）|\))/.test(s);
+      if (m) s = m[3];
+      s = s.replace(/^(?:（|\()おすすめ(?:）|\))\s*[:：]?\s*/, '').trim();
+      if (!s) continue;
+      // 長い選択肢は、最初の文を見出しに、残りを説明にする
+      let label = s;
+      let description = '';
+      const cut = s.search(/[。]/);
+      if (s.length > 60 && cut > 0 && cut < s.length - 1) {
+        label = s.slice(0, cut);
+        description = s.slice(cut + 1).trim();
+      }
+      if (rec) label += '（おすすめ）';
+      if (m) label = `${m[1]}: ${label}`; // 「A と同じ」のように記号で指すことがあるので残す
+      cur.options.push({ label, description });
+      continue;
+    }
+    // 番号のあとの地の文（字下げなし）が来たら、その質問の選択肢はそこまで
+    if (cur && line.trim() && !/^\s/.test(line)) cur = null;
+  }
+  const picked = qs
+    .filter((q) => q.question && (q.options.length >= 2 || /[？?]\s*$/.test(q.question)))
+    .map((q) => ({ question: q.question, header: '', multiSelect: false, options: q.options.length >= 2 ? q.options : [] }));
+  return parseSpecQuestions(JSON.stringify(picked));
+}
 function parseSpecQuestions(json) {
   let data;
   try {
@@ -2085,7 +2131,8 @@ class AgentManager extends EventEmitter {
       return text;
     }
     c.lastSpecUnclear = marked;
-    if (marked) c.specQuestions = questions;
+    // JSON のブロックを付け忘れたときは、本文の番号付きの質問からフォームを作る（あとからブロックだけ届けば、そちらで上書きする）
+    if (marked) c.specQuestions = questions || parseMarkdownQuestions(text);
     return text;
   }
 
@@ -2765,4 +2812,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
+module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };

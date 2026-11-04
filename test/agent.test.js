@@ -1251,3 +1251,28 @@ test('仕様の確認: 質問フォーム用の JSON ブロックを読み取り
   // ブロックがなければそのまま
   assert.deepStrictEqual(extractSpecQuestions('ふつうの返事'), { text: 'ふつうの返事', questions: null });
 });
+
+test('仕様の確認: JSON ブロックがないときは、本文の番号付きの質問と選択肢からフォームを作る', () => {
+  const { parseMarkdownQuestions } = require('../src/agent');
+  const text = [
+    '内容が詰まっていないので、開発を開始できません。',
+    '',
+    '- アプリ全体の機能にするのか',
+    '',
+    '1. **どの範囲にしますか？**',
+    '   - A（おすすめ）: アプリの設定に足す',
+    '   - B: 専用にして決め打ちで作る',
+    '   - C: その他（具体的に書いてください）',
+    '',
+    '2. **色は何色にしますか？**',
+    '',
+    '3. 手順を読む',
+    '',
+    'この2つは、それぞれどれにしますか？',
+  ].join('\n');
+  assert.deepStrictEqual(parseMarkdownQuestions(text), [
+    { question: 'どの範囲にしますか？', header: '', multiSelect: false, options: [{ label: 'A: アプリの設定に足す（おすすめ）', description: '' }, { label: 'B: 専用にして決め打ちで作る', description: '' }] },
+    { question: '色は何色にしますか？', header: '', multiSelect: false, options: [] },
+  ]);
+  assert.strictEqual(parseMarkdownQuestions('1. 手順を読む\n2. 直す'), null, '質問でない番号付きの一覧はフォームにしない');
+});
