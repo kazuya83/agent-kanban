@@ -129,6 +129,8 @@ const PROXY_CHANNELS = new Set([
   'conflict:fromPr',
   'card:permission',
   'card:answer',
+  // チャットを開くと画面が自動で既読にするので、転送しないと遠隔中に毎回エラーが出る
+  'card:markSeen',
   // card:open（ホストの Finder を開く）も操作側では見えないので転送しない
 ]);
 
