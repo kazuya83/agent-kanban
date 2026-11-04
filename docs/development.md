@@ -77,6 +77,7 @@ git config core.hooksPath .githooks
 
 - `.githooks/post-merge` が `scripts/after-merge-build.sh` を裏で走らせます。マージ自体はすぐに終わります
 - マージしたあとの main から一時的な worktree（ブランチ `build-apps/<sha>`）を作り、`claude -p "/build-apps review"` でテストと3つの OS のビルドをします。落ちたときは、install.sh / install.ps1 などを Claude が直します
+- できたファイルは、main をチェックアウトしているフォルダの `dist/` に写して残します
 - 直したところがあれば、コミットしてからもう一度ビルドして確かめます。通れば main にマージして `origin/main` に push します。直したところがなければ、マージも push もしません
 - **Release の公開はしません。** 公開は今までどおり `scripts/release-local.sh` で行います
 - 失敗したとき・コンフリクトしたとき・main に未コミットの変更があるときは、自動ではマージしません。macOS の通知で知らせ、ブランチと worktree を残します
