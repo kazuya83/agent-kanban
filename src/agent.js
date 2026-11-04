@@ -660,6 +660,14 @@ class AgentManager extends EventEmitter {
     this.changed(c);
   }
 
+  // 会話の返事を読んだ（開いた）ので「未読」を外す
+  markSeen(id) {
+    const c = this.must(id);
+    if (!c.unread) return;
+    c.unread = false;
+    this.changed(c);
+  }
+
   // 実行中・待機中のタスクの数（終了するときの確認用）
   activeCount() {
     const running = this.store.cards.filter((c) => c.status === 'running').length;
@@ -1440,6 +1448,7 @@ class AgentManager extends EventEmitter {
     c.afterDone = false;
     c.status = afterDone ? 'done' : 'failed';
     c.error = msg;
+    if (isChat(c)) c.unread = true;
     this.log(c, 'error', msg);
     this.dropFollowBtw(c);
     this.changed(c);
@@ -1859,6 +1868,8 @@ class AgentManager extends EventEmitter {
       if (c.status === 'failed') this.notify(c, 'failed', `失敗: ${c.title}`, c.error);
       // 停止・失敗したときは、予約した btw を勝手に送らない（停止したのにまた動き出さないように）
       const keepFollow = !c.stopRequested && c.status !== 'failed';
+      // 会話の返事（またはエラー）が来たら、開いて読むまで「未読」にする（自分で止めたときは除く）
+      if (isChat(c) && !c.stopRequested) c.unread = true;
       c.stopRequested = false;
       c.finishedAt = Date.now();
       this.changed(c);

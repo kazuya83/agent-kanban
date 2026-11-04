@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('api', {
   resume: (id) => call('card:resume', id),
   resumeAll: () => call('card:resumeAll'),
   dismissInterrupted: (id) => call('card:dismissInterrupted', id),
+  markSeen: (id) => call('card:markSeen', id),
   stop: (id) => call('card:stop', id),
   send: (id, message, skill, attachments) => call('card:send', { id, message, skill, attachments }),
   adoptCompetitor: (id) => call('compete:adopt', id),

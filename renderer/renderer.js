@@ -365,6 +365,7 @@ function cardHtml(c) {
     <div class="card s-${c.status} ${isChat(c) ? 'chat' : ''} ${waiting ? (bcls === 'waiting' ? 'waiting' : bcls === 'conflict' ? 'conflicting' : 'asking') : ''} ${state.selected === c.id ? 'selected' : ''}" draggable="${c.status === 'todo' && !isChat(c)}" data-id="${c.id}">
       <div class="card-top">
         <span class="badge b-${bcls}">${blabel}</span>
+        ${isUnreadChat(c) ? '<span class="unread-chip" title="まだ読んでいない返事があります">未読</span>' : ''}
         ${since ? `<span class="elapsed" data-since="${since}">${elapsed(since)}</span>` : ''}
       </div>
       <div class="card-title">${c.issue ? `<a class="issue-chip" data-url="${esc(c.issue.url)}" title="Issue を開く">#${c.issue.number}</a> ${esc(c.title.replace(/^#\d+\s*/, ''))}` : esc(c.title)}</div>
@@ -570,17 +571,44 @@ function byAttention(a, b) {
   return (needsYou(b) ? 1 : 0) - (needsYou(a) ? 1 : 0) || b.createdAt - a.createdAt;
 }
 
-// 「会話」ボタン: 会話の数と、返事を待っている会話があるかを出す
+// 返事が来たのに、まだ開いていない会話か（開いている会話は、見たものとして扱う）
+function isUnreadChat(c) {
+  return isChat(c) && !!c.unread && c.status !== 'running' && c.status !== 'queued' && state.selected !== c.id;
+}
+function isReplyingChat(c) {
+  return isChat(c) && (c.status === 'running' || c.status === 'queued');
+}
+
+// 「会話」ボタン: 会話の数と、返事を待っている・返答中・未読の会話があるかを、数と色で出す
 function renderChatBtn() {
   const chats = state.board.cards.filter(isChat);
   const waiting = chats.filter(needsYou).length;
+  const unread = chats.filter(isUnreadChat).length;
+  const replying = chats.filter(isReplyingChat).length;
   const n = $('chatCount');
-  n.textContent = String(waiting || chats.length);
+  n.textContent = String(waiting || unread || replying || chats.length);
   n.classList.toggle('hidden', !chats.length);
   n.classList.toggle('warn', !!waiting);
-  $('chatBtn').title = waiting ? `あなたの対応を待っている会話が ${waiting} 件あります` : 'タスクを作らずに、このリポジトリについてエージェントと話します';
+  n.classList.toggle('unread', !waiting && !!unread);
+  n.classList.toggle('replying', !waiting && !unread && !!replying);
+  const btn = $('chatBtn');
+  btn.classList.toggle('has-unread', !!unread);
+  btn.classList.toggle('has-replying', !!replying);
+  const notes = [
+    waiting && `あなたの対応を待っている会話が ${waiting} 件`,
+    unread && `まだ読んでいない返事が ${unread} 件`,
+    replying && `返答中の会話が ${replying} 件`,
+  ].filter(Boolean);
+  btn.title = notes.length ? `${notes.join('、')}あります` : 'タスクを作らずに、このリポジトリについてエージェントと話します';
   if (state.chatListOpen) drawChatList();
 }
+
+// 開いている会話に返事が来ていたら、読んだことにする
+function markSeenIfOpen() {
+  const c = card(state.selected);
+  if (c && isChat(c) && c.unread && c.status !== 'running' && c.status !== 'queued' && !document.hidden) run(() => api.markSeen(c.id));
+}
+document.addEventListener('visibilitychange', markSeenIfOpen);
 
 // ボード上のクリック・ドラッグ（イベント委譲）
 $('board').addEventListener('click', boardClick);
@@ -711,6 +739,7 @@ async function select(id) {
   renderDetailHead();
   updateBtwTab(card(id));
   updateTabsFor(card(id));
+  markSeenIfOpen();
   if (!state.logs.has(id)) {
     const logs = await run(() => api.logs(id));
     state.logs.set(id, logs || []);
@@ -3610,6 +3639,7 @@ api.onRemote((rs) => {
 api.onBoard((board) => {
   state.board = board;
   renderBoard();
+  markSeenIfOpen();
   if (state.selected) {
     renderDetailHead();
     const c = card(state.selected);
