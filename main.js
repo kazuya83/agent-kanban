@@ -5,6 +5,7 @@ const { Store } = require('./src/store');
 const { AgentManager } = require('./src/agent');
 const { PermissionServer } = require('./src/permission-server');
 const git = require('./src/git');
+const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 
 // Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
@@ -137,13 +138,33 @@ app.whenReady().then(async () => {
 
   handle('board:get', () => boardState());
   handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
-  handle('env:check', () => ({
-    git: resolveCommand('git'),
-    claude: resolveCommand(store.settings.claudePath || 'claude'),
-    platform: process.platform,
-  }));
-  handle('repo:choose', async () => {
-    const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: 'git リポジトリを選択' });
+  handle('env:check', async () => {
+    // WSL のリポジトリなら、WSL の中に git と claude があるかを見る
+    const w = wsl.parseWslPath(store.settings.repoPath);
+    if (w) {
+      return {
+        git: await wsl.which(w.distro, 'git'),
+        claude: await wsl.which(w.distro, store.settings.wslClaudePath || 'claude'),
+        platform: process.platform,
+        wsl: w.distro,
+      };
+    }
+    return {
+      git: resolveCommand('git'),
+      claude: resolveCommand(store.settings.claudePath || 'claude'),
+      platform: process.platform,
+    };
+  });
+  // Windows: WSL のディストリビューション（Ubuntu など）。リポジトリを選ぶときに、その中のフォルダも選べるようにする
+  handle('wsl:distros', () => (process.platform === 'win32' || process.env.AGENT_KANBAN_WSL ? wsl.listDistros() : []));
+  handle('repo:choose', async (opts = {}) => {
+    const distro = opts && opts.wsl;
+    const home = distro ? await wsl.homeDir(distro) : '';
+    const r = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+      title: distro ? `git リポジトリを選択（${distro}）` : 'git リポジトリを選択',
+      ...(distro ? { defaultPath: wsl.toUnc(distro, home || '/home') } : {}),
+    });
     if (r.canceled || !r.filePaths[0]) return null;
     const top = await git.toplevel(r.filePaths[0]);
     if (!top) throw new Error('選んだフォルダは git リポジトリではありません');
@@ -238,10 +259,15 @@ app.whenReady().then(async () => {
   handle('notifications:read', ({ ids } = {}) => agents.readNotifications(store.settings.repoPath, ids));
   handle('notifications:clear', ({ ids } = {}) => agents.clearNotifications(store.settings.repoPath, ids));
   handle('notifications:act', ({ id }) => agents.actNotification(id));
-  handle('skills:list', () => require('./src/skills').listSkills(store.settings.repoPath));
+  // WSL のリポジトリなら、WSL の中の ~/.claude からスキルと会話を読む
+  const claudeConfigFor = async (repo) => {
+    const w = wsl.parseWslPath(repo);
+    return w ? (await wsl.claudeConfigDir(w.distro)) || undefined : undefined;
+  };
+  handle('skills:list', async () => require('./src/skills').listSkills(store.settings.repoPath, { configDir: await claudeConfigFor(store.settings.repoPath) }));
   handle('card:btw', ({ id, text }) => agents.btw(id, text));
   handle('card:setSession', ({ id, session }) => agents.setSession(id, session));
-  handle('sessions:list', () => require('./src/sessions').listSessions(store.settings.repoPath));
+  handle('sessions:list', async () => require('./src/sessions').listSessions(store.settings.repoPath, { configDir: await claudeConfigFor(store.settings.repoPath) }));
   handle('card:logs', (id) => agents.logs(id));
   handle('card:diff', (id) => agents.diff(id));
   handle('card:worktree', (id) => agents.worktree(id));

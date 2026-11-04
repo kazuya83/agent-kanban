@@ -1604,13 +1604,39 @@ async function openSettings() {
   );
 }
 
-async function chooseRepo() {
-  const r = await run(() => api.chooseRepo());
+async function pickRepo(opts) {
+  const r = await run(() => api.chooseRepo(opts));
   if (r) {
     closeDetail();
     state.board = await api.getBoard();
     renderBoard();
+    checkEnv();
   }
+}
+
+// Windows で WSL（Ubuntu など）があれば、このパソコンのフォルダか、WSL の中のフォルダかを選んでもらう
+async function chooseRepo() {
+  const distros = (await api.wslDistros().catch(() => [])) || [];
+  if (!distros.length) return pickRepo();
+  openModal(
+    `<h2>リポジトリを選ぶ</h2>
+     <p class="muted small">選んだフォルダが WSL の中なら、git と claude も WSL の中で動かします（WSL の中にも git と Claude Code が必要です）。</p>
+     <div class="repo-choices">
+       <button class="btn repo-choice" data-pick="">🪟 <b>このパソコンのフォルダを選ぶ</b><small>C:\\Users\\… など</small></button>
+       ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">🐧 <b>${esc(d)} のフォルダを選ぶ</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}
+     </div>
+     <div class="modal-actions"><button class="btn ghost" id="rpCancel">キャンセル</button></div>`,
+    () => {
+      $('rpCancel').onclick = closeModal;
+      $('modalBox').querySelectorAll('[data-pick]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const d = b.dataset.pick;
+          closeModal();
+          pickRepo(d ? { wsl: d } : {});
+        }),
+      );
+    },
+  );
 }
 
 $('repoBtn').onclick = chooseRepo;
@@ -1878,8 +1904,11 @@ async function checkEnv() {
   const env = await run(() => api.checkEnv());
   if (!env) return;
   const msgs = [];
-  if (!env.git) msgs.push(`git が見つかりません。${env.platform === 'win32' ? 'Git for Windows（https://git-scm.com/）' : env.platform === 'darwin' ? 'ターミナルで xcode-select --install を実行するか Homebrew で git' : 'git'} をインストールしてから、アプリを再起動してください。`);
-  if (!env.claude) msgs.push('claude コマンドが見つかりません。Claude Code をインストールしてログインするか、⚙ 設定で claude のフルパスを指定してください（ターミナルで which claude、Windows なら where claude で調べられます）。');
+  if (env.wsl) {
+    if (!env.git) msgs.push(`${env.wsl}（WSL）の中に git が見つかりません。${env.wsl} のターミナルで sudo apt install git を実行してください。`);
+    if (!env.claude) msgs.push(`${env.wsl}（WSL）の中に claude が見つかりません。${env.wsl} のターミナルで Claude Code をインストールしてログインしてください（このリポジトリのタスクは ${env.wsl} の中で動きます）。`);
+  } else if (!env.git) msgs.push(`git が見つかりません。${env.platform === 'win32' ? 'Git for Windows（https://git-scm.com/）' : env.platform === 'darwin' ? 'ターミナルで xcode-select --install を実行するか Homebrew で git' : 'git'} をインストールしてから、アプリを再起動してください。`);
+  if (!env.wsl && !env.claude) msgs.push('claude コマンドが見つかりません。Claude Code をインストールしてログインするか、⚙ 設定で claude のフルパスを指定してください（ターミナルで which claude、Windows なら where claude で調べられます）。');
   const el = $('envBanner');
   el.innerHTML = msgs.map((m) => `<div>⚠ ${esc(m)}</div>`).join('');
   el.classList.toggle('hidden', msgs.length === 0);

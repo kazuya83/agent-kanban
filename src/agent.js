@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const git = require('./git');
+const wsl = require('./wsl');
 const { resolveCommand, isWin } = require('./env');
 const github = require('./github');
 const ghCli = require('./gh');
@@ -176,6 +177,13 @@ function cleanBranchName(text) {
 
 function killTree(child) {
   if (!child || child.exitCode !== null) return;
+  if (child.viaWsl) {
+    try {
+      child.stdin.end();
+    } catch {
+      /* もう閉じている */
+    }
+  }
   if (process.platform === 'win32') {
     execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], () => {});
   } else {
@@ -780,18 +788,13 @@ class AgentManager extends EventEmitter {
    * 設定の命名規則（自然言語）に従ったブランチ名を、claude に1回だけ聞いて決める
    * @returns {Promise<string>}
    */
-  generateBranchName(c, rule, cwd) {
+  async generateBranchName(c, rule, cwd) {
     const s = this.store.settings;
-    const cmd = s.claudePath || 'claude';
-    const resolved = resolveCommand(cmd);
-    if (!resolved) return Promise.reject(new Error(notFoundMessage(cmd)));
-    this.log(c, 'system', '命名規則に従ってブランチ名を考えてもらっています…');
     const args = ['-p', '--output-format', 'text', '--permission-mode', 'default'];
     if (s.model) args.push('--model', s.model);
-    const useShell = isWin && /\.(cmd|bat)$/i.test(resolved);
-    const quote = (a) => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
+    const child = await this.spawnClaude(cwd, args);
+    this.log(c, 'system', '命名規則に従ってブランチ名を考えてもらっています…');
     return new Promise((resolve, reject) => {
-      const child = spawn(useShell ? quote(resolved) : resolved, useShell ? args.map(quote) : args, { cwd, shell: useShell, windowsHide: true });
       let out = '';
       let err = '';
       const timer = setTimeout(() => {
@@ -818,7 +821,7 @@ class AgentManager extends EventEmitter {
     });
   }
 
-  writeMcpConfig(c) {
+  writeMcpConfig(c, wslDistro) {
     if (!this.permission) return null;
     // 承認サーバーのトークンを含むので、自分だけが読めるようにする
     fs.mkdirSync(this.opts.mcpDir, { recursive: true, mode: 0o700 });
@@ -828,13 +831,16 @@ class AgentManager extends EventEmitter {
       mcpServers: {
         [MCP_SERVER_NAME]: {
           type: 'stdio',
-          command: this.opts.nodeBin,
+          // WSL の中の claude からは、Windows 側のアプリ（/mnt/c/...exe）を呼ぶ。
+          // Windows のプログラムには WSLENV に書いた環境変数だけが渡るので、ここに並べる
+          command: wslDistro ? wsl.toLinux(this.opts.nodeBin) : this.opts.nodeBin,
           args: [this.opts.mcpScript],
           env: {
             ELECTRON_RUN_AS_NODE: '1',
             KANBAN_PORT: String(this.permission.port),
             KANBAN_TOKEN: this.permission.token,
             KANBAN_CARD: c.id,
+            ...(wslDistro ? { WSLENV: 'ELECTRON_RUN_AS_NODE/u:KANBAN_PORT/u:KANBAN_TOKEN/u:KANBAN_CARD/u' } : {}),
           },
         },
       },
@@ -842,6 +848,37 @@ class AgentManager extends EventEmitter {
     fs.writeFileSync(file, JSON.stringify(config, null, 2), { mode: 0o600 });
     if (!isWin) fs.chmodSync(file, 0o600);
     return file;
+  }
+
+  /**
+   * claude を起動する。WSL のフォルダなら、WSL の中の claude を動かす
+   * @param {string} cwd
+   * @param {string[]} args
+   * @param {Record<string,string>} extraEnv
+   */
+  async spawnClaude(cwd, args, extraEnv = {}) {
+    const s = this.store.settings;
+    const w = wsl.parseWslPath(cwd);
+    if (w) {
+      // Windows のパス（MCP の設定ファイルなど）は、WSL の中から見えるパス（/mnt/c/...）にして渡す
+      const mapped = args.map((a) => (/^[A-Za-z]:[\\/]/.test(a) || wsl.isWslPath(a) ? wsl.toLinux(a) : a));
+      const cmd = s.wslClaudePath || 'claude';
+      const cm = wsl.command(w.distro, w.linux, cmd, mapped, { path: await wsl.shellPath(w.distro), env: extraEnv });
+      const child = spawn(cm.file, cm.args, { env: process.env, windowsHide: true });
+      child.viaWsl = w.distro;
+      return child;
+    }
+    const cmd = s.claudePath || 'claude';
+    const resolved = resolveCommand(cmd);
+    if (!resolved) throw Object.assign(new Error(notFoundMessage(cmd)), { code: 'ENOENT' });
+    // Windows の .cmd / .bat はシェル経由でしか起動できない。.exe は直接起動する
+    const useShell = isWin && /\.(cmd|bat)$/i.test(resolved);
+    return spawn(useShell ? quoteForCmd(resolved) : resolved, useShell ? args.map(quoteForCmd) : args, {
+      cwd,
+      env: { ...process.env, ...extraEnv },
+      shell: useShell,
+      windowsHide: true,
+    });
   }
 
   // 会話（チャット）の権限モード。リポジトリのフォルダ（手元の作業中のファイル）でそのまま動くので、
@@ -864,7 +901,7 @@ class AgentManager extends EventEmitter {
     if (s.model) args.push('--model', s.model);
     const allowed = splitList(s.allowedTools);
     if (allowed.length) args.push('--allowedTools', ...allowed);
-    const mcpConfig = this.writeMcpConfig(c);
+    const mcpConfig = this.writeMcpConfig(c, wsl.parseWslPath(cwd)?.distro);
     if (mcpConfig) args.push('--mcp-config', mcpConfig, '--permission-prompt-tool', PERMISSION_TOOL);
     if (c.sessionId) args.push('--resume', assertSessionId(c.sessionId));
     // 既存の会話を引き継ぐときは、元の会話を変えないようにフォークする（新しい ID になる）
@@ -874,20 +911,8 @@ class AgentManager extends EventEmitter {
     c.pendingPrompt = null;
     c.lastPromptSent = prompt;
     for (const m of c.btw || []) if (m.state === 'queued') m.state = 'delivered';
-    const cmd = s.claudePath || 'claude';
-    const resolved = resolveCommand(cmd);
-    if (!resolved) {
-      throw Object.assign(new Error(notFoundMessage(cmd)), { code: 'ENOENT' });
-    }
-    // Windows の .cmd / .bat はシェル経由でしか起動できない。.exe は直接起動する
-    const useShell = isWin && /\.(cmd|bat)$/i.test(resolved);
-    const child = spawn(useShell ? quoteForCmd(resolved) : resolved, useShell ? args.map(quoteForCmd) : args, {
-      cwd,
-      // 承認待ちの MCP ツール呼び出しがタイムアウトしないようにする
-      env: { ...process.env, MCP_TOOL_TIMEOUT: '86400000' },
-      shell: useShell,
-      windowsHide: true,
-    });
+    // 承認待ちの MCP ツール呼び出しがタイムアウトしないようにする
+    const child = await this.spawnClaude(cwd, args, { MCP_TOOL_TIMEOUT: '86400000' });
     this.procs.set(c.id, child);
     // sent: stdin に書いたメッセージ（acked = claude が受け取ったことをリプレイで確認済み）
     const run = { resultError: null, finished: false, child, sent: [], stdinClosed: false, idleTimer: null };
@@ -974,7 +999,11 @@ class AgentManager extends EventEmitter {
         }
       } else {
         c.status = 'failed';
-        c.error = run.resultError || `claude が終了コード ${code} で終了しました`;
+        c.error =
+          run.resultError ||
+          (child.viaWsl && code === 127
+            ? `${child.viaWsl}（WSL）の中に claude が見つかりません。${child.viaWsl} のターミナルで Claude Code をインストールしてログインしてください`
+            : `claude が終了コード ${code} で終了しました`);
       }
       if (c.status === 'failed') this.notify(c, 'failed', `失敗: ${c.title}`, c.error);
       c.stopRequested = false;
@@ -1320,7 +1349,7 @@ class AgentManager extends EventEmitter {
             dir = temp;
           } catch (err) {
             // 「main は <フォルダ> で使われています」と断られたら、そのフォルダでマージする
-            const at = git.checkedOutAtFromError(err);
+            const at = git.checkedOutAtFromError(err, top);
             if (!at) throw err;
             temp = null;
             dir = at;
@@ -1424,8 +1453,10 @@ class AgentManager extends EventEmitter {
       await git.push(c.worktreePath, 'origin', c.branch, true);
       this.log(c, 'system', `ブランチ ${c.branch} を origin に push しました`);
       const def = this.prDefaults(c);
+      const slug = await github.repoSlug(top).catch(() => null);
       const pr = await ghCli.createPullRequest({
         cwd: c.worktreePath,
+        repo: slug ? `${slug.owner}/${slug.repo}` : undefined,
         head: c.branch,
         base,
         title: String(opts.title || '').trim() || def.title,

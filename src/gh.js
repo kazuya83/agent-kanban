@@ -7,6 +7,8 @@ const DEVICE_URL = 'https://github.com/login/device';
 
 function run(cmd, args, opts = {}) {
   return new Promise((resolve) => {
+    // WSL のフォルダを作業フォルダにすると、gh が Windows の git でそのフォルダを調べて止まるので、使わない（--repo で指定する）
+    if (opts.cwd && require('./wsl').isWslPath(opts.cwd)) opts = { ...opts, cwd: undefined };
     execFile(cmd, args, { windowsHide: true, timeout: 20000, ...opts }, (err, stdout, stderr) => {
       resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') });
     });
@@ -142,11 +144,12 @@ async function addProjectScope(onEvent) {
  * @param {{ cwd: string, head: string, base: string, title: string, body: string, gh?: string }} p
  * @returns {Promise<{ url: string, number: number|null, created: boolean }>}
  */
-async function createPullRequest({ cwd, head, base, title, body, gh: ghPath }) {
+async function createPullRequest({ cwd, head, base, title, body, repo, gh: ghPath }) {
   const gh = ghPath || resolveCommand('gh');
   if (!gh) throw new Error('PR を作るには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます');
   const opts = { cwd, timeout: 60000 };
-  const view = await run(gh, ['pr', 'view', head, '--json', 'url,number,state'], opts);
+  const repoArgs = repo ? ['--repo', repo] : [];
+  const view = await run(gh, ['pr', 'view', head, ...repoArgs, '--json', 'url,number,state'], opts);
   if (view.code === 0) {
     try {
       const d = JSON.parse(view.stdout);
@@ -155,7 +158,7 @@ async function createPullRequest({ cwd, head, base, title, body, gh: ghPath }) {
       /* 読めなければ新しく作る */
     }
   }
-  const r = await run(gh, ['pr', 'create', '--head', head, '--base', base, '--title', title, '--body', body], opts);
+  const r = await run(gh, ['pr', 'create', ...repoArgs, '--head', head, '--base', base, '--title', title, '--body', body], opts);
   if (r.code !== 0) {
     const msg = (r.stderr || r.stdout).trim();
     if (/auth login|not logged/i.test(msg)) throw new Error('GitHub にログインしていません。「Issue から」の画面からログインしてください');
