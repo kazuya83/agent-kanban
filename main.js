@@ -734,27 +734,29 @@ app.whenReady().then(async () => {
     return { ...dirBrowse.listDirs(start, { showHidden: !!showHidden }), home: app.getPath('home') };
   });
   // リポジトリを開く（tab: 'new' なら新しいタブ、'replace' なら今のタブを置き換える。すでにタブにあればそのタブに移る）
-  // ベースブランチはリポジトリごとに覚えておき、開いたリポジトリの分に戻す
+  // 設定（ベースブランチ・取り込み方など）はプロジェクト（リポジトリ）ごとに覚えておき、開いたリポジトリの分に切り替える
+  const { switchRepoSettings, hasRepoSettings, isNoGitRepo } = require('./src/store');
   const switchRepo = (dir, tabs) => {
     const s = store.settings;
-    const cur = s.repoPath;
-    const bases = { ...(s.repoBaseBranches || {}) };
-    if (cur) {
-      if (s.baseBranch) bases[cur] = s.baseBranch;
-      else delete bases[cur];
-    }
-    for (const k of Object.keys(bases)) if (!tabs.includes(k)) delete bases[k];
-    s.repoBaseBranches = bases;
-    s.repoPath = dir;
-    s.baseBranch = (dir && bases[dir]) || '';
+    switchRepoSettings(s, dir);
     s.repoTabs = tabs;
+  };
+  // 初めて開いたプロジェクトは初期値から始める。取り込み方は PR を作成。ただし origin が GitHub でない・git なしなら直接マージ
+  const initRepoSettings = async (dir) => {
+    const gh = isNoGitRepo(store.settings, dir) ? false : await git.isGitHubRemote(dir).catch(() => false);
+    if (gh) return;
+    store.setRepoSettings(dir, { integration: 'merge' });
+    store.save();
+    notifyBoard();
   };
   const openRepo = (dir, { tab } = {}) => {
     const s = store.settings;
+    const fresh = !!dir && !hasRepoSettings(s, dir);
     switchRepo(dir, openRepoTab(s.repoTabs, s.repoPath, dir, { mode: tab === 'replace' ? 'replace' : 'new' }));
     s.recentRepoPaths = touchRecentRepo(s.recentRepoPaths, dir);
     store.save();
     notifyBoard();
+    if (fresh) initRepoSettings(dir).catch(() => {});
     return dir;
   };
   // タブを切り替える（タブにあるリポジトリだけ）
@@ -946,8 +948,9 @@ app.whenReady().then(async () => {
   handle('card:diff', (id) => agents.diff(id));
   handle('card:worktree', (id) => agents.worktree(id));
   handle('card:merge', async ({ id, target, createNew, keep, push }) => {
-    // push するかどうかは覚えておき、次のマージでも同じにする
-    store.settings.pushAfterMerge = !!push;
+    // push するかどうかはプロジェクトごとに覚えておき、次のマージでも同じにする
+    const card = store.card(id);
+    store.setRepoSettings((card && card.repoPath) || store.settings.repoPath, { pushAfterMerge: !!push });
     store.save();
     return agents.merge(id, { target, createNew, keep, push });
   });

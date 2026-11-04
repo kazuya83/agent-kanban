@@ -65,9 +65,9 @@ test('migrateSettings: タブがなかった設定は今のリポジトリだけ
   const s = { ...DEFAULT_SETTINGS, repoPath: '/cur' };
   migrateSettings(s, { repoPath: '/cur' }, []);
   assert.deepStrictEqual(s.repoTabs, ['/cur']);
-  assert.deepStrictEqual(s.repoBaseBranches, {});
+  assert.strictEqual(s.repoBaseBranches, undefined);
   const t = { ...DEFAULT_SETTINGS, repoPath: '/b', repoTabs: ['/a', '/b', '/a'], repoBaseBranches: [] };
   migrateSettings(t, t, []);
   assert.deepStrictEqual(t.repoTabs, ['/a', '/b']);
-  assert.deepStrictEqual(t.repoBaseBranches, {});
+  assert.strictEqual(t.repoBaseBranches, undefined);
 });

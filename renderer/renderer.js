@@ -3012,6 +3012,7 @@ function openRemoteSettings() {
 
 async function openSettings() {
   const s = state.board.settings;
+  const projectName = String(s.repoPath || '').split(/[\\/]/).filter(Boolean).pop() || '';
   // ブランチ一覧は git を何回も起動するので（Windows だと遅い）、待たずにモーダルを開いてから後で入れる
   const baseOptions = (info) =>
     `<option value="">チェックアウト中のブランチ${info.current ? `（今は ${esc(info.current)}）` : ''}</option>` +
@@ -3021,6 +3022,9 @@ async function openSettings() {
   openModal(
     `<h2>設定</h2>
      <div class="field"><span>アプリの更新</span><div id="updPanel" class="gh-panel upd-panel">${updatePanelHtml(state.update)}</div></div>
+
+     <h3 class="s-section">このプロジェクトの設定${projectName ? `（<code>${esc(projectName)}</code>）` : ''}</h3>
+     <small class="muted s-note">ここの項目はプロジェクト（リポジトリ）ごとに覚えます。タブを切り替えると、そのプロジェクトの設定に変わります。初めて開いたプロジェクトは初期値から始まります。</small>
      <label class="field"><span>ベースブランチ（worktree の作成元・マージ先）</span>
        <select id="sBase">${baseOptions({ branches: [], current: '' })}</select></label>
      <label class="field"><span>レビュー後の取り込み方</span>
@@ -3048,22 +3052,25 @@ async function openSettings() {
      <label class="field"><span>権限モード</span>
        <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
        <small>自動で許可されない操作は、カードに「承認待ち」として表示されます。</small></label>
-     <label class="field"><span>同時に動かす数</span><input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
+     <label class="field"><span>Claude Code に最初から許可しておくツール（カンマか改行で区切る）</span>
+       <textarea id="sAllowed" rows="2" placeholder="例: Bash(npm test:*), Bash(git status), WebSearch">${esc(s.allowedTools)}</textarea></label>
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
        <small>「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
+
+     <h3 class="s-section">アプリ全体の設定</h3>
+     <small class="muted s-note">ここから下の項目は、どのプロジェクトでも同じです。</small>
+     <label class="field"><span>同時に動かす数</span><input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したとき、前に完了したタスクと似た作業が続いていたら、スキルにしないか通知で聞く（右上のベル）</label>
      <label class="check"><input type="checkbox" id="sDeleteSessions" ${s.deleteSessionsOnMerge !== false ? 'checked' : ''} /> マージして完了したら、そのタスクの作業に使った Claude Code の会話（セッション）を消す（引き継いだ元の会話は残します）</label>
 
-     <h3 class="s-section">使うエージェント</h3>
+     <h4 class="s-section s-sub">使うエージェント</h4>
      <small class="muted s-note">チェックを付けたエージェントだけ、コマンドとモデルを設定でき、タスク・会話・Pipeline・競争で選べます（1つ以上）。</small>
      ${agentConfigHtml('claude', s, `
        <div class="row">
          <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath || 'claude')}" /></label>
          <label class="field"><span>モデル（空なら既定）</span><input id="sModel" placeholder="例: sonnet / opus" value="${esc(s.model || '')}" /></label>
-       </div>
-       <label class="field"><span>最初から許可しておくツール（カンマか改行で区切る）</span>
-         <textarea id="sAllowed" rows="2" placeholder="例: Bash(npm test:*), Bash(git status), WebSearch">${esc(s.allowedTools)}</textarea></label>`)}
+       </div>`)}
      ${agentConfigHtml('codex', s, `
        <div class="row">
          <label class="field"><span>codex コマンドのパス</span><input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
@@ -3084,7 +3091,7 @@ async function openSettings() {
        <select id="sDefaultAgent"></select>
        <small>オーケストレーションで Pipeline・競争を選んでいれば、タスクを作るときの「エージェント」の欄では、そちらを最初から選んでおきます（使えない状態のときや会話では、このエージェント）。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
 
-     <h3 class="s-section">オーケストレーション</h3>
+     <h4 class="s-section s-sub">オーケストレーション</h4>
      <div class="field"><span>使うオーケストレーション（Pipelineと競争は、どちらか1つだけ使えます。使わないこともできます）</span>
        <div class="check-row">
          <label class="check"><input type="radio" name="sOrch" value="relay" ${orchestrationOf(s) === 'relay' ? 'checked' : ''} /> ${icon('pipeline')}Pipeline</label>

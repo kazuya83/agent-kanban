@@ -759,6 +759,7 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .relay-no { font-weight: 700; color: var(--run); text-align: center; }
 .check-row { display: flex; flex-wrap: wrap; gap: 6px 18px; }
 .s-note { display: block; margin: -4px 0 12px; }
+.s-sub { font-size: 13px; border-top-style: dashed; }
 /* 設定の「使うエージェント」: チェックを付けたものだけ、コマンド・モデルの欄を出す */
 .agent-cfg { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: var(--panel-2); }
 .agent-cfg:not(.on) { opacity: 0.75; }

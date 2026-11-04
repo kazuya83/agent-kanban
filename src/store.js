@@ -116,10 +116,11 @@ function repoTabSummary(tabs, cards, settings) {
 const DEFAULT_SETTINGS = {
   repoPath: '',
   repoTabs: [], // 画面上部のタブで開いているリポジトリ（左から順。今のリポジトリも含む・MAX_REPO_TABS まで）
-  repoBaseBranches: {}, // リポジトリごとのベースブランチ（タブを切り替えたら baseBranch に戻す）
+  repoSettings: {}, // プロジェクト（リポジトリ）ごとの設定（REPO_SETTING_KEYS）。今のリポジトリの分は、下の同じ名前の項目にも入れて使う
   lastRepoParent: '', // クローン・新規作成で最後に使った置き場所（親フォルダ）
   recentRepoPaths: [], // 最近開いたリポジトリ（新しいものが先頭）
   noGitRepos: [], // git で管理していないフォルダとして開いたもの（worktree を作らず、そのフォルダでタスクを動かす）
+  // ---- ここから REPO_SETTING_KEYS の項目は、今のリポジトリの設定（repoSettings から写したもの） ----
   baseBranch: '', // 空なら、開始時にチェックアウトしているブランチ
   permissionMode: 'acceptEdits', // default / acceptEdits / plan / bypassPermissions
   allowedTools: '', // カンマ・改行区切り（例: Bash(npm test:*), WebSearch）
@@ -127,7 +128,7 @@ const DEFAULT_SETTINGS = {
   claudePath: 'claude',
   maxParallel: 3,
   defaultSkill: '', // 新しいタスクを作るときに最初から選んでおくスキル
-  integration: 'merge', // レビュー後の取り込み方: merge（ローカルで直接マージ） / pr（push してプルリクエストを作る）
+  integration: 'pr', // レビュー後の取り込み方: merge（ローカルで直接マージ） / pr（push してプルリクエストを作る）
   issueStatusSync: true, // Issue から作ったタスクの列に合わせて、GitHub Projects の Status（In progress / In review / Done）を変える
   statusFieldName: '', // Projects で変える項目（単一選択）の名前。空なら「Status」
   statusMapping: { inProgress: '', inReview: '', done: '' }, // 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空なら名前から自動で探す
@@ -191,6 +192,113 @@ function anchorFromDay(day, time, now) {
 
 const MAX_NOTIFICATIONS = 200;
 
+// ---------- プロジェクト（リポジトリ）ごとの設定 ----------
+// リポジトリに関わる設定だけをプロジェクトごとに持つ。コマンドのパス・モデル・同時に動かす数・自動更新などはアプリ全体で1つ
+const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'pushAfterMerge'];
+const MAX_REPO_SETTINGS = 200;
+
+// 初めて開いたプロジェクトの設定（初期値。取り込み方は PR を作成。GitHub でないリポジトリは開いたときに直接マージにする）
+function defaultRepoSettings() {
+  const out = {};
+  for (const k of REPO_SETTING_KEYS) out[k] = k === 'statusMapping' ? { ...DEFAULT_SETTINGS.statusMapping } : DEFAULT_SETTINGS[k];
+  return out;
+}
+
+// 設定から、プロジェクトごとの項目だけを取り出す（足りない項目は初期値）
+function pickRepoSettings(src) {
+  const out = defaultRepoSettings();
+  if (!src || typeof src !== 'object') return out;
+  for (const k of REPO_SETTING_KEYS) if (src[k] !== undefined) out[k] = k === 'statusMapping' ? { ...out.statusMapping, ...(src[k] || {}) } : src[k];
+  if (!['merge', 'pr'].includes(out.integration)) out.integration = DEFAULT_SETTINGS.integration;
+  return out;
+}
+
+function cleanRepoSettingsMap(map) {
+  const out = {};
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return out;
+  for (const [p, v] of Object.entries(map).slice(-MAX_REPO_SETTINGS)) if (String(p || '').trim() && v && typeof v === 'object') out[p] = pickRepoSettings(v);
+  return out;
+}
+
+// そのリポジトリの設定（今のリポジトリなら、画面で変えた今の値）
+function repoSettingsOf(settings, dir) {
+  const d = String(dir || '').trim();
+  if (!settings) return defaultRepoSettings();
+  if (!d || d === settings.repoPath) return pickRepoSettings(settings);
+  return pickRepoSettings((settings.repoSettings || {})[d]);
+}
+
+function hasRepoSettings(settings, dir) {
+  const d = String(dir || '').trim();
+  return !!d && !!settings && (d === settings.repoPath || Object.prototype.hasOwnProperty.call(settings.repoSettings || {}, d));
+}
+
+// 今のリポジトリの設定を repoSettings に書き戻す
+function stashRepoSettings(settings) {
+  if (!settings) return;
+  const map = settings.repoSettings && typeof settings.repoSettings === 'object' && !Array.isArray(settings.repoSettings) ? { ...settings.repoSettings } : {};
+  if (settings.repoPath) {
+    delete map[settings.repoPath]; // 新しく使ったものを後ろにする（多すぎるときは古いものから捨てる）
+    map[settings.repoPath] = pickRepoSettings(settings);
+  }
+  settings.repoSettings = cleanRepoSettingsMap(map);
+}
+
+// 今のリポジトリを切り替える: 今の分を書き戻して、開くリポジトリの分（なければ初期値）を写す
+function switchRepoSettings(settings, dir) {
+  stashRepoSettings(settings);
+  const d = String(dir || '').trim();
+  const next = d ? pickRepoSettings(settings.repoSettings[d]) : defaultRepoSettings();
+  settings.repoPath = d;
+  Object.assign(settings, next);
+  if (d) settings.repoSettings[d] = pickRepoSettings(next);
+}
+
+// そのリポジトリの設定を変える（今のリポジトリなら今の値も変える）
+function setRepoSettings(settings, dir, patch) {
+  const d = String(dir || '').trim();
+  if (!settings || !d || !patch) return;
+  const keys = Object.keys(patch).filter((k) => REPO_SETTING_KEYS.includes(k));
+  if (d === settings.repoPath) for (const k of keys) settings[k] = patch[k];
+  const map = settings.repoSettings && typeof settings.repoSettings === 'object' && !Array.isArray(settings.repoSettings) ? { ...settings.repoSettings } : {};
+  const cur = pickRepoSettings(d === settings.repoPath ? settings : map[d]);
+  for (const k of keys) cur[k] = patch[k];
+  map[d] = pickRepoSettings(cur);
+  settings.repoSettings = map;
+}
+
+// プロジェクトごとの設定がなかったころの設定: 今まで使っていたリポジトリには、今までの値（ベースブランチはリポジトリごとに覚えていた分）を入れておく
+// 取り込み方を保存していなければ、そのころの初期値（直接マージ）にする
+function migrateRepoSettings(settings, raw, cards) {
+  if (raw.repoSettings && typeof raw.repoSettings === 'object' && !Array.isArray(raw.repoSettings)) {
+    settings.repoSettings = cleanRepoSettingsMap(raw.repoSettings);
+    if (settings.repoPath && !settings.repoSettings[settings.repoPath]) settings.repoSettings[settings.repoPath] = pickRepoSettings(settings);
+    delete settings.repoBaseBranches;
+    return;
+  }
+  const old = { ...raw, integration: raw.integration === 'pr' ? 'pr' : 'merge' };
+  const bases = raw.repoBaseBranches && typeof raw.repoBaseBranches === 'object' && !Array.isArray(raw.repoBaseBranches) ? raw.repoBaseBranches : {};
+  const paths = new Set();
+  const add = (p) => {
+    const s = String(p || '').trim();
+    if (s) paths.add(s);
+  };
+  add(settings.repoPath);
+  for (const p of settings.repoTabs || []) add(p);
+  for (const p of settings.recentRepoPaths || []) add(p);
+  for (const p of Object.keys(bases)) add(p);
+  for (const c of cards || []) add(c && c.repoPath);
+  const map = {};
+  for (const p of paths) {
+    const base = p === settings.repoPath ? String(raw.baseBranch || '') : String(bases[p] || '');
+    map[p] = pickRepoSettings({ ...old, baseBranch: base });
+  }
+  settings.repoSettings = cleanRepoSettingsMap(map);
+  // 今のリポジトリの値も、今までの値にそろえる
+  Object.assign(settings, settings.repoPath ? settings.repoSettings[settings.repoPath] : pickRepoSettings(old));
+  delete settings.repoBaseBranches;
+}
+
 // 前のバージョンの設定を今の形に直す
 function migrateSettings(settings, raw, cards) {
   if (!Array.isArray(raw.enabledAgents)) {
@@ -212,7 +320,7 @@ function migrateSettings(settings, raw, cards) {
   if (!settings.recentRepoPaths.length) settings.recentRepoPaths = seedRecentRepoPaths(settings, cards);
   // タブがなかったころの設定: 今のリポジトリだけのタブにする
   settings.repoTabs = cleanRepoTabs(settings.repoTabs, settings.repoPath);
-  if (!settings.repoBaseBranches || typeof settings.repoBaseBranches !== 'object' || Array.isArray(settings.repoBaseBranches)) settings.repoBaseBranches = {};
+  migrateRepoSettings(settings, raw, cards);
 }
 
 class Store {
@@ -246,6 +354,7 @@ class Store {
 
   flush() {
     clearTimeout(this.timer);
+    stashRepoSettings(this.data.settings);
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(this.data));
@@ -258,6 +367,15 @@ class Store {
 
   get cards() {
     return this.data.cards;
+  }
+
+  // そのリポジトリ（プロジェクト）の設定。タブで開いていない・裏で動いているリポジトリのタスクでも、そのリポジトリの分を使う
+  repoSettings(dir) {
+    return repoSettingsOf(this.data.settings, dir);
+  }
+
+  setRepoSettings(dir, patch) {
+    setRepoSettings(this.data.settings, dir, patch);
   }
 
   get notifications() {
@@ -341,6 +459,14 @@ class Store {
 
 module.exports = {
   migrateSettings,
+  REPO_SETTING_KEYS,
+  defaultRepoSettings,
+  pickRepoSettings,
+  repoSettingsOf,
+  hasRepoSettings,
+  stashRepoSettings,
+  switchRepoSettings,
+  setRepoSettings,
   Store,
   DEFAULT_SETTINGS,
   MAX_NOTIFICATIONS,

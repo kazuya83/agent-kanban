@@ -764,7 +764,7 @@ class AgentManager extends EventEmitter {
 
   // Issue から作ったカードの列が変わったら、Issue が入っている Project の Status を合わせる（裏で順番に動かす）
   queueIssueSync(c) {
-    if (!c.issue || this.store.settings.issueStatusSync === false) return;
+    if (!c.issue || this.store.repoSettings(c.repoPath).issueStatusSync === false) return;
     const key = this.issueStatusKey(c);
     if (!key) return;
     c.issueSync = c.issueSync || {};
@@ -808,7 +808,7 @@ class AgentManager extends EventEmitter {
 
   // テストで差し替えられるようにメソッドにしておく
   setIssueProjectStatus(repoPath, number, key) {
-    const s = this.store.settings;
+    const s = this.store.repoSettings(repoPath);
     return github.setIssueProjectStatus(repoPath, number, key, { gh: this.opts.ghPath, fieldName: s.statusFieldName, mapping: s.statusMapping });
   }
 
@@ -1365,7 +1365,7 @@ class AgentManager extends EventEmitter {
     if (c.status !== 'todo') throw new Error('このタスクはもう開始しています');
     this.log(c, 'user', c.prompt, userLogExtra(c.skill, c.attachments, c.attachmentsParsed));
     delete c.attachmentsParsed;
-    if (inSpecCheck(c) && this.store.settings.specCheck === false) c.specState = null; // 作ったあとで設定を切った
+    if (inSpecCheck(c) && this.store.repoSettings(c.repoPath).specCheck === false) c.specState = null; // 作ったあとで設定を切った
     this.enqueue(c, this.firstPrompt(c), c.attachments);
   }
 
@@ -1523,11 +1523,11 @@ class AgentManager extends EventEmitter {
     const top = await git.toplevel(c.repoPath);
     if (!top) throw new Error(`${c.repoPath} は git リポジトリではありません`);
     const reopen = c.reopenBase && (await git.branchExists(top, c.reopenBase)) ? c.reopenBase : null;
-    const base = reopen || this.store.settings.baseBranch || (await git.currentBranch(top));
+    const base = reopen || this.store.repoSettings(c.repoPath).baseBranch || (await git.currentBranch(top));
     if (base === 'HEAD') throw new Error('ベースブランチが決まりません（detached HEAD）。設定でベースブランチを指定してください');
     const baseCommit = await git.revParse(top, base);
     let branch = c.issue ? `agent/issue-${c.issue.number}-${c.id}` : `agent/${slugify(c.title)}-${c.id}`;
-    const rule = String(this.store.settings.branchNamingRule || '').trim();
+    const rule = String(this.store.repoSettings(c.repoPath).branchNamingRule || '').trim();
     if (rule) {
       // 続きのときは前と同じ名前から番号を付けていく
       const prev = c.reopenFrom !== undefined && c.namedBranch ? c.namedBranch : null;
@@ -1745,9 +1745,10 @@ class AgentManager extends EventEmitter {
     } else if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
     const cwd = inFolder ? c.repoPath : c.worktreePath;
     const s = this.store.settings;
+    const rs = this.store.repoSettings(c.repoPath); // 権限モード・許可しておくツールは、そのタスクのプロジェクトの設定
     const agent = agentOf(c);
     const label = agentLabel(agent);
-    const mode = afterDone ? 'plan' : chat ? this.chatPermissionMode(s.permissionMode) : s.permissionMode;
+    const mode = afterDone ? 'plan' : chat ? this.chatPermissionMode(rs.permissionMode) : rs.permissionMode;
     let args;
     if (agent === 'claude') {
       // stdin を開いたままにして、実行中でもメッセージ（btw）を送れるようにする
@@ -1755,7 +1756,7 @@ class AgentManager extends EventEmitter {
       if (mode) args.push('--permission-mode', mode);
       const model = modelOf(c, s);
       if (model) args.push('--model', model);
-      const allowed = splitList(s.allowedTools);
+      const allowed = splitList(rs.allowedTools);
       if (allowed.length) args.push('--allowedTools', ...allowed);
       const mcpConfig = this.writeMcpConfig(c, wsl.parseWslPath(cwd)?.distro);
       if (mcpConfig) args.push('--mcp-config', mcpConfig, '--permission-prompt-tool', PERMISSION_TOOL);
