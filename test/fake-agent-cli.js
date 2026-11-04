@@ -32,7 +32,7 @@ process.stdin.on('end', () => {
     process.exit(0);
   }
   const file = `${kind}-${Date.now()}-${process.pid}.txt`;
-  const fail = prompt.startsWith('[fail]'); // 先頭にあるときだけ（リレーの次の工程の指示には元の指示が入るので）
+  const fail = prompt.startsWith('[fail]'); // 先頭にあるときだけ（Pipelineの次の工程の指示には元の指示が入るので）
   const ask = prompt.includes('[q]');
   if (kind === 'codex') {
     // codex exec [resume] --json ... [SESSION_ID] -

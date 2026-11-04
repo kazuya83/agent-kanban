@@ -1,4 +1,4 @@
-// Claude Code 以外のエージェント（Codex / Gemini）と、オーケストレーション（リレー・競争）
+// Claude Code 以外のエージェント（Codex / Gemini）と、オーケストレーション（Pipeline・競争）
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -132,14 +132,14 @@ test('Gemini のタスク: 失敗はエラー列に、見つからないとわ�
   assert.match(d.error, /gemini コマンドが見つかりません/);
 });
 
-test('リレー: Codex で実装 → Claude でレビューと、同じ worktree で順番に引き継ぐ', async () => {
+test('Pipeline: Codex で実装 → Claude でレビューと、同じ worktree で順番に引き継ぐ', async () => {
   const { agents, store } = setup();
   store.settings.relaySteps = [
     { agent: 'codex', label: '実装', instruction: '実装して' },
     { agent: 'gemini', label: 'テスト', instruction: 'テストして' },
     { agent: 'claude', label: 'レビュー', instruction: 'レビューして' },
   ];
-  const [c] = agents.createTask({ title: 'relay', prompt: 'リレーのタスク', agent: 'relay' });
+  const [c] = agents.createTask({ title: 'relay', prompt: 'Pipelineのタスク', agent: 'relay' });
   assert.strictEqual(c.agent, 'codex');
   agents.start(c.id);
   const wt = await waitFor(() => c.worktreePath);
@@ -154,7 +154,7 @@ test('リレー: Codex で実装 → Claude でレビューと、同じ worktree
     assert.strictEqual(typeof h.costUsd, 'number');
   }
   assert.ok(c.relay.stepStartedAt >= c.relay.history[1].at, '今の工程の開始時刻');
-  // レビュー待ちの通知はリレーが終わったときの1回だけ
+  // レビュー待ちの通知はPipelineが終わったときの1回だけ
   assert.strictEqual(store.notifications.filter((n) => n.cardId === c.id && n.kind === 'review').length, 1);
   // 3つの工程の変更がすべてブランチに入っている
   const diff = await agents.diff(c.id);
@@ -164,13 +164,13 @@ test('リレー: Codex で実装 → Claude でレビューと、同じ worktree
   assert.match(diff, /工程 3\/3「レビュー」/);
   assert.match(c.sessionId, /^sess-new-/);
   assert.deepStrictEqual(c.sessions.map((x) => x.agent), ['codex', 'gemini', 'claude']);
-  // リレーが終わったあとの追加指示は、最後の工程のエージェント（Claude）が続ける
+  // Pipelineが終わったあとの追加指示は、最後の工程のエージェント（Claude）が続ける
   agents.send(c.id, '追加');
   await waitFor(() => c.status === 'review' && c.logs.filter((l) => l.kind === 'result').length === 4);
   assert.strictEqual(c.relay.index, 2);
 });
 
-test('リレー: 途中の工程が失敗したら止まり、追加指示で直すと続きの工程へ進む', async () => {
+test('Pipeline: 途中の工程が失敗したら止まり、追加指示で直すと続きの工程へ進む', async () => {
   const { agents, store } = setup();
   store.settings.relaySteps = [
     { agent: 'codex', label: '実装', instruction: '' },
@@ -233,7 +233,7 @@ test('競争: エージェントが2つ未満ならエラー。Issue からも�
   assert.ok(cards.every((c) => c.issue.number === 5));
 });
 
-test('使うエージェント: チェックを付けていないエージェントでは、タスク・会話・リレー・競争を作れない', async () => {
+test('使うエージェント: チェックを付けていないエージェントでは、タスク・会話・Pipeline・競争を作れない', async () => {
   const { agents, store } = setup();
   store.settings.enabledAgents = ['claude', 'codex'];
   assert.throws(() => agents.createTask({ prompt: 'x', agent: 'gemini' }), /使わない設定/);
@@ -255,28 +255,28 @@ test('使うエージェント: チェックを付けていないエージェン
   assert.strictEqual(agents.createChat({ message: 'y' }).agent, 'codex');
 });
 
-test('リレーと競争は排他: 設定で選んだ方だけ使え、もう片方ではタスクを作れない', async () => {
+test('Pipelineと競争は排他: 設定で選んだ方だけ使え、もう片方ではタスクを作れない', async () => {
   const { agents, store } = setup();
   store.settings.relaySteps = [{ agent: 'codex', label: '実装', instruction: '' }];
   store.settings.competeAgents = ['claude', 'codex'];
-  // 初期値はリレー
+  // 初期値はPipeline
   assert.strictEqual(store.settings.orchestration, 'relay');
   assert.strictEqual(agents.createTask({ prompt: 'x', agent: 'relay' }).length, 1);
   assert.throws(() => agents.createTask({ prompt: 'x', agent: 'compete' }), /競争は使わない設定/);
-  // 競争に切り替えると、リレーは使えない
+  // 競争に切り替えると、Pipelineは使えない
   store.settings.orchestration = 'compete';
   assert.strictEqual(agents.createTask({ prompt: 'x', agent: 'compete' }).length, 2);
-  assert.throws(() => agents.createTask({ prompt: 'x', agent: 'relay' }), /リレーは使わない設定/);
+  assert.throws(() => agents.createTask({ prompt: 'x', agent: 'relay' }), /Pipelineは使わない設定/);
   // 1つのエージェントのタスクは、どちらを選んでいても作れる
   assert.strictEqual(agents.createTask({ prompt: 'x', agent: 'claude' })[0].agent, 'claude');
-  // 知らない値はリレーに直す
+  // 知らない値はPipelineに直す
   const s1 = { orchestration: 'both', enabledAgents: ['claude'] };
   migrateSettings(s1, s1, []);
   assert.strictEqual(s1.orchestration, 'relay');
   assert.strictEqual(providers.cleanOrchestration('compete'), 'compete');
 });
 
-test('使うエージェント: 前のバージョンの設定は、使っていたエージェントにチェックを付け、最初のエージェントからリレー・競争を外す', () => {
+test('使うエージェント: 前のバージョンの設定は、使っていたエージェントにチェックを付け、最初のエージェントからPipeline・競争を外す', () => {
   const s1 = { defaultAgent: 'relay', relaySteps: [{ agent: 'codex', label: 'a', instruction: '' }], competeAgents: ['claude', 'gemini'] };
   migrateSettings(s1, { defaultAgent: 'relay' }, []);
   assert.deepStrictEqual(s1.enabledAgents, ['claude', 'codex']);

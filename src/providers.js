@@ -202,7 +202,7 @@ function createParser(a, opts = {}) {
 
 // ---------- オーケストレーション ----------
 
-// リレー（順番に引き継ぐ）の工程の初期値
+// Pipeline（順番に引き継ぐ）の工程の初期値
 const DEFAULT_RELAY_STEPS = [
   { agent: 'codex', label: '実装', instruction: 'タスクの指示に沿って実装してください。必要ならテストも追加・実行してください。' },
   {
@@ -214,13 +214,13 @@ const DEFAULT_RELAY_STEPS = [
 // 競争（同じタスクを複数のエージェントで並列に解く）の初期値
 const DEFAULT_COMPETE_AGENTS = ['claude', 'codex'];
 
-// リレーと競争は排他。設定でどちらか1つだけを使う（'relay' / 'compete'。ほかの値はリレー）
+// Pipelineと競争は排他。設定でどちらか1つだけを使う（'relay' / 'compete'。ほかの値はPipeline）
 const ORCHESTRATIONS = ['relay', 'compete'];
 function cleanOrchestration(v) {
   return ORCHESTRATIONS.includes(v) ? v : 'relay';
 }
 
-// 設定から読んだリレーの工程を整える（知らないエージェント・空の工程は落とす）
+// 設定から読んだPipelineの工程を整える（知らないエージェント・空の工程は落とす）
 function cleanRelaySteps(steps) {
   if (!Array.isArray(steps)) return [];
   return steps
@@ -240,7 +240,7 @@ function cleanCompeteAgents(list) {
 }
 
 // ---------- 使うエージェント ----------
-// 設定でチェックを付けたエージェントだけを、タスク・会話・リレー・競争で選べるようにする（1つは必ず残す）
+// 設定でチェックを付けたエージェントだけを、タスク・会話・Pipeline・競争で選べるようにする（1つは必ず残す）
 const DEFAULT_ENABLED_AGENTS = ['claude'];
 function cleanEnabledAgents(list) {
   const out = cleanCompeteAgents(list).sort((a, b) => AGENT_IDS.indexOf(a) - AGENT_IDS.indexOf(b));

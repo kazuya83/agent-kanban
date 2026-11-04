@@ -18,7 +18,7 @@ const PERMISSION_MODES = [
   ['bypassPermissions', 'すべて自動で許可する（注意）'],
 ];
 
-// エージェント（Claude Code / Codex CLI / Gemini CLI）と、オーケストレーション（リレー・競争）
+// エージェント（Claude Code / Codex CLI / Gemini CLI）と、オーケストレーション（Pipeline・競争）
 const AGENTS = [
   ['claude', 'Claude Code', 'Claude'],
   ['codex', 'Codex CLI', 'Codex'],
@@ -338,10 +338,10 @@ function cardHtml(c) {
     </div>`;
 }
 
-// カードに出すエージェント・リレー・競争の印
+// カードに出すエージェント・Pipeline・競争の印
 function orchChipsHtml(c) {
   const chips = [];
-  if (c.relay) chips.push(`<span class="orch-chip relay" title="リレー: 工程ごとに別のエージェントへ順番に引き継ぎます">🔁 ${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${esc(agentShort(agentOf(c)))}</span>`);
+  if (c.relay) chips.push(`<span class="orch-chip relay" title="Pipeline: 工程ごとに別のエージェントへ順番に引き継ぎます">🔁 ${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${esc(agentShort(agentOf(c)))}</span>`);
   else if (agentOf(c) !== 'claude') chips.push(`<span class="orch-chip agent">🤖 ${esc(agentLabel(agentOf(c)))}</span>`);
   if (c.compete) {
     const n = competitors(c).length;
@@ -561,7 +561,7 @@ function closeDetail() {
   renderBoard();
 }
 
-// リレーの工程の状態（ワークフロー表示用）
+// Pipelineの工程の状態（ワークフロー表示用）
 const RELAY_STATE = {
   pending: ['・', '待ち'],
   queued: ['…', '待機中'],
@@ -601,7 +601,7 @@ function relayBarHtml(c) {
   return `<div class="relay-bar">${segs.join('')}</div>`;
 }
 
-// 詳細: リレーの工程をワークフローの形で見せる（状態・エージェント・時間・金額・前の工程の報告）
+// 詳細: Pipelineの工程をワークフローの形で見せる（状態・エージェント・時間・金額・前の工程の報告）
 function relayFlowHtml(c) {
   if (!c.relay || isChat(c)) return '';
   const r = c.relay;
@@ -635,7 +635,7 @@ function relayFlowHtml(c) {
       </div>
     </li>`;
   });
-  return `<div class="relay-flow"><div class="rf-title">🔁 リレー <span class="muted small">${doneN}/${r.steps.length} 工程が完了</span></div><ol class="rf-list">${nodes.join('')}</ol></div>`;
+  return `<div class="relay-flow"><div class="rf-title">🔁 Pipeline <span class="muted small">${doneN}/${r.steps.length} 工程が完了</span></div><ol class="rf-list">${nodes.join('')}</ol></div>`;
 }
 
 // 詳細: 競争の候補（同じタスクをほかのエージェントで解いたもの）
@@ -1304,11 +1304,11 @@ function agentLimitHint(a) {
   return a === 'claude' ? '' : `${agentLabel(a)} は CLI の作りの都合で、カードでの承認・選択肢の質問・btw（実行中のメッセージ）・既存の会話の引き継ぎに対応していません。権限は設定の権限モードに合わせて CLI 側で許可します。`;
 }
 
-// リレーと競争は排他。設定で選んだ方だけを使える（'relay' / 'compete'）
+// Pipelineと競争は排他。設定で選んだ方だけを使える（'relay' / 'compete'）
 function orchestrationOf(s) {
   return s && s.orchestration === 'compete' ? 'compete' : 'relay';
 }
-// タスクを動かすエージェントを選ぶ欄（単独のエージェント / リレーか競争の、設定で選んだ方）。使う設定のエージェントだけ出す
+// タスクを動かすエージェントを選ぶ欄（単独のエージェント / Pipelineか競争の、設定で選んだ方）。使う設定のエージェントだけ出す
 // orchestration: false なら、1つのエージェントだけを選ぶ（会話など）
 function agentFieldHtml(idp, value, { orchestration = true } = {}) {
   const s = state.board.settings;
@@ -1326,7 +1326,7 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
       <optgroup label="1つのエージェントで動かす">${single}</optgroup>
       <optgroup label="オーケストレーション">
         ${orchestrationOf(s) === 'relay'
-          ? opt('relay', `🔁 リレー: ${stepsLabel}${relayOff ? '（⚙ 設定で工程のエージェントを使う設定にしてください）' : ''}`, relayOff)
+          ? opt('relay', `🔁 Pipeline: ${stepsLabel}${relayOff ? '（⚙ 設定で工程のエージェントを使う設定にしてください）' : ''}`, relayOff)
           : opt('compete', comp.length >= 2 ? `🏁 競争: ${comp.map(agentShort).join('・')} で同じタスクを解いて比べる` : '🏁 競争（⚙ 設定で使うエージェントを2つ以上選んでください）', comp.length < 2)}
       </optgroup>
     </select>
@@ -1841,7 +1841,7 @@ async function openSettings() {
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上の 🔔）</label>
      <h3 class="s-section">使うエージェント</h3>
-     <small class="muted s-note">チェックを付けたエージェントだけ、コマンドとモデルを設定でき、タスク・会話・リレー・競争で選べます（1つ以上）。</small>
+     <small class="muted s-note">チェックを付けたエージェントだけ、コマンドとモデルを設定でき、タスク・会話・Pipeline・競争で選べます（1つ以上）。</small>
      ${agentConfigHtml('claude', s, `
        <div class="row">
          <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath || 'claude')}" /></label>
@@ -1869,16 +1869,16 @@ async function openSettings() {
      <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可）。</small>
      <label class="field"><span>新しいタスク・会話で最初から選んでおくエージェント</span>
        <select id="sDefaultAgent"></select>
-       <small>リレー・競争（設定で選んだ方）は、タスクを作るときに「エージェント」の欄で選べます。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
+       <small>Pipeline・競争（設定で選んだ方）は、タスクを作るときに「エージェント」の欄で選べます。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
 
      <h3 class="s-section">オーケストレーション</h3>
-     <div class="field"><span>使うオーケストレーション（リレーと競争は、どちらか1つだけ使えます）</span>
+     <div class="field"><span>使うオーケストレーション（Pipelineと競争は、どちらか1つだけ使えます）</span>
        <div class="check-row">
-         <label class="check"><input type="radio" name="sOrch" value="relay" ${orchestrationOf(s) === 'relay' ? 'checked' : ''} /> 🔁 リレー</label>
+         <label class="check"><input type="radio" name="sOrch" value="relay" ${orchestrationOf(s) === 'relay' ? 'checked' : ''} /> 🔁 Pipeline</label>
          <label class="check"><input type="radio" name="sOrch" value="compete" ${orchestrationOf(s) === 'compete' ? 'checked' : ''} /> 🏁 競争</label>
        </div>
        <small>選んだ方だけ、タスクを作るときに「エージェント」の欄で選べます。</small></div>
-     <div class="field" id="sRelayField"><span>🔁 リレーの工程（上から順に、同じ worktree で引き継ぎます）</span>
+     <div class="field" id="sRelayField"><span>🔁 Pipelineの工程（上から順に、同じ worktree で引き継ぎます）</span>
        <div id="sRelay" class="relay-edit"></div>
        <button class="btn small" id="sRelayAdd" type="button">＋ 工程を足す</button>
        <small>工程ごとにエージェントと担当の説明を決めます。前の工程の変更はコミットしてから、最後の報告と一緒に次の工程へ渡します。</small></div>
@@ -1991,7 +1991,7 @@ async function openSettings() {
         if (!on.length) return toast('使うエージェントを1つ以上選んでください');
         const steps = readRelay();
         const offStep = steps.find((st) => (st.label || st.instruction) && !on.includes(st.agent));
-        if (offStep && orch() === 'relay' && !confirm(`リレーの工程「${offStep.label || '（名前なし）'}」の ${agentLabel(offStep.agent)} は使わない設定です。このままだとリレーを始められません。保存しますか？`)) return;
+        if (offStep && orch() === 'relay' && !confirm(`Pipelineの工程「${offStep.label || '（名前なし）'}」の ${agentLabel(offStep.agent)} は使わない設定です。このままだとPipelineを始められません。保存しますか？`)) return;
         const r = await runBusy('設定を保存しています…', () =>
           api.updateSettings({
             baseBranch: $('sBase').value,

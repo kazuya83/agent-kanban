@@ -232,7 +232,7 @@ app.whenReady().then(async () => {
     notifyBoard();
     return store.settings;
   });
-  // agent: claude / codex / gemini / relay（リレー） / compete（競争。カードが複数できる）。返すのは最初のカードの ID
+  // agent: claude / codex / gemini / relay（Pipeline） / compete（競争。カードが複数できる）。返すのは最初のカードの ID
   // fromChat: 会話の続きとしてタスクを作るときの、元の会話のカードの ID
   handle('card:create', ({ title, prompt, autoStart, session, skill, agent, fromChat }) => {
     const cards = agents.createTask({ title, prompt, session, skill, agent, fromChat });
