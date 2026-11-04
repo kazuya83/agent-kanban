@@ -645,9 +645,17 @@ function renderChatBtn() {
 }
 
 // 開いている会話に返事が来ていたら、読んだことにする
+// 既読にできなかった会話（遠隔の接続先のアプリが古いなど）。既読はおまけなので、
+// エラーにはせず一度だけ知らせ、画面が描き直されるたびに試し直さない
+const markSeenFailed = new Set();
 function markSeenIfOpen() {
   const c = card(state.selected);
-  if (c && isChat(c) && c.unread && c.status !== 'running' && c.status !== 'queued' && !document.hidden) run(() => api.markSeen(c.id));
+  if (!c || !isChat(c) || !c.unread || c.status === 'running' || c.status === 'queued' || document.hidden) return;
+  if (markSeenFailed.has(c.id)) return;
+  api.markSeen(c.id).catch(() => {
+    markSeenFailed.add(c.id);
+    toast('この会話は既読にできませんでした（接続先のアプリが古いと、遠隔からは既読にできません）', 'info');
+  });
 }
 document.addEventListener('visibilitychange', markSeenIfOpen);
 
