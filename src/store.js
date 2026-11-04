@@ -78,6 +78,12 @@ const DEFAULT_SETTINGS = {
   remoteClientHost: '127.0.0.1', // 接続先（トンネル後は通常 127.0.0.1）
   remoteClientPort: 17831,
   remoteClientToken: '', // ペアリング後に保存するトークン（クライアント側）
+  remoteClientMode: 'ssh', // 'ssh' = アプリが SSH トンネルを張る / 'direct' = 自分で張ったトンネルなどへ直接つなぐ
+  remoteSshHost: '', // SSH の接続先（Tailscale の IP やホスト名）
+  remoteSshUser: '', // SSH のユーザー名（Mac のログイン名）
+  remoteSshPort: 22,
+  remoteSshKey: '', // 鍵ファイル（空なら ssh の既定）
+  remoteSshPath: 'ssh', // ssh コマンド
   claudeRemoteControl: false, // Claude カード起動時に公式 Remote Control（--remote-control）も付ける
 };
 
