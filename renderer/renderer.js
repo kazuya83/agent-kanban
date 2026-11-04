@@ -1718,7 +1718,6 @@ async function openSettings() {
        <textarea id="sAllowed" rows="2" placeholder="例: Bash(npm test:*), Bash(git status), WebSearch">${esc(s.allowedTools)}</textarea></label>
      <div class="row">
        <label class="field"><span>同時に動かす数</span><input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
-       <label class="field"><span>モデル（空なら既定）</span><input id="sModel" placeholder="例: sonnet / opus" value="${esc(s.model)}" /></label>
      </div>
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
        <small>「＋ 新しいタスク」と「Issue から作成」を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
@@ -1731,9 +1730,12 @@ async function openSettings() {
        <label class="field"><span>リセット時刻</span><input id="sResetTime" type="time" value="${esc(s.weeklyResetTime || '00:00')}" /></label>
      </div>
      <small class="field-note">Claude の使用状況（/usage）に出る週間上限のリセット日時に合わせます。自動のときは、Claude がリセット日時を知らせてくるまで月曜 0:00 で区切ります。</small>
-     <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath)}" /></label>
 
      <h3 class="s-section">エージェントとオーケストレーション</h3>
+     <div class="row">
+       <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath || 'claude')}" /></label>
+       <label class="field"><span>Claude のモデル（空なら既定）</span><input id="sModel" placeholder="例: sonnet / opus" value="${esc(s.model || '')}" /></label>
+     </div>
      <div class="row">
        <label class="field"><span>codex コマンドのパス</span><input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
        <label class="field"><span>Codex のモデル（空なら既定）</span><input id="sCodexModel" placeholder="例: gpt-5-codex" value="${esc(s.codexModel || '')}" /></label>
@@ -1742,7 +1744,7 @@ async function openSettings() {
        <label class="field"><span>gemini コマンドのパス</span><input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
        <label class="field"><span>Gemini のモデル（空なら既定）</span><input id="sGeminiModel" placeholder="例: gemini-2.5-pro" value="${esc(s.geminiModel || '')}" /></label>
      </div>
-     <small class="muted s-note">Codex / Gemini はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可）。</small>
+     <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可）。</small>
      <label class="field"><span>新しいタスクで最初から選んでおくエージェント</span>
        <select id="sDefaultAgent">${[...AGENTS.map(([a, l]) => [a, l]), ['relay', '🔁 リレー'], ['compete', '🏁 競争']].map(([v, l]) => `<option value="${v}" ${v === (s.defaultAgent || 'claude') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
      <div class="field"><span>🔁 リレーの工程（上から順に、同じ worktree で引き継ぎます）</span>
