@@ -39,3 +39,4 @@ GitHub Actions はテストだけを動かす。**ビルドとリリースは、
 - 公開は外に出る操作なので、`release` は必ずユーザーの OK をもらってから行う
 - バージョンは `scripts/next-version.js` が決める。0.2.0 のように大きく上げたいときは、package.json の version をその番号にして main に入れてから release する
 - `dist/` は毎回消して作り直す
+- main にタスクをマージすると、`.githooks/post-merge` → `scripts/after-merge-build.sh` が、このスキルの `review` を `claude -p` で裏で動かす（`build-apps/<sha>` という worktree の中で動く）。そのときはユーザーに質問できないので、最後まで自分で直す。コミット・マージ・push はスクリプトが行うので、スキルの中ではしない
