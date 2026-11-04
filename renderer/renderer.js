@@ -2590,6 +2590,86 @@ api.appInfo().then(
   });
 })();
 
+// 詳細パネルの3つの段（上: タスクの情報 / 中: タブの中身 / 下: 追加の指示）は、境目をドラッグして高さを変えられる。
+// どの段も「ログ・worktree などのタブ」の高さより低くはできない。高さは保存し、ダブルクリックで元に戻す
+(function setupDetailSplit() {
+  const panel = $('detail');
+  const head = $('detailHead');
+  const foot = $('detailFoot');
+  const tabs = $('tabs');
+  const KEYS = { head: 'detailHeadHeight', foot: 'detailFootHeight' };
+  const els = { head, foot };
+  const h = { head: Number(localStorage.getItem(KEYS.head)) || 0, foot: Number(localStorage.getItem(KEYS.foot)) || 0 };
+  const minH = () => Math.max(24, tabs.offsetHeight);
+  // 上下の段とタブを除いた、3つの段で分け合える高さ
+  const avail = () => panel.clientHeight - tabs.offsetHeight;
+  const cur = (k) => (h[k] > 0 ? h[k] : els[k].offsetHeight);
+  const apply = (k) => {
+    const el = els[k];
+    el.classList.toggle('sized', h[k] > 0);
+    el.style.height = h[k] > 0 ? `${Math.round(h[k])}px` : '';
+  };
+  // k の段を v にしたいとき、ほかの2つの段がタブの高さ以上を保てる範囲に収める
+  const clampFor = (k, v) => {
+    const other = k === 'head' ? 'foot' : 'head';
+    const min = minH();
+    const max = avail() - cur(other) - min;
+    return Math.max(min, Math.min(v, max));
+  };
+  // パネルの高さが変わったら（ウィンドウの大きさ・モーダルとの切り替え）、はみ出さないように縮める
+  const fit = () => {
+    if (panel.classList.contains('hidden') || !panel.clientHeight) return;
+    const min = minH();
+    let over = cur('head') + cur('foot') + min - avail();
+    for (const k of ['foot', 'head']) {
+      if (over <= 0 || !(h[k] > 0)) continue;
+      const cut = Math.min(over, h[k] - min);
+      if (cut > 0) {
+        h[k] -= cut;
+        over -= cut;
+        apply(k);
+      }
+    }
+  };
+  const setup = (handleId, k, dir) => {
+    const handle = $(handleId);
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      handle.classList.add('dragging');
+      document.body.classList.add('resizing-row');
+      const startY = e.clientY;
+      const start = els[k].offsetHeight;
+      const move = (ev) => {
+        h[k] = clampFor(k, start + dir * (ev.clientY - startY));
+        apply(k);
+      };
+      const up = () => {
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', up);
+        handle.removeEventListener('pointercancel', up);
+        handle.classList.remove('dragging');
+        document.body.classList.remove('resizing-row');
+        if (h[k] > 0) localStorage.setItem(KEYS[k], String(Math.round(h[k])));
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', up);
+      handle.addEventListener('pointercancel', up);
+    });
+    handle.addEventListener('dblclick', () => {
+      h[k] = 0;
+      apply(k);
+      localStorage.removeItem(KEYS[k]);
+    });
+  };
+  setup('splitHead', 'head', 1); // 下へ動かすと上の段が高くなる
+  setup('splitFoot', 'foot', -1); // 上へ動かすと下の段が高くなる
+  apply('head');
+  apply('foot');
+  new ResizeObserver(fit).observe(panel);
+})();
+
 (async () => {
   state.board = await api.getBoard();
   renderBoard();
