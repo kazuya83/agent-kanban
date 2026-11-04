@@ -201,6 +201,26 @@ test('Codex の実行中 btw: 今の作業は続け、終わったあとに追�
   }
 });
 
+test('Codex の実行中 btw: 停止したときは予約した btw を送らない', async () => {
+  const { agents, calls } = setup();
+  process.env.FAKE_SLEEP = '3000';
+  try {
+    const [c] = agents.createTask({ title: 'cx-btw-stop', prompt: 'コーデックスで作って', agent: 'codex' });
+    agents.start(c.id);
+    await waitFor(() => c.status === 'running' && !!c.sessionId);
+    agents.btw(c.id, 'テストも書いて');
+    assert.strictEqual(c.btw[0].state, 'follow');
+    agents.stop(c.id);
+    await waitFor(() => c.status === 'review' && c.btw[0].state === 'lost');
+    await new Promise((r) => setTimeout(r, 300));
+    assert.strictEqual(c.status, 'review');
+    assert.strictEqual(calls().filter((x) => x.kind === 'codex').length, 1);
+    assert.ok(c.logs.some((l) => l.kind === 'system' && /送りませんでした/.test(l.text)));
+  } finally {
+    delete process.env.FAKE_SLEEP;
+  }
+});
+
 test('Gemini のタスク: 失敗はエラー列に、見つからないとわかりやすいエラー', async () => {
   const { agents, store } = setup();
   const [c] = agents.createTask({ title: 'gm', prompt: '[fail] ジェミニ', agent: 'gemini' });

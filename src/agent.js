@@ -1219,6 +1219,7 @@ class AgentManager extends EventEmitter {
     c.status = afterDone ? 'done' : 'failed';
     c.error = msg;
     this.log(c, 'error', msg);
+    this.dropFollowBtw(c);
     this.changed(c);
     this.pump();
   }
@@ -1627,11 +1628,13 @@ class AgentManager extends EventEmitter {
             : `${cmd} が終了コード ${code} で終了しました`);
       }
       if (c.status === 'failed') this.notify(c, 'failed', `失敗: ${c.title}`, c.error);
+      // 停止・失敗したときは、予約した btw を勝手に送らない（停止したのにまた動き出さないように）
+      const keepFollow = !c.stopRequested && c.status !== 'failed';
       c.stopRequested = false;
       c.finishedAt = Date.now();
       this.changed(c);
       // Claude 以外で予約した btw は、終わったあとに追加指示として送る
-      if (this.flushFollowBtw(c)) return;
+      if (keepFollow ? this.flushFollowBtw(c) : this.dropFollowBtw(c)) return;
       if (relayNext) return this.advanceRelay(c, relayTo);
       this.checkCompetitionDone(c);
       this.pump();
@@ -1667,10 +1670,11 @@ class AgentManager extends EventEmitter {
       this.log(c, 'error', c.error);
       this.notify(c, 'failed', `失敗: ${c.title}`, c.error);
     }
+    const keepFollow = !c.stopRequested && !c.error;
     c.stopRequested = false;
     c.finishedAt = Date.now();
     this.changed(c);
-    if (this.flushFollowBtw(c)) return;
+    if (keepFollow ? this.flushFollowBtw(c) : this.dropFollowBtw(c)) return;
     this.pump();
   }
 
@@ -1845,6 +1849,19 @@ class AgentManager extends EventEmitter {
     } catch {
       /* もう閉じている */
     }
+  }
+
+  /**
+   * 停止・失敗で終わったときは、予約した btw を送らずに「届かなかった」にする
+   * @returns {false} 何も enqueue しない
+   */
+  dropFollowBtw(c) {
+    const pending = (c.btw || []).filter((m) => m.state === 'follow');
+    if (!pending.length) return false;
+    for (const m of pending) m.state = 'lost';
+    this.log(c, 'system', '停止・失敗したので、btw で予約したメッセージは送りませんでした。続けるときは「追加指示」で送ってください');
+    this.changed(c);
+    return false;
   }
 
   /**
