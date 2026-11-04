@@ -14,6 +14,9 @@ test('遠隔で転送するチャンネルと、しないチャンネル', () =>
   assert.strictEqual(isProxyChannel('repo:choose'), false);
   assert.strictEqual(isProxyChannel('repo:chooseParent'), false);
   assert.strictEqual(isProxyChannel('card:open'), false);
+  // 代わりに、ホストのフォルダを操作側の画面で辿って、パスを指定して開く
+  assert.strictEqual(isProxyChannel('repo:browse'), true);
+  assert.strictEqual(isProxyChannel('repo:open'), true);
   assert.strictEqual(isLocalChannel('remote:connect'), true);
   assert.strictEqual(isLocalChannel('app:info'), true);
   assert.strictEqual(isLocalChannel('repo:choose'), false);

@@ -102,6 +102,26 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .dv-ico .ic { margin-right: 0; }
 .repo { border: 1px dashed var(--line); background: transparent; padding: 4px 10px; border-radius: 8px; cursor: pointer; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repo:hover { border-color: var(--accent); }
+/* 遠隔操作中: ホストのリポジトリだと分かるように、接続先の名前を付けて色を変える */
+.repo.remote { border-style: solid; border-color: color-mix(in srgb, var(--run) 45%, var(--line)); }
+.repo-host { color: var(--run); font-weight: 600; margin-right: 6px; }
+.repo-host::after { content: ':'; }
+/* ホストのフォルダを辿る一覧（遠隔操作中） */
+.dir-browser { display: grid; gap: 8px; }
+.dir-browser-inline { margin: -4px 0 12px; padding: 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; }
+.db-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.db-hidden { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.db-repo-tag { color: var(--ok); font-weight: 600; }
+.db-list { max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.db-list.loading { opacity: 0.5; pointer-events: none; }
+.db-row { display: flex; align-items: center; gap: 6px; padding-right: 6px; border-bottom: 1px solid var(--line); }
+.db-row:last-child { border-bottom: 0; }
+.db-dir { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 6px 10px; background: transparent; border: 0; color: var(--text); text-align: left; cursor: pointer; font-family: var(--mono); font-size: 12px; }
+.db-dir span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-dir:hover { color: var(--accent); }
+.db-row.repo .db-dir { color: var(--ok); }
+.db-empty { margin: 0; padding: 10px; }
+.db-actions { display: flex; justify-content: flex-end; }
 .spacer { flex: 1; }
 .pill { background: var(--panel-2); border: 1px solid var(--line); padding: 3px 10px; border-radius: 999px; color: var(--muted); }
 .pill.cost { font-family: var(--mono); color: var(--text); }

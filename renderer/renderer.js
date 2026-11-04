@@ -427,7 +427,36 @@ function renderCostInfo(settings) {
   if (wait > 0 && wait < 2 ** 31 - 1) weekRollTimer = setTimeout(async () => ((state.board = await api.getBoard()), renderBoard()), wait + 1000);
 }
 
+// 遠隔操作（クライアント）で接続中なら、その接続の情報。ボード・リポジトリ・作業ディレクトリはホストのもの
+function remoteClient() {
+  const rs = state.board.remoteSession;
+  return rs && rs.role === 'client' ? rs.client || {} : null;
+}
+// 接続先のホストの呼び名（SSH なら user@host、直接なら host:port）
+function remoteHostLabel(c = remoteClient()) {
+  if (!c) return '';
+  if (c.mode === 'direct') return `${c.host}:${c.port}`;
+  return c.sshHost ? (c.sshUser ? `${c.sshUser}@${c.sshHost}` : c.sshHost) : 'ホスト';
+}
+
+// 左上のリポジトリ欄。遠隔操作中は、接続先（ホスト）のパスだと分かるように接続先の名前を付ける
+function renderRepoBtn() {
+  const repo = state.board.settings.repoPath || '';
+  const rc = remoteClient();
+  const btn = $('repoBtn');
+  btn.classList.toggle('remote', !!rc);
+  if (rc) {
+    const host = remoteHostLabel(rc);
+    btn.innerHTML = `${icon('monitor')}<span class="repo-host">${esc(host)}</span>${esc(repo || 'ホストのリポジトリを選ぶ')}`;
+    btn.title = repo ? `接続先（${host}）のリポジトリ: ${repo}\nエージェントはホストのこのフォルダで動きます。クリックでホストのリポジトリを切り替えます` : `接続先（${host}）のリポジトリを選びます`;
+  } else {
+    btn.innerHTML = icon('folder') + esc(repo || 'リポジトリを選ぶ');
+    btn.title = repo ? `${repo}\nクリックでリポジトリを切り替えます` : 'リポジトリを選ぶ';
+  }
+}
+
 function renderRemoteInfo() {
+  renderRepoBtn();
   const el = $('remoteInfo');
   const rs = state.board.remoteSession;
   if (!rs || rs.role === 'local') {
@@ -453,7 +482,6 @@ function renderBoard() {
   const { settings, cards } = state.board;
   renderInterruptBanner();
   renderRemoteInfo();
-  $('repoBtn').innerHTML = icon('folder') + esc(settings.repoPath || 'リポジトリを選ぶ');
   // 会話は同時実行数に数えない
   const running = cards.filter((c) => c.status === 'running' && !isChat(c)).length;
   renderCostInfo(settings);
@@ -462,7 +490,9 @@ function renderBoard() {
   $('runInfo').textContent = `実行中 ${running}/${settings.maxParallel || 1}`;
 
   if (!settings.repoPath) {
-    $('board').innerHTML = `<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、エージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ・クローン・新規作成</button></div>`;
+    $('board').innerHTML = remoteClient()
+      ? `<div class="empty-state"><h2>接続先（${esc(remoteHostLabel())}）でリポジトリを選んでください</h2><p>遠隔操作中は、ホストのリポジトリでエージェントが動きます。ホストの最近開いたリポジトリや、ホストのフォルダから選べます。</p><button class="btn primary" id="emptyRepo">ホストのリポジトリを選ぶ</button></div>`
+      : `<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、エージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ・クローン・新規作成</button></div>`;
     $('emptyRepo').onclick = chooseRepo;
     return;
   }
@@ -2482,6 +2512,8 @@ async function openSettings() {
 }
 
 async function pickRepo(opts) {
+  // 遠隔操作中はホストの画面にダイアログが出てしまうので、ホストのフォルダをこの画面で辿って選ぶ
+  if (remoteClient()) return hostFolderModal(opts || {});
   const r = await run(() => api.chooseRepo(opts));
   if (r) {
     closeDetail();
@@ -2526,8 +2558,10 @@ async function chooseRepo() {
   const distros = (await api.wslDistros().catch(() => [])) || [];
   const current = state.board.settings.repoPath || '';
   const recent = (state.board.settings.recentRepoPaths || []).filter((p) => p);
+  const rc = remoteClient();
+  const host = rc ? remoteHostLabel(rc) : '';
   const recentHtml = recent.length
-    ? `<p class="repo-section-label">最近開いたリポジトリ</p>
+    ? `<p class="repo-section-label">${rc ? `ホスト（${esc(host)}）で最近開いたリポジトリ` : '最近開いたリポジトリ'}</p>
        <div class="repo-choices">
          ${recent
            .map((p) => {
@@ -2539,11 +2573,16 @@ async function chooseRepo() {
        <p class="repo-section-label">または新しく開く</p>`
     : '';
   openModal(
-    `<h2>リポジトリを選ぶ</h2>
+    `<h2>${rc ? 'ホストのリポジトリを選ぶ' : 'リポジトリを選ぶ'}</h2>
+     ${rc ? `<p class="muted small">遠隔操作中です。ここで選ぶのは接続先（${esc(host)}）のフォルダで、エージェントもホストのそのフォルダで動きます。</p>` : ''}
      ${distros.length ? `<p class="muted small">選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。</p>` : ''}
      ${recentHtml}
      <div class="repo-choices">
-       <button class="btn repo-choice" data-pick="">${icon(distros.length ? 'monitor' : 'folder')}<b>${distros.length ? 'このパソコンのフォルダを開く' : '手元のフォルダを開く'}</b><small>${distros.length ? 'C:\\Users\\… など' : 'すでにある git リポジトリ'}</small></button>
+       ${
+         rc
+           ? `<button class="btn repo-choice" data-pick="">${icon('monitor')}<b>ホストのフォルダを開く</b><small>${esc(host)} のフォルダを、この画面で辿って選びます</small></button>`
+           : `<button class="btn repo-choice" data-pick="">${icon(distros.length ? 'monitor' : 'folder')}<b>${distros.length ? 'このパソコンのフォルダを開く' : '手元のフォルダを開く'}</b><small>${distros.length ? 'C:\\Users\\… など' : 'すでにある git リポジトリ'}</small></button>`
+       }
        ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">${icon('terminal')}<b>${esc(d)} のフォルダを開く</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}
        <button class="btn repo-choice" id="rpClone">${icon('download')}<b>URL からクローンする</b><small>https://github.com/owner/repo・git@github.com:owner/repo.git・owner/repo</small></button>
        <button class="btn repo-choice" id="rpCreate">${icon('folderPlus')}<b>新しく作る</b><small>空のリポジトリを作ります（GitHub にも作れます）</small></button>
@@ -2570,6 +2609,93 @@ async function chooseRepo() {
   );
 }
 
+// ホストのフォルダを辿る一覧（遠隔操作中に使う。ホストの画面にダイアログを出さないため）
+// el に描く。onPick(dir) は「pickLabel」のボタンで今のフォルダを選んだとき、onOpenRepo(dir) は一覧の git リポジトリの「開く」
+async function mountDirBrowser(el, { start = '', wsl = '', pickLabel = 'このフォルダを選ぶ', onPick, onOpenRepo } = {}) {
+  const st = { hidden: false, listing: null, seq: 0 };
+  const load = async (dir, { first = false } = {}) => {
+    const seq = ++st.seq;
+    el.querySelector('.db-list')?.classList.add('loading');
+    let r;
+    try {
+      r = await api.browseDirs({ path: dir || '', wsl: first && !dir ? wsl : '', showHidden: st.hidden });
+    } catch (err) {
+      if (seq !== st.seq) return;
+      el.querySelector('.db-list')?.classList.remove('loading');
+      toast(err.message);
+      // 最初に開けなかったときは、ホームから見せる
+      if (first && dir) return load('');
+      return;
+    }
+    if (seq !== st.seq || !el.isConnected) return;
+    st.listing = r;
+    draw();
+  };
+  const draw = () => {
+    const r = st.listing;
+    el.innerHTML = `<div class="dir-browser">
+      <div class="input-row"><input class="mono db-path" spellcheck="false" autocomplete="off" value="${esc(r.path)}" title="パスを入れて Enter で移動します" /><button class="btn db-go">移動</button></div>
+      <div class="db-tools">
+        <button class="btn ghost small db-up" ${r.parent ? '' : 'disabled'}>↑ 上のフォルダ</button>
+        <button class="btn ghost small db-home">ホーム</button>
+        <label class="db-hidden"><input type="checkbox" ${st.hidden ? 'checked' : ''} /> 隠しフォルダも出す</label>
+        ${r.repo ? '<span class="db-repo-tag">git リポジトリ</span>' : ''}
+      </div>
+      <div class="db-list">
+        ${
+          r.dirs.length
+            ? r.dirs
+                .map(
+                  (d) => `<div class="db-row${d.repo ? ' repo' : ''}"><button class="db-dir" data-dir="${esc(d.path)}">${icon(d.repo ? 'branch' : 'folder')}<span>${esc(d.name)}</span></button>${d.repo && onOpenRepo ? `<button class="btn small db-open" data-open="${esc(d.path)}">開く</button>` : ''}</div>`,
+                )
+                .join('')
+            : '<p class="muted small db-empty">この中にフォルダはありません</p>'
+        }
+        ${r.truncated ? '<p class="muted small db-empty">フォルダが多いので、先頭の分だけ出しています。パスを入れて移動してください</p>' : ''}
+      </div>
+      ${onPick ? `<div class="db-actions"><button class="btn primary db-pick">${esc(pickLabel)}</button></div>` : ''}
+    </div>`;
+    const input = el.querySelector('.db-path');
+    el.querySelector('.db-go').onclick = () => load(input.value.trim());
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        load(input.value.trim());
+      }
+    };
+    el.querySelector('.db-up').onclick = () => r.parent && load(r.parent);
+    el.querySelector('.db-home').onclick = () => load(r.home || '');
+    el.querySelector('.db-hidden input').onchange = (e) => ((st.hidden = e.target.checked), load(r.path));
+    el.querySelectorAll('[data-dir]').forEach((b) => (b.onclick = () => load(b.dataset.dir)));
+    el.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => onOpenRepo(b.dataset.open)));
+    const pick = el.querySelector('.db-pick');
+    if (pick) pick.onclick = () => onPick(r.path);
+  };
+  el.innerHTML = '<p class="muted small">ホストのフォルダを読み込んでいます…</p>';
+  await load(start, { first: true });
+}
+
+// 遠隔操作中に、ホストのフォルダを辿って git リポジトリを開く画面
+function hostFolderModal(opts = {}) {
+  const host = remoteHostLabel();
+  openModal(
+    `<h2>ホストのフォルダを開く</h2>
+     <p class="muted small">接続先（${esc(host)}）のフォルダです。git リポジトリのフォルダまで移動して「このフォルダを開く」を押すか、一覧の「開く」を押します。</p>
+     <div id="hfBrowser"></div>
+     <div class="modal-actions"><button class="btn ghost" id="hfBack">戻る</button></div>`,
+    () => {
+      $('hfBack').onclick = () => chooseRepo();
+      mountDirBrowser($('hfBrowser'), {
+        start: '',
+        wsl: opts.wsl || '',
+        pickLabel: 'このフォルダを開く',
+        onPick: (dir) => openRecentRepo(dir),
+        onOpenRepo: (dir) => openRecentRepo(dir),
+      });
+    },
+  );
+}
+
 // URL から推測するフォルダ名（https://github.com/owner/repo.git → repo）
 function repoNameFromUrl(url) {
   const last = String(url || '').trim().replace(/[\\/]+$/, '').split(/[/:]/).pop() || '';
@@ -2585,6 +2711,7 @@ async function repoSetupModal(mode, distros = []) {
      ${distros.length ? `<label class="field"><span>作る場所</span><select id="rsWhere"><option value="">このパソコン</option>${distros.map((d) => `<option value="${esc(d)}">${esc(d)}（WSL）</option>`).join('')}</select></label>` : ''}
      <label class="field"><span>置き場所（この中にフォルダを作ります）</span>
        <div class="input-row"><input id="rsParent" class="mono" spellcheck="false" /><button class="btn" id="rsBrowse">選ぶ…</button></div></label>
+     <div id="rsHostBrowser" class="dir-browser-inline hidden"></div>
      <label class="field"><span>フォルダ名${clone ? '（空なら URL から決めます）' : ''}</span><input id="rsName" class="mono" spellcheck="false" autocomplete="off" placeholder="${clone ? 'repo' : '例: my-app'}" /></label>
      ${clone ? '' : `<label class="field" id="rsGhWrap"><span>GitHub</span><select id="rsGh"><option value="">作らない（手元だけ）</option><option value="private">GitHub にも作る（非公開）</option><option value="public">GitHub にも作る（公開）</option></select><small>GitHub にも作るときは、gh（GitHub CLI）にログインしている必要があります</small></label>`}
      <p class="muted small" id="rsPreview"></p>
@@ -2605,6 +2732,23 @@ async function repoSetupModal(mode, distros = []) {
       };
       $('rsBack').onclick = () => chooseRepo();
       $('rsBrowse').onclick = async () => {
+        // 遠隔操作中は、ホストのフォルダをこの画面で辿って選ぶ
+        if (remoteClient()) {
+          const box = $('rsHostBrowser');
+          if (!box.classList.contains('hidden')) return box.classList.add('hidden');
+          box.classList.remove('hidden');
+          mountDirBrowser(box, {
+            start: $('rsParent').value.trim(),
+            wsl: where(),
+            pickLabel: 'ここを置き場所にする',
+            onPick: (dir) => {
+              $('rsParent').value = dir;
+              box.classList.add('hidden');
+              preview();
+            },
+          });
+          return;
+        }
         const p = await run(() => api.chooseRepoParent({ defaultPath: $('rsParent').value.trim() || undefined }));
         if (p) $('rsParent').value = p;
         preview();

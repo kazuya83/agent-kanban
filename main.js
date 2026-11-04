@@ -11,6 +11,7 @@ const providers = require('./src/providers');
 const { RemoteHost, RemoteClient, DEFAULT_PORT, isProxyChannel, isLocalChannel } = require('./src/remote');
 const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
 const sshKey = require('./src/ssh-key');
+const dirBrowse = require('./src/dir-browse');
 const fs = require('fs');
 
 // Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
@@ -467,6 +468,20 @@ app.whenReady().then(async () => {
   handle('repo:open', async ({ path: dir } = {}) => {
     const picked = String(dir || '').trim();
     return openRepo(await resolveRepoDir(picked, { forgetOnMissing: true }));
+  });
+  // フォルダの中のフォルダを返す。遠隔操作中に、ホストのフォルダを操作側の画面で辿って選ぶのに使う
+  // path が空なら、今のリポジトリの親（WSL を選んだときはその中のホーム）→ ホームから始める
+  handle('repo:browse', async ({ path: dir, wsl: distro, showHidden } = {}) => {
+    let start = String(dir || '').trim();
+    if (!start && distro) {
+      const home = await wsl.homeDir(distro);
+      start = wsl.toUnc(distro, home || '/');
+    }
+    if (!start) {
+      const cur = store.settings.repoPath;
+      start = cur && fs.existsSync(cur) ? (wsl.isWslPath(cur) ? path.win32 : path).dirname(cur) : app.getPath('home');
+    }
+    return { ...dirBrowse.listDirs(start, { showHidden: !!showHidden }), home: app.getPath('home') };
   });
   const openRepo = (dir) => {
     store.settings.repoPath = dir;

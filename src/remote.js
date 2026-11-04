@@ -78,7 +78,10 @@ const PROXY_CHANNELS = new Set([
   'board:get',
   'env:check',
   'wsl:distros',
-  // repo:choose / repo:chooseParent はホストの画面にダイアログが出て、操作側からは閉じられないので転送しない
+  // repo:choose / repo:chooseParent はホストの画面にダイアログが出て、操作側からは閉じられないので転送しない。
+  // 代わりに、ホストのフォルダを操作側の画面で辿る repo:browse と、パスを指定して開く repo:open を転送する
+  'repo:open',
+  'repo:browse',
   'repo:defaultParent',
   'repo:clone',
   'repo:create',
