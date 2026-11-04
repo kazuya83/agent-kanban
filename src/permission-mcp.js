@@ -10,7 +10,7 @@ const CARD = process.env.KANBAN_CARD || '';
 
 const TOOL = {
   name: 'approve',
-  description: 'Ask the human operator on the Claude Agent Kanban board to approve or deny a tool call.',
+  description: 'Ask the human operator on the Agent Kanban board to approve or deny a tool call.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -84,7 +84,7 @@ async function handle(msg) {
     try {
       decision = await ask((params && params.arguments) || {});
     } catch (err) {
-      decision = { behavior: 'deny', message: `Claude Agent Kanban に接続できなかったため拒否しました: ${err.message}` };
+      decision = { behavior: 'deny', message: `Agent Kanban に接続できなかったため拒否しました: ${err.message}` };
     }
     return send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(decision) }] } });
   }

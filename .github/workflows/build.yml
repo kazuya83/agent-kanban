@@ -91,11 +91,11 @@ jobs:
           npm install --no-save playwright-core@1.48.2
           if [ "$RUNNER_OS" = "macOS" ]; then
             ls dist
-            APP=$(ls -d dist/mac*/"Claude Agent Kanban.app" | head -n1)
+            APP=$(ls -d dist/mac*/"Agent Kanban.app" | head -n1)
             codesign -dv --verbose=2 "$APP" 2>&1 | head -12 || true
-            node test/smoke-packaged.js "$APP/Contents/MacOS/Claude Agent Kanban" smoke-built.png
+            node test/smoke-packaged.js "$APP/Contents/MacOS/Agent Kanban" smoke-built.png
           else
-            node test/smoke-packaged.js "dist/win-unpacked/Claude Agent Kanban.exe" smoke-built.png
+            node test/smoke-packaged.js "dist/win-unpacked/Agent Kanban.exe" smoke-built.png
           fi
       - uses: actions/upload-artifact@v7
         if: always() && runner.os != 'Linux'
@@ -105,7 +105,7 @@ jobs:
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v7
         with:
-          name: claude-agent-kanban-${{ runner.os }}
+          name: agent-kanban-${{ runner.os }}
           path: |
             dist/*.exe
             dist/*.zip
@@ -127,7 +127,7 @@ jobs:
         with:
           tag_name: v${{ needs.test.outputs.version }}
           target_commitish: ${{ github.sha }}
-          name: Claude Agent Kanban v${{ needs.test.outputs.version }}
+          name: Agent Kanban v${{ needs.test.outputs.version }}
           generate_release_notes: true
           files: |
             dist/*.exe
@@ -155,27 +155,27 @@ jobs:
           # Same as a user would run: curl ... | bash  (pinned to this commit)
           curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/install.sh" | /bin/bash
           if [ "$RUNNER_OS" = "macOS" ]; then
-            APP="/Applications/Claude Agent Kanban.app"
-            [ -d "$APP" ] || APP="$HOME/Applications/Claude Agent Kanban.app"
+            APP="/Applications/Agent Kanban.app"
+            [ -d "$APP" ] || APP="$HOME/Applications/Agent Kanban.app"
             test -d "$APP"
             # ユーザーと同じく、インストールしたアプリを起動して画面を確かめる
             npm install --prefix /tmp/pw --no-save --no-package-lock playwright-core@1.48.2 >/dev/null
             ls -la "$APP/Contents/Resources" | head
-            NODE_PATH=/tmp/pw/node_modules node test/smoke-packaged.js "$APP/Contents/MacOS/Claude Agent Kanban" smoke-installed.png
+            NODE_PATH=/tmp/pw/node_modules node test/smoke-packaged.js "$APP/Contents/MacOS/Agent Kanban" smoke-installed.png
             # 起動したまま更新しても、アプリを終了してから入れ替え、起動し直すこと（入れ替えると古いプロセスの画面が壊れるため）
             open -a "$APP"
-            for _ in $(seq 1 20); do pgrep -x "Claude Agent Kanban" >/dev/null && break; sleep 1; done
-            before=$(pgrep -x "Claude Agent Kanban" | head -n1)
+            for _ in $(seq 1 20); do pgrep -x "Agent Kanban" >/dev/null && break; sleep 1; done
+            before=$(pgrep -x "Agent Kanban" | head -n1)
             echo "running before update: pid $before"
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/install.sh" | /bin/bash
             sleep 8
-            after=$(pgrep -x "Claude Agent Kanban" | head -n1 || true)
+            after=$(pgrep -x "Agent Kanban" | head -n1 || true)
             echo "running after update: pid $after"
             test -n "$before" && test -n "$after" && test "$before" != "$after"
-            osascript -e 'tell application "Claude Agent Kanban" to quit' || true
+            osascript -e 'tell application "Agent Kanban" to quit' || true
             sleep 3
           else
-            test -x "$HOME/.local/bin/claude-agent-kanban"
+            test -x "$HOME/.local/bin/agent-kanban"
           fi
           /bin/bash ./install.sh --uninstall
       - name: install.ps1（Windows）
@@ -187,11 +187,11 @@ jobs:
           $PSVersionTable.PSVersion
           # Same as a user would run: irm <raw url> | iex  (pinned to this commit)
           irm "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/install.ps1" | iex
-          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter 'Claude Agent Kanban.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter 'Agent Kanban.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $exe) { throw 'installed exe not found' }
           Write-Host "OK: $($exe.FullName)"
-          if (-not (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Claude Agent Kanban.lnk'))) { throw 'start menu shortcut not found' }
+          if (-not (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Agent Kanban.lnk'))) { throw 'start menu shortcut not found' }
           $env:AGENT_KANBAN_UNINSTALL = '1'
           irm "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/install.ps1" | iex
-          if (Test-Path "$env:LOCALAPPDATA\Programs\Claude Agent Kanban") { throw 'uninstall failed' }
+          if (Test-Path "$env:LOCALAPPDATA\Programs\Agent Kanban") { throw 'uninstall failed' }
           Write-Host 'uninstall OK'

@@ -1,4 +1,4 @@
-// カード（タスク）ごとに worktree を作り、Claude Code CLI を並列に動かす
+// カード（タスク）ごとに worktree を作り、エージェントの CLI（Claude Code / Codex CLI / Gemini CLI）を並列に動かす
 const { spawn, execFile } = require('child_process');
 const { EventEmitter } = require('events');
 const fs = require('fs');
@@ -19,7 +19,7 @@ const PERMISSION_TOOL = `mcp__${MCP_SERVER_NAME}__approve`;
 const INTERRUPTED_MESSAGE = 'アプリの終了で中断されました。「▶ 再開」で中断したところから続けられます（追加指示を送っても再開できます）。';
 // 作業のあとに「スキルにしておくとよいもの」を提案してもらうときの指示
 const SKILL_SUGGEST_PROMPT = [
-  'ここまでの作業を振り返って、次から同じような作業をもっと速く・確実にできるように、Claude Code のスキル（SKILL.md）として残しておくとよさそうなものを提案してください。',
+  'ここまでの作業を振り返って、次から同じような作業をもっと速く・確実にできるように、スキル（SKILL.md）として残しておくとよさそうなものを提案してください。',
   '',
   '- 候補は1〜3個にしてください。それぞれ「スキル名」「何をするスキルか」「どんなときに使うか」「SKILL.md に書く手順の概要」を書いてください',
   '- すでにあるスキル（このリポジトリの .claude/skills/ と ~/.claude/skills/）を確かめて、重ならないようにしてください',
@@ -27,22 +27,27 @@ const SKILL_SUGGEST_PROMPT = [
   '- まだファイルは作らないでください。最後に「どれを追加しますか？」と聞いてください',
 ].join('\n');
 // スキルの提案を頼む会話の最初の指示。元のタスクの指示・やりとり・結果をまとめて渡す
+// カードのやりとり（あなたの指示とエージェントの返事）を、新しいものから size 文字くらいまで抜き出す。
+// skipPrompt: 最初の指示（別に渡すとき）は入れない
+function talkExcerpt(c, { size: max = 6000, skipPrompt = true } = {}) {
+  const talk = (c.logs || [])
+    .filter((l) => (l.kind === 'user' && !(skipPrompt && l.text === c.prompt)) || l.kind === 'text')
+    // Claude Code の発言のログには agent が付いていない（ほかのエージェントの発言には付いている）
+    .map((l) => `${l.kind === 'user' ? '【ユーザー】' : `【${agentShort(l.agent || 'claude')}】`} ${truncate(String(l.text).trim(), 800)}`);
+  let picked = [];
+  let size = 0;
+  for (let i = talk.length - 1; i >= 0 && size < max; i--) {
+    picked.unshift(talk[i]);
+    size += talk[i].length;
+  }
+  if (picked.length < talk.length) picked = ['（前のやりとりは省略）', ...picked];
+  return picked;
+}
 function buildSkillSuggestPrompt(c) {
   const lines = [`次のタスク「${c.title}」の作業を振り返ってください。`, ''];
   lines.push('## タスクの指示', truncate(c.prompt, 3000), '');
-  const talk = (c.logs || [])
-    .filter((l) => (l.kind === 'user' && l.text !== c.prompt) || l.kind === 'text')
-    .map((l) => `${l.kind === 'user' ? '【ユーザー】' : '【Claude】'} ${truncate(String(l.text).trim(), 800)}`);
-  if (talk.length) {
-    let picked = [];
-    let size = 0;
-    for (let i = talk.length - 1; i >= 0 && size < 6000; i--) {
-      picked.unshift(talk[i]);
-      size += talk[i].length;
-    }
-    if (picked.length < talk.length) picked = ['（前のやりとりは省略）', ...picked];
-    lines.push('## やりとり（抜粋）', ...picked, '');
-  }
+  const picked = talkExcerpt(c);
+  if (picked.length) lines.push('## やりとり（抜粋）', ...picked, '');
   const info = [];
   if (c.issue) info.push(`- Issue: #${c.issue.number} ${c.issue.url || ''}`.trim());
   if (c.branch) info.push(`- ブランチ: ${c.branch}`);
@@ -53,7 +58,18 @@ function buildSkillSuggestPrompt(c) {
   lines.push('---', '', SKILL_SUGGEST_PROMPT.replace('ここまでの作業を振り返って', 'このタスクの作業をもとに'));
   return lines.join('\n');
 }
-// 仕様が詰まっていないと Claude が判断したときに、返事の1行目に付けてもらう印（アプリが見て「仕様の確認」にする。画面には出さない）
+// 会話の続きとしてタスクを作るとき、会話そのものを引き継げない（エージェントが違う・Claude Code 以外）なら、
+// 会話のやりとりを最初の指示に添えて渡す
+function buildChatContext(chat) {
+  const picked = talkExcerpt(chat, { size: 8000, skipPrompt: false });
+  if (!picked.length) return '';
+  return [`## これまでの会話「${chat.title}」（このタスクは、この会話の続きです）`, '', ...picked].join('\n');
+}
+function withChatContext(context, prompt) {
+  return context ? `${context}\n\n---\n\n${prompt}` : prompt;
+}
+
+// 仕様が詰まっていないとエージェントが判断したときに、返事の1行目に付けてもらう印（アプリが見て「仕様の確認」にする。画面には出さない）
 const SPEC_MARKER = '[[SPEC_UNCLEAR]]';
 // 新しいタスク・Issue から作ったタスクの最初の指示に付ける。内容が足りなければ、開発を始めずに質問してもらう
 const SPEC_CHECK_PROMPT = [
@@ -186,7 +202,7 @@ function agentOf(c) {
 function promptWithSkill(agent, skill, prompt) {
   if (agent === 'claude' || !skill) return withSkill(skill, prompt);
   const name = String(skill).replace(/^\//, '').split(':').pop();
-  return `（Claude Code のスキル「${skill}」の手順に従ってください。手順は .claude/skills/${name}/SKILL.md か ~/.claude/skills/${name}/SKILL.md に書かれています）\n\n${prompt}`;
+  return `（スキル「${skill}」の手順に従ってください。手順は .claude/skills/${name}/SKILL.md か ~/.claude/skills/${name}/SKILL.md に書かれています）\n\n${prompt}`;
 }
 
 // ---------- リレー（工程ごとに別のエージェントへ順番に引き継ぐ） ----------
@@ -251,7 +267,7 @@ function cleanSkill(s) {
   return v || null;
 }
 
-// Claude の最後の返事が、ユーザーへの質問で終わっているか
+// エージェントの最後の返事が、ユーザーへの質問で終わっているか
 function endsWithQuestion(text) {
   const t = String(text || '').trim();
   if (!t) return false;
@@ -269,7 +285,7 @@ function splitList(s) {
     .filter(Boolean);
 }
 
-// 設定の「ブランチの命名規則」（自然言語）から、Claude にブランチ名を考えてもらうときの指示
+// 設定の「ブランチの命名規則」（自然言語）から、エージェントにブランチ名を考えてもらうときの指示
 function buildBranchNamePrompt(rule, c) {
   const lines = [
     'git のブランチ名を1つだけ考えてください。次の「命名規則」に従ってください。',
@@ -292,7 +308,7 @@ function buildBranchNamePrompt(rule, c) {
   return lines.join('\n');
 }
 
-// Claude の返事からブランチ名を取り出して、使えない文字を落とす
+// エージェントの返事からブランチ名を取り出して、使えない文字を落とす
 function cleanBranchName(text) {
   const line = String(text || '')
     .split('\n')
@@ -604,7 +620,7 @@ class AgentManager extends EventEmitter {
       c,
       'skill',
       `スキルにしませんか？: ${c.title}`,
-      'このタスクの作業を振り返って、次から同じような作業を速く・確実にできるスキル（SKILL.md）を Claude に提案してもらえます。',
+      `このタスクの作業を振り返って、次から同じような作業を速く・確実にできるスキル（SKILL.md）を ${agentShort(this.helperAgent(c))} に提案してもらえます。`,
       { action: 'suggestSkills', actionLabel: '💡 スキルを提案してもらう' },
     );
   }
@@ -618,35 +634,53 @@ class AgentManager extends EventEmitter {
    * - compete: 設定の競争のエージェントの数だけ（同じタスクを、それぞれ別の worktree で並列に解く）
    * @returns {object[]} 作ったカード
    */
-  createTask({ title, prompt, issue, session, skill, agent }) {
+  createTask({ title, prompt, issue, session, skill, agent, fromChat }) {
     const s = this.store.settings;
-    const mode = agent || s.defaultAgent || 'claude';
-    if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill });
+    const mode = agent || providers.defaultAgentOf(s);
+    const chat = fromChat ? this.store.card(fromChat) : null;
+    const from = isChat(chat) ? chat : null;
+    if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from });
     if (mode === 'relay') {
       const steps = providers.cleanRelaySteps(s.relaySteps);
       if (!steps.length) throw new Error('リレーの工程がありません。設定の「リレーの工程」を決めてください');
-      const c = this.createCard({ title, prompt, issue, session, skill, agent: steps[0].agent, relay: { steps, index: 0, history: [] } });
+      const off = steps.find((st) => !providers.isEnabled(s, st.agent));
+      if (off) throw new Error(`リレーの工程「${off.label}」の ${agentLabel(off.agent)} は使わない設定になっています。⚙ 設定で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
+      const c = this.createCard({ title, prompt, issue, session, skill, agent: steps[0].agent, relay: { steps, index: 0, history: [] }, fromChat: from });
       return [c];
     }
-    return [this.createCard({ title, prompt, issue, session, skill, agent: mode })];
+    return [this.createCard({ title, prompt, issue, session, skill, agent: mode, fromChat: from })];
   }
 
-  // 競争: 同じタスクを、設定のエージェントそれぞれのカードにする
-  createCompetition({ title, prompt, issue, session, skill }) {
-    const list = providers.cleanCompeteAgents(this.store.settings.competeAgents);
-    if (list.length < 2) throw new Error('競争させるエージェントを、設定で2つ以上選んでください');
+  // 競争: 同じタスクを、設定のエージェントそれぞれのカードにする（使わない設定のエージェントは外す）
+  createCompetition({ title, prompt, issue, session, skill, fromChat }) {
+    const s = this.store.settings;
+    const list = providers.cleanCompeteAgents(s.competeAgents).filter((a) => providers.isEnabled(s, a));
+    if (list.length < 2) throw new Error('競争させるエージェントを、設定で2つ以上選んでください（使うエージェントにチェックを付けたものから選べます）');
     const group = crypto.randomBytes(4).toString('hex');
     const base = (title && title.trim()) || truncate(String(prompt || '').trim().split('\n')[0], 40);
     return list.map((a, index) =>
-      this.createCard({ title: `${base} [${agentShort(a)}]`, prompt, issue, session, skill, agent: a, compete: { group, index, total: list.length, title: base } }),
+      this.createCard({ title: `${base} [${agentShort(a)}]`, prompt, issue, session, skill, agent: a, compete: { group, index, total: list.length, title: base }, fromChat }),
     );
   }
 
-  createCard({ title, prompt, issue, session, skill, agent, relay, compete }) {
+  // 使うエージェントか（設定でチェックを付けていなければエラー）
+  assertEnabled(agent) {
+    if (!providers.isAgent(agent)) throw new Error(`知らないエージェントです: ${agent}`);
+    if (!providers.isEnabled(this.store.settings, agent)) throw new Error(`${agentLabel(agent)} は使わない設定になっています。⚙ 設定の「使うエージェント」でチェックを付けてください`);
+  }
+
+  // アプリが頼む作業（比較・スキルの提案など）を任せるエージェント。元のカードのエージェントが使えるならそれ、なければ最初から選んでおくエージェント
+  helperAgent(src) {
+    const s = this.store.settings;
+    const a = src && !src.relay ? agentOf(src) : null;
+    return a && providers.isEnabled(s, a) ? a : providers.defaultAgentOf(s);
+  }
+
+  createCard({ title, prompt, issue, session, skill, agent, relay, compete, fromChat }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     if (!prompt || !prompt.trim()) throw new Error('指示を入力してください');
-    if (agent && !providers.isAgent(agent)) throw new Error(`知らないエージェントです: ${agent}`);
+    if (agent) this.assertEnabled(agent);
     const card = {
       id: crypto.randomBytes(4).toString('hex'),
       title: (title && title.trim()) || truncate(prompt.trim().split('\n')[0], 40),
@@ -663,10 +697,18 @@ class AgentManager extends EventEmitter {
     if (relay) card.relay = relay;
     if (compete) card.compete = compete;
     card.sessions = [];
+    // 会話の続きとして作るとき: Claude Code どうしなら会話そのものを引き継ぎ（フォーク）、
+    // それ以外（エージェントが違う・Claude Code 以外）は会話のやりとりを最初の指示に添えて渡す
+    const fromSession = fromChat && session && session.id && session.id === fromChat.sessionId;
+    if (fromChat && !(fromSession && card.agent === 'claude' && agentOf(fromChat) === 'claude')) {
+      card.chatContext = buildChatContext(fromChat);
+      card.fromChat = fromChat.id;
+      if (fromSession) session = null;
+    }
     // 既存の会話（Claude Code の会話）を引き継げるのは Claude Code だけ
     if (session && session.id && card.agent === 'claude') this.applySession(card, session);
     card.skill = cleanSkill(skill);
-    // 内容が詰まっていなければ、開発を始める前に Claude と対話して仕様を詰める
+    // 内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める
     if (s.specCheck !== false) card.specState = 'checking';
     this.store.cards.push(card);
     this.changed(card);
@@ -676,7 +718,8 @@ class AgentManager extends EventEmitter {
   // 最初の指示（スキル・リレーの担当の説明を付けたもの）
   firstPrompt(c) {
     // 仕様の確認中は、開発を始める前に内容が足りているかを判断してもらう指示を付ける
-    const p = promptWithSkill(agentOf(c), c.skill, inSpecCheck(c) ? withSpecCheck(c.prompt) : c.prompt);
+    const body = withChatContext(c.chatContext, c.prompt);
+    const p = promptWithSkill(agentOf(c), c.skill, inSpecCheck(c) ? withSpecCheck(body) : body);
     return c.relay && !isChat(c) ? buildRelayFirstPrompt(c, p) : p;
   }
 
@@ -734,12 +777,12 @@ class AgentManager extends EventEmitter {
     return others.length;
   }
 
-  // 競争の候補を、Claude に比べてもらう会話を作る
+  // 競争の候補を、エージェント（最初から選んでおくエージェント）に比べてもらう会話を作る
   compareCompetitors(id) {
     const list = this.competitors(id);
     if (list.length < 2) throw new Error('比べる候補がありません');
     const title = list[0].compete.title || list[0].title;
-    const chat = this.createChat({ message: buildComparePrompt(title, list), title: `🏁 比較: ${title}` });
+    const chat = this.createChat({ message: buildComparePrompt(title, list), title: `🏁 比較: ${title}`, agent: providers.defaultAgentOf(this.store.settings) });
     for (const x of list) x.compete.compareChat = chat.id;
     this.changed(chat);
     return chat;
@@ -747,14 +790,16 @@ class AgentManager extends EventEmitter {
 
   /**
    * タスクに紐づかない会話（チャット）を作って、すぐに話し始める。
-   * worktree もブランチも作らず、リポジトリのフォルダでそのまま Claude と話す（コミット・マージはしない）
-   * @param {{ message: string, title?: string, session?: object, skill?: string }} p
+   * worktree もブランチも作らず、リポジトリのフォルダでそのままエージェントと話す（コミット・マージはしない）
+   * @param {{ message: string, title?: string, session?: object, skill?: string, agent?: string }} p
    */
-  createChat({ message, title, session, skill }) {
+  createChat({ message, title, session, skill, agent }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     const text = String(message || '').trim();
     if (!text) throw new Error('メッセージを入力してください');
+    const a = agent || providers.defaultAgentOf(s);
+    this.assertEnabled(a);
     const card = {
       id: crypto.randomBytes(4).toString('hex'),
       kind: 'chat',
@@ -767,8 +812,10 @@ class AgentManager extends EventEmitter {
       alwaysAllow: [],
       logs: [],
       sessions: [],
+      agent: a,
     };
-    if (session && session.id) this.applySession(card, session);
+    // 既存の会話（Claude Code の会話）を引き継げるのは Claude Code だけ
+    if (session && session.id && a === 'claude') this.applySession(card, session);
     card.skill = cleanSkill(skill);
     this.store.cards.push(card);
     this.changed(card);
@@ -899,7 +946,7 @@ class AgentManager extends EventEmitter {
    */
   suggestSkills(id) {
     const src = this.must(id);
-    const chat = this.createChat({ message: buildSkillSuggestPrompt(src), title: `💡 スキルの提案: ${src.title}` });
+    const chat = this.createChat({ message: buildSkillSuggestPrompt(src), title: `💡 スキルの提案: ${src.title}`, agent: this.helperAgent(src) });
     chat.skillSuggestFrom = src.id;
     for (const n of this.store.notifications) {
       if (n.cardId === id && n.action === 'suggestSkills' && !n.actedAt) {
@@ -1044,39 +1091,88 @@ class AgentManager extends EventEmitter {
   }
 
   /**
-   * 設定の命名規則（自然言語）に従ったブランチ名を、claude に1回だけ聞いて決める
+   * 設定の命名規則（自然言語）に従ったブランチ名を、カードのエージェントに1回だけ聞いて決める
    * @returns {Promise<string>}
    */
   async generateBranchName(c, rule, cwd) {
+    this.log(c, 'system', `命名規則に従ってブランチ名を ${agentShort(agentOf(c))} に考えてもらっています…`);
+    const out = await this.askOnce(agentOf(c), cwd, buildBranchNamePrompt(rule, c));
+    const name = cleanBranchName(out);
+    if (!name) throw new Error('ブランチ名が返ってきませんでした');
+    return name;
+  }
+
+  /**
+   * エージェントに1回だけ質問して、返事の文章を返す（ファイルは変えさせない）
+   * @param {string} agent
+   * @param {string} cwd
+   * @param {string} prompt
+   * @returns {Promise<string>}
+   */
+  async askOnce(agent, cwd, prompt) {
     const s = this.store.settings;
-    const args = ['-p', '--output-format', 'text', '--permission-mode', 'default'];
-    if (s.model) args.push('--model', s.model);
-    const child = await this.spawnClaude(cwd, args);
-    this.log(c, 'system', '命名規則に従ってブランチ名を考えてもらっています…');
+    let args;
+    let parser = null;
+    if (agent === 'claude') {
+      args = ['-p', '--output-format', 'text', '--permission-mode', 'default'];
+      if (s.model) args.push('--model', s.model);
+    } else {
+      args = providers.buildArgs(agent, { mode: 'plan', model: providers.agentModel(s, agent) });
+      parser = providers.createParser(agent, { summarize: summarizeInput });
+    }
+    const child = await this.spawnAgent(agent, cwd, args);
     return new Promise((resolve, reject) => {
       let out = '';
       let err = '';
+      let buf = '';
+      const texts = [];
+      let resultError = null;
+      const take = (actions) => {
+        for (const a of actions) {
+          if (a.type === 'text') texts.push(String(a.text));
+          else if (a.type === 'result' && a.error) resultError = a.error;
+        }
+      };
+      const line = (l) => {
+        if (!l.trim()) return;
+        try {
+          take(parser.onEvent(JSON.parse(l)));
+        } catch {
+          /* JSON でない行は読み飛ばす */
+        }
+      };
       const timer = setTimeout(() => {
         killTree(child);
         reject(new Error('時間がかかりすぎました'));
       }, 120000);
       child.stdout.setEncoding('utf8');
-      child.stdout.on('data', (d) => (out += d));
+      child.stdout.on('data', (d) => {
+        if (!parser) return void (out += d);
+        buf += d;
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          line(buf.slice(0, i));
+          buf = buf.slice(i + 1);
+        }
+      });
       child.stderr.setEncoding('utf8');
       child.stderr.on('data', (d) => (err += d));
       child.stdin.on('error', () => {});
       child.on('error', (e) => {
         clearTimeout(timer);
-        reject(e);
+        reject(e.code === 'ENOENT' ? new Error(notFoundMessage(child.agentCmd, agent)) : e);
       });
       child.on('close', (code) => {
         clearTimeout(timer);
-        if (code !== 0) return reject(new Error(truncate(err.trim() || out.trim() || `claude が終了コード ${code} で終わりました`, 300)));
-        const name = cleanBranchName(out);
-        if (!name) return reject(new Error('ブランチ名が返ってきませんでした'));
-        resolve(name);
+        if (parser) {
+          line(buf);
+          take(parser.flush());
+          out = texts.join('\n');
+        }
+        if (code !== 0 || resultError) return reject(new Error(truncate(resultError || err.trim() || out.trim() || `${child.agentCmd} が終了コード ${code} で終わりました`, 300)));
+        resolve(out);
       });
-      child.stdin.end(buildBranchNamePrompt(rule, c));
+      child.stdin.end(prompt);
     });
   }
 
@@ -1297,7 +1393,7 @@ class AgentManager extends EventEmitter {
           this.emit('awaiting', c);
           this.notify(c, 'awaiting', `回答待ち: ${c.title}`, c.lastText || `${agentShort(agent)} が質問しています`);
         } else {
-          if (isChat(c)) this.notify(c, 'awaiting', `返事: ${c.title}`, c.lastText || 'Claude が返事をしました');
+          if (isChat(c)) this.notify(c, 'awaiting', `返事: ${c.title}`, c.lastText || `${agentShort(agent)} が返事をしました`);
           else this.notify(c, 'review', `レビュー待ち: ${c.title}`, c.lastText || '作業が終わりました。差分を確かめてください');
         }
       } else {
@@ -1467,7 +1563,7 @@ class AgentManager extends EventEmitter {
       if (b) {
         b.state = 'delivered';
         b.deliveredAt = Date.now();
-        this.log(c, 'system', 'btw のメッセージを Claude が受け取りました');
+        this.log(c, 'system', 'btw のメッセージを Claude Code が受け取りました');
         this.changed(c);
       }
     }
@@ -1781,7 +1877,7 @@ class AgentManager extends EventEmitter {
     const lines = [];
     if (c.issue) lines.push(`Closes #${c.issue.number}`, '');
     if (c.lastMessage) lines.push(c.lastMessage, '');
-    lines.push('---', 'Claude Agent Kanban のタスクから作成しました。');
+    lines.push('---', 'Agent Kanban のタスクから作成しました。');
     return { title, body: lines.join('\n') };
   }
 
@@ -1982,7 +2078,7 @@ class AgentManager extends EventEmitter {
       // 新しくコンフリクトした。worktree があればアプリの中で解消できる
       if (c.worktreePath && ['review', 'failed'].includes(c.status) && base && !(c.conflict && !c.conflict.pr)) {
         if (!active) this.raisePrConflict(c, base);
-        this.log(c, 'error', `PR が ${base} とコンフリクトしています。「Claude に解消してもらう」か「自分で解消する」で直して、PR を更新してください: ${c.prUrl}`);
+        this.log(c, 'error', `PR が ${base} とコンフリクトしています。「エージェントに解消してもらう」か「自分で解消する」で直して、PR を更新してください: ${c.prUrl}`);
         this.notify(c, 'conflict', `PR がコンフリクトしています: ${c.title}`, c.prUrl);
       } else if (!c.worktreePath) {
         this.log(c, 'error', `PR が ${base || 'マージ先'} とコンフリクトしています（worktree を片付けたので、GitHub 上で解消してください）: ${c.prUrl}`);
@@ -2058,7 +2154,7 @@ class AgentManager extends EventEmitter {
 
   /**
    * マージ先のブランチをタスクの worktree に取り込み、コンフリクトを解消する
-   * @param {'agent'|'manual'} mode  agent: Claude に解消してもらう / manual: 自分でエディタで直す
+   * @param {'agent'|'manual'} mode  agent: エージェントに解消してもらう / manual: 自分でエディタで直す
    */
   async resolveConflict(id, mode) {
     const c = this.must(id);
@@ -2167,11 +2263,11 @@ class AgentManager extends EventEmitter {
     const left = [...new Set([...marked, ...unmerged])];
     if (left.length) {
       c.conflict = { ...c.conflict, resolving: false, manual: inProgress, unresolved: left };
-      this.log(c, 'error', `コンフリクトがまだ残っています: ${left.join(', ')}。もう一度 Claude に頼むか、自分で直してください`);
+      this.log(c, 'error', `コンフリクトがまだ残っています: ${left.join(', ')}。もう一度 ${agentShort(agentOf(c))} に頼むか、自分で直してください`);
       return false;
     }
     if (inProgress) await git.finishMerge(wt);
-    this.markResolved(c, 'Claude がコンフリクトを解消しました');
+    this.markResolved(c, `${agentShort(agentOf(c))} がコンフリクトを解消しました`);
     return true;
   }
 

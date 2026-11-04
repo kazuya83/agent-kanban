@@ -1,4 +1,4 @@
-// GitHub Issue を読み込んで、Claude への指示にする
+// GitHub Issue を読み込んで、エージェントへの指示にする
 // 1. gh コマンドがあれば使う（gh auth login 済みなら private リポジトリも読める）
 // 2. gh がない・ログインしていないときは GitHub REST API（public リポジトリのみ。環境変数 GH_TOKEN があれば使う）
 //    画面では gh のインストールとログインを案内する
@@ -70,7 +70,7 @@ async function viaGh(gh, repoPath, slug, number) {
 }
 
 async function viaApi(slug, number, token) {
-  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'claude-agent-kanban' };
+  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'agent-kanban' };
   if (token) headers.Authorization = `Bearer ${token}`;
   const base = `https://api.github.com/repos/${slug.owner}/${slug.repo}`;
   const res = await fetch(`${base}/issues/${number}`, { headers });
@@ -133,7 +133,7 @@ function clip(s, n) {
   return s.length > n ? `${s.slice(0, n)}\n…（長いので省略）` : s;
 }
 
-// Issue から Claude への指示を作る
+// Issue からエージェントへの指示を作る
 function buildIssuePrompt(issue, extra) {
   const lines = [
     `GitHub の Issue #${issue.number} を解決してください。`,
