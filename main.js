@@ -98,7 +98,7 @@ function send(channel, payload) {
 
 function boardState() {
   const { cleanRepoTabs, repoTabSummary } = require('./src/store');
-  const repoTabs = repoTabSummary(cleanRepoTabs(store.settings.repoTabs, store.settings.repoPath), store.cards);
+  const repoTabs = repoTabSummary(cleanRepoTabs(store.settings.repoTabs, store.settings.repoPath), store.cards, store.settings);
   return { settings: store.settings, repoTabs, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath) };
 }
 
@@ -665,7 +665,7 @@ app.whenReady().then(async () => {
   });
   // Windows: WSL のディストリビューション（Ubuntu など）。リポジトリを選ぶときに、その中のフォルダも選べるようにする
   handle('wsl:distros', () => (process.platform === 'win32' || process.env.AGENT_KANBAN_WSL ? wsl.listDistros() : []));
-  const { touchRecentRepo, cleanRepoTabs, openRepoTab, closeRepoTab } = require('./src/store');
+  const { touchRecentRepo, cleanRepoTabs, openRepoTab, closeRepoTab, markNoGitRepo } = require('./src/store');
   const forgetRecentRepo = (dir) => {
     const s = String(dir || '').trim();
     if (!s) return;
@@ -674,6 +674,7 @@ app.whenReady().then(async () => {
     notifyBoard();
   };
   // パスが git リポジトリか調べて toplevel を返す（だめなら recent から外すこともある）
+  // git で管理していないフォルダ（動画づくりなど）は、そのフォルダをそのまま返し、git なしのフォルダとして覚えておく
   const resolveRepoDir = async (picked, { forgetOnMissing = false } = {}) => {
     const fs = require('fs');
     if (!picked) throw new Error('パスが空です');
@@ -681,27 +682,33 @@ app.whenReady().then(async () => {
       if (forgetOnMissing) forgetRecentRepo(picked);
       throw new Error(`フォルダが見つかりません: ${picked}`);
     }
+    if (!fs.statSync(picked).isDirectory()) throw new Error(`フォルダではありません: ${picked}`);
     const pw = wsl.parseWslPath(picked);
+    const asFolder = () => {
+      const dir = pw ? picked.replace(/[\\/]+$/, '') : path.resolve(picked);
+      markNoGitRepo(store.settings, dir, true);
+      return dir;
+    };
     let top = '';
     try {
       top = wsl.fromLinux(picked, (await git.git(picked, ['rev-parse', '--show-toplevel'])).trim());
     } catch (err) {
-      if (/not a git repository/i.test(err.message)) {
-        if (forgetOnMissing) forgetRecentRepo(picked);
-        throw new Error(`選んだフォルダは git リポジトリではありません（${picked}）`);
-      }
+      if (/not a git repository/i.test(err.message)) return asFolder();
+      // このパソコンに git が入っていなくても、git なしのフォルダとしてなら開ける
+      if (!pw && /ENOENT/.test(err.message)) return asFolder();
       if (pw && /not found|No such file|127/i.test(err.message)) throw new Error(`${pw.distro}（WSL）の中に git が見つかりません。${pw.distro} のターミナルで sudo apt install git を実行してください。\n${err.message}`);
       throw new Error(`git でフォルダを調べられませんでした（${picked}）\n${err.message}`);
     }
     if (!top) throw new Error(`git から答えが返ってきませんでした（${picked}）`);
+    markNoGitRepo(store.settings, top, false);
     return top;
   };
   handle('repo:choose', async (opts = {}) => {
     const distro = opts && opts.wsl;
     const home = distro ? await wsl.homeDir(distro) : '';
     const r = await dialog.showOpenDialog(win, {
-      properties: ['openDirectory'],
-      title: distro ? `git リポジトリを選択（${distro}）` : 'git リポジトリを選択',
+      properties: ['openDirectory', 'createDirectory'],
+      title: distro ? `フォルダを選択（${distro}）` : 'フォルダを選択（git リポジトリ、または git で管理していないフォルダ）',
       ...(distro ? { defaultPath: wsl.toUnc(distro, home || '/home') } : {}),
     });
     if (r.canceled || !r.filePaths[0]) return null;
@@ -802,19 +809,22 @@ app.whenReady().then(async () => {
   handle('repo:clone', async ({ url, parent, name, tab } = {}) => {
     const dir = await repoSetup.cloneRepo({ url, parent, name });
     store.settings.lastRepoParent = parent;
+    markNoGitRepo(store.settings, dir, false);
     openRepo(dir, { tab });
     const warning = (await repoSetup.hasCommit(dir)) ? '' : 'クローンしましたが、このリポジトリにはコミットがまだありません。タスクを動かすには、最初のコミットを入れて push してください';
     return { dir, warning };
   });
-  handle('repo:create', async ({ parent, name, github, tab } = {}) => {
-    const r = await repoSetup.createRepo({ parent, name, github });
+  handle('repo:create', async ({ parent, name, github, git: useGit, tab } = {}) => {
+    const r = await repoSetup.createRepo({ parent, name, github, git: useGit !== false });
     store.settings.lastRepoParent = parent;
+    markNoGitRepo(store.settings, r.dir, useGit === false);
     openRepo(r.dir, { tab });
     return r;
   });
   handle('repo:info', async () => {
     const repo = store.settings.repoPath;
     if (!repo) return { branches: [], current: '' };
+    if (require('./src/store').isNoGitRepo(store.settings, repo)) return { branches: [], current: '', hasOrigin: false, noGit: true };
     // git の起動は Windows だと遅いので、並べて走らせる
     const [branches, current, hasOrigin] = await Promise.all([
       git.branches(repo).catch(() => []),
@@ -942,6 +952,7 @@ app.whenReady().then(async () => {
   });
   handle('card:pr', ({ id, base, title, body, keep }) => agents.createPullRequest(id, { base, title, body, keep }));
   handle('card:discard', (id) => agents.discard(id));
+  handle('card:complete', (id) => agents.complete(id));
   handle('conflict:resolve', ({ id, mode }) => agents.resolveConflict(id, mode));
   handle('conflict:complete', (id) => agents.completeConflict(id));
   handle('conflict:abort', (id) => agents.abortConflict(id));
@@ -951,8 +962,9 @@ app.whenReady().then(async () => {
   handle('card:answer', ({ id, reqId, answers }) => agents.answerQuestion(id, reqId, answers));
   handle('card:open', async (id) => {
     const c = agents.must(id);
-    if (!c.worktreePath) throw new Error('worktree がありません');
-    const err = await shell.openPath(c.worktreePath);
+    const dir = c.noGit ? c.repoPath : c.worktreePath;
+    if (!dir) throw new Error('worktree がありません');
+    const err = await shell.openPath(dir);
     if (err) throw new Error(err);
   });
 

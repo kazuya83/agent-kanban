@@ -98,14 +98,17 @@ function runGh(args, cwd) {
 /**
  * parent/name に新しいリポジトリを作る（README.md だけの最初のコミットまで）。
  * github: '' なら手元だけ、'private' / 'public' なら GitHub にも作って push する
- * @returns {Promise<{ dir: string, github: string, warning?: string }>}
+ * git: false なら、git で管理しない空のフォルダを作るだけ（GitHub には作れない）
+ * @returns {Promise<{ dir: string, github: string, git?: boolean, warning?: string }>}
  */
-async function createRepo({ parent, name, github = '' }) {
+async function createRepo({ parent, name, github = '', git: useGit = true }) {
   const n = validateName(name);
+  if (!useGit && github) throw new Error('git で管理しないフォルダは、GitHub には作れません');
   if (github && !['private', 'public'].includes(github)) throw new Error('GitHub の公開範囲が正しくありません');
   if (github && wsl.isWslPath(parent)) throw new Error('WSL のフォルダでは、GitHub にも作ることはできません。手元に作ってから、WSL の中で gh repo create してください');
   const dir = targetDir(parent, n);
   fs.mkdirSync(dir, { recursive: true });
+  if (!useGit) return { dir, github: '', git: false };
   await git.git(dir, ['init', '-q']);
   // 古い git でも main になるように（-b は git 2.28 から）
   await git.git(dir, ['symbolic-ref', 'HEAD', 'refs/heads/main']);

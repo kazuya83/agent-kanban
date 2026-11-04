@@ -10,6 +10,8 @@ const COLUMNS = [
 const STATUS_LABEL = { todo: '未着手', queued: '待機中', running: '実行中', review: 'レビュー待ち', failed: 'エラー', done: 'マージ済み' };
 const CHAT_STATUS_LABEL = { todo: '未開始', queued: '待機中', running: '返答中', review: '返事済み', failed: 'エラー', done: '終了' };
 const isChat = (c) => !!c && c.kind === 'chat';
+// git で管理していないフォルダのタスク（worktree・差分・マージ・PR はない）
+const isNoGit = (c) => !!c && !!c.noGit;
 const LOG_LABEL = { question: '質問', user: 'あなた', text: 'Claude', tool: 'ツール', tool_result: '結果', tool_error: '結果(エラー)', system: 'システム', result: '完了', error: 'エラー', stderr: 'stderr', permission: '承認' };
 const PERMISSION_MODES = [
   ['default', '毎回確認する（すべての操作をカードで承認）'],
@@ -476,8 +478,9 @@ function renderRepoTabs() {
       : `${t.attention ? `<span class="repo-tab-badge warn" title="あなたの対応を待っているタスクが ${t.attention} 件あります">${t.attention}</span>` : ''}${t.running ? `<span class="repo-tab-badge run" title="動いているタスクが ${t.running} 件あります">${t.running}</span>` : ''}`;
     const where = rc ? (t.remote ? `接続先（${host}）のリポジトリ\n` : 'このマシンのリポジトリ\n') : '';
     const tip = on ? `${where}${t.path}\nクリックで、このタブのリポジトリを切り替えます` : `${where}${t.path}\nクリックでこのリポジトリに切り替えます`;
+    const tipAll = t.noGit ? `${tip}\n（git で管理していないフォルダ。タスクはこのフォルダで直接動きます）` : tip;
     return `<div class="repo-tab${on ? ' active' : ''}${rc && !t.remote ? ' local' : ''}" data-path="${esc(t.path)}" data-remote="${t.remote ? '1' : ''}" role="tab" aria-selected="${on}">
-          <button class="repo-tab-main" title="${esc(tip)}">${icon('folder')}<span class="repo-tab-name">${esc(repoFolderName(t.path))}</span>${badges}</button>
+          <button class="repo-tab-main" title="${esc(tipAll)}">${icon('folder')}<span class="repo-tab-name">${esc(repoFolderName(t.path))}</span>${badges}</button>
           ${own.length > 1 || (rc && tabs.length > 1) ? `<button class="repo-tab-close" title="タブを閉じる（動いているタスクは止まりません）" aria-label="タブを閉じる">${icon('x')}</button>` : ''}
         </div>`;
   };
@@ -798,9 +801,9 @@ async function select(id) {
   renderDetailBody();
 }
 
-// 会話には worktree も差分もないので、そのタブは隠す
+// 会話と git で管理していないフォルダのタスクには worktree も差分もないので、そのタブは隠す
 function updateTabsFor(c) {
-  const chat = isChat(c);
+  const chat = isChat(c) || isNoGit(c);
   document.querySelectorAll('#tabs .tab').forEach((t) => {
     if (t.dataset.tab === 'worktree' || t.dataset.tab === 'diff') t.classList.toggle('hidden', chat);
   });
@@ -966,13 +969,15 @@ function renderDetailHead() {
     isInterrupted(c) && `<button class="btn primary" data-act="resume" title="中断したところから続けます">${icon('play')}再開</button>`,
     s === 'todo' && !isInterrupted(c) && `<button class="btn primary" data-act="start">${icon('play')}開始</button>`,
     (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">${icon('stop')}停止</button>`,
+    (s === 'review' || s === 'failed') && isNoGit(c) &&
+      `<button class="btn primary" data-act="complete" title="git で管理していないフォルダなので、マージや PR はありません。フォルダの中身を確かめてから完了にします">${icon('check')}完了にする</button>`,
     (s === 'review' || s === 'failed') && c.worktreePath &&
       (state.board.settings.integration === 'pr'
         ? `<button class="btn primary" data-act="pr">${icon('pr')}${c.prUrl ? 'PR を更新…' : 'PR を作成…'}</button>`
         : `<button class="btn primary" data-act="merge">${icon('merge')}マージ…</button>`),
     // 完了したタスクは開き直さない。修正は別のタスクにする（このタスクのやりとりを引き継ぐ）
     s === 'done' && `<button class="btn" data-act="fixTask" title="このタスクのやりとり（完了後の会話も含む）を引き継いで、修正のための新しいタスクを作ります">${icon('wrench')}修正タスクを作る</button>`,
-    c.worktreePath && `<button class="btn ghost" data-act="open">フォルダを開く</button>`,
+    (c.worktreePath || isNoGit(c)) && `<button class="btn ghost" data-act="open">フォルダを開く</button>`,
     // 完了したタスク（完了後の会話の途中も含む）は削除できない
     s !== 'done' && !c.afterDone && `<button class="btn danger" data-act="discard">破棄</button>`,
   ].filter(Boolean);
@@ -1025,6 +1030,7 @@ function detailMetaHtml(c) {
       ${!chat ? `<dt>エージェント</dt><dd>${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</dd>` : ''}
       ${sessionRowHtml(c)}
       ${chat ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（worktree は作りません）</span></dd>` : ''}
+      ${!chat && isNoGit(c) ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（git で管理していないフォルダ。worktree は作らず、このフォルダで直接動かします）</span></dd>` : ''}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
       ${c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''}
       ${c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}${c.prState === 'MERGED' ? '（マージ済み）' : c.prState === 'CLOSED' ? '（閉じられました）' : ''}${c.prState === 'OPEN' && c.prMergeable === 'CONFLICTING' ? ` <span class="badge b-conflict">コンフリクト</span>${c.worktreePath && !c.conflict && (s === 'review' || s === 'failed') ? ' <button class="btn small" data-act="prConflict">解消する</button>' : ''}` : ''}</dd>` : ''}
@@ -1134,6 +1140,10 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'stop') runBusy('停止しています…', () => api.stop(c.id));
   if (act === 'open') run(() => api.open(c.id));
   if (act === 'merge') openMerge(c);
+  if (act === 'complete') {
+    if (confirm(`「${c.title}」を完了にしますか？\nフォルダの中身はそのまま残ります（git で管理していないので、マージや PR はありません）。`)) await runBusy('完了にしています…', () => api.complete(c.id), '完了にしました');
+    return;
+  }
   if (act === 'pr') openPr(c);
   if (act === 'prConflict') run(() => api.reopenPrConflict(c.id));
   if (act === 'toTask') newTask({ fromChat: c });
@@ -1160,6 +1170,13 @@ $('detailHead').addEventListener('click', async (e) => {
   }
   if (act === 'discard') {
     if (c.status === 'done' || c.afterDone) return toast('完了したタスクは削除できません');
+    if (isNoGit(c)) {
+      if (confirm(`「${c.title}」をボードから削除しますか？\nフォルダの中で変えたファイルはそのまま残ります（git で管理していないので、元には戻しません）。`)) {
+        await runBusy('削除しています…', () => api.discard(c.id), '削除しました');
+        closeDetail();
+      }
+      return;
+    }
     if (confirm(`「${c.title}」を破棄しますか？\nworktree とブランチ ${c.branch || ''} も削除され、元に戻せません。`)) {
       await runBusy('worktree とブランチを削除しています…', () => api.discard(c.id), '破棄しました');
       closeDetail();
@@ -3289,11 +3306,11 @@ async function chooseRepo(opts) {
        ${
          onHost
            ? `<button class="btn repo-choice" data-pick="">${icon('monitor')}<b>ホストのフォルダを開く</b><small>${esc(host)} のフォルダを、この画面で辿って選びます</small></button>`
-           : `<button class="btn repo-choice" data-pick="">${icon(distros.length ? 'monitor' : 'folder')}<b>${distros.length ? 'このパソコンのフォルダを開く' : '手元のフォルダを開く'}</b><small>${distros.length ? 'C:\\Users\\… など' : 'すでにある git リポジトリ'}</small></button>`
+           : `<button class="btn repo-choice" data-pick="">${icon(distros.length ? 'monitor' : 'folder')}<b>${distros.length ? 'このパソコンのフォルダを開く' : '手元のフォルダを開く'}</b><small>${distros.length ? 'C:\\Users\\… など' : 'git リポジトリ、または git で管理していないフォルダ'}</small></button>`
        }
        ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">${icon('terminal')}<b>${esc(d)} のフォルダを開く</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}
        <button class="btn repo-choice" id="rpClone">${icon('download')}<b>URL からクローンする</b><small>https://github.com/owner/repo・git@github.com:owner/repo.git・owner/repo</small></button>
-       <button class="btn repo-choice" id="rpCreate">${icon('folderPlus')}<b>新しく作る</b><small>空のリポジトリを作ります（GitHub にも作れます）</small></button>
+       <button class="btn repo-choice" id="rpCreate">${icon('folderPlus')}<b>新しく作る</b><small>空のリポジトリ（GitHub にも作れます）か、git で管理しないフォルダを作ります</small></button>
      </div>
      <div class="modal-actions"><button class="btn ghost" id="rpCancel">キャンセル</button></div>`,
     () => {
@@ -3395,7 +3412,7 @@ function hostFolderModal(opts = {}) {
   const host = remoteHostLabel();
   openModal(
     `<h2>ホストのフォルダを開く</h2>
-     <p class="muted small">接続先（${esc(host)}）のフォルダです。git リポジトリのフォルダまで移動して「このフォルダを開く」を押すか、一覧の「開く」を押します。</p>
+     <p class="muted small">接続先（${esc(host)}）のフォルダです。開きたいフォルダまで移動して「このフォルダを開く」を押すか、一覧の git リポジトリの「開く」を押します。git で管理していないフォルダも開けます（worktree を作らず、そのフォルダでタスクを動かします）。</p>
      <div id="hfBrowser"></div>
      <div class="modal-actions"><button class="btn ghost" id="hfBack">戻る</button></div>`,
     () => {
@@ -3421,13 +3438,14 @@ function repoNameFromUrl(url) {
 async function repoSetupModal(mode, distros = []) {
   const clone = mode === 'clone';
   openModal(
-    `<h2>${clone ? 'URL からクローンする' : '新しいリポジトリを作る'}</h2>
+    `<h2>${clone ? 'URL からクローンする' : '新しく作る'}</h2>
      ${clone ? `<label class="field"><span>リポジトリの URL</span><input id="rsUrl" class="mono" placeholder="https://github.com/owner/repo または owner/repo" autocomplete="off" spellcheck="false" /></label>` : ''}
      ${distros.length ? `<label class="field"><span>作る場所</span><select id="rsWhere"><option value="">このパソコン</option>${distros.map((d) => `<option value="${esc(d)}">${esc(d)}（WSL）</option>`).join('')}</select></label>` : ''}
      <label class="field"><span>置き場所（この中にフォルダを作ります）</span>
        <div class="input-row"><input id="rsParent" class="mono" spellcheck="false" /><button class="btn" id="rsBrowse">選ぶ…</button></div></label>
      <div id="rsHostBrowser" class="dir-browser-inline hidden"></div>
      <label class="field"><span>フォルダ名${clone ? '（空なら URL から決めます）' : ''}</span><input id="rsName" class="mono" spellcheck="false" autocomplete="off" placeholder="${clone ? 'repo' : '例: my-app'}" /></label>
+     ${clone ? '' : `<label class="field"><span>ソース管理</span><select id="rsGit"><option value="git">git で管理する（タスクごとに worktree で作業し、マージ・PR で取り込む）</option><option value="none">git で管理しない（フォルダだけ作る。動画づくりなど、コード以外の作業に）</option></select><small>git で管理しないフォルダでは、タスクはそのフォルダの中で直接動きます。差分・worktree・マージ・PR は使えず、終わったら「完了にする」で完了にします</small></label>`}
      ${clone ? '' : `<label class="field" id="rsGhWrap"><span>GitHub</span><select id="rsGh"><option value="">作らない（手元だけ）</option><option value="private">GitHub にも作る（非公開）</option><option value="public">GitHub にも作る（公開）</option></select><small>GitHub にも作るときは、gh（GitHub CLI）にログインしている必要があります</small></label>`}
      <p class="muted small" id="rsPreview"></p>
      <div class="modal-actions"><button class="btn ghost" id="rsBack">戻る</button><button class="btn primary" id="rsOk">${clone ? 'クローンして開く' : '作って開く'}</button></div>`,
@@ -3436,13 +3454,19 @@ async function repoSetupModal(mode, distros = []) {
       const sep = () => (where() || /^[A-Za-z]:\\|^\\\\/.test($('rsParent').value) ? '\\' : '/');
       const name = () => $('rsName').value.trim() || (clone ? repoNameFromUrl($('rsUrl').value) : '');
       let nameTouched = false;
+      const noGit = () => !!$('rsGit') && $('rsGit').value === 'none';
+      // WSL のフォルダと、git で管理しないフォルダでは GitHub に作れない
+      const syncGh = () => {
+        if ($('rsGhWrap')) $('rsGhWrap').hidden = !!where() || noGit();
+        if (!clone) $('rsOk').textContent = noGit() ? 'フォルダを作って開く' : '作って開く';
+      };
       const preview = () => {
         const p = $('rsParent').value.trim().replace(/[\\/]+$/, '');
         $('rsPreview').textContent = p && name() ? `作るフォルダ: ${p}${sep()}${name()}` : '';
       };
       const loadParent = async () => {
         $('rsParent').value = (await api.repoDefaultParent({ ...targetOpts(), ...(where() ? { wsl: where() } : {}) }).catch(() => '')) || '';
-        if ($('rsGhWrap')) $('rsGhWrap').hidden = !!where(); // WSL のフォルダでは GitHub に作れない
+        syncGh();
         preview();
       };
       $('rsBack').onclick = () => chooseRepo();
@@ -3469,6 +3493,7 @@ async function repoSetupModal(mode, distros = []) {
         preview();
       };
       if ($('rsWhere')) $('rsWhere').onchange = loadParent;
+      if ($('rsGit')) $('rsGit').onchange = syncGh;
       $('rsParent').oninput = preview;
       $('rsName').oninput = () => ((nameTouched = !!$('rsName').value.trim()), preview());
       if (clone) $('rsUrl').oninput = () => (nameTouched || ($('rsName').placeholder = repoNameFromUrl($('rsUrl').value) || 'repo'), preview());
@@ -3476,12 +3501,12 @@ async function repoSetupModal(mode, distros = []) {
         const parent = $('rsParent').value.trim();
         const r = clone
           ? await runBusy('クローンしています…（大きいリポジトリは時間がかかります）', () => api.cloneRepo({ ...targetOpts(), url: $('rsUrl').value.trim(), parent, name: $('rsName').value.trim(), tab: state.repoOpenMode }))
-          : await runBusy('リポジトリを作っています…', () => api.createRepo({ ...targetOpts(), parent, name: $('rsName').value.trim(), github: where() ? '' : $('rsGh').value, tab: state.repoOpenMode }));
+          : await runBusy(noGit() ? 'フォルダを作っています…' : 'リポジトリを作っています…', () => api.createRepo({ ...targetOpts(), parent, name: $('rsName').value.trim(), github: where() || noGit() ? '' : $('rsGh').value, git: !noGit(), tab: state.repoOpenMode }));
         if (!r) return;
         closeModal();
         closeDetail();
         if (r.warning) toast(r.warning);
-        else toast(clone ? 'クローンしました' : r.github ? 'リポジトリを作り、GitHub にも push しました' : 'リポジトリを作りました', 'ok');
+        else toast(clone ? 'クローンしました' : r.git === false ? 'git で管理しないフォルダを作りました' : r.github ? 'リポジトリを作り、GitHub にも push しました' : 'リポジトリを作りました', 'ok');
         state.board = await api.getBoard();
         renderBoard();
         checkEnv();

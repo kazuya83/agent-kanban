@@ -15,6 +15,7 @@ const attachments = require('./attachments');
 const { findSimilarTasks } = require('./similar');
 const os = require('os');
 const { agentLabel, agentShort } = providers;
+const { isNoGitRepo } = require('./store');
 
 const MAX_LOGS = 2000;
 const MCP_SERVER_NAME = 'agent_kanban';
@@ -240,10 +241,21 @@ function inSpecCheck(c) {
 }
 const RESUME_PROMPT ='前回の作業は、アプリの終了で途中で中断されました。worktree の今の状態（git status / git diff など）を確かめて、中断したところから作業を続けてください。';
 const CHAT_RESUME_PROMPT = '前回の返事は、アプリの終了で途中で中断されました。中断したところから続けてください。';
+const FOLDER_RESUME_PROMPT = '前回の作業は、アプリの終了で途中で中断されました。フォルダの今の状態を確かめて、中断したところから作業を続けてください。';
 
 // タスクに紐づかない会話（チャット）か。worktree もブランチも作らず、リポジトリのフォルダでそのまま話す
 function isChat(c) {
   return !!c && c.kind === 'chat';
+}
+
+// git で管理していないフォルダ（動画づくりなど）のタスクか。worktree・ブランチ・コミット・マージは使わず、フォルダの中でそのまま動かす
+function isNoGit(c) {
+  return !!c && !!c.noGit;
+}
+
+// 作業の場所がもうあるか（git なら worktree、git でないフォルダなら一度動かしたことがある）
+function hasWorkplace(c) {
+  return !!(c && (c.worktreePath || isChat(c) || (isNoGit(c) && c.startedAt)));
 }
 
 // Claude 以外で、実行中に送った btw を「終わったあとの追加指示」待ちにしているか
@@ -452,7 +464,9 @@ function buildRelayStepPrompt(c, i) {
   }
   lines.push(
     '## 作業の場所',
-    `このフォルダ（git worktree・ブランチ ${c.branch || ''}・ベース ${c.baseBranch || ''}）で作業してください。前の工程の変更はコミット済みです（git log ${c.baseBranch || 'ベース'}..HEAD や git diff ${c.baseBranch || 'ベース'}...HEAD で確かめられます）。`,
+    isNoGit(c)
+      ? 'このフォルダ（git では管理していません）で作業してください。前の工程の変更は、このフォルダにそのまま残っています。'
+      : `このフォルダ（git worktree・ブランチ ${c.branch || ''}・ベース ${c.baseBranch || ''}）で作業してください。前の工程の変更はコミット済みです（git log ${c.baseBranch || 'ベース'}..HEAD や git diff ${c.baseBranch || 'ベース'}...HEAD で確かめられます）。`,
     '',
     '## あなたの担当',
     st.instruction || `工程「${st.label}」を進めてください。`,
@@ -613,12 +627,12 @@ class AgentManager extends EventEmitter {
       if (c.status === 'queued') {
         // まだ claude に渡していない指示なので、そのまま渡し直せばよい
         c.interrupted = { at: now, kind: 'queued', prompt: c.pendingPrompt || this.firstPrompt(c), attachments: (c.pendingPrompt ? c.pendingAttachments : c.attachments) || undefined };
-        c.status = c.worktreePath || isChat(c) ? 'review' : 'todo';
+        c.status = hasWorkplace(c) ? 'review' : 'todo';
         c.error = null;
       }
       if (c.status === 'running') {
         // 会話が始まっていれば同じ会話の続きから、始まる前なら同じ指示をもう一度渡す
-        const resumePrompt = isChat(c) ? CHAT_RESUME_PROMPT : RESUME_PROMPT;
+        const resumePrompt = isChat(c) ? CHAT_RESUME_PROMPT : isNoGit(c) ? FOLDER_RESUME_PROMPT : RESUME_PROMPT;
         c.interrupted = { at: now, kind: 'running', prompt: c.sessionId ? resumePrompt : c.lastPromptSent || this.firstPrompt(c), attachments: c.sessionId ? undefined : (c.lastPromptSent ? c.lastAttachmentsSent : c.attachments) || undefined };
         c.status = 'failed';
         c.error = INTERRUPTED_MESSAGE;
@@ -640,7 +654,7 @@ class AgentManager extends EventEmitter {
     const it = c.interrupted;
     if (!it) throw new Error('このタスクは中断されていません');
     if (c.status === 'running' || c.status === 'queued') throw new Error('このタスクはもう動いています');
-    if (it.kind === 'running') this.log(c, 'user', it.prompt === RESUME_PROMPT || it.prompt === CHAT_RESUME_PROMPT ? '（中断したところから再開）' : it.prompt);
+    if (it.kind === 'running') this.log(c, 'user', [RESUME_PROMPT, CHAT_RESUME_PROMPT, FOLDER_RESUME_PROMPT].includes(it.prompt) ? '（中断したところから再開）' : it.prompt);
     else this.log(c, 'system', '中断されていた指示で再開します');
     this.enqueue(c, it.prompt, it.attachments);
   }
@@ -935,6 +949,7 @@ class AgentManager extends EventEmitter {
   // 競争: 同じタスクを、設定のエージェントそれぞれのカードにする（使わない設定のエージェントは外す）
   createCompetition({ title, prompt, issue, session, skill, fromChat, parsed }) {
     const s = this.store.settings;
+    if (isNoGitRepo(s, s.repoPath)) throw new Error('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください');
     const list = providers.cleanCompeteAgents(s.competeAgents).filter((a) => providers.isEnabled(s, a));
     if (list.length < 2) throw new Error('競争させるエージェントを、設定で2つ以上選んでください（使うエージェントにチェックを付けたものから選べます）');
     const group = crypto.randomBytes(4).toString('hex');
@@ -962,6 +977,8 @@ class AgentManager extends EventEmitter {
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     if (!prompt || !prompt.trim()) throw new Error('指示を入力してください');
     if (agent) this.assertEnabled(agent);
+    const noGit = isNoGitRepo(s, s.repoPath);
+    if (noGit && compete) throw new Error('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください');
     const card = {
       id: crypto.randomBytes(4).toString('hex'),
       title: (title && title.trim()) || truncate(prompt.trim().split('\n')[0], 40),
@@ -973,6 +990,7 @@ class AgentManager extends EventEmitter {
       alwaysAllow: [],
       logs: [],
     };
+    if (noGit) card.noGit = true;
     if (issue) card.issue = { number: issue.number, title: issue.title, url: issue.url };
     card.agent = agent || 'claude';
     if (relay) card.relay = relay;
@@ -1461,7 +1479,7 @@ class AgentManager extends EventEmitter {
       if (c.afterDone) {
         c.afterDone = false;
         c.status = 'done';
-      } else c.status = c.worktreePath || isChat(c) ? 'review' : 'todo';
+      } else c.status = hasWorkplace(c) ? 'review' : 'todo';
       this.changed(c);
       return;
     }
@@ -1699,10 +1717,12 @@ class AgentManager extends EventEmitter {
     const chat = isChat(c);
     // 完了したタスクについての会話: worktree は作らずリポジトリのフォルダで、ファイルを変えない計画モードで動かす
     const afterDone = !chat && !!c.afterDone;
-    if (chat || afterDone) {
-      if (!c.repoPath || !fs.existsSync(c.repoPath)) throw new Error(`リポジトリのフォルダが見つかりません: ${c.repoPath}`);
+    // git で管理していないフォルダは、worktree を作らずにそのフォルダでそのまま動かす
+    const inFolder = chat || afterDone || isNoGit(c);
+    if (inFolder) {
+      if (!c.repoPath || !fs.existsSync(c.repoPath)) throw new Error(`${isNoGit(c) ? '' : 'リポジトリの'}フォルダが見つかりません: ${c.repoPath}`);
     } else if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
-    const cwd = chat || afterDone ? c.repoPath : c.worktreePath;
+    const cwd = inFolder ? c.repoPath : c.worktreePath;
     const s = this.store.settings;
     const agent = agentOf(c);
     const label = agentLabel(agent);
@@ -1797,7 +1817,7 @@ class AgentManager extends EventEmitter {
       if (!this.store.card(c.id)) return; // 破棄された
       if (afterDone) return this.finishAfterDone(c, code, spawnError, run, cmd);
       // 状態を「レビュー」にする前に、作業内容をブランチにコミットしておく
-      if (!spawnError && !chat) {
+      if (!spawnError && !chat && !isNoGit(c)) {
         try {
           const canCommit = await this.afterConflictRun(c);
           if (canCommit && (await git.commitAll(c.worktreePath, this.commitMessage(c)))) this.log(c, 'system', '変更を worktree のブランチにコミットしました');
@@ -1854,7 +1874,7 @@ class AgentManager extends EventEmitter {
         } else {
           if (isChat(c)) this.notify(c, 'awaiting', `返事: ${c.title}`, c.lastText || `${agentShort(agent)} が返事をしました`);
           else if (plan && plan.limitMsg) this.notify(c, 'review', `ループの上限: ${c.title}`, plan.limitMsg);
-          else this.notify(c, 'review', `レビュー待ち: ${c.title}`, c.lastText || '作業が終わりました。差分を確かめてください');
+          else this.notify(c, 'review', `レビュー待ち: ${c.title}`, c.lastText || (isNoGit(c) ? '作業が終わりました。フォルダの中身を確かめてください' : '作業が終わりました。差分を確かめてください'));
         }
       } else {
         c.status = 'failed';
@@ -2310,7 +2330,7 @@ class AgentManager extends EventEmitter {
 
   async diff(id) {
     const c = this.must(id);
-    if (isChat(c)) return '';
+    if (isChat(c) || isNoGit(c)) return '';
     if (c.worktreePath && fs.existsSync(c.worktreePath)) return git.diff(c.worktreePath, c.baseCommit);
     return c.finalDiff || '';
   }
@@ -2318,7 +2338,7 @@ class AgentManager extends EventEmitter {
   // worktree の作業状況（タブ「worktree」用）
   async worktree(id) {
     const c = this.must(id);
-    if (isChat(c)) return { exists: false, status: null, worktrees: [] };
+    if (isChat(c) || isNoGit(c)) return { exists: false, status: null, worktrees: [] };
     const repo = c.repoPath || this.store.settings.repoPath;
     const others = repo && fs.existsSync(repo) ? await git.listWorktrees(repo).catch(() => []) : [];
     const exists = !!(c.worktreePath && fs.existsSync(c.worktreePath));
@@ -2338,6 +2358,7 @@ class AgentManager extends EventEmitter {
   async merge(id, opts = {}) {
     const c = this.must(id);
     if (isChat(c)) throw new Error('会話はマージできません（タスクにすると、worktree で作業してマージできます）');
+    if (isNoGit(c)) throw new Error('git で管理していないフォルダのタスクはマージできません。「完了にする」で完了にしてください');
     if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけマージできます');
     if (!c.worktreePath) throw new Error('worktree がありません');
     if (this.merging?.has(id)) throw new Error('マージ中です');
@@ -2464,6 +2485,7 @@ class AgentManager extends EventEmitter {
   async createPullRequest(id, opts = {}) {
     const c = this.must(id);
     if (isChat(c)) throw new Error('会話からは PR を作れません（タスクにすると、worktree で作業して PR を作れます）');
+    if (isNoGit(c)) throw new Error('git で管理していないフォルダのタスクからは PR を作れません。「完了にする」で完了にしてください');
     if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけ PR を作れます');
     if (!c.worktreePath) throw new Error('worktree がありません');
     if (this.merging?.has(id)) throw new Error('処理中です');
@@ -2844,6 +2866,24 @@ class AgentManager extends EventEmitter {
     return true;
   }
 
+  /**
+   * git で管理していないフォルダのタスクを「完了」にする（マージや PR の代わり。フォルダの中身はそのまま）
+   */
+  complete(id) {
+    const c = this.must(id);
+    if (!isNoGit(c)) throw new Error('git のリポジトリのタスクは、マージか PR の作成で完了にしてください');
+    if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけ完了にできます');
+    c.status = 'done';
+    c.error = null;
+    c.interrupted = null;
+    c.awaitingReply = false;
+    c.completedAt = Date.now();
+    this.log(c, 'system', 'タスクを完了にしました');
+    this.completed(c);
+    this.changed(c);
+    this.checkCompetitionDone(c);
+  }
+
   // 完了したタスク（完了後の会話の途中も含む）は削除できない。会話（chat）は対象外
   isUndeletable(c) {
     return !!c && !isChat(c) && (c.status === 'done' || !!c.afterDone);
@@ -2867,4 +2907,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, SKILL_SUGGEST_REPEAT_NOTE, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
+module.exports = { AgentManager, isNoGit, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, SKILL_SUGGEST_REPEAT_NOTE, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
