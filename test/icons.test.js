@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { icon, ICON_NAMES, NOTIF_ICON } = require('../renderer/icons.js');
+const { icon, agentIcon, ICON_NAMES, AGENT_ICON, NOTIF_ICON } = require('../renderer/icons.js');
 
 // 絵文字（カラーで描かれる文字）。UI のアイコンはモノクロの SVG を使う
 // （✓ ✕ → ▾ など、もともと1色で描かれる記号は使ってよい）
@@ -21,6 +21,23 @@ test('icon() はモノクロ（currentColor）の SVG を返す', () => {
 
 test('通知の種類ごとのアイコンがある', () => {
   for (const name of Object.values(NOTIF_ICON)) assert.ok(ICON_NAMES.includes(name), name);
+});
+
+test('エージェントごとのブランドアイコンがある', () => {
+  for (const [a, name] of Object.entries(AGENT_ICON)) {
+    assert.ok(ICON_NAMES.includes(name), `${a} → ${name}`);
+    assert.match(agentIcon(a), new RegExp(`class="ic"`));
+    assert.doesNotMatch(agentIcon(a), /#[0-9a-f]{3,6}/i, `${a} に固定の色がある`);
+  }
+  // 未知のエージェントは汎用の bot
+  assert.match(agentIcon('nope'), /viewBox="0 0 24 24"/);
+  assert.match(agentIcon('claude', 'logo'), /class="ic logo"/);
+});
+
+test('renderer.js の agentIcon() は登録済みのエージェント ID', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf8');
+  // agentIcon(agentOf(...)) / agentIcon(st.agent) / agentIcon(a) など変数渡しは除外し、直書きだけ見る
+  for (const [, id] of src.matchAll(/agentIcon\('([^']+)'\)/g)) assert.ok(AGENT_ICON[id], id);
 });
 
 test('画面に出す文字に絵文字が残っていない', () => {

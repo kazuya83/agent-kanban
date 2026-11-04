@@ -42,7 +42,23 @@
     pr: '<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M6 7.5v9"/><path d="M18 16.5V9a3 3 0 0 0-3-3h-4"/><path d="m13 3-3 3 3 3"/>',
     merge: '<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="13" r="2.5"/><path d="M6 7.5v9"/><path d="M6 7.5a8 8 0 0 0 9.5 5.5"/>',
     sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+    // エージェントのブランド寄りのマーク（モノクロ・currentColor。ぱっと見で見分けられる形）
+    // Claude / Anthropic: 曲線のアスタリスク（縦＋横の花弁）
+    claude:
+      '<path fill="currentColor" stroke="none" d="M12 2c.4 4 1.9 6.7 5.5 8.5C13.9 12.3 12.4 15 12 19c-.4-4-1.9-6.7-5.5-8.5C10.1 8.7 11.6 6 12 2z"/><path fill="currentColor" stroke="none" d="M2 12c4-.4 6.7-1.9 8.5-5.5C12.3 10.1 15 11.6 19 12c-4 .4-6.7 1.9-8.5 5.5C10.1 13.9 7.4 12.4 2 12z"/>',
+    // Codex / OpenAI: 六角＋内側の輪（結び目の簡略）
+    codex:
+      '<path fill="currentColor" stroke="none" d="M12 2.2 16.3 4.7 18.8 9v6l-2.5 4.3L12 21.8l-4.3-2.5L5.2 15V9l2.5-4.3z"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>',
+    // Gemini: 四芒星＋小さな星
+    gemini:
+      '<path fill="currentColor" stroke="none" d="M12 2.5 14.2 9.8 21.5 12 14.2 14.2 12 21.5 9.8 14.2 2.5 12 9.8 9.8z"/><path fill="currentColor" stroke="none" d="M18.5 3.5 19.3 5.7 21.5 6.5 19.3 7.3 18.5 9.5 17.7 7.3 15.5 6.5 17.7 5.7z"/>',
+    // Cursor: 幾何学的なポインタ
+    cursor:
+      '<path fill="currentColor" stroke="none" d="M5 3.2 19.5 12.1l-6.2 1.6 2.6 6.8-3.1 1.2-2.7-7.1L5 17.2z"/>',
   };
+
+  // エージェント ID → アイコン名（未知の ID は汎用の bot）
+  const AGENT_ICON = { claude: 'claude', codex: 'codex', gemini: 'gemini', cursor: 'cursor' };
 
   // 通知の種類ごとのアイコン
   const NOTIF = { permission: 'lock', question: 'question', awaiting: 'chat', review: 'eye', failed: 'alert', done: 'checkCircle', skill: 'bulb', conflict: 'conflict' };
@@ -53,7 +69,12 @@
     return `<svg class="ic${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
   }
 
-  const api = { icon, ICON_NAMES: Object.keys(PATHS), NOTIF_ICON: NOTIF };
+  // エージェントのブランドアイコン（表示用の HTML）。未知なら bot
+  function agentIcon(a, cls) {
+    return icon(AGENT_ICON[a] || 'bot', cls);
+  }
+
+  const api = { icon, agentIcon, ICON_NAMES: Object.keys(PATHS), AGENT_ICON, NOTIF_ICON: NOTIF };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else Object.assign(root, api);
 })(typeof window !== 'undefined' ? window : globalThis);

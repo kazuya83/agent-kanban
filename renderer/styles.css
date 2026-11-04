@@ -554,7 +554,8 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .repo-choice small { color: var(--muted); font-family: var(--mono); font-size: 11px; }
 
 /* ---- エージェント・オーケストレーション（Pipeline・競争） ---- */
-.orch-chip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 8px; margin-right: 4px; border-radius: 999px; font-size: 11px; font-weight: 600; background: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--text); }
+.orch-chip { display: inline-flex; align-items: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 8px; margin-right: 4px; border-radius: 999px; font-size: 11px; font-weight: 600; background: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--text); }
+.orch-chip .ic { width: 12px; height: 12px; margin-right: 4px; vertical-align: 0; }
 .orch-chip.agent { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
 .orch-chip.relay { background: color-mix(in srgb, var(--run) 16%, transparent); color: var(--run); }
 .orch-chip.compete { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
@@ -583,7 +584,8 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .rf-body { min-width: 0; flex: 1; padding-top: 2px; }
 .rf-node.rs-pending .rf-body { opacity: 0.7; }
 .rf-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 13px; }
-.rf-agent { font-size: 11px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 16%, transparent); }
+.rf-agent { display: inline-flex; align-items: center; font-size: 11px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 16%, transparent); }
+.rf-agent .ic { width: 12px; height: 12px; margin-right: 3px; }
 .rf-state { font-size: 11px; font-weight: 600; color: var(--rs, var(--muted)); }
 .rf-info { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .rf-inst { font-size: 12px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -607,7 +609,8 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 /* 設定の「使うエージェント」: チェックを付けたものだけ、コマンド・モデルの欄を出す */
 .agent-cfg { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: var(--panel-2); }
 .agent-cfg:not(.on) { opacity: 0.75; }
-.agent-cfg-head { margin: 0; }
+.agent-cfg-head { margin: 0; display: inline-flex; align-items: center; gap: 2px; }
+.agent-cfg-head .ic { width: 16px; height: 16px; margin-right: 4px; }
 .agent-cfg-body { margin-top: 8px; }
 .agent-cfg-body[hidden] { display: none; }
 
