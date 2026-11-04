@@ -591,14 +591,22 @@ const RELAY_STATE = {
   interrupted: ['‖', '中断'],
   stopped: ['■', '停止'],
   failed: ['✕', '失敗'],
+  skipped: ['–', 'スキップ'],
   done: ['✓', '完了'],
 };
+// 設定: 分岐の行き先の選択肢（'' = 次の工程 / 'end' = 終了 / 工程の番号）
+function targetOpts(v, n) {
+  const o = (val, label) => `<option value="${val}" ${String(v === undefined ? '' : v) === String(val) ? 'selected' : ''}>${label}</option>`;
+  return [o('', '次の工程'), ...Array.from({ length: n }, (_, j) => o(j, `工程${j + 1}へ`)), o('end', '終了（レビューへ）')].join('');
+}
 function relayStepState(c, i) {
   const r = c.relay;
-  if (i < r.index) return 'done';
-  if (i > r.index) return 'pending';
+  const ran = (r.history || []).some((h) => h.index === i);
+  // 分岐で飛ばした工程・Pipelineを終えたあとの、まだ動かしていない工程は「スキップ」
+  if (i < r.index) return ran ? 'done' : 'skipped';
+  if (i > r.index) return r.done ? (ran ? 'done' : 'skipped') : 'pending';
   const b = badgeFor(c)[0];
-  if (b === 'review') return i === r.steps.length - 1 ? 'done' : 'stopped'; // 途中の工程で止まっている（停止したとき）
+  if (b === 'review') return r.done || i === r.steps.length - 1 ? 'done' : 'stopped'; // 途中の工程で止まっている（停止したとき）
   if (b === 'todo') return 'pending';
   return RELAY_STATE[b] ? b : 'done';
 }
@@ -622,13 +630,19 @@ function relayBarHtml(c) {
 function relayFlowHtml(c) {
   if (!c.relay || isChat(c)) return '';
   const r = c.relay;
-  const hist = new Map((r.history || []).map((h) => [h.index, h]));
+  const hist = new Map((r.history || []).map((h) => [h.index, h])); // 同じ工程を何度か動かしたら、最後の回
+  const runs = (i) => (r.history || []).filter((h) => h.index === i).length + (i === r.index ? 1 : 0);
   const doneN = r.steps.filter((_, i) => relayStepState(c, i) === 'done').length;
+  const loopN = Object.values(r.loops || {}).reduce((a, b) => a + b, 0);
   const nodes = r.steps.map((st, i) => {
     const stt = relayStepState(c, i);
     const [mark, label] = RELAY_STATE[stt]; // icon() を隠さないよう、別の名前にする
-    const h = hist.get(i);
+    // 今の工程は、今の回の情報を見せる（今の回は履歴にまだない。前の回の報告は残す）
+    const h = i === r.index ? null : hist.get(i);
+    const prev = hist.get(i);
     const info = [];
+    const n = runs(i);
+    if (n > 1) info.push(`${n}回目`);
     if (h) {
       if (h.startedAt && h.at) info.push(`${icon('clock')}${durText(h.at - h.startedAt) || '1分未満'}`);
       if (h.costUsd) info.push(`$${h.costUsd.toFixed(3)}`);
@@ -638,21 +652,29 @@ function relayFlowHtml(c) {
       const cost = (c.costUsd || 0) - (r.stepCostStart || 0);
       if (cost > 0) info.push(`$${cost.toFixed(3)}`);
     }
+    // 判定する工程: 行き先と、最後の判定
+    const judge = st.onPass !== undefined || st.onFail !== undefined;
+    const tgt = (to) => (to === 'end' ? '終了' : to === undefined ? '次へ' : `工程${to + 1}${to <= i ? 'に戻る' : 'へ'}`);
+    const verdict = (i === r.index && r.lastVerdict) || (prev && prev.verdict);
+    const judgeHtml = judge
+      ? `<div class="rf-info">分岐: 合格 → ${esc(tgt(st.onPass))} ・ 差し戻し → ${esc(tgt(st.onFail))}${(r.loops || {})[i] ? ` ・ 戻した回数 ${r.loops[i]}/${st.maxLoops || 3}` : ''}${verdict ? ` <span class="rf-verdict v-${verdict}">${verdict === 'fail' ? '差し戻し' : '合格'}</span>` : ''}</div>`
+      : '';
     const key = `${c.id}:${i}`;
-    const report = h && String(h.report || '').trim()
-      ? `<details class="rf-report" data-rkey="${esc(key)}" ${state.relayOpen.has(key) ? 'open' : ''}><summary>次の工程へ渡した報告</summary><div class="rf-report-body">${esc(h.report)}</div></details>`
+    const report = prev && String(prev.report || '').trim()
+      ? `<details class="rf-report" data-rkey="${esc(key)}" ${state.relayOpen.has(key) ? 'open' : ''}><summary>${(r.history || []).filter((x) => x.index === i).length > 1 ? '最後に' : ''}次の工程へ渡した報告</summary><div class="rf-report-body">${esc(prev.report)}</div></details>`
       : '';
     return `<li class="rf-node rs-${stt} ${i === r.index ? 'cur' : ''}">
       <span class="rf-dot">${mark}</span>
       <div class="rf-body">
         <div class="rf-head"><b>${i + 1}. ${esc(st.label)}</b> <span class="rf-agent">${esc(agentLabel(st.agent))}</span> <span class="rf-state">${label}</span></div>
         ${info.length ? `<div class="rf-info">${info.join(' ・ ')}</div>` : ''}
+        ${judgeHtml}
         ${st.instruction ? `<div class="rf-inst" title="${esc(st.instruction)}">${esc(st.instruction)}</div>` : ''}
         ${report}
       </div>
     </li>`;
   });
-  return `<div class="relay-flow"><div class="rf-title">${icon('pipeline')}Pipeline <span class="muted small">${doneN}/${r.steps.length} 工程が完了</span></div><ol class="rf-list">${nodes.join('')}</ol></div>`;
+  return `<div class="relay-flow"><div class="rf-title">${icon('pipeline')}Pipeline <span class="muted small">${doneN}/${r.steps.length} 工程が完了${loopN ? `・ループ ${loopN} 回` : ''}${r.limitReached ? '・ループの上限で終了' : ''}</span></div><ol class="rf-list">${nodes.join('')}</ol></div>`;
 }
 
 // 詳細: 競争の候補（同じタスクをほかのエージェントで解いたもの）
@@ -1951,6 +1973,11 @@ async function openSettings() {
               <button class="icon rUp" type="button" title="上へ" ${i === 0 ? 'disabled' : ''}>↑</button>
               <button class="icon rDel" type="button" title="この工程を消す">✕</button>
               <textarea class="rInst" rows="2" placeholder="この工程の担当の説明（例: 前の工程の変更をレビューして直す）">${esc(st.instruction)}</textarea>
+              <div class="relay-branch" title="合格・差し戻しの行き先を「次の工程」以外にすると、この工程のエージェントに結果を判定してもらい（返事の最後に [[PASS]] / [[FAIL]]）、行き先を変えます。前の工程に戻すとループになります">
+                <label>合格なら <select class="rPass">${targetOpts(st.onPass, relay.length)}</select></label>
+                <label>差し戻しなら <select class="rFail">${targetOpts(st.onFail, relay.length)}</select></label>
+                <label class="rLoopBox" ${st.onPass === undefined && st.onFail === undefined ? 'hidden' : ''}>戻る上限 <input class="rLoops" type="number" min="1" max="10" value="${esc(st.maxLoops || 3)}" /> 回</label>
+              </div>
             </div>`,
           )
           .join('') || '<div class="muted small">工程がありません</div>';
@@ -1961,8 +1988,27 @@ async function openSettings() {
           st.agent = row.querySelector('.rAgent').value;
           st.label = row.querySelector('.rLabel').value.trim();
           st.instruction = row.querySelector('.rInst').value.trim();
+          const tv = (v) => (v === '' ? undefined : v === 'end' ? 'end' : Number(v));
+          st.onPass = tv(row.querySelector('.rPass').value);
+          st.onFail = tv(row.querySelector('.rFail').value);
+          if (st.onPass === undefined) delete st.onPass;
+          if (st.onFail === undefined) delete st.onFail;
+          if (st.onPass === undefined && st.onFail === undefined) delete st.maxLoops;
+          else st.maxLoops = Math.min(10, Math.max(1, Math.round(Number(row.querySelector('.rLoops').value) || 3)));
         });
         return relay;
+      };
+      // 工程を消す・並べ替えたとき、分岐の行き先の番号を合わせる（map: 元の番号 → 新しい番号。消した工程は undefined）
+      const remapTargets = (map) => {
+        for (const st of relay) {
+          for (const k of ['onPass', 'onFail']) {
+            if (typeof st[k] !== 'number') continue;
+            const n = map(st[k]);
+            if (n === undefined) delete st[k];
+            else st[k] = n;
+          }
+          if (st.onPass === undefined && st.onFail === undefined) delete st.maxLoops;
+        }
       };
       drawRelay();
       drawAgents();
@@ -1997,12 +2043,20 @@ async function openSettings() {
         if (e.target.closest('.rDel')) {
           readRelay();
           relay.splice(i, 1);
+          remapTargets((n) => (n === i ? undefined : n > i ? n - 1 : n));
           drawRelay();
         } else if (e.target.closest('.rUp') && i > 0) {
           readRelay();
           [relay[i - 1], relay[i]] = [relay[i], relay[i - 1]];
+          remapTargets((n) => (n === i ? i - 1 : n === i - 1 ? i : n));
           drawRelay();
         }
+      };
+      // 分岐の行き先を決めたら、戻る上限の欄を出す
+      $('sRelay').onchange = (e) => {
+        if (!e.target.closest('.rPass, .rFail')) return;
+        const row = e.target.closest('.relay-edit-row');
+        row.querySelector('.rLoopBox').hidden = !row.querySelector('.rPass').value && !row.querySelector('.rFail').value;
       };
       let defSkill = s.defaultSkill || null;
       const drawDef = () => renderSkillSlot('sSkill', defSkill, (v) => ((defSkill = v), drawDef()));

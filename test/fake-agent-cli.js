@@ -54,7 +54,12 @@ process.stdin.on('end', () => {
       out({ type: 'turn.failed', error: { message: 'codex boom' } });
       process.exit(1);
     }
-    out({ type: 'item.completed', item: { id: 'item_2', type: 'agent_message', text: ask ? 'どちらにしますか？' : `codex done: ${prompt.split('\n')[0]}` } });
+    // Pipelineの判定する工程（指示に判定の印の説明があるとき）: [judge-always-fail] ならいつも差し戻し、
+    // [judge] なら1回目は差し戻し・2回目以降（見出しに「回目」がある）は合格
+    let verdict = '';
+    if (prompt.includes('[[FAIL]]') && prompt.includes('[judge-always-fail]')) verdict = '\n[[FAIL]]';
+    else if (prompt.includes('[[FAIL]]') && prompt.includes('[judge]')) verdict = prompt.split('\n')[0].includes('回目') ? '\n[[PASS]]' : '\n直してください\n[[FAIL]]';
+    out({ type: 'item.completed', item: { id: 'item_2', type: 'agent_message', text: ask ? 'どちらにしますか？' : `codex done: ${prompt.split('\n')[0]}${verdict}` } });
     out({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } });
     process.exit(0);
   }
