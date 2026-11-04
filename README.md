@@ -289,6 +289,25 @@ $env:AGENT_KANBAN_UNINSTALL = "1"; irm https://raw.githubusercontent.com/kazuya8
 
 アプリとは別に、**git** と、使うエージェントの CLI（**Claude Code / Codex CLI / Gemini CLI / Cursor CLI** のどれか。ログイン済み）が必要です。アプリは、ターミナルの PATH にある `claude` / `codex` / `gemini` / `cursor-agent` を自動で探します。見つからないときは、画面の上に案内が出ます（⚙ 設定でフルパスを指定することもできます）。
 
+## 遠隔操作（SSH トンネルで別の PC からボードを操作する）
+
+Mac mini などでエージェントを動かし、Windows など別の PC の Agent Kanban から **同じボードをほぼそのまま表示・操作**できます。通信はアプリが `127.0.0.1` だけを待ち受けるため、インターネットへの露出はなく、**SSH のポート転送**でつなぎます。どのマシンもホスト（作業側）にもクライアント（操作側）にもなれます。
+
+### 手順（例: Mac mini＝ホスト、Windows＝クライアント）
+
+1. **Mac mini** で Agent Kanban を開き、⚙ 設定 →「遠隔操作」→「ホストを開始」を押します（ペアリング用の 6 桁コードが出ます。ポート既定は `17831`）
+2. **Windows** のターミナルで、SSH トンネルを張ります（`<user>` と `<host>` は Mac mini のものに置き換え）
+
+   ```bash
+   ssh -L 17831:127.0.0.1:17831 <user>@<host>
+   ```
+
+3. **Windows** の Agent Kanban で ⚙ 設定 →「遠隔操作」→ 接続先 `127.0.0.1`・ポート `17831`・Mac に出ているペアリングコードを入れて接続します
+4. 以降はトークンが保存されるので、コードなしで再接続できます。上部のピルに「遠隔操作中」と出ているあいだは、ホスト側のボード・承認・質問・追加指示がそのまま使えます
+
+- ホストを止める・ペアを破棄する・トークンを忘れる操作も、同じ設定画面にあります
+- あわせて、設定の「Claude カード起動時に公式 Remote Control も付ける」をオンにすると、カードで動かす Claude に `--remote-control` が付き、[claude.ai/code](https://claude.ai/code) や Claude アプリからも続けられます（CLI が対応している場合）
+
 ## Windows で WSL（Ubuntu など）のリポジトリを使う
 
 Windows では、「リポジトリを選ぶ」を押すと、**このパソコンのフォルダ** か **WSL（Ubuntu など）のフォルダ** かを選べます。

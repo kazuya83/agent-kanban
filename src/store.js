@@ -36,6 +36,14 @@ const DEFAULT_SETTINGS = {
   orchestration: 'relay', // Pipelineと競争は排他。使うのはどちらか1つ（'relay' / 'compete'）
   relaySteps: DEFAULT_RELAY_STEPS, // Pipeline: 同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ
   competeAgents: DEFAULT_COMPETE_AGENTS, // 競争: 同じタスクを、これらのエージェントで並列に解かせる
+  // ---- 遠隔操作（SSH トンネル前提。アプリ同士） ----
+  remoteHostEnabled: false, // このマシンをホスト（作業側）として 127.0.0.1 で待ち受ける
+  remotePort: 17831, // ホストの待ち受けポート（クライアントは SSH -L でここにトンネルする）
+  remotePairTokens: [], // ペアリング済みクライアントのトークン（ホスト側）
+  remoteClientHost: '127.0.0.1', // 接続先（トンネル後は通常 127.0.0.1）
+  remoteClientPort: 17831,
+  remoteClientToken: '', // ペアリング後に保存するトークン（クライアント側）
+  claudeRemoteControl: false, // Claude カード起動時に公式 Remote Control（--remote-control）も付ける
 };
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;

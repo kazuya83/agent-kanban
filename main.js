@@ -8,6 +8,7 @@ const git = require('./src/git');
 const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
+const { RemoteHost, RemoteClient, DEFAULT_PORT, isProxyChannel } = require('./src/remote');
 
 // Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
 fixPath();
@@ -39,6 +40,9 @@ let quitState = 'idle'; // 終了の流れ: idle → confirming → stopping →
 let store;
 let agents;
 let permServer;
+let remoteHost = null;
+let remoteClient = null;
+const localHandlers = new Map();
 
 function createWindow() {
   win = new BrowserWindow({
@@ -82,24 +86,111 @@ function boardState() {
   return { settings: store.settings, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), weeklyCost: store.weeklyCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath) };
 }
 
+function remoteSession() {
+  const h = remoteHost?.status() || {};
+  const c = remoteClient?.status() || {};
+  return {
+    role: c.connected ? 'client' : h.listening ? 'host' : 'local',
+    host: {
+      enabled: !!store.settings.remoteHostEnabled,
+      listening: !!h.listening,
+      port: h.port || store.settings.remotePort || DEFAULT_PORT,
+      pairCode: h.pairCode || null,
+      pairExpiresAt: h.pairExpiresAt || 0,
+      pairedCount: h.pairedCount || (store.settings.remotePairTokens || []).length,
+      clients: h.clients || 0,
+    },
+    client: {
+      connected: !!c.connected,
+      host: store.settings.remoteClientHost || '127.0.0.1',
+      port: store.settings.remoteClientPort || DEFAULT_PORT,
+      hasToken: !!(store.settings.remoteClientToken || c.hasToken),
+    },
+  };
+}
+
+function withRemoteSession(state) {
+  return { ...state, remoteSession: remoteSession() };
+}
+
 let boardTimer = null;
 function notifyBoard() {
   if (boardTimer) return;
   boardTimer = setTimeout(() => {
     boardTimer = null;
-    send('board:changed', boardState());
+    // クライアント接続中はホスト側の board:changed を中継するので、ローカルボードは送らない
+    if (remoteClient?.connected) {
+      send('remote:changed', remoteSession());
+      return;
+    }
+    const state = withRemoteSession(boardState());
+    send('board:changed', state);
+    remoteHost?.broadcast('board:changed', state);
   }, 120);
+}
+
+function notifyRemoteOnly() {
+  send('remote:changed', remoteSession());
+  if (!remoteClient?.connected) notifyBoard();
+}
+
+// ローカル処理。クライアント接続中は PROXY 対象をホストへ転送する
+async function dispatch(channel, arg) {
+  if (remoteClient?.connected && isProxyChannel(channel)) {
+    const data = await remoteClient.invoke(channel, arg);
+    // ホストの board:get に、このマシンの遠隔状態を載せる
+    if (channel === 'board:get' && data && typeof data === 'object') return withRemoteSession(data);
+    return data;
+  }
+  const fn = localHandlers.get(channel);
+  if (!fn) throw new Error(`未対応の操作です: ${channel}`);
+  return fn(arg);
 }
 
 // エラーはメッセージだけをきれいに返す
 function handle(channel, fn) {
+  localHandlers.set(channel, fn);
   ipcMain.handle(channel, async (_e, arg) => {
     try {
-      return { ok: true, data: await fn(arg) };
+      return { ok: true, data: await dispatch(channel, arg) };
     } catch (err) {
       return { ok: false, error: (err && err.message) || String(err) };
     }
   });
+}
+
+async function startRemoteHost() {
+  const port = store.settings.remotePort || DEFAULT_PORT;
+  if (!remoteHost) {
+    remoteHost = new RemoteHost({
+      port,
+      tokens: store.settings.remotePairTokens || [],
+      onTokens: (tokens) => {
+        store.settings.remotePairTokens = tokens;
+        store.save();
+      },
+      invoke: (channel, arg) => {
+        const fn = localHandlers.get(channel);
+        if (!fn || !isProxyChannel(channel)) throw new Error(`この操作は遠隔では使えません: ${channel}`);
+        return fn(arg);
+      },
+    });
+    remoteHost.on('changed', notifyRemoteOnly);
+  }
+  await remoteHost.start(port);
+  store.settings.remoteHostEnabled = true;
+  store.settings.remotePort = remoteHost.port;
+  store.save();
+  notifyRemoteOnly();
+  return remoteSession();
+}
+
+async function stopRemoteHost() {
+  store.settings.remoteHostEnabled = false;
+  store.save();
+  if (remoteHost) await remoteHost.stop();
+  notifyRemoteOnly();
+  return remoteSession();
 }
 
 app.whenReady().then(async () => {
@@ -119,7 +210,11 @@ app.whenReady().then(async () => {
   agents.on('changed', notifyBoard);
   // 作った PR がマージされたら、タスクを完了にする（1分ごとに GitHub で確かめる）
   agents.watchPullRequests(60000);
-  agents.on('log', (id, entry) => send('card:log', { id, entry }));
+  agents.on('log', (id, entry) => {
+    const payload = { id, entry };
+    send('card:log', payload);
+    remoteHost?.broadcast('card:log', payload);
+  });
   // 通知（右上のベルに貯まるもの）は、デスクトップ通知でも知らせる
   agents.on('notification', (n) => {
     notifyBoard();
@@ -137,8 +232,79 @@ app.whenReady().then(async () => {
     if (win && !win.isFocused()) win.flashFrame(true);
   });
 
-  handle('board:get', () => boardState());
+  remoteClient = new RemoteClient();
+  remoteClient.on('event', (channel, payload) => {
+    if (channel === 'board:changed' && payload && typeof payload === 'object') {
+      send('board:changed', withRemoteSession(payload));
+      return;
+    }
+    send(channel, payload);
+  });
+  remoteClient.on('disconnected', () => {
+    notifyRemoteOnly();
+    send('board:changed', withRemoteSession(boardState()));
+  });
+  remoteClient.on('changed', notifyRemoteOnly);
+
+  handle('board:get', () => withRemoteSession(boardState()));
   handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
+  handle('remote:status', () => remoteSession());
+  handle('remote:startHost', async ({ port } = {}) => {
+    if (remoteClient?.connected) throw new Error('クライアントとして接続中はホストを開始できません。先に切断してください');
+    if (port != null) {
+      const n = parseInt(port, 10);
+      store.settings.remotePort = n === 0 ? 0 : Math.min(65535, Math.max(1024, n || DEFAULT_PORT));
+      store.save();
+    }
+    return startRemoteHost();
+  });
+  handle('remote:stopHost', () => stopRemoteHost());
+  handle('remote:refreshPair', () => {
+    if (!remoteHost?.listening()) throw new Error('ホストが起動していません');
+    const r = remoteHost.refreshPairCode();
+    notifyRemoteOnly();
+    return r;
+  });
+  handle('remote:clearPairs', () => {
+    if (remoteHost) remoteHost.clearPairs();
+    else {
+      store.settings.remotePairTokens = [];
+      store.save();
+    }
+    notifyRemoteOnly();
+    return remoteSession();
+  });
+  handle('remote:connect', async ({ host, port, code } = {}) => {
+    if (remoteHost?.listening()) throw new Error('ホストとして待ち受け中は接続できません。先にホストを停止してください');
+    const h = String(host || store.settings.remoteClientHost || '127.0.0.1').trim() || '127.0.0.1';
+    const p = parseInt(port != null ? port : store.settings.remoteClientPort, 10) || DEFAULT_PORT;
+    store.settings.remoteClientHost = h;
+    store.settings.remoteClientPort = p;
+    store.save();
+    const token = store.settings.remoteClientToken || '';
+    const result = await remoteClient.connect({ host: h, port: p, code: code || '', token: code ? '' : token });
+    if (result.token) {
+      store.settings.remoteClientToken = result.token;
+      store.save();
+    }
+    notifyRemoteOnly();
+    // 接続直後にホストのボードを取る
+    const board = await remoteClient.invoke('board:get');
+    send('board:changed', withRemoteSession(board));
+    return remoteSession();
+  });
+  handle('remote:disconnect', () => {
+    remoteClient?.disconnect();
+    send('board:changed', withRemoteSession(boardState()));
+    return remoteSession();
+  });
+  handle('remote:forgetToken', () => {
+    store.settings.remoteClientToken = '';
+    store.save();
+    remoteClient?.disconnect();
+    notifyRemoteOnly();
+    return remoteSession();
+  });
   handle('env:check', async () => {
     // WSL のリポジトリなら、WSL の中に git と claude があるかを見る
     const w = wsl.parseWslPath(store.settings.repoPath);
@@ -238,11 +404,12 @@ app.whenReady().then(async () => {
     return { branches, current, hasOrigin };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'specCheck', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'competeAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'specCheck', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'competeAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime', 'claudeRemoteControl'];
     if (patch && 'branchNamingRule' in patch) patch = { ...patch, branchNamingRule: String(patch.branchNamingRule || '').trim() };
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     if (patch && 'suggestSkillsOnDone' in patch) patch = { ...patch, suggestSkillsOnDone: !!patch.suggestSkillsOnDone };
     if (patch && 'specCheck' in patch) patch = { ...patch, specCheck: !!patch.specCheck };
+    if (patch && 'claudeRemoteControl' in patch) patch = { ...patch, claudeRemoteControl: !!patch.claudeRemoteControl };
     if (patch && 'weeklyResetDay' in patch) patch = { ...patch, weeklyResetDay: /^[0-6]$/.test(String(patch.weeklyResetDay)) ? String(patch.weeklyResetDay) : '' };
     if (patch && 'weeklyResetTime' in patch) patch = { ...patch, weeklyResetTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(String(patch.weeklyResetTime)) ? String(patch.weeklyResetTime) : '00:00' };
     if (patch && 'issueStatusSync' in patch) patch = { ...patch, issueStatusSync: !!patch.issueStatusSync };
@@ -298,18 +465,22 @@ app.whenReady().then(async () => {
   });
   // gh（GitHub CLI）: 状態の確認・インストール・ログイン
   const gh = require('./src/gh');
+  const pushEvent = (channel, payload) => {
+    send(channel, payload);
+    remoteHost?.broadcast(channel, payload);
+  };
   handle('gh:status', () => gh.status());
-  handle('gh:install', () => gh.install((line) => send('gh:event', { type: 'line', line })));
+  handle('gh:install', () => gh.install((line) => pushEvent('gh:event', { type: 'line', line })));
   handle('gh:login', () =>
     gh.login((ev) => {
       if (ev.type === 'code') shell.openExternal(ev.url).catch(() => {});
-      send('gh:event', ev);
+      pushEvent('gh:event', ev);
     }),
   );
   handle('gh:addProjectScope', () =>
     gh.addProjectScope((ev) => {
       if (ev.type === 'code') shell.openExternal(ev.url).catch(() => {});
-      send('gh:event', ev);
+      pushEvent('gh:event', ev);
     }),
   );
   handle('gh:cancel', () => gh.cancel());
@@ -360,6 +531,17 @@ app.whenReady().then(async () => {
     if (err) throw new Error(err);
   });
 
+  // 前回ホストを有効にしていたら、起動時に待ち受けを再開する
+  if (store.settings.remoteHostEnabled) {
+    try {
+      await startRemoteHost();
+    } catch (err) {
+      console.error('遠隔ホストの起動に失敗:', err);
+      store.settings.remoteHostEnabled = false;
+      store.save();
+    }
+  }
+
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length > 0) return;
@@ -383,6 +565,8 @@ app.on('before-quit', (e) => {
   if (quitState === 'done' || !agents) {
     store?.flush();
     permServer?.close();
+    remoteClient?.disconnect();
+    remoteHost?.stop();
     return;
   }
   e.preventDefault();
@@ -394,6 +578,12 @@ app.on('before-quit', (e) => {
       await agents.shutdown();
     } catch {
       /* 終了は続ける */
+    }
+    try {
+      remoteClient?.disconnect();
+      await remoteHost?.stop();
+    } catch {
+      /* */
     }
     quitState = 'done';
     app.quit();

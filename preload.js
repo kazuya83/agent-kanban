@@ -64,4 +64,13 @@ contextBridge.exposeInMainWorld('api', {
   onBoard: (cb) => ipcRenderer.on('board:changed', (_e, d) => cb(d)),
   onLog: (cb) => ipcRenderer.on('card:log', (_e, d) => cb(d)),
   onFocus: (cb) => ipcRenderer.on('card:focus', (_e, id) => cb(id)),
+  remoteStatus: () => call('remote:status'),
+  remoteStartHost: (p) => call('remote:startHost', p || {}),
+  remoteStopHost: () => call('remote:stopHost'),
+  remoteRefreshPair: () => call('remote:refreshPair'),
+  remoteClearPairs: () => call('remote:clearPairs'),
+  remoteConnect: (p) => call('remote:connect', p || {}),
+  remoteDisconnect: () => call('remote:disconnect'),
+  remoteForgetToken: () => call('remote:forgetToken'),
+  onRemote: (cb) => ipcRenderer.on('remote:changed', (_e, d) => cb(d)),
 });
