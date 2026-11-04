@@ -3,9 +3,44 @@ const fs = require('fs');
 const path = require('path');
 const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isAgent, cleanEnabledAgents, cleanOrchestration } = require('./providers');
 
+const MAX_RECENT_REPOS = 10; // 最近開いたリポジトリを覚えておく件数
+
+// 最近開いたリポジトリ一覧を整える（新しいものが先頭・重複なし・空は捨てる）
+function cleanRecentRepoPaths(list, max = MAX_RECENT_REPOS) {
+  const out = [];
+  for (const p of Array.isArray(list) ? list : []) {
+    const s = String(p || '').trim();
+    if (!s || out.includes(s)) continue;
+    out.push(s);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+// 開いたリポジトリを最近一覧の先頭に足す
+function touchRecentRepo(list, dir, max = MAX_RECENT_REPOS) {
+  const s = String(dir || '').trim();
+  if (!s) return cleanRecentRepoPaths(list, max);
+  return cleanRecentRepoPaths([s, ...(Array.isArray(list) ? list : [])], max);
+}
+
+// 履歴が空のとき、今のリポジトリとカードから初期一覧を作る
+function seedRecentRepoPaths(settings, cards) {
+  const seeded = [];
+  const add = (p) => {
+    const s = String(p || '').trim();
+    if (s && !seeded.includes(s)) seeded.push(s);
+  };
+  add(settings.repoPath);
+  const sorted = [...(Array.isArray(cards) ? cards : [])].sort((a, b) => (Number(b && b.createdAt) || 0) - (Number(a && a.createdAt) || 0));
+  for (const c of sorted) add(c && c.repoPath);
+  return cleanRecentRepoPaths(seeded);
+}
+
 const DEFAULT_SETTINGS = {
   repoPath: '',
   lastRepoParent: '', // クローン・新規作成で最後に使った置き場所（親フォルダ）
+  recentRepoPaths: [], // 最近開いたリポジトリ（新しいものが先頭）
   baseBranch: '', // 空なら、開始時にチェックアウトしているブランチ
   permissionMode: 'acceptEdits', // default / acceptEdits / plan / bypassPermissions
   allowedTools: '', // カンマ・改行区切り（例: Bash(npm test:*), WebSearch）
@@ -83,6 +118,9 @@ function migrateSettings(settings, raw, cards) {
   settings.orchestration = cleanOrchestration(settings.orchestration);
   // 「最初から選んでおくエージェント」にはPipeline・競争を選べなくなったので、1つのエージェントにする
   if (!isAgent(settings.defaultAgent) || !settings.enabledAgents.includes(settings.defaultAgent)) settings.defaultAgent = settings.enabledAgents[0];
+  // 最近開いたリポジトリ: なければ今のリポジトリとカードから起こす
+  settings.recentRepoPaths = cleanRecentRepoPaths(settings.recentRepoPaths);
+  if (!settings.recentRepoPaths.length) settings.recentRepoPaths = seedRecentRepoPaths(settings, cards);
 }
 
 class Store {
@@ -209,4 +247,16 @@ class Store {
   }
 }
 
-module.exports = { migrateSettings, Store, DEFAULT_SETTINGS, MAX_NOTIFICATIONS, weekAround, anchorFromDay, WEEK_MS };
+module.exports = {
+  migrateSettings,
+  Store,
+  DEFAULT_SETTINGS,
+  MAX_NOTIFICATIONS,
+  MAX_RECENT_REPOS,
+  cleanRecentRepoPaths,
+  touchRecentRepo,
+  seedRecentRepoPaths,
+  weekAround,
+  anchorFromDay,
+  WEEK_MS,
+};

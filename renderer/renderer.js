@@ -2326,13 +2326,57 @@ async function pickRepo(opts) {
   }
 }
 
-// リポジトリを選ぶ: 既存のフォルダを開く / URL からクローン / 新しく作る
+// パスの末尾のフォルダ名（Windows / WSL の \\ にも対応）
+function repoFolderName(p) {
+  const s = String(p || '').replace(/[\\/]+$/, '');
+  const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+
+async function openRecentRepo(dir) {
+  const cur = state.board.settings.repoPath;
+  if (dir && dir === cur) {
+    closeModal();
+    return;
+  }
+  const r = await run(() => api.openRepo(dir));
+  if (r) {
+    closeModal();
+    closeDetail();
+    state.board = await api.getBoard();
+    renderBoard();
+    toast(`${repoFolderName(r)} を開きました`, 'ok');
+    checkEnv();
+    return;
+  }
+  // フォルダが無い・git でないときは履歴から外れているので、モーダル上のカードも消す
+  $('modalBox')?.querySelectorAll('[data-recent]').forEach((b) => {
+    if (b.dataset.recent === dir) b.remove();
+  });
+}
+
+// リポジトリを選ぶ: 最近開いたもの / 既存のフォルダを開く / URL からクローン / 新しく作る
 // Windows で WSL（Ubuntu など）があれば、このパソコンのフォルダか、WSL の中のフォルダかも選んでもらう
 async function chooseRepo() {
   const distros = (await api.wslDistros().catch(() => [])) || [];
+  const current = state.board.settings.repoPath || '';
+  const recent = (state.board.settings.recentRepoPaths || []).filter((p) => p);
+  const recentHtml = recent.length
+    ? `<p class="repo-section-label">最近開いたリポジトリ</p>
+       <div class="repo-choices">
+         ${recent
+           .map((p) => {
+             const on = p === current;
+             return `<button class="btn repo-choice${on ? ' current' : ''}" data-recent="${esc(p)}" ${on ? 'disabled' : ''}>${icon('folder')}<b>${esc(repoFolderName(p))}${on ? ' <span class="repo-current-tag">開いています</span>' : ''}</b><small>${esc(p)}</small></button>`;
+           })
+           .join('')}
+       </div>
+       <p class="repo-section-label">または新しく開く</p>`
+    : '';
   openModal(
     `<h2>リポジトリを選ぶ</h2>
      ${distros.length ? `<p class="muted small">選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。</p>` : ''}
+     ${recentHtml}
      <div class="repo-choices">
        <button class="btn repo-choice" data-pick="">${icon(distros.length ? 'monitor' : 'folder')}<b>${distros.length ? 'このパソコンのフォルダを開く' : '手元のフォルダを開く'}</b><small>${distros.length ? 'C:\\Users\\… など' : 'すでにある git リポジトリ'}</small></button>
        ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">${icon('terminal')}<b>${esc(d)} のフォルダを開く</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}
@@ -2349,6 +2393,12 @@ async function chooseRepo() {
           const d = b.dataset.pick;
           closeModal();
           pickRepo(d ? { wsl: d } : {});
+        }),
+      );
+      $('modalBox').querySelectorAll('[data-recent]').forEach((b) =>
+        b.addEventListener('click', () => {
+          if (b.disabled) return;
+          openRecentRepo(b.dataset.recent);
         }),
       );
     },
