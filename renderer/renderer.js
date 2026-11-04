@@ -1,4 +1,4 @@
-/* global api, icon, NOTIF_ICON */
+/* global api, icon, agentIcon, NOTIF_ICON */
 const COLUMNS = [
   { key: 'todo', label: 'Todo', statuses: ['todo'], hint: 'ここから「実行中」へドラッグしても開始できます' },
   { key: 'running', label: '実行中', statuses: ['queued', 'running'] },
@@ -386,8 +386,8 @@ function cardHtml(c) {
 // カードに出すエージェント・Pipeline・競争の印
 function orchChipsHtml(c) {
   const chips = [];
-  if (c.relay) chips.push(`<span class="orch-chip relay" title="Pipeline: 工程ごとに別のエージェントへ順番に引き継ぎます">${icon('pipeline')}${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${esc(agentShort(agentOf(c)))}</span>`);
-  else if (agentOf(c) !== 'claude') chips.push(`<span class="orch-chip agent">${icon('bot')}${esc(agentLabel(agentOf(c)))}</span>`);
+  if (c.relay) chips.push(`<span class="orch-chip relay" title="Pipeline: 工程ごとに別のエージェントへ順番に引き継ぎます">${icon('pipeline')}${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${agentIcon(agentOf(c))} ${esc(agentShort(agentOf(c)))}</span>`);
+  else chips.push(`<span class="orch-chip agent">${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</span>`);
   if (c.compete) {
     const n = competitors(c).length;
     chips.push(c.compete.adopted ? `<span class="orch-chip compete">${icon('flag')}採用した案</span>` : `<span class="orch-chip compete" title="同じタスクを複数のエージェントで解いています">${icon('flag')}競争 ${n}案</span>`);
@@ -713,7 +713,7 @@ function relayFlowHtml(c) {
     return `<li class="rf-node rs-${stt} ${i === r.index ? 'cur' : ''}">
       <span class="rf-dot">${mark}</span>
       <div class="rf-body">
-        <div class="rf-head"><b>${i + 1}. ${esc(st.label)}</b> <span class="rf-agent">${esc(agentLabel(st.agent))}</span> <span class="rf-state">${label}</span></div>
+        <div class="rf-head"><b>${i + 1}. ${esc(st.label)}</b> <span class="rf-agent">${agentIcon(st.agent)}${esc(agentLabel(st.agent))}</span> <span class="rf-state">${label}</span></div>
         ${info.length ? `<div class="rf-info">${info.join(' ・ ')}</div>` : ''}
         ${judgeHtml}
         ${st.instruction ? `<div class="rf-inst" title="${esc(st.instruction)}">${esc(st.instruction)}</div>` : ''}
@@ -734,7 +734,7 @@ function competeBoxHtml(c) {
   const rows = list
     .map((x) => {
       const [bcls, blabel] = badgeFor(x);
-      return `<button class="compete-item ${x.id === c.id ? 'cur' : ''}" data-goto="${x.id}"><span class="badge b-${bcls}">${blabel}</span> <b>${esc(agentLabel(agentOf(x)))}</b> <span class="muted small">${esc(x.lastMessage || '')}</span></button>`;
+      return `<button class="compete-item ${x.id === c.id ? 'cur' : ''}" data-goto="${x.id}"><span class="badge b-${bcls}">${blabel}</span> <b>${agentIcon(agentOf(x))}${esc(agentLabel(agentOf(x)))}</b> <span class="muted small">${esc(x.lastMessage || '')}</span></button>`;
     })
     .join('');
   const canAdopt = c.status === 'review' || c.status === 'failed';
@@ -743,7 +743,7 @@ function competeBoxHtml(c) {
     <small>${busy ? 'まだ動いている候補があります。' : 'すべての候補が終わりました。'}差分タブでそれぞれの変更を見比べて、よいものを採用してください。採用すると、ほかの候補は worktree とブランチごと破棄します。</small>
     <div class="d-actions">
       ${canAdopt ? `<button class="btn primary" data-act="adopt">${icon('flag')}この案（${esc(agentShort(agentOf(c)))}）を採用</button>` : ''}
-      <button class="btn" data-act="compare" ${busy ? 'title="終わっていない候補は、その時点の内容で比べます"' : ''}>${icon('compare')}${esc(agentShort(defaultAgent()))} に比べてもらう</button>
+      <button class="btn" data-act="compare" ${busy ? 'title="終わっていない候補は、その時点の内容で比べます"' : ''}>${icon('compare')}${agentIcon(defaultAgent())}${esc(agentShort(defaultAgent()))} に比べてもらう</button>
       ${c.compete.compareChat && card(c.compete.compareChat) ? `<button class="btn ghost" data-goto="${c.compete.compareChat}">比較の会話を開く</button>` : ''}
     </div></div>`;
 }
@@ -784,7 +784,7 @@ function renderDetailHead() {
     </div>
     <dl class="d-meta">
       ${c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''}
-      ${!chat ? `<dt>エージェント</dt><dd>${esc(agentLabel(agentOf(c)))}</dd>` : ''}
+      ${!chat ? `<dt>エージェント</dt><dd>${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</dd>` : ''}
       ${sessionRowHtml(c)}
       ${chat ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（worktree は作りません）</span></dd>` : ''}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
@@ -934,7 +934,7 @@ function skillChip(e) {
   return e.skill ? `<div class="c-skill"><span class="skill-chip small">${icon('zap')}/${esc(e.skill)}</span></div>` : '';
 }
 function chatHeadHtml(agent, e) {
-  return `<div class="c-head"><span class="c-avatar">${icon('bot')}</span><b class="c-name">${esc(agentShort(agent))}</b><span class="c-time">${esc(logTime(e))}</span></div>`;
+  return `<div class="c-head"><span class="c-avatar">${agentIcon(agent)}</span><b class="c-name">${esc(agentShort(agent))}</b><span class="c-time">${esc(logTime(e))}</span></div>`;
 }
 // ツールの呼び出し「名前  引数の要約」を名前と引数に分ける
 function splitTool(text) {
@@ -1953,7 +1953,7 @@ async function openPr(c) {
 function agentConfigHtml(a, s, body) {
   const on = enabledAgents(s).includes(a);
   return `<div class="agent-cfg ${on ? 'on' : ''}" data-agent="${a}">
-    <label class="check agent-cfg-head"><input type="checkbox" class="sUse" value="${a}" ${on ? 'checked' : ''} /> <b>${esc(agentLabel(a))}</b> を使う</label>
+    <label class="check agent-cfg-head"><input type="checkbox" class="sUse" value="${a}" ${on ? 'checked' : ''} /> ${agentIcon(a)}<b>${esc(agentLabel(a))}</b> を使う</label>
     <div class="agent-cfg-body" ${on ? '' : 'hidden'}>${body}</div></div>`;
 }
 
@@ -2067,7 +2067,7 @@ async function openSettings() {
         if (!list.includes(cur)) dsel.value = list[0];
         // 競争させるエージェント
         document.querySelectorAll('.sCompete').forEach((x) => (x.checked ? competeSel.add(x.value) : competeSel.delete(x.value)));
-        $('sCompeteBox').innerHTML = list.map((a) => `<label class="check"><input type="checkbox" class="sCompete" value="${a}" ${competeSel.has(a) ? 'checked' : ''} /> ${esc(agentLabel(a))}</label>`).join('');
+        $('sCompeteBox').innerHTML = list.map((a) => `<label class="check"><input type="checkbox" class="sCompete" value="${a}" ${competeSel.has(a) ? 'checked' : ''} /> ${agentIcon(a)}${esc(agentLabel(a))}</label>`).join('');
       };
       const drawRelay = () => {
         const on = using();
