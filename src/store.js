@@ -37,8 +37,70 @@ function seedRecentRepoPaths(settings, cards) {
   return cleanRecentRepoPaths(seeded);
 }
 
+const MAX_REPO_TABS = 3; // 画面上部のタブで同時に開いておけるリポジトリの数
+
+// タブで開いているリポジトリ一覧を整える（空・重複を捨てる。今のリポジトリは必ず入れて、上限まで）
+function cleanRepoTabs(list, current, max = MAX_REPO_TABS) {
+  const cur = String(current || '').trim();
+  const out = [];
+  for (const p of Array.isArray(list) ? list : []) {
+    const s = String(p || '').trim();
+    if (s && !out.includes(s)) out.push(s);
+  }
+  if (cur && !out.includes(cur)) out.push(cur);
+  // 多すぎるときは、今のリポジトリを残して後ろから落とす
+  while (out.length > max) {
+    let i = out.length - 1;
+    if (out[i] === cur) i -= 1;
+    out.splice(i, 1);
+  }
+  return out;
+}
+
+// リポジトリを開いたあとのタブ一覧
+// すでにタブにあればそのまま。mode が 'replace' か、タブが上限まであるなら今のタブを置き換え、そうでなければ右に足す
+function openRepoTab(tabs, current, dir, { mode = 'new', max = MAX_REPO_TABS } = {}) {
+  const list = cleanRepoTabs(tabs, current, max);
+  const d = String(dir || '').trim();
+  if (!d || list.includes(d)) return list;
+  const i = list.indexOf(String(current || '').trim());
+  if (i >= 0 && (mode === 'replace' || list.length >= max)) {
+    list[i] = d;
+    return list;
+  }
+  if (list.length >= max) list.pop();
+  list.push(d);
+  return list;
+}
+
+// タブを閉じたあとのタブ一覧と、次に開くリポジトリ（今のタブを閉じたら、その右・なければ左のタブ）
+function closeRepoTab(tabs, current, dir, max = MAX_REPO_TABS) {
+  const list = cleanRepoTabs(tabs, current, max);
+  const d = String(dir || '').trim();
+  const cur = String(current || '').trim();
+  const i = list.indexOf(d);
+  if (i < 0 || list.length <= 1) return { tabs: list, next: cur };
+  list.splice(i, 1);
+  return { tabs: list, next: d === cur ? list[Math.min(i, list.length - 1)] : cur };
+}
+
+// タブに出す、リポジトリごとの動いているタスクと対応を待っているタスクの数
+function repoTabSummary(tabs, cards) {
+  const all = Array.isArray(cards) ? cards : [];
+  return (Array.isArray(tabs) ? tabs : []).map((p) => {
+    const mine = all.filter((c) => c && c.repoPath === p);
+    return {
+      path: p,
+      running: mine.filter((c) => c.status === 'running' || c.status === 'queued').length,
+      attention: mine.filter((c) => (c.questions || []).length || (c.permissions || []).length || (c.awaitingReply && (c.status === 'review' || c.status === 'failed'))).length,
+    };
+  });
+}
+
 const DEFAULT_SETTINGS = {
   repoPath: '',
+  repoTabs: [], // 画面上部のタブで開いているリポジトリ（左から順。今のリポジトリも含む・MAX_REPO_TABS まで）
+  repoBaseBranches: {}, // リポジトリごとのベースブランチ（タブを切り替えたら baseBranch に戻す）
   lastRepoParent: '', // クローン・新規作成で最後に使った置き場所（親フォルダ）
   recentRepoPaths: [], // 最近開いたリポジトリ（新しいものが先頭）
   baseBranch: '', // 空なら、開始時にチェックアウトしているブランチ
@@ -129,6 +191,9 @@ function migrateSettings(settings, raw, cards) {
   // 最近開いたリポジトリ: なければ今のリポジトリとカードから起こす
   settings.recentRepoPaths = cleanRecentRepoPaths(settings.recentRepoPaths);
   if (!settings.recentRepoPaths.length) settings.recentRepoPaths = seedRecentRepoPaths(settings, cards);
+  // タブがなかったころの設定: 今のリポジトリだけのタブにする
+  settings.repoTabs = cleanRepoTabs(settings.repoTabs, settings.repoPath);
+  if (!settings.repoBaseBranches || typeof settings.repoBaseBranches !== 'object' || Array.isArray(settings.repoBaseBranches)) settings.repoBaseBranches = {};
 }
 
 class Store {
@@ -261,6 +326,11 @@ module.exports = {
   DEFAULT_SETTINGS,
   MAX_NOTIFICATIONS,
   MAX_RECENT_REPOS,
+  MAX_REPO_TABS,
+  cleanRepoTabs,
+  openRepoTab,
+  closeRepoTab,
+  repoTabSummary,
   cleanRecentRepoPaths,
   touchRecentRepo,
   seedRecentRepoPaths,

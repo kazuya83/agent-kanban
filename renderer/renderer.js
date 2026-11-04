@@ -40,7 +40,7 @@ const agentLabel = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[1];
 const agentShort = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[2];
 const agentOf = (c) => (c && AGENTS.some((x) => x[0] === c.agent) ? c.agent : 'claude');
 
-const state = { board: { settings: {}, cards: [] }, selected: null, tab: 'log', logs: new Map(), headSig: '', relayOpen: new Set() };
+const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'log', logs: new Map(), headSig: '', relayOpen: new Set() };
 const $ = (id) => document.getElementById(id);
 // index.html の data-icon="名前" の場所に、モノクロの SVG アイコンを入れる（icons.js）
 for (const el of document.querySelectorAll('[data-icon]')) el.outerHTML = icon(el.dataset.icon, el.className);
@@ -439,24 +439,75 @@ function remoteHostLabel(c = remoteClient()) {
   return c.sshHost ? (c.sshUser ? `${c.sshUser}@${c.sshHost}` : c.sshHost) : 'ホスト';
 }
 
-// 左上のリポジトリ欄。遠隔操作中は、接続先（ホスト）のパスだと分かるように接続先の名前を付ける
-function renderRepoBtn() {
+// 左上のリポジトリのタブ（MAX_REPO_TABS まで）。遠隔操作中は、ホストのタブだと分かるように接続先の名前を付ける
+const MAX_REPO_TABS = 3;
+function repoTabsList() {
+  const repo = state.board.settings.repoPath || '';
+  const list = (state.board.repoTabs || []).filter((t) => t && t.path);
+  if (repo && !list.some((t) => t.path === repo)) list.push({ path: repo, running: 0, attention: 0 });
+  return list;
+}
+function renderRepoTabs() {
   const repo = state.board.settings.repoPath || '';
   const rc = remoteClient();
-  const btn = $('repoBtn');
-  btn.classList.toggle('remote', !!rc);
-  if (rc) {
-    const host = remoteHostLabel(rc);
-    btn.innerHTML = `${icon('monitor')}<span class="repo-host">${esc(host)}</span>${esc(repo || 'ホストのリポジトリを選ぶ')}`;
-    btn.title = repo ? `接続先（${host}）のリポジトリ: ${repo}\nエージェントはホストのこのフォルダで動きます。クリックでホストのリポジトリを切り替えます` : `接続先（${host}）のリポジトリを選びます`;
-  } else {
-    btn.innerHTML = icon('folder') + esc(repo || 'リポジトリを選ぶ');
-    btn.title = repo ? `${repo}\nクリックでリポジトリを切り替えます` : 'リポジトリを選ぶ';
+  const el = $('repoTabs');
+  el.classList.toggle('remote', !!rc);
+  const host = rc ? remoteHostLabel(rc) : '';
+  const hostHtml = rc ? `<span class="repo-host" title="接続先（${esc(host)}）のリポジトリです。エージェントはホストのフォルダで動きます">${icon('monitor')}${esc(host)}</span>` : '';
+  if (!repo) {
+    el.innerHTML = `${hostHtml}<button class="repo" id="repoPick" title="${rc ? `接続先（${esc(host)}）のリポジトリを選びます` : 'リポジトリを選ぶ'}">${icon('folder')}${rc ? 'ホストのリポジトリを選ぶ' : 'リポジトリを選ぶ'}</button>`;
+    $('repoPick').onclick = () => chooseRepo({ tab: 'replace' });
+    return;
   }
+  const tabs = repoTabsList();
+  const full = tabs.length >= MAX_REPO_TABS;
+  el.innerHTML =
+    hostHtml +
+    tabs
+      .map((t) => {
+        const on = t.path === repo;
+        const badges = on
+          ? ''
+          : `${t.attention ? `<span class="repo-tab-badge warn" title="あなたの対応を待っているタスクが ${t.attention} 件あります">${t.attention}</span>` : ''}${t.running ? `<span class="repo-tab-badge run" title="動いているタスクが ${t.running} 件あります">${t.running}</span>` : ''}`;
+        const tip = on ? `${t.path}\nクリックで、このタブのリポジトリを切り替えます` : `${t.path}\nクリックでこのリポジトリに切り替えます`;
+        return `<div class="repo-tab${on ? ' active' : ''}" data-path="${esc(t.path)}" role="tab" aria-selected="${on}">
+          <button class="repo-tab-main" title="${esc(tip)}">${icon('folder')}<span class="repo-tab-name">${esc(repoFolderName(t.path))}</span>${badges}</button>
+          ${tabs.length > 1 ? `<button class="repo-tab-close" title="タブを閉じる（動いているタスクは止まりません）" aria-label="タブを閉じる">${icon('x')}</button>` : ''}
+        </div>`;
+      })
+      .join('') +
+    `<button class="repo-tab-add" id="repoTabAdd" ${full ? 'disabled' : ''} title="${full ? `タブは ${MAX_REPO_TABS} つまでです。タブを閉じてから開いてください` : '新しいタブでリポジトリを開く'}" aria-label="新しいタブでリポジトリを開く">${icon('plus')}</button>`;
+  el.querySelectorAll('.repo-tab').forEach((tab) => {
+    const p = tab.dataset.path;
+    tab.querySelector('.repo-tab-main').onclick = () => (p === state.board.settings.repoPath ? chooseRepo({ tab: 'replace' }) : switchRepoTab(p));
+    const x = tab.querySelector('.repo-tab-close');
+    if (x) x.onclick = (e) => (e.stopPropagation(), closeRepoTab(p));
+  });
+  $('repoTabAdd').onclick = () => !full && chooseRepo({ tab: 'new' });
+}
+
+// リポジトリを開いた・切り替えたあとに、ボードを読み直す
+async function afterRepoChanged() {
+  closeModal();
+  closeDetail();
+  state.board = await api.getBoard();
+  renderBoard();
+  checkEnv();
+}
+async function switchRepoTab(dir) {
+  if (await run(() => api.switchRepoTab(dir))) await afterRepoChanged();
+}
+async function closeRepoTab(dir) {
+  const wasCurrent = dir === state.board.settings.repoPath;
+  const r = await run(() => api.closeRepoTab(dir));
+  if (!r) return;
+  if (wasCurrent) return afterRepoChanged();
+  state.board = await api.getBoard();
+  renderBoard();
 }
 
 function renderRemoteInfo() {
-  renderRepoBtn();
+  renderRepoTabs();
   const el = $('remoteInfo');
   const rs = state.board.remoteSession;
   el.classList.remove('resume', 'error');
@@ -3035,7 +3086,7 @@ async function openSettings() {
 async function pickRepo(opts) {
   // 遠隔操作中はホストの画面にダイアログが出てしまうので、ホストのフォルダをこの画面で辿って選ぶ
   if (remoteClient()) return hostFolderModal(opts || {});
-  const r = await run(() => api.chooseRepo(opts));
+  const r = await run(() => api.chooseRepo({ ...(opts || {}), tab: state.repoOpenMode }));
   if (r) {
     closeDetail();
     state.board = await api.getBoard();
@@ -3057,13 +3108,14 @@ async function openRecentRepo(dir) {
     closeModal();
     return;
   }
-  const r = await run(() => api.openRepo(dir));
+  const inTab = repoTabsList().some((t) => t.path === dir);
+  const r = await run(() => api.openRepo(dir, { tab: state.repoOpenMode }));
   if (r) {
     closeModal();
     closeDetail();
     state.board = await api.getBoard();
     renderBoard();
-    toast(`${repoFolderName(r)} を開きました`, 'ok');
+    toast(inTab ? `${repoFolderName(r)} のタブに切り替えました` : `${repoFolderName(r)} を開きました`, 'ok');
     checkEnv();
     return;
   }
@@ -3075,9 +3127,19 @@ async function openRecentRepo(dir) {
 
 // リポジトリを選ぶ: 最近開いたもの / 既存のフォルダを開く / URL からクローン / 新しく作る
 // Windows で WSL（Ubuntu など）があれば、このパソコンのフォルダか、WSL の中のフォルダかも選んでもらう
-async function chooseRepo() {
+// opts.tab: 'new' なら選んだものを新しいタブで、'replace' なら今のタブで開く（「戻る」で開き直すときは前の選び方のまま）
+async function chooseRepo(opts) {
+  if (opts && (opts.tab === 'new' || opts.tab === 'replace')) state.repoOpenMode = opts.tab;
   const distros = (await api.wslDistros().catch(() => [])) || [];
   const current = state.board.settings.repoPath || '';
+  const tabs = current ? repoTabsList() : [];
+  const tabbed = new Set(tabs.map((t) => t.path));
+  const asNew = state.repoOpenMode === 'new' && tabs.length < MAX_REPO_TABS;
+  const tabNote = !current
+    ? ''
+    : asNew
+      ? `<p class="muted small">選んだリポジトリを新しいタブで開きます（タブは ${MAX_REPO_TABS} つまで）。</p>`
+      : `<p class="muted small">選んだリポジトリで、今のタブ（${esc(repoFolderName(current))}）を置き換えます。${tabs.length < MAX_REPO_TABS ? '残しておきたいときは、タブの右の「＋」から開いてください。' : ''}</p>`;
   const recent = (state.board.settings.recentRepoPaths || []).filter((p) => p);
   const rc = remoteClient();
   const host = rc ? remoteHostLabel(rc) : '';
@@ -3087,7 +3149,8 @@ async function chooseRepo() {
          ${recent
            .map((p) => {
              const on = p === current;
-             return `<button class="btn repo-choice${on ? ' current' : ''}" data-recent="${esc(p)}" ${on ? 'disabled' : ''}>${icon('folder')}<b>${esc(repoFolderName(p))}${on ? ' <span class="repo-current-tag">開いています</span>' : ''}</b><small>${esc(p)}</small></button>`;
+             const tag = on ? ' <span class="repo-current-tag">開いています</span>' : tabbed.has(p) ? ' <span class="repo-current-tag">タブにあります</span>' : '';
+             return `<button class="btn repo-choice${on ? ' current' : ''}" data-recent="${esc(p)}" ${on ? 'disabled' : ''}>${icon('folder')}<b>${esc(repoFolderName(p))}${tag}</b><small>${esc(p)}</small></button>`;
            })
            .join('')}
        </div>
@@ -3096,6 +3159,7 @@ async function chooseRepo() {
   openModal(
     `<h2>${rc ? 'ホストのリポジトリを選ぶ' : 'リポジトリを選ぶ'}</h2>
      ${rc ? `<p class="muted small">遠隔操作中です。ここで選ぶのは接続先（${esc(host)}）のフォルダで、エージェントもホストのそのフォルダで動きます。</p>` : ''}
+     ${tabNote}
      ${distros.length ? `<p class="muted small">選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。</p>` : ''}
      ${recentHtml}
      <div class="repo-choices">
@@ -3281,8 +3345,8 @@ async function repoSetupModal(mode, distros = []) {
       $('rsOk').onclick = async () => {
         const parent = $('rsParent').value.trim();
         const r = clone
-          ? await runBusy('クローンしています…（大きいリポジトリは時間がかかります）', () => api.cloneRepo({ url: $('rsUrl').value.trim(), parent, name: $('rsName').value.trim() }))
-          : await runBusy('リポジトリを作っています…', () => api.createRepo({ parent, name: $('rsName').value.trim(), github: where() ? '' : $('rsGh').value }));
+          ? await runBusy('クローンしています…（大きいリポジトリは時間がかかります）', () => api.cloneRepo({ url: $('rsUrl').value.trim(), parent, name: $('rsName').value.trim(), tab: state.repoOpenMode }))
+          : await runBusy('リポジトリを作っています…', () => api.createRepo({ parent, name: $('rsName').value.trim(), github: where() ? '' : $('rsGh').value, tab: state.repoOpenMode }));
         if (!r) return;
         closeModal();
         closeDetail();
@@ -3298,7 +3362,6 @@ async function repoSetupModal(mode, distros = []) {
   );
 }
 
-$('repoBtn').onclick = chooseRepo;
 $('newBtn').onclick = () => newTask();
 $('chatBtn').onclick = openChats;
 $('detailBackdrop').addEventListener('mousedown', closeDetail);
