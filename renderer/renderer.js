@@ -438,7 +438,8 @@ function renderRemoteInfo() {
   el.classList.remove('hidden');
   el.classList.toggle('host', rs.role === 'host');
   if (rs.role === 'client') {
-    el.textContent = `遠隔操作中 → ${rs.client.host}:${rs.client.port}`;
+    const c = rs.client;
+    el.textContent = c.mode === 'direct' ? `遠隔操作中 → ${c.host}:${c.port}` : `遠隔操作中 → SSH ${c.sshHost}`;
     el.title = 'ホストのボードを表示・操作しています。クリックで設定を開きます';
   } else {
     const code = rs.host.pairCode ? ` ・ コード ${rs.host.pairCode}` : '';
@@ -2230,25 +2231,45 @@ async function openSettings() {
                <button class="btn small" type="button" id="rClearPairs">ペアを破棄</button>
                <button class="btn small danger" type="button" id="rStopHost">ホストを停止</button>
              </div>
-             <div><small class="muted">操作側で次のトンネルを張ってから接続します:</small><div class="remote-ssh">${esc(ssh)}</div></div>`
+             <div><small class="muted">操作側の「クライアント」で「SSH 経由」を選び、このマシンの SSH の接続先（Tailscale の IP など）を入れて接続します。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>`
           : `<div><strong>ホスト（作業側）</strong></div>
              <label class="field"><span>待ち受けポート</span><input id="rHostPort" type="number" min="1024" max="65535" value="${esc(port)}" /></label>
              <button class="btn small primary" type="button" id="rStartHost">ホストを開始（ペアリングコードを出す）</button>
-             <div><small class="muted">開始後、操作側で SSH トンネルを張り、下の「クライアント」からコードで接続します。</small><div class="remote-ssh">${esc(ssh)}</div></div>`;
-        const clientBlock = rs.client.connected
-          ? `<div><strong>クライアントとして接続中</strong> → ${esc(rs.client.host)}:${esc(rs.client.port)}</div>
+             <div><small class="muted">開始後、操作側の「クライアント」で「SSH 経由」を選び、コードで接続します（このマシンの「リモートログイン」をオンにしておいてください）。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>`;
+        const c = rs.client;
+        const viaSsh = c.mode !== 'direct';
+        const clientBlock = c.connected
+          ? `<div><strong>クライアントとして接続中</strong> → ${viaSsh ? `SSH 経由 ${esc(c.sshUser ? `${c.sshUser}@` : '')}${esc(c.sshHost)}（ホストのポート ${esc(c.port)}）` : `${esc(c.host)}:${esc(c.port)}`}</div>
              <button class="btn small danger" type="button" id="rDisconnect">切断してローカルボードに戻る</button>`
           : `<div><strong>クライアント（操作側）</strong></div>
+             <label class="field"><span>接続方法</span>
+               <select id="rClientMode">
+                 <option value="ssh" ${viaSsh ? 'selected' : ''}>SSH 経由（アプリがトンネルを張る・おすすめ）</option>
+                 <option value="direct" ${viaSsh ? '' : 'selected'}>直接（自分で張ったトンネルの 127.0.0.1 などへ）</option>
+               </select>
+             </label>
+             <div id="rSshFields" ${viaSsh ? '' : 'hidden'}>
+               <div class="row">
+                 <label class="field"><span>SSH の接続先（Tailscale の IP・名前など）</span><input id="rSshHost" placeholder="100.x.x.x / mac-mini" value="${esc(c.sshHost || '')}" /></label>
+                 <label class="field"><span>ユーザー名（Mac のログイン名）</span><input id="rSshUser" placeholder="kazuya" value="${esc(c.sshUser || '')}" /></label>
+                 <label class="field"><span>SSH ポート</span><input id="rSshPort" type="number" min="1" max="65535" value="${esc(c.sshPort || 22)}" /></label>
+               </div>
+               <div class="row">
+                 <label class="field"><span>鍵ファイル（空なら既定の ~/.ssh/id_*）</span><input id="rSshKey" placeholder="C:\\Users\\you\\.ssh\\id_ed25519" value="${esc(c.sshKey || '')}" /></label>
+                 <label class="field"><span>ssh コマンド</span><input id="rSshPath" value="${esc(c.sshPath || 'ssh')}" /></label>
+               </div>
+               <small class="muted">SSH は鍵で入れる必要があります（パスワードは入力できません）。Mac 側は「システム設定 → 一般 → 共有 → リモートログイン」をオンにしてください。</small>
+             </div>
              <div class="row">
-               <label class="field"><span>接続先ホスト</span><input id="rClientHost" value="${esc(rs.client.host || '127.0.0.1')}" /></label>
-               <label class="field"><span>ポート</span><input id="rClientPort" type="number" min="1024" max="65535" value="${esc(rs.client.port || 17831)}" /></label>
+               <label class="field" id="rClientHostField" ${viaSsh ? 'hidden' : ''}><span>接続先ホスト</span><input id="rClientHost" value="${esc(c.host || '127.0.0.1')}" /></label>
+               <label class="field"><span>ホストの待ち受けポート</span><input id="rClientPort" type="number" min="1024" max="65535" value="${esc(c.port || 17831)}" /></label>
              </div>
              <label class="field"><span>ペアリングコード（初回のみ。トークンがあれば空で再接続）</span><input id="rPairCode" placeholder="6桁" maxlength="8" /></label>
              <div class="row">
-               <button class="btn small primary" type="button" id="rConnect">${rs.client.hasToken ? '保存したトークンで接続' : 'コードでペアリング'}</button>
-               ${rs.client.hasToken ? '<button class="btn small" type="button" id="rForgetToken">トークンを忘れる</button>' : ''}
+               <button class="btn small primary" type="button" id="rConnect">${c.hasToken ? '保存したトークンで接続' : 'コードでペアリング'}</button>
+               ${c.hasToken ? '<button class="btn small" type="button" id="rForgetToken">トークンを忘れる</button>' : ''}
              </div>
-             <small class="muted">SSH 例: <code>${esc(ssh)}</code>（トンネル後はホストに 127.0.0.1 を指定）</small>`;
+             <small class="muted" id="rDirectHint" ${viaSsh ? 'hidden' : ''}>直接のときは、先に <code>${esc(ssh)}</code> を張り、接続先ホストは 127.0.0.1 のままにします（ホストは 127.0.0.1 でしか待ち受けないので、Tailscale の IP を直接入れてもつながりません）</small>`;
         box.innerHTML = `${hostBlock}<hr style="border:0;border-top:1px solid var(--line);margin:4px 0" />${clientBlock}`;
         const busy = (label, fn) => runBusy(label, fn).then((ok) => { if (ok !== undefined) drawRemote(); });
         if ($('rStartHost')) $('rStartHost').onclick = () => busy('ホストを開始しています…', () => api.remoteStartHost({ port: $('rHostPort').value }));
@@ -2258,10 +2279,29 @@ async function openSettings() {
           if (!confirm('ペアリング済みのクライアントをすべて無効にしますか？')) return;
           busy('ペアを破棄しています…', () => api.remoteClearPairs());
         };
-        if ($('rConnect')) $('rConnect').onclick = () =>
-          busy('接続しています…', () =>
-            api.remoteConnect({ host: $('rClientHost').value, port: $('rClientPort').value, code: $('rPairCode').value.trim() }),
+        if ($('rClientMode')) $('rClientMode').onchange = () => {
+          const ssh = $('rClientMode').value === 'ssh';
+          $('rSshFields').hidden = !ssh;
+          $('rClientHostField').hidden = ssh;
+          $('rDirectHint').hidden = ssh;
+        };
+        if ($('rConnect')) $('rConnect').onclick = () => {
+          const mode = $('rClientMode').value;
+          if (mode === 'ssh' && !$('rSshHost').value.trim()) return toast('SSH の接続先（Tailscale の IP か名前）を入れてください');
+          busy(mode === 'ssh' ? 'SSH トンネルを張って接続しています…' : '接続しています…', () =>
+            api.remoteConnect({
+              mode,
+              host: $('rClientHost').value,
+              port: $('rClientPort').value,
+              code: $('rPairCode').value.trim(),
+              sshHost: $('rSshHost').value,
+              sshUser: $('rSshUser').value,
+              sshPort: $('rSshPort').value,
+              sshKey: $('rSshKey').value,
+              sshPath: $('rSshPath').value,
+            }),
           );
+        };
         if ($('rDisconnect')) $('rDisconnect').onclick = () => busy('切断しています…', () => api.remoteDisconnect());
         if ($('rForgetToken')) $('rForgetToken').onclick = () => busy('トークンを消しています…', () => api.remoteForgetToken());
       };

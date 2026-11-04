@@ -9,6 +9,7 @@ const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
 const { RemoteHost, RemoteClient, DEFAULT_PORT, isProxyChannel, isLocalChannel } = require('./src/remote');
+const { SshTunnel, isLoopbackHost } = require('./src/ssh-tunnel');
 
 // Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
 fixPath();
@@ -42,6 +43,7 @@ let agents;
 let permServer;
 let remoteHost = null;
 let remoteClient = null;
+let sshTunnel = null;
 const localHandlers = new Map();
 
 function createWindow() {
@@ -102,9 +104,16 @@ function remoteSession() {
     },
     client: {
       connected: !!c.connected,
+      mode: store.settings.remoteClientMode === 'direct' ? 'direct' : 'ssh',
       host: store.settings.remoteClientHost || '127.0.0.1',
       port: store.settings.remoteClientPort || DEFAULT_PORT,
       hasToken: !!(store.settings.remoteClientToken || c.hasToken),
+      sshHost: store.settings.remoteSshHost || '',
+      sshUser: store.settings.remoteSshUser || '',
+      sshPort: store.settings.remoteSshPort || 22,
+      sshKey: store.settings.remoteSshKey || '',
+      sshPath: store.settings.remoteSshPath || 'ssh',
+      tunnel: !!sshTunnel?.active(),
     },
   };
 }
@@ -159,6 +168,18 @@ function handle(channel, fn) {
       return { ok: false, error: (err && err.message) || String(err) };
     }
   });
+}
+
+// ssh のパス。Windows は PATH に無くても標準の OpenSSH クライアントの場所を見る
+function sshCommand(setting) {
+  const cmd = String(setting || '').trim() || 'ssh';
+  const found = resolveCommand(cmd);
+  if (found) return found;
+  if (process.platform === 'win32' && cmd === 'ssh') {
+    const win = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe');
+    if (resolveCommand(win)) return win;
+  }
+  return cmd;
 }
 
 async function startRemoteHost() {
@@ -276,15 +297,48 @@ app.whenReady().then(async () => {
     notifyRemoteOnly();
     return remoteSession();
   });
-  handle('remote:connect', async ({ host, port, code } = {}) => {
+  handle('remote:connect', async ({ mode, host, port, code, sshHost, sshUser, sshPort, sshKey, sshPath } = {}) => {
     if (remoteHost?.listening()) throw new Error('ホストとして待ち受け中は接続できません。先にホストを停止してください');
-    const h = String(host || store.settings.remoteClientHost || '127.0.0.1').trim() || '127.0.0.1';
-    const p = parseInt(port != null ? port : store.settings.remoteClientPort, 10) || DEFAULT_PORT;
-    store.settings.remoteClientHost = h;
-    store.settings.remoteClientPort = p;
+    const s = store.settings;
+    const m = (mode || s.remoteClientMode) === 'direct' ? 'direct' : 'ssh';
+    const h = String(host || s.remoteClientHost || '127.0.0.1').trim() || '127.0.0.1';
+    const p = parseInt(port != null ? port : s.remoteClientPort, 10) || DEFAULT_PORT;
+    s.remoteClientMode = m;
+    s.remoteClientHost = h;
+    s.remoteClientPort = p;
+    if (sshHost != null) s.remoteSshHost = String(sshHost).trim();
+    if (sshUser != null) s.remoteSshUser = String(sshUser).trim();
+    if (sshPort != null) s.remoteSshPort = Math.min(65535, Math.max(1, parseInt(sshPort, 10) || 22));
+    if (sshKey != null) s.remoteSshKey = String(sshKey).trim();
+    if (sshPath != null) s.remoteSshPath = String(sshPath).trim() || 'ssh';
     store.save();
-    const token = store.settings.remoteClientToken || '';
-    const result = await remoteClient.connect({ host: h, port: p, code: code || '', token: code ? '' : token });
+    const token = s.remoteClientToken || '';
+    let target = { host: h, port: p };
+    if (m === 'ssh') {
+      // アプリが ssh -N -L を張り、手元の空きポート経由でホストの 127.0.0.1:p へつなぐ
+      sshTunnel?.close();
+      sshTunnel = new SshTunnel({ command: sshCommand(s.remoteSshPath) });
+      sshTunnel.on('exit', () => {
+        // トンネルが落ちたら接続も切れる。状態だけ画面に知らせる
+        if (remoteClient?.connected) remoteClient.disconnect();
+        notifyRemoteOnly();
+      });
+      const localPort = await sshTunnel.open({ host: s.remoteSshHost, user: s.remoteSshUser, sshPort: s.remoteSshPort, remotePort: p, identityFile: s.remoteSshKey });
+      target = { host: '127.0.0.1', port: localPort };
+    }
+    let result;
+    try {
+      result = await remoteClient.connect({ ...target, code: code || '', token: code ? '' : token });
+    } catch (err) {
+      sshTunnel?.close();
+      if (m === 'ssh' && /ECONNRESET|接続が切れました|ECONNREFUSED/.test(String(err?.message))) {
+        throw new Error(`SSH はつながりましたが、ホストの Agent Kanban に届きませんでした。Mac 側で「ホストを開始」しているか、待ち受けポート（${p}）が合っているかを確かめてください`);
+      }
+      if (m === 'direct' && !isLoopbackHost(h) && /ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH/.test(String(err?.code || err?.message))) {
+        throw new Error(`${h}:${p} に直接つながりません。ホストは外に見せないよう 127.0.0.1 でしか待ち受けていないため、Tailscale の IP などへは直接つなげません。接続方法を「SSH 経由」にして、SSH の接続先にその IP を入れてください`);
+      }
+      throw err;
+    }
     if (result.token) {
       store.settings.remoteClientToken = result.token;
       store.save();
@@ -297,6 +351,7 @@ app.whenReady().then(async () => {
   });
   handle('remote:disconnect', () => {
     remoteClient?.disconnect();
+    sshTunnel?.close();
     send('board:changed', withRemoteSession(boardState()));
     return remoteSession();
   });
@@ -304,6 +359,7 @@ app.whenReady().then(async () => {
     store.settings.remoteClientToken = '';
     store.save();
     remoteClient?.disconnect();
+    sshTunnel?.close();
     notifyRemoteOnly();
     return remoteSession();
   });
@@ -568,6 +624,7 @@ app.on('before-quit', (e) => {
     store?.flush();
     permServer?.close();
     remoteClient?.disconnect();
+    sshTunnel?.close();
     remoteHost?.stop();
     return;
   }
@@ -583,6 +640,7 @@ app.on('before-quit', (e) => {
     }
     try {
       remoteClient?.disconnect();
+      sshTunnel?.close();
       await remoteHost?.stop();
     } catch {
       /* */

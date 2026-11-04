@@ -13,6 +13,8 @@ const MAX_LINE = 32 * 1024 * 1024;
 const MAX_PAIR_FAILURES = 5;
 // 認証しないまま居座る接続は切る
 const AUTH_TIMEOUT_MS = 30 * 1000;
+// クライアントの TCP 接続を待つ長さ
+const CONNECT_TIMEOUT_MS = 10 * 1000;
 // 遠隔へ渡さない設定（トークンなどの秘密）
 const SECRET_SETTINGS = ['remotePairTokens', 'remoteClientToken'];
 
@@ -322,12 +324,13 @@ class RemoteClient extends EventEmitter {
     };
   }
 
-  connect({ host = '127.0.0.1', port = DEFAULT_PORT, code = '', token = '' } = {}) {
+  connect({ host = '127.0.0.1', port = DEFAULT_PORT, code = '', token = '', timeoutMs = CONNECT_TIMEOUT_MS } = {}) {
     return new Promise((resolve, reject) => {
       this.disconnect();
       this.host = String(host || '127.0.0.1').trim() || '127.0.0.1';
       this.port = Math.min(65535, Math.max(1024, parseInt(port, 10) || DEFAULT_PORT));
       const socket = net.connect({ host: this.host, port: this.port }, async () => {
+        clearTimeout(connectTimer);
         this.socket = socket;
         readLines(socket, (msg) => this.onMessage(msg));
         try {
@@ -349,7 +352,15 @@ class RemoteClient extends EventEmitter {
           reject(err);
         }
       });
+      // OS の既定（Windows で 20 秒ほど）まで待たずに、届かないことを知らせる
+      const connectTimer = setTimeout(() => {
+        const err = new Error(`connect ETIMEDOUT ${this.host}:${this.port}`);
+        err.code = 'ETIMEDOUT';
+        socket.destroy(err);
+      }, timeoutMs);
+      connectTimer.unref?.();
       socket.on('error', (err) => {
+        clearTimeout(connectTimer);
         if (!this.connected) reject(err);
         else if (this.listenerCount('error')) this.emit('error', err);
       });
