@@ -100,8 +100,41 @@ function summarizeInput(input) {
 
 function toolResultText(content) {
   if (typeof content === 'string') return content;
-  if (Array.isArray(content)) return content.map((c) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
+  if (Array.isArray(content)) return content.filter((c) => c && c.type !== 'image').map((c) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
   return '';
+}
+
+// ツールの結果に入っている画像（スクリーンショットなど）を、表示できる形で取り出す
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // base64 の長さで見る。これより大きい画像は保存しない
+const MAX_IMAGES_PER_CARD = 30; // board.json が大きくなりすぎないよう、古い画像から消す
+function toolResultImages(content) {
+  if (!Array.isArray(content)) return [];
+  const out = [];
+  for (const c of content) {
+    if (!c || c.type !== 'image') continue;
+    const src = c.source || {};
+    const mediaType = String(src.media_type || '').toLowerCase();
+    const data = typeof src.data === 'string' ? src.data.replace(/\s+/g, '') : '';
+    if (src.type !== 'base64' || !IMAGE_TYPES.has(mediaType) || !data || !/^[A-Za-z0-9+/]+=*$/.test(data)) out.push({ omitted: '表示できない形式の画像です' });
+    else if (data.length > MAX_IMAGE_BYTES) out.push({ omitted: '大きすぎるので保存しませんでした' });
+    else out.push({ mediaType, data });
+  }
+  return out;
+}
+
+// カードのログに残す画像を MAX_IMAGES_PER_CARD 枚までにする（古いものは「消しました」に置きかえる）
+function pruneImages(logs) {
+  let kept = 0;
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const ims = logs[i].images;
+    if (!ims) continue;
+    for (let j = ims.length - 1; j >= 0; j--) {
+      if (!ims[j].data) continue;
+      if (kept < MAX_IMAGES_PER_CARD) kept++;
+      else ims[j] = { omitted: '古い画像なので消しました' };
+    }
+  }
 }
 
 function notFoundMessage(cmd) {
@@ -390,6 +423,7 @@ class AgentManager extends EventEmitter {
     card.logs = card.logs || [];
     card.logs.push(entry);
     if (card.logs.length > MAX_LOGS) card.logs.splice(0, card.logs.length - MAX_LOGS);
+    if (entry.images && entry.images.some((im) => im.data)) pruneImages(card.logs);
     this.emit('log', card.id, entry);
   }
 
@@ -1051,7 +1085,9 @@ class AgentManager extends EventEmitter {
         }
         const content = ev.message && Array.isArray(ev.message.content) ? ev.message.content : [];
         for (const b of content) {
-          if (b.type === 'tool_result') this.log(c, b.is_error ? 'tool_error' : 'tool_result', truncate(toolResultText(b.content), 1500));
+          if (b.type !== 'tool_result') continue;
+          const images = toolResultImages(b.content);
+          this.log(c, b.is_error ? 'tool_error' : 'tool_result', truncate(toolResultText(b.content), 1500), images.length ? { images } : undefined);
         }
         break;
       }
@@ -1827,4 +1863,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
+module.exports = { AgentManager, toolResultText, toolResultImages, PERMISSION_TOOL, endsWithQuestion, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };

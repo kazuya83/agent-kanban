@@ -180,6 +180,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 .k-tool .log-x, .k-tool_result .log-x, .k-tool_error .log-x, .k-stderr .log-x { font-family: var(--mono); font-size: 11.5px; }
 .k-tool .log-k { color: var(--run); }
 .k-tool_result .log-x { color: var(--muted); max-height: 140px; overflow: auto; }
+.k-tool_result .log-x:has(.log-img) { max-height: none; }
+.log-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; white-space: normal; }
+.log-img { max-width: 360px; max-height: 240px; border: 1px solid var(--line); border-radius: 4px; cursor: zoom-in; background: #fff; }
+.log-img-omitted { font-size: 11.5px; color: var(--muted); }
+.img-overlay { position: fixed; inset: 0; z-index: 10000; background: rgba(0, 0, 0, 0.8); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+.img-overlay img { max-width: 95vw; max-height: 95vh; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.6); }
 .k-tool_error .log-x, .k-error .log-x { color: var(--err); }
 .k-user { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .k-user .log-k { color: var(--accent); }

@@ -662,8 +662,46 @@ function logEntryHtml(e) {
   const sk = e.skill ? `<span class="skill-chip small">⚡ /${esc(e.skill)}</span> ` : '';
   const md = MD_KINDS.has(e.kind) && typeof Markdown !== 'undefined';
   const body = md ? `<div class="md">${sk ? `<div>${sk}</div>` : ''}${Markdown.render(e.text)}</div>` : `${sk}${esc(e.text)}`;
-  return `<div class="log k-${e.kind}${md ? ' log-md' : ''}"><span class="log-k">${LOG_LABEL[e.kind] || e.kind}</span><span class="log-t">${time}</span><div class="log-x">${body}</div></div>`;
+  return `<div class="log k-${e.kind}${md ? ' log-md' : ''}"><span class="log-k">${LOG_LABEL[e.kind] || e.kind}</span><span class="log-t">${time}</span><div class="log-x">${body}${logImagesHtml(e.images)}</div></div>`;
 }
+
+// ツールの結果に入っていた画像（スクリーンショットなど）。クリックで大きく表示する
+const IMG_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+function logImagesHtml(images) {
+  if (!Array.isArray(images) || !images.length) return '';
+  const items = images.map((im) => {
+    if (im && IMG_TYPES.has(im.mediaType) && typeof im.data === 'string' && /^[A-Za-z0-9+/]+=*$/.test(im.data)) {
+      return `<img class="log-img" src="data:${im.mediaType};base64,${im.data}" alt="画像" title="クリックで大きく表示" />`;
+    }
+    return `<span class="log-img-omitted">🖼 画像（${esc((im && im.omitted) || '表示できません')}）</span>`;
+  });
+  return `<div class="log-imgs">${items.join('')}</div>`;
+}
+
+document.addEventListener('click', (ev) => {
+  const img = ev.target.closest && ev.target.closest('.log-img');
+  if (img) {
+    const ov = document.createElement('div');
+    ov.className = 'img-overlay';
+    ov.title = 'クリックで閉じる';
+    const big = document.createElement('img');
+    big.src = img.src;
+    ov.appendChild(big);
+    ov.onclick = () => ov.remove();
+    document.body.appendChild(ov);
+  }
+});
+// 拡大表示中の Esc は拡大を閉じるだけにする（詳細パネルまで閉じない）
+document.addEventListener(
+  'keydown',
+  (ev) => {
+    const ovs = document.querySelectorAll('.img-overlay');
+    if (ev.key !== 'Escape' || !ovs.length) return;
+    ovs.forEach((o) => o.remove());
+    ev.stopImmediatePropagation();
+  },
+  true,
+);
 
 // ---------------- 差分タブ（GitHub 風: 左にファイルツリー、右にファイルごとの差分） ----------------
 
