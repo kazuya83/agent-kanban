@@ -165,6 +165,15 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .d-resizer { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 5; }
 .d-resizer:hover, .d-resizer.dragging { background: color-mix(in srgb, var(--accent) 45%, transparent); }
 body.resizing { cursor: col-resize; user-select: none; }
+/* 詳細パネルの上（タスクの情報）・中（タブの中身）・下（追加の指示）の境目。ドラッグで高さを変える */
+.d-vsplit { flex: none; position: relative; z-index: 4; height: 6px; margin: -3px 0; cursor: row-resize; }
+.d-vsplit:hover, .d-vsplit.dragging { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+body.resizing-row { cursor: row-resize; user-select: none; }
+.detail > .tabs { flex: none; }
+.d-head.sized { flex: none; max-height: none; }
+.d-foot.sized { flex: none; overflow-y: auto; }
+.d-foot.sized .d-foot-row { flex: 1; min-height: 0; }
+.d-foot.sized textarea { align-self: stretch; resize: none; }
 .d-head { padding: 14px 16px 10px; border-bottom: 1px solid var(--line); max-height: 55%; overflow-y: auto; }
 .d-title-row { display: flex; align-items: center; gap: 8px; }
 .d-title { font-size: 15px; margin: 0; flex: 1; word-break: break-word; }
