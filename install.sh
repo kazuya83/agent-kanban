@@ -86,7 +86,13 @@ if ! curl -fL --progress-bar -o "${file}" "${url}"; then
   url="https://github.com/${REPO}/releases/download/${tag}/${OLD_BIN_NAME}-${tag#v}-${pattern}"
   file="${tmp}/$(basename "${url}")"
   info "ダウンロードしています: $(basename "${url}")"
-  curl -fL --progress-bar -o "${file}" "${url}" || die "ダウンロードできませんでした: ${url}（バージョン ${tag} があるか、https://github.com/${REPO}/releases で確認してください）"
+  if ! curl -fL --progress-bar -o "${file}" "${url}"; then
+    if [ "${os}" = "Darwin" ]; then
+      # Mac の dmg は、公開のあとに追加される（Mac のビルドを待たずに公開するため）
+      die "${tag} の Mac 版はまだ準備中です。しばらくしてからもう一度試すか、前の版を入れてください（例: AGENT_KANBAN_VERSION=前の版の番号）。https://github.com/${REPO}/releases"
+    fi
+    die "ダウンロードできませんでした: ${url}（バージョン ${tag} があるか、https://github.com/${REPO}/releases で確認してください）"
+  fi
 fi
 
 case "${os}" in

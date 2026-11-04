@@ -2,6 +2,8 @@
 # - push / プルリクエスト: まずテスト
 # - main への push: 最新のリリースからアプリの中身が変わっていれば、テストのあとすぐに
 #   バージョンを自動で上げて（0.1.8 → 0.1.9）3つの OS でビルドし、GitHub Release を作り、インストールを確かめる
+#   - 公開は Mac を待たない: Windows と Linux ができたら公開し、Mac の dmg は、できしだい同じ版に追加する
+#     （Mac の実行環境は空き待ちが長いことがあるため。Mac のインストールは手元の Mac で確かめる）
 #   - 途中で次の push が来たら、前の実行は取り消す（続けてマージしても、リリースまで進むのは最後の1回）
 #   - 0.2.0 のように大きく上げたいときは、package.json の version をその番号にして push する
 #   - バージョンの決め方は scripts/next-version.js
@@ -62,11 +64,9 @@ jobs:
         include:
           - os: windows-latest
             target: --win
-          # Mac の実行環境は、リポジトリの変数 MACOS_RUNNER で変えられる（空なら macos-14）
-          - os: ${{ vars.MACOS_RUNNER || 'macos-14' }}
-            target: --mac
           - os: ubuntu-latest
             target: --linux
+          # Mac は下の build-mac（公開を待たせないよう、別のジョブにしている）
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -114,7 +114,60 @@ jobs:
             dist/*.AppImage
           if-no-files-found: error
 
+  # Mac のビルド。公開（release）はこれを待たない。できたら release-mac で同じ版に追加する
+  build-mac:
+    needs: test
+    if: needs.test.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
+    # Mac の実行環境は、リポジトリの変数 MACOS_RUNNER で変えられる（空なら macos-14）
+    runs-on: ${{ vars.MACOS_RUNNER || 'macos-14' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: バージョンを入れる（v${{ needs.test.outputs.version }}）
+        shell: bash
+        run: npm version "${{ needs.test.outputs.version }}" --no-git-tag-version --allow-same-version
+      - name: Build
+        run: npx electron-builder --mac --publish never
+        env:
+          # 証明書なしでビルドする（macOS はアドホック署名）
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # ビルドしたアプリを実際に起動して、画面が出るか確かめる（Mac / Windows）
+      - name: Launch the built app and check the window
+        if: runner.os != 'Linux'
+        timeout-minutes: 6
+        shell: bash
+        run: |
+          npm install --no-save playwright-core@1.48.2
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            ls dist
+            APP=$(ls -d dist/mac*/"Agent Kanban.app" | head -n1)
+            codesign -dv --verbose=2 "$APP" 2>&1 | head -12 || true
+            node test/smoke-packaged.js "$APP/Contents/MacOS/Agent Kanban" smoke-built.png
+          else
+            node test/smoke-packaged.js "dist/win-unpacked/Agent Kanban.exe" smoke-built.png
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always() && runner.os != 'Linux'
+        with:
+          name: smoke-built-${{ runner.os }}
+          path: smoke-*.png
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agent-kanban-${{ runner.os }}
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.dmg
+            dist/*.AppImage
+          if-no-files-found: error
+
   release:
+    # Mac（build-mac）は待たない
     needs: [test, build]
     if: needs.test.outputs.release == 'true'
     runs-on: ubuntu-latest
@@ -136,8 +189,27 @@ jobs:
             dist/*.dmg
             dist/*.AppImage
 
+  # Mac の dmg を、公開済みの同じ版に追加する
+  release-mac:
+    needs: [test, release, build-mac]
+    if: needs.test.outputs.release == 'true' && needs.release.result == 'success' && needs.build-mac.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: agent-kanban-macOS
+          path: dist
+      - run: ls -la dist
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.test.outputs.version }}
+          name: Agent Kanban v${{ needs.test.outputs.version }}
+          files: |
+            dist/*.dmg
+            dist/*.zip
+
   # インストール用スクリプトを、実際の OS で最新の Release に対して試す
-  # （macOS は標準の /bin/bash 3.2、Windows は標準の Windows PowerShell 5.1 で実行する）
+  # （Windows は標準の Windows PowerShell 5.1 で実行する。Mac は手元の Mac で確かめるので、ここでは試さない）
   install-script:
     # リリースしたあと、その版をインストール用スクリプトで入れて確かめる
     needs: [test, build, release]
@@ -145,7 +217,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["${{ vars.MACOS_RUNNER || 'macos-14' }}", windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
