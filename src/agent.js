@@ -11,6 +11,8 @@ const github = require('./github');
 const ghCli = require('./gh');
 const { withSkill } = require('./skills');
 const providers = require('./providers');
+const attachments = require('./attachments');
+const os = require('os');
 const { agentLabel, agentShort } = providers;
 
 const MAX_LOGS = 2000;
@@ -372,7 +374,10 @@ function buildRelayFirstPrompt(c, prompt) {
 // 2つ目以降の工程の指示（元の指示・これまでの工程の報告・担当の説明）
 function buildRelayStepPrompt(c, i) {
   const st = c.relay.steps[i];
-  const lines = [relayHeader(c, i), '', '## タスクの指示', truncate(c.prompt, 6000), '', '## これまでの工程'];
+  const lines = [relayHeader(c, i), '', '## タスクの指示', truncate(c.prompt, 6000), ''];
+  const att = attachments.attachmentNote(c.attachments, { toAgentPath: wsl.parseWslPath(c.repoPath || '') ? (p) => wsl.toLinux(p) : undefined });
+  if (att) lines.push(att, '');
+  lines.push('## これまでの工程');
   // ループで長くなりすぎないよう、新しい方から 10 件まで
   const hist = c.relay.history || [];
   if (hist.length > 10) lines.push(`（前の ${hist.length - 10} 件の報告は省きました）`, '');
@@ -483,6 +488,12 @@ function cleanBranchName(text) {
     .slice(0, 100);
 }
 
+// 「あなたの指示」のログに付けるもの（スキル・添付ファイル）
+function userLogExtra(skill, atts, parsed) {
+  const extra = { ...(skill ? { skill } : {}), ...(attachments.logExtra(atts, parsed) || {}) };
+  return Object.keys(extra).length ? extra : undefined;
+}
+
 function killTree(child) {
   if (!child || child.exitCode !== null) return;
   if (child.viaWsl) {
@@ -512,6 +523,8 @@ class AgentManager extends EventEmitter {
     this.procs = new Map(); // cardId -> child process
     this.pending = new Map(); // permission request id -> { cardId, toolName, input, resolve }
     this.permission = null; // { port, token }
+    // 指示に添付したファイルの置き場所（作業フォルダの外）
+    this.attachRoot = (opts && opts.attachDir) || path.join(os.tmpdir(), 'agent-kanban-attachments');
     this.recoverInterrupted();
   }
 
@@ -536,18 +549,19 @@ class AgentManager extends EventEmitter {
       }
       if (c.status === 'queued') {
         // まだ claude に渡していない指示なので、そのまま渡し直せばよい
-        c.interrupted = { at: now, kind: 'queued', prompt: c.pendingPrompt || this.firstPrompt(c) };
+        c.interrupted = { at: now, kind: 'queued', prompt: c.pendingPrompt || this.firstPrompt(c), attachments: (c.pendingPrompt ? c.pendingAttachments : c.attachments) || undefined };
         c.status = c.worktreePath || isChat(c) ? 'review' : 'todo';
         c.error = null;
       }
       if (c.status === 'running') {
         // 会話が始まっていれば同じ会話の続きから、始まる前なら同じ指示をもう一度渡す
         const resumePrompt = isChat(c) ? CHAT_RESUME_PROMPT : RESUME_PROMPT;
-        c.interrupted = { at: now, kind: 'running', prompt: c.sessionId ? resumePrompt : c.lastPromptSent || this.firstPrompt(c) };
+        c.interrupted = { at: now, kind: 'running', prompt: c.sessionId ? resumePrompt : c.lastPromptSent || this.firstPrompt(c), attachments: c.sessionId ? undefined : (c.lastPromptSent ? c.lastAttachmentsSent : c.attachments) || undefined };
         c.status = 'failed';
         c.error = INTERRUPTED_MESSAGE;
       }
       c.pendingPrompt = null;
+      c.pendingAttachments = null;
     }
     this.store.save();
   }
@@ -565,7 +579,7 @@ class AgentManager extends EventEmitter {
     if (c.status === 'running' || c.status === 'queued') throw new Error('このタスクはもう動いています');
     if (it.kind === 'running') this.log(c, 'user', it.prompt === RESUME_PROMPT || it.prompt === CHAT_RESUME_PROMPT ? '（中断したところから再開）' : it.prompt);
     else this.log(c, 'system', '中断されていた指示で再開します');
-    this.enqueue(c, it.prompt);
+    this.enqueue(c, it.prompt, it.attachments);
   }
 
   resumeAll(repoPath) {
@@ -798,8 +812,10 @@ class AgentManager extends EventEmitter {
    * - compete: 設定の競争のエージェントの数だけ（同じタスクを、それぞれ別の worktree で並列に解く）
    * @returns {object[]} 作ったカード
    */
-  createTask({ title, prompt, issue, session, skill, agent, fromChat }) {
+  createTask({ title, prompt, issue, session, skill, agent, fromChat, attachments: files }) {
     const s = this.store.settings;
+    // 添付は先に確かめておく（カードごとに保存する）
+    const parsed = attachments.parseAttachments(files);
     const mode = agent || providers.defaultAgentOf(s);
     // 会話の続き、または完了したタスクの修正として作る
     const chat = fromChat ? this.store.card(fromChat) : null;
@@ -810,27 +826,27 @@ class AgentManager extends EventEmitter {
       const why = providers.cleanOrchestration(s.orchestration) === 'none' ? 'オーケストレーションを使わない設定' : 'Pipelineと競争はどちらか1つだけ使えます';
       throw new Error(`${name(mode)}は使わない設定になっています（${why}）。「設定」の「オーケストレーション」で${name(mode)}を選んでください`);
     }
-    if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from });
+    if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from, parsed });
     if (mode === 'relay') {
       const steps = providers.cleanRelaySteps(s.relaySteps);
       if (!steps.length) throw new Error('Pipelineの工程がありません。設定の「Pipelineの工程」を決めてください');
       const off = steps.find((st) => !providers.isEnabled(s, st.agent));
       if (off) throw new Error(`Pipelineの工程「${off.label}」の ${agentLabel(off.agent)} は使わない設定になっています。「設定」で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
-      const c = this.createCard({ title, prompt, issue, session, skill, agent: steps[0].agent, relay: { steps, index: 0, history: [] }, fromChat: from });
+      const c = this.createCard({ title, prompt, issue, session, skill, agent: steps[0].agent, relay: { steps, index: 0, history: [] }, fromChat: from, parsed });
       return [c];
     }
-    return [this.createCard({ title, prompt, issue, session, skill, agent: mode, fromChat: from })];
+    return [this.createCard({ title, prompt, issue, session, skill, agent: mode, fromChat: from, parsed })];
   }
 
   // 競争: 同じタスクを、設定のエージェントそれぞれのカードにする（使わない設定のエージェントは外す）
-  createCompetition({ title, prompt, issue, session, skill, fromChat }) {
+  createCompetition({ title, prompt, issue, session, skill, fromChat, parsed }) {
     const s = this.store.settings;
     const list = providers.cleanCompeteAgents(s.competeAgents).filter((a) => providers.isEnabled(s, a));
     if (list.length < 2) throw new Error('競争させるエージェントを、設定で2つ以上選んでください（使うエージェントにチェックを付けたものから選べます）');
     const group = crypto.randomBytes(4).toString('hex');
     const base = (title && title.trim()) || truncate(String(prompt || '').trim().split('\n')[0], 40);
     return list.map((a, index) =>
-      this.createCard({ title: `${base} [${agentShort(a)}]`, prompt, issue, session, skill, agent: a, compete: { group, index, total: list.length, title: base }, fromChat }),
+      this.createCard({ title: `${base} [${agentShort(a)}]`, prompt, issue, session, skill, agent: a, compete: { group, index, total: list.length, title: base }, fromChat, parsed }),
     );
   }
 
@@ -847,7 +863,7 @@ class AgentManager extends EventEmitter {
     return a && providers.isEnabled(s, a) ? a : providers.defaultAgentOf(s);
   }
 
-  createCard({ title, prompt, issue, session, skill, agent, relay, compete, fromChat }) {
+  createCard({ title, prompt, issue, session, skill, agent, relay, compete, fromChat, parsed }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     if (!prompt || !prompt.trim()) throw new Error('指示を入力してください');
@@ -882,6 +898,7 @@ class AgentManager extends EventEmitter {
     card.skill = cleanSkill(skill);
     // 内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める
     if (s.specCheck !== false) card.specState = 'checking';
+    this.saveCardAttachments(card, parsed);
     this.store.cards.push(card);
     this.changed(card);
     return card;
@@ -890,7 +907,7 @@ class AgentManager extends EventEmitter {
   // 最初の指示（スキル・Pipelineの担当の説明を付けたもの）
   firstPrompt(c) {
     // 仕様の確認中は、開発を始める前に内容が足りているかを判断してもらう指示を付ける
-    const body = withChatContext(c.chatContext, c.prompt);
+    const body = this.withAttachments(c, withChatContext(c.chatContext, c.prompt), c.attachments);
     const p = promptWithSkill(agentOf(c), c.skill, inSpecCheck(c) ? withSpecCheck(body) : body);
     return c.relay && !isChat(c) ? buildRelayFirstPrompt(c, p) : p;
   }
@@ -992,11 +1009,12 @@ class AgentManager extends EventEmitter {
    * worktree もブランチも作らず、リポジトリのフォルダでそのままエージェントと話す（コミット・マージはしない）
    * @param {{ message: string, title?: string, session?: object, skill?: string, agent?: string }} p
    */
-  createChat({ message, title, session, skill, agent }) {
+  createChat({ message, title, session, skill, agent, attachments: files }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     const text = String(message || '').trim();
     if (!text) throw new Error('メッセージを入力してください');
+    const parsed = attachments.parseAttachments(files);
     const a = agent || providers.defaultAgentOf(s);
     this.assertEnabled(a);
     const card = {
@@ -1016,6 +1034,7 @@ class AgentManager extends EventEmitter {
     // 既存の会話（Claude Code の会話）を引き継げるのは Claude Code だけ
     if (session && session.id && a === 'claude') this.applySession(card, session);
     card.skill = cleanSkill(skill);
+    this.saveCardAttachments(card, parsed);
     this.store.cards.push(card);
     this.changed(card);
     this.start(card.id);
@@ -1120,21 +1139,39 @@ class AgentManager extends EventEmitter {
   start(id) {
     const c = this.must(id);
     if (c.status !== 'todo') throw new Error('このタスクはもう開始しています');
-    this.log(c, 'user', c.prompt, c.skill ? { skill: c.skill } : undefined);
+    this.log(c, 'user', c.prompt, userLogExtra(c.skill, c.attachments, c.attachmentsParsed));
+    delete c.attachmentsParsed;
     if (inSpecCheck(c) && this.store.settings.specCheck === false) c.specState = null; // 作ったあとで設定を切った
-    this.enqueue(c, this.firstPrompt(c));
+    this.enqueue(c, this.firstPrompt(c), c.attachments);
   }
 
-  send(id, message, skill) {
+  send(id, message, skill, files) {
     const c = this.must(id);
     if (!['review', 'failed', 'done'].includes(c.status)) throw new Error('実行中・待機中は追加指示を送れません');
     if (!message || !message.trim()) throw new Error('追加指示を入力してください');
     skill = cleanSkill(skill);
-    if (c.status === 'done' && !isChat(c)) return this.sendAfterDone(c, message.trim(), skill);
-    this.log(c, 'user', message.trim(), skill ? { skill } : undefined);
+    const parsed = attachments.parseAttachments(files);
+    const atts = attachments.saveAttachments(this.attachRoot, c.id, parsed);
+    if (c.status === 'done' && !isChat(c)) return this.sendAfterDone(c, message.trim(), skill, atts, parsed);
+    this.log(c, 'user', message.trim(), userLogExtra(skill, atts, parsed));
     // 仕様の確認中の答えには、続けて判断してもらうための一言を添える
-    const body = inSpecCheck(c) ? `${message.trim()}\n\n${SPEC_FOLLOW_NOTE}` : message.trim();
-    this.enqueue(c, promptWithSkill(agentOf(c), skill, body));
+    const body = this.withAttachments(c, inSpecCheck(c) ? `${message.trim()}\n\n${SPEC_FOLLOW_NOTE}` : message.trim(), atts);
+    this.enqueue(c, promptWithSkill(agentOf(c), skill, body), atts);
+  }
+
+  // 添付を、このカードの置き場所に保存してカードに記録する（最初の指示の添付）
+  saveCardAttachments(card, parsed) {
+    if (!parsed || !parsed.length) return;
+    card.attachments = attachments.saveAttachments(this.attachRoot, card.id, parsed);
+    // 最初のログに画像を出すときに読み直さないよう、start まで中身を持っておく（保存はしない）
+    Object.defineProperty(card, 'attachmentsParsed', { value: parsed, enumerable: false, configurable: true, writable: true });
+  }
+
+  // 指示に、添付ファイルのパスを書き足す（エージェントから見えるパスで）
+  withAttachments(c, text, atts) {
+    if (!atts || !atts.length) return text;
+    const w = wsl.parseWslPath(c.repoPath || '');
+    return attachments.withAttachmentNote(text, atts, { toAgentPath: w ? (p) => wsl.toLinux(p) : undefined, inlineImages: agentOf(c) === 'claude' });
   }
 
   /**
@@ -1163,19 +1200,21 @@ class AgentManager extends EventEmitter {
    * 最初は新しい会話で始めて元のタスクの中身を渡し、2回目からはその会話の続きにする。
    * 修正が必要なときは「修正タスクを作る」で別のタスクにしてもらう
    */
-  sendAfterDone(c, message, skill) {
+  sendAfterDone(c, message, skill, atts, parsed) {
     const first = !c.afterDoneSession;
     if (first) this.log(c, 'system', '完了したタスクについて話します（ファイルは変えません。修正が必要なときは「修正タスクを作る」から別のタスクにしてください）');
-    this.log(c, 'user', message, skill ? { skill } : undefined);
+    this.log(c, 'user', message, userLogExtra(skill, atts, parsed));
     // 前の作業の会話は worktree のフォルダに保存されているので使わない。完了後の会話はその会話だけを続ける
     c.sessionId = c.afterDoneSession || null;
     c.forkNext = false;
     c.afterDone = true;
-    this.enqueue(c, promptWithSkill(agentOf(c), skill, first ? buildAfterDonePrompt(c, message) : message));
+    this.enqueue(c, promptWithSkill(agentOf(c), skill, this.withAttachments(c, first ? buildAfterDonePrompt(c, message) : message, atts)), atts);
   }
 
-  enqueue(c, prompt) {
+  // atts: この指示に添付したファイル（Claude Code には画像をそのまま渡す。パスは prompt に書いてある）
+  enqueue(c, prompt, atts) {
     if (this.shuttingDown) throw new Error('アプリを終了しています');
+    c.pendingAttachments = atts && atts.length ? atts : null;
     c.interrupted = null;
     c.awaitingReply = false;
     c.lastText = '';
@@ -1489,6 +1528,9 @@ class AgentManager extends EventEmitter {
       if (c.sessionId) args.push('--resume', assertSessionId(c.sessionId));
       // 既存の会話を引き継ぐときは、元の会話を変えないようにフォークする（新しい ID になる）
       if (c.sessionId && c.forkNext) args.push('--fork-session');
+      // 添付ファイルの置き場所（作業フォルダの外）も読めるようにする
+      const attachDir = this.attachDirOf(c);
+      if (attachDir) args.push('--add-dir', attachDir);
       // 公式 Remote Control: claude.ai/code や Claude アプリからも同じセッションを続けられる（対応 CLI のみ）
       if (s.claudeRemoteControl) {
         args.push('--remote-control');
@@ -1500,12 +1542,16 @@ class AgentManager extends EventEmitter {
         c.sessionId = null;
         c.forkNext = false;
       }
-      args = providers.buildArgs(agent, { mode, model: providers.agentModel(s, agent), sessionId: c.sessionId ? assertSessionId(c.sessionId) : null, prompt: c.pendingPrompt || '' });
+      const attachDir = this.attachDirOf(c);
+      args = providers.buildArgs(agent, { mode, model: providers.agentModel(s, agent), sessionId: c.sessionId ? assertSessionId(c.sessionId) : null, prompt: c.pendingPrompt || '', includeDirs: attachDir ? [attachDir] : [] });
     }
 
     const prompt = c.pendingPrompt || '';
+    const sentAtts = c.pendingAttachments || null;
     c.pendingPrompt = null;
+    c.pendingAttachments = null;
     c.lastPromptSent = prompt;
+    c.lastAttachmentsSent = sentAtts;
     for (const m of c.btw || []) if (m.state === 'queued') m.state = 'delivered';
     if (agent !== 'claude') this.log(c, 'system', `${label} で動かします${c.sessionId ? `（会話 ${c.sessionId.slice(0, 8)} の続き）` : ''}`);
     // 承認待ちの MCP ツール呼び出しがタイムアウトしないようにする
@@ -1536,7 +1582,7 @@ class AgentManager extends EventEmitter {
       if (t) this.log(c, 'stderr', truncate(t, 2000));
     });
     child.stdin.on('error', () => {});
-    if (agent === 'claude') this.writeMessage(run, prompt, null);
+    if (agent === 'claude') this.writeMessage(run, prompt, null, attachments.imageBlocks(sentAtts));
     else {
       // Codex / Gemini は指示を stdin で1回だけ受け取る（Cursor は引数で受け取ったので空で閉じる）。実行中の btw は終了後の追加指示にする
       run.stdinClosed = true;
@@ -1812,9 +1858,17 @@ class AgentManager extends EventEmitter {
   // ---------- 実行中のメッセージ（btw） ----------
 
   // stream-json の1行として stdin に書く
-  writeMessage(run, text, btwId) {
+  // images: 一緒に渡す画像（content ブロック）
+  writeMessage(run, text, btwId, images) {
     run.sent.push({ text, btwId, acked: false });
-    run.child.stdin.write(`${JSON.stringify({ type: 'user', message: { role: 'user', content: text } })}\n`);
+    const content = images && images.length ? [...images, { type: 'text', text }] : text;
+    run.child.stdin.write(`${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`);
+  }
+
+  // このカードの添付ファイルの置き場所（添付がなければ null）
+  attachDirOf(c) {
+    const dir = attachments.cardDir(this.attachRoot, c.id);
+    return fs.existsSync(dir) ? dir : null;
   }
 
   // claude がメッセージを受け取ると、--replay-user-messages で同じ内容が返ってくる
@@ -2616,6 +2670,7 @@ class AgentManager extends EventEmitter {
     if (c.worktreePath) await git.removeWorktree(c.repoPath, c.worktreePath);
     if (c.branch && c.status !== 'done' && !c.afterDone) await git.deleteBranch(c.repoPath, c.branch);
     fs.rmSync(path.join(this.opts.mcpDir, `${id}.json`), { force: true });
+    attachments.removeCardAttachments(this.attachRoot, id);
     this.changed(null);
   }
 }

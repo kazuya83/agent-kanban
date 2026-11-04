@@ -63,9 +63,9 @@ function cursorPolicy(mode) {
 /**
  * 起動する引数（指示は stdin で渡す。Cursor だけは prompt を最後の引数に入れる）
  * @param {'codex'|'gemini'|'cursor'} a
- * @param {{ mode?: string, model?: string, sessionId?: string|null, prompt?: string }} o
+ * @param {{ mode?: string, model?: string, sessionId?: string|null, prompt?: string, includeDirs?: string[] }} o
  */
-function buildArgs(a, { mode, model, sessionId, prompt } = {}) {
+function buildArgs(a, { mode, model, sessionId, prompt, includeDirs = [] } = {}) {
   if (a === 'codex') {
     const args = ['exec'];
     if (sessionId) args.push('resume');
@@ -84,6 +84,8 @@ function buildArgs(a, { mode, model, sessionId, prompt } = {}) {
     const args = ['--output-format', 'stream-json', '--skip-trust', '--approval-mode', geminiApproval(mode)];
     if (model) args.push('-m', model);
     if (sessionId) args.push('--resume', sessionId);
+    // 作業フォルダの外にある添付ファイルの置き場所も読めるようにする
+    if (includeDirs.length) args.push('--include-directories', includeDirs.join(','));
     return args;
   }
   if (a === 'cursor') {

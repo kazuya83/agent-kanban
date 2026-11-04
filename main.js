@@ -350,6 +350,7 @@ app.whenReady().then(async () => {
     // パッケージ後は asar の外に出した MCP スクリプトを使う
     mcpScript: path.join(__dirname, 'src', 'permission-mcp.js').replace('app.asar', 'app.asar.unpacked'),
     mcpDir: path.join(userData, 'mcp'),
+    attachDir: path.join(userData, 'attachments'), // 指示に添付したファイル（作業フォルダの外に置く）
     nodeBin: process.execPath, // ELECTRON_RUN_AS_NODE=1 で Node として動かす
   });
 
@@ -701,12 +702,13 @@ app.whenReady().then(async () => {
   });
   // agent: claude / codex / gemini / cursor / relay（Pipeline） / compete（競争。カードが複数できる）。返すのは最初のカードの ID
   // fromChat: 会話の続きとしてタスクを作るときの、元の会話のカードの ID
-  handle('card:create', ({ title, prompt, autoStart, session, skill, agent, fromChat }) => {
-    const cards = agents.createTask({ title, prompt, session, skill, agent, fromChat });
+  // attachments: 添付ファイル [{ name, mediaType, data(base64) }]
+  handle('card:create', ({ title, prompt, autoStart, session, skill, agent, fromChat, attachments }) => {
+    const cards = agents.createTask({ title, prompt, session, skill, agent, fromChat, attachments });
     if (autoStart) for (const c of cards) agents.start(c.id);
     return cards[0].id;
   });
-  handle('chat:create', ({ message, title, session, skill, agent }) => agents.createChat({ message, title, session, skill, agent }).id);
+  handle('chat:create', ({ message, title, session, skill, agent, attachments }) => agents.createChat({ message, title, session, skill, agent, attachments }).id);
   handle('card:createFromIssues', async ({ numbers, extra, autoStart, session, skill, agent }) => {
     const { cards, errors } = await agents.createFromIssues({ numbers, extra, session, skill, agent });
     if (autoStart) for (const c of cards) agents.start(c.id);
@@ -750,7 +752,7 @@ app.whenReady().then(async () => {
   handle('card:resumeAll', () => agents.resumeAll(store.settings.repoPath));
   handle('card:dismissInterrupted', (id) => agents.dismissInterrupted(id));
   handle('card:stop', (id) => agents.stop(id));
-  handle('card:send', ({ id, message, skill }) => agents.send(id, message, skill));
+  handle('card:send', ({ id, message, skill, attachments }) => agents.send(id, message, skill, attachments));
   handle('compete:adopt', (id) => agents.adoptCompetitor(id));
   handle('compete:compare', (id) => agents.compareCompetitors(id).id);
   handle('card:suggestSkills', ({ id }) => agents.suggestSkills(id));
