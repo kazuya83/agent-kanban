@@ -281,7 +281,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 .modal-box h2 { margin: 0 0 14px; font-size: 16px; }
 .field { display: block; margin-bottom: 12px; }
 .field > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.field small { color: var(--muted); display: block; margin-top: 4px; }
+.field small, .field-note { color: var(--muted); display: block; margin-top: 4px; }
+.field-note { margin: -4px 0 10px; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .status-map { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .status-map .row { grid-template-columns: 1fr 1fr 1fr; }

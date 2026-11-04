@@ -24,6 +24,31 @@ const $ = (id) => document.getElementById(id);
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
+
+// カードや通知の短い文章では、Markdown の記号（見出し・太字・コード・表・リスト）を外して、ふつうの文章にする
+function plainText(md) {
+  return String(md ?? '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !/^\|?\s*:?-{3,}/.test(l)) // 表の区切り行
+    .map((l) =>
+      l
+        .replace(/^#{1,6}\s+/, '')
+        .replace(/^[-*+]\s+/, '・')
+        .replace(/^\d+\.\s+/, '')
+        .replace(/^>\s?/, '')
+        .replace(/^\||\|$/g, '')
+        .replace(/\s*\|\s*/g, ' / '),
+    )
+    .join(' ')
+    .replace(/\*\*(.+?)\*\*|__(.+?)__/g, '$1$2')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1$2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 function card(id) {
   return state.board.cards.find((c) => c.id === id);
 }
@@ -270,7 +295,7 @@ function cardHtml(c) {
       <div class="card-title">${c.issue ? `<a class="issue-chip" data-url="${esc(c.issue.url)}" title="Issue を開く">#${c.issue.number}</a> ${esc(c.title.replace(/^#\d+\s*/, ''))}` : esc(c.title)}</div>
       ${c.skill ? `<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">⚡ /${esc(c.skill)}</span></div>` : ''}
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
-      ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(c.lastMessage)}</div>` : ''}
+      ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(plainText(c.lastMessage))}</div>` : ''}
       ${isInterrupted(c) ? `<div class="int-quick"><button class="btn small primary" data-resume="${c.id}" title="中断したところから続けます">▶ 再開</button></div>` : ''}
       ${questionCompactHtml(c)}
       ${permissionBlock(c, true)}
@@ -281,6 +306,34 @@ function cardHtml(c) {
     </div>`;
 }
 
+// 週間上限のリセットからリセットまでの合計金額を、期間（何月何日〜何日）と一緒に出す
+let weekRollTimer = null;
+function renderCostInfo(settings) {
+  const el = $('costInfo');
+  el.classList.toggle('hidden', !settings.repoPath);
+  const total = Number(state.board.totalCostUsd) || 0;
+  const w = state.board.weeklyCost;
+  if (!w) {
+    el.textContent = `合計 $${total.toFixed(2)}`;
+    return;
+  }
+  const start = new Date(w.start);
+  const end = new Date(w.end);
+  const md = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+  const hm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const full = (d) => `${d.getMonth() + 1}月${d.getDate()}日（${'日月火水木金土'[d.getDay()]}）${hm(d)}`;
+  // 0:00 にリセットされるなら、終わりの日は前の日（例: 月曜 0:00 リセット → 月〜日）
+  const midnight = start.getHours() === 0 && start.getMinutes() === 0;
+  const last = midnight ? new Date(w.end - 1) : end;
+  el.textContent = `今週 $${(Number(w.usd) || 0).toFixed(2)} ・ ${md(start)}〜${md(last)}`;
+  const src = { claude: 'Claude から届いた週間上限のリセット日時', settings: '設定で決めたリセットの曜日・時刻', default: 'リセット日時がまだ分からないので月曜 0:00（設定で変えられます）' }[w.source] || '';
+  el.title = `Claude の週間上限のリセットに合わせた、今週このリポジトリのタスクで使った金額です\n期間: ${full(start)} 〜 ${full(end)}\n区切り: ${src}\nこれまでの合計: $${total.toFixed(2)}（削除したタスクの分も含みます）`;
+  // 週が変わったら表示を新しい週に切り替える
+  clearTimeout(weekRollTimer);
+  const wait = w.end - Date.now();
+  if (wait > 0 && wait < 2 ** 31 - 1) weekRollTimer = setTimeout(async () => ((state.board = await api.getBoard()), renderBoard()), wait + 1000);
+}
+
 function renderBoard() {
   const { settings, cards } = state.board;
   renderInterruptBanner();
@@ -288,9 +341,7 @@ function renderBoard() {
   $('baseInfo').textContent = settings.repoPath ? `ベース: ${settings.baseBranch || 'チェックアウト中のブランチ'}` : '';
   // 会話は同時実行数に数えない
   const running = cards.filter((c) => c.status === 'running' && !isChat(c)).length;
-  const total = Number(state.board.totalCostUsd) || 0;
-  $('costInfo').classList.toggle('hidden', !settings.repoPath);
-  $('costInfo').textContent = `合計 $${total.toFixed(2)}`;
+  renderCostInfo(settings);
   renderNotifications();
   renderChatBtn();
   $('runInfo').textContent = `実行中 ${running}/${settings.maxParallel || 1}`;
@@ -1506,6 +1557,13 @@ async function openSettings() {
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
        <small>「＋ 新しいタスク」と「Issue から作成」を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上の 🔔）</label>
+     <div class="row">
+       <label class="field"><span>週間上限のリセット曜日（上部の「今週」の区切り）</span>
+         <select id="sResetDay"><option value="">自動（Claude から届く日時を使う）</option>
+         ${'日月火水木金土'.split('').map((d, i) => `<option value="${i}" ${String(s.weeklyResetDay) === String(i) ? 'selected' : ''}>${d}曜日</option>`).join('')}</select></label>
+       <label class="field"><span>リセット時刻</span><input id="sResetTime" type="time" value="${esc(s.weeklyResetTime || '00:00')}" /></label>
+     </div>
+     <small class="field-note">Claude の使用状況（/usage）に出る週間上限のリセット日時に合わせます。自動のときは、Claude がリセット日時を知らせてくるまで月曜 0:00 で区切ります。</small>
      <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath)}" /></label>
 
      <div class="modal-actions"><button class="btn ghost" id="sCancel">キャンセル</button><button class="btn primary" id="sOk">保存</button></div>`,
@@ -1531,6 +1589,8 @@ async function openSettings() {
             defaultSkill: defSkill || '',
             issueStatusSync: $('sIssueSync').checked,
             suggestSkillsOnDone: $('sSuggestSkills').checked,
+            weeklyResetDay: $('sResetDay').value,
+            weeklyResetTime: $('sResetTime').value || '00:00',
             statusFieldName: $('sStatusField').value.trim(),
             statusMapping: { inProgress: $('sMapProgress').value.trim(), inReview: $('sMapReview').value.trim(), done: $('sMapDone').value.trim() },
           }),
@@ -1684,7 +1744,7 @@ function notifItemHtml(n) {
     <span class="notif-icon">${NOTIF_ICON[n.kind] || '🔔'}</span>
     <div class="notif-main">
       <div class="notif-title">${esc(n.title)}</div>
-      ${n.body ? `<div class="notif-body">${esc(n.body)}</div>` : ''}
+      ${n.body ? `<div class="notif-body">${esc(plainText(n.body))}</div>` : ''}
       <div class="notif-foot"><span class="muted small">${timeAgo(n.t)}</span>${action}</div>
     </div>
     <button class="icon notif-x" data-nclear="${esc(n.id)}" title="この通知を消す">✕</button>
