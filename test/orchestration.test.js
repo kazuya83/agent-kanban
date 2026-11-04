@@ -1,4 +1,4 @@
-// Claude Code 以外のエージェント（Codex / Gemini）と、オーケストレーション（Pipeline・競争）
+// Claude Code 以外のエージェント（Codex / Gemini / Cursor）と、オーケストレーション（Pipeline・競争）
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -34,8 +34,9 @@ function setup() {
     claudePath: bin('claude', FAKE_CLAUDE),
     codexPath: bin('codex', FAKE_CLI, 'codex'),
     geminiPath: bin('gemini', FAKE_CLI, 'gemini'),
+    cursorPath: bin('cursor-agent', FAKE_CLI, 'cursor'),
     maxParallel: 3,
-    enabledAgents: ['claude', 'codex', 'gemini'],
+    enabledAgents: ['claude', 'codex', 'gemini', 'cursor'],
     specCheck: false, // ここでは指示をそのまま渡したときの流れを確かめる（仕様の確認は agent.test.js で確かめる）
   });
   const agents = new AgentManager(store, { mcpScript: path.join(__dirname, '..', 'src', 'permission-mcp.js'), mcpDir: path.join(tmp, 'data', 'mcp'), nodeBin: process.execPath });
@@ -69,6 +70,12 @@ test('providers: 引数（権限モード・モデル・続き）', () => {
   assert.deepStrictEqual(providers.buildArgs('gemini', { mode: 'acceptEdits', sessionId: 's1' }), ['--output-format', 'stream-json', '--skip-trust', '--approval-mode', 'auto_edit', '--resume', 's1']);
   assert.strictEqual(providers.geminiApproval('bypassPermissions'), 'yolo');
   assert.strictEqual(providers.geminiApproval('plan'), 'plan');
+  // Cursor は指示を最後の引数で渡す（「-」で始まる指示はオプションに見えないよう空白を付ける）
+  assert.deepStrictEqual(providers.buildArgs('cursor', { mode: 'acceptEdits', prompt: 'やって' }), ['-p', '--output-format', 'stream-json', '--trust', '--force', 'やって']);
+  assert.deepStrictEqual(providers.buildArgs('cursor', { mode: 'plan', model: 'gpt-5', sessionId: 'c1', prompt: '-x' }), ['-p', '--output-format', 'stream-json', '--trust', '--mode', 'plan', '--model', 'gpt-5', '--resume', 'c1', ' -x']);
+  assert.deepStrictEqual(providers.cursorPolicy('bypassPermissions'), ['--force', '--approve-mcps']);
+  assert.strictEqual(providers.promptViaArg('cursor'), true);
+  assert.strictEqual(providers.promptViaArg('codex'), false);
   assert.deepStrictEqual(providers.cleanCompeteAgents(['codex', 'x', 'codex', 'gemini']), ['codex', 'gemini']);
   assert.deepStrictEqual(providers.cleanRelaySteps([{ agent: 'nope', instruction: 'a' }, { label: '', instruction: '' }]), [{ agent: 'claude', label: '工程1', instruction: 'a' }]);
   // ほかのエージェントにはスキルを「/名前」ではなく SKILL.md の場所で伝える
@@ -90,6 +97,56 @@ test('providers: Gemini の少しずつ届く発言はまとめ、Codex のイ�
   assert.deepStrictEqual(r.map((x) => x.type), ['tool', 'tool_result']);
   assert.strictEqual(r[1].error, true);
   assert.deepStrictEqual(cp.onEvent({ type: 'turn.failed', error: { message: 'bad' } }), [{ type: 'result', error: 'bad' }]);
+});
+
+test('providers: Cursor のイベントを共通の形に直す', () => {
+  const p = providers.createParser('cursor', { summarize: (x) => (x && (x.command || x.path || x.query)) || JSON.stringify(x) });
+  assert.deepStrictEqual(p.onEvent({ type: 'system', subtype: 'init', session_id: 'abc', model: 'GPT-5' }), [{ type: 'session', id: 'abc', model: 'GPT-5' }]);
+  assert.deepStrictEqual(p.onEvent({ type: 'user', message: { content: [{ type: 'text', text: '指示' }] } }), []);
+  assert.deepStrictEqual(p.onEvent({ type: 'assistant', message: { content: [{ type: 'text', text: 'a' }] } }), []);
+  p.onEvent({ type: 'assistant', message: { content: [{ type: 'text', text: 'b' }] } });
+  const st = p.onEvent({ type: 'tool_call', subtype: 'started', call_id: '1', tool_call: { shellToolCall: { args: { command: 'npm test' } } } });
+  assert.deepStrictEqual(st, [{ type: 'text', text: 'ab' }, { type: 'tool', name: 'Bash', summary: 'npm test' }]);
+  const done = p.onEvent({ type: 'tool_call', subtype: 'completed', call_id: '1', tool_call: { shellToolCall: { args: { command: 'npm test' }, result: { success: { exitCode: 1, stdout: 'fail', stderr: '' } } } } });
+  assert.deepStrictEqual(done, [{ type: 'tool_result', text: 'fail', error: true }]);
+  // started が来なかったツールは completed で出す。中身が JSON 文字列のツール（MCP など）も読む
+  const fn = p.onEvent({ type: 'tool_call', subtype: 'completed', call_id: '2', tool_call: { function: { name: 'lookup', arguments: '{"query":"q"}' } } });
+  assert.deepStrictEqual(fn, [{ type: 'tool', name: 'lookup', summary: 'q' }, { type: 'tool_result', text: 'ok', error: false }]);
+  const rd = p.onEvent({ type: 'tool_call', subtype: 'completed', call_id: '3', tool_call: { readToolCall: { args: { path: 'a.js' }, result: { error: { message: 'no file' } } } } });
+  assert.deepStrictEqual(rd.map((x) => [x.type, x.name || x.text]), [['tool', 'Read'], ['tool_result', 'no file']]);
+  assert.deepStrictEqual(p.onEvent({ type: 'result', subtype: 'success', is_error: false, result: 'ab' }), [{ type: 'result' }]);
+  assert.deepStrictEqual(p.onEvent({ type: 'result', subtype: 'error', is_error: true, result: 'bad' }), [{ type: 'result', error: 'bad' }]);
+});
+
+test('Cursor のタスク: 指示を引数で渡して worktree で動き、追加指示は --resume で続ける', async () => {
+  const { agents, calls } = setup();
+  const [c] = agents.createTask({ title: 'cu', prompt: 'カーソルで作って', agent: 'cursor' });
+  assert.strictEqual(c.agent, 'cursor');
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  assert.match(c.sessionId, /^cursor-chat-/);
+  assert.strictEqual(c.sessions[0].agent, 'cursor');
+  assert.match(c.lastText, /cursor done/);
+  assert.ok(c.logs.some((l) => l.kind === 'text' && l.agent === 'cursor' && l.text === 'ファイルを作ります'));
+  assert.ok(c.logs.some((l) => l.kind === 'tool' && /^Write/.test(l.text)));
+  assert.match(await agents.diff(c.id), /カーソルで作って/);
+  const first = calls().filter((x) => x.kind === 'cursor')[0].args;
+  assert.ok(first.includes('--force') && first.includes('--trust'));
+  assert.strictEqual(first[first.length - 1], 'カーソルで作って');
+  const sid = c.sessionId;
+  agents.send(c.id, 'もう1つ');
+  await waitFor(() => c.status === 'review' && calls().filter((x) => x.kind === 'cursor').length === 2);
+  const second = calls().filter((x) => x.kind === 'cursor')[1].args;
+  assert.strictEqual(second[second.indexOf('--resume') + 1], sid);
+  assert.strictEqual(second[second.length - 1], 'もう1つ');
+});
+
+test('Cursor のタスク: 失敗はエラー列に', async () => {
+  const { agents } = setup();
+  const [c] = agents.createTask({ title: 'cu', prompt: '[fail] カーソル', agent: 'cursor' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'failed');
+  assert.strictEqual(c.error, 'cursor boom');
 });
 
 test('Codex のタスク: worktree で動いてコミットし、追加指示は同じ会話の続き（resume）', async () => {

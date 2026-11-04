@@ -129,8 +129,8 @@ Info "インストールしました: $dest（$tag）"
 Info "スタートメニューとデスクトップの「$appName」から起動できます。"
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Warn 'git が見つかりません。Git for Windows をインストールしてください: https://git-scm.com/' }
-if (-not (Get-Command claude -ErrorAction SilentlyContinue) -and -not (Get-Command codex -ErrorAction SilentlyContinue) -and -not (Get-Command gemini -ErrorAction SilentlyContinue)) {
-  Warn 'エージェントの CLI（claude / codex / gemini）が見つかりません。使うものをインストールしてログインしてください（Claude Code・Codex CLI・Gemini CLI）。'
+if (-not (Get-Command claude -ErrorAction SilentlyContinue) -and -not (Get-Command codex -ErrorAction SilentlyContinue) -and -not (Get-Command gemini -ErrorAction SilentlyContinue) -and -not (Get-Command cursor-agent -ErrorAction SilentlyContinue)) {
+  Warn 'エージェントの CLI（claude / codex / gemini / cursor-agent）が見つかりません。使うものをインストールしてログインしてください（Claude Code・Codex CLI・Gemini CLI・Cursor CLI）。'
 }
 
 if (-not $env:AGENT_KANBAN_NO_LAUNCH) {

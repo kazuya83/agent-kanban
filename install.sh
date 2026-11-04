@@ -149,8 +149,8 @@ esac
 
 # 動かすのに必要なもの
 command -v git >/dev/null || warn "git が見つかりません。インストールしてください。"
-if ! command -v claude >/dev/null && ! command -v codex >/dev/null && ! command -v gemini >/dev/null; then
-  warn "エージェントの CLI（claude / codex / gemini）が見つかりません。使うものをインストールしてログインしてください（Claude Code・Codex CLI・Gemini CLI）。"
+if ! command -v claude >/dev/null && ! command -v codex >/dev/null && ! command -v gemini >/dev/null && ! command -v cursor-agent >/dev/null; then
+  warn "エージェントの CLI（claude / codex / gemini / cursor-agent）が見つかりません。使うものをインストールしてログインしてください（Claude Code・Codex CLI・Gemini CLI・Cursor CLI）。"
 fi
 
 echo

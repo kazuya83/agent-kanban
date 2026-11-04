@@ -18,11 +18,12 @@ const PERMISSION_MODES = [
   ['bypassPermissions', 'すべて自動で許可する（注意）'],
 ];
 
-// エージェント（Claude Code / Codex CLI / Gemini CLI）と、オーケストレーション（Pipeline・競争）
+// エージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）と、オーケストレーション（Pipeline・競争）
 const AGENTS = [
   ['claude', 'Claude Code', 'Claude'],
   ['codex', 'Codex CLI', 'Codex'],
   ['gemini', 'Gemini CLI', 'Gemini'],
+  ['cursor', 'Cursor CLI', 'Cursor'],
 ];
 // 設定で「使う」にチェックを付けたエージェント（1つもなければ Claude Code）
 function enabledAgents(s = state.board.settings || {}) {
@@ -394,7 +395,7 @@ function renderBoard() {
   $('runInfo').textContent = `実行中 ${running}/${settings.maxParallel || 1}`;
 
   if (!settings.repoPath) {
-    $('board').innerHTML = `<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、エージェント（Claude Code / Codex CLI / Gemini CLI）を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ</button></div>`;
+    $('board').innerHTML = `<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、エージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ</button></div>`;
     $('emptyRepo').onclick = chooseRepo;
     return;
   }
@@ -1197,7 +1198,7 @@ function updateBtwTab(c) {
   $('btwTab').textContent = n ? `btw (${n})` : 'btw';
   const live = c && (c.status === 'running' || c.status === 'queued');
   $('btwTab').classList.toggle('live', !!live);
-  // Codex / Gemini は実行中のメッセージに対応していない（待機中なら開始の指示に付け足せる）
+  // Codex / Gemini / Cursor は実行中のメッセージに対応していない（待機中なら開始の指示に付け足せる）
   $('btwTab').title = c && agentOf(c) !== 'claude' ? `${agentLabel(agentOf(c))} には、実行中のメッセージは送れません（待機中なら、開始するときの指示に付け足します）` : '実行中のエージェントに、作業を止めずにメッセージを送ります';
 }
 
@@ -1216,7 +1217,7 @@ async function renderDetailBody() {
   } else if (state.tab === 'btw') {
     const live = c.status === 'running' || c.status === 'queued';
     body.innerHTML = `<div class="pad btw">
-      <p class="muted small">エージェントの作業を止めずに、メッセージを送れます（例:「テストも書いて」「その API は使わないで」）。Claude Code は今の作業の途中で読み、そのまま反映します（Codex / Gemini は、待機中なら開始するときの指示に付け足します）。</p>
+      <p class="muted small">エージェントの作業を止めずに、メッセージを送れます（例:「テストも書いて」「その API は使わないで」）。Claude Code は今の作業の途中で読み、そのまま反映します（Codex / Gemini / Cursor は、待機中なら開始するときの指示に付け足します）。</p>
       <div id="btwList" class="btw-list">${btwListHtml(c)}</div>
       <textarea id="btwInput" rows="3" placeholder="${live ? 'btw: …（Ctrl/⌘ + Enter で送信）' : 'エージェントが実行中のときに送れます'}" ${live ? '' : 'disabled'}></textarea>
       <div class="btw-actions"><span class="muted small">${live ? (c.status === 'queued' ? '待機中なので、開始するときの指示に付け足します' : '送ると、すぐに実行中のエージェントに届きます') : c.status === 'todo' ? '開始すると送れるようになります' : '作業が終わったあとは、下の「追加指示」を使ってください'}</span>
@@ -1866,7 +1867,12 @@ async function openSettings() {
          <label class="field"><span>gemini コマンドのパス</span><input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
          <label class="field"><span>モデル（空なら既定）</span><input id="sGeminiModel" placeholder="例: gemini-2.5-pro" value="${esc(s.geminiModel || '')}" /></label>
        </div>`)}
-     <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可）。</small>
+     ${agentConfigHtml('cursor', s, `
+       <div class="row">
+         <label class="field"><span>cursor-agent コマンドのパス</span><input id="sCursor" value="${esc(s.cursorPath || 'cursor-agent')}" /></label>
+         <label class="field"><span>モデル（空なら既定）</span><input id="sCursorModel" placeholder="例: gpt-5 / sonnet-4.5" value="${esc(s.cursorModel || '')}" /></label>
+       </div>`)}
+     <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。</small>
      <label class="field"><span>新しいタスク・会話で最初から選んでおくエージェント</span>
        <select id="sDefaultAgent"></select>
        <small>Pipeline・競争（設定で選んだ方）は、タスクを作るときに「エージェント」の欄で選べます。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
@@ -2006,6 +2012,8 @@ async function openSettings() {
             codexModel: $('sCodexModel').value.trim(),
             geminiPath: $('sGemini').value.trim() || 'gemini',
             geminiModel: $('sGeminiModel').value.trim(),
+            cursorPath: $('sCursor').value.trim() || 'cursor-agent',
+            cursorModel: $('sCursorModel').value.trim(),
             defaultAgent: $('sDefaultAgent').value,
             enabledAgents: on,
             orchestration: orch(),
@@ -2048,7 +2056,7 @@ async function chooseRepo() {
   if (!distros.length) return pickRepo();
   openModal(
     `<h2>リポジトリを選ぶ</h2>
-     <p class="muted small">選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。</p>
+     <p class="muted small">選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。</p>
      <div class="repo-choices">
        <button class="btn repo-choice" data-pick="">🪟 <b>このパソコンのフォルダを選ぶ</b><small>C:\\Users\\… など</small></button>
        ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">🐧 <b>${esc(d)} のフォルダを選ぶ</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}

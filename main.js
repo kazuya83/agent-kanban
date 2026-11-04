@@ -198,7 +198,7 @@ app.whenReady().then(async () => {
     return { branches, current, hasOrigin };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'specCheck', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'relaySteps', 'competeAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'specCheck', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'competeAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
     if (patch && 'branchNamingRule' in patch) patch = { ...patch, branchNamingRule: String(patch.branchNamingRule || '').trim() };
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     if (patch && 'suggestSkillsOnDone' in patch) patch = { ...patch, suggestSkillsOnDone: !!patch.suggestSkillsOnDone };
@@ -213,7 +213,7 @@ app.whenReady().then(async () => {
     }
     if (patch && 'enabledAgents' in patch) patch = { ...patch, enabledAgents: providers.cleanEnabledAgents(patch.enabledAgents) };
     if (patch && 'defaultAgent' in patch && !providers.isAgent(patch.defaultAgent)) patch = { ...patch, defaultAgent: 'claude' };
-    for (const k of ['codexPath', 'codexModel', 'geminiPath', 'geminiModel']) if (patch && k in patch) patch = { ...patch, [k]: String(patch[k] || '').trim() };
+    for (const k of ['codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel']) if (patch && k in patch) patch = { ...patch, [k]: String(patch[k] || '').trim() };
     if (patch && 'relaySteps' in patch) patch = { ...patch, relaySteps: providers.cleanRelaySteps(patch.relaySteps) };
     if (patch && 'orchestration' in patch) patch = { ...patch, orchestration: providers.cleanOrchestration(patch.orchestration) };
     if (patch && 'competeAgents' in patch) patch = { ...patch, competeAgents: providers.cleanCompeteAgents(patch.competeAgents) };
@@ -232,7 +232,7 @@ app.whenReady().then(async () => {
     notifyBoard();
     return store.settings;
   });
-  // agent: claude / codex / gemini / relay（Pipeline） / compete（競争。カードが複数できる）。返すのは最初のカードの ID
+  // agent: claude / codex / gemini / cursor / relay（Pipeline） / compete（競争。カードが複数できる）。返すのは最初のカードの ID
   // fromChat: 会話の続きとしてタスクを作るときの、元の会話のカードの ID
   handle('card:create', ({ title, prompt, autoStart, session, skill, agent, fromChat }) => {
     const cards = agents.createTask({ title, prompt, session, skill, agent, fromChat });

@@ -1,7 +1,7 @@
 {
   "name": "agent-kanban",
   "version": "0.1.8",
-  "description": "AI コーディングエージェント（Claude Code / Codex CLI / Gemini CLI）のタスクをカンバンで管理し、git worktree ごとに並列実行するデスクトップアプリ",
+  "description": "AI コーディングエージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）のタスクをカンバンで管理し、git worktree ごとに並列実行するデスクトップアプリ",
   "main": "main.js",
   "license": "MIT",
   "author": "kazuya83",
