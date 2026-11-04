@@ -337,8 +337,8 @@ const DEFAULT_RELAY_STEPS = [
 // 競争（同じタスクを複数のエージェントで並列に解く）の初期値
 const DEFAULT_COMPETE_AGENTS = ['claude', 'codex'];
 
-// Pipelineと競争は排他。設定でどちらか1つだけを使う（'relay' / 'compete'。ほかの値はPipeline）
-const ORCHESTRATIONS = ['relay', 'compete'];
+// Pipelineと競争は排他。設定でどちらか1つだけを使うか、使わない（'relay' / 'compete' / 'none'。ほかの値はPipeline）
+const ORCHESTRATIONS = ['relay', 'compete', 'none'];
 function cleanOrchestration(v) {
   return ORCHESTRATIONS.includes(v) ? v : 'relay';
 }

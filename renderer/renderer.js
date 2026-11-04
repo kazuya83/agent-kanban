@@ -399,7 +399,15 @@ function renderBoard() {
     $('emptyRepo').onclick = chooseRepo;
     return;
   }
-  $('board').innerHTML = COLUMNS.map((col) => {
+  // 作り直すとスクロールが先頭に戻るので、ボードと各列の位置を覚えておいて戻す
+  const boardEl = $('board');
+  const boardScroll = [boardEl.scrollLeft, boardEl.scrollTop];
+  const colScroll = {};
+  boardEl.querySelectorAll('.column[data-col]').forEach((sec) => {
+    const list = sec.querySelector('.cards');
+    if (list) colScroll[sec.dataset.col] = list.scrollTop;
+  });
+  boardEl.innerHTML = COLUMNS.map((col) => {
     const list = cards
       .filter((c) => !isChat(c) && col.statuses.includes(c.status))
       .sort(byAttention);
@@ -409,6 +417,12 @@ function renderBoard() {
         <div class="cards">${list.map(cardHtml).join('') || `<div class="col-empty">${col.key === 'todo' ? '「＋ 新しいタスク」から追加' : 'なし'}</div>`}</div>
       </section>`;
   }).join('');
+  boardEl.querySelectorAll('.column[data-col]').forEach((sec) => {
+    const top = colScroll[sec.dataset.col];
+    const list = sec.querySelector('.cards');
+    if (top && list) list.scrollTop = top;
+  });
+  [boardEl.scrollLeft, boardEl.scrollTop] = boardScroll;
 }
 
 // 対応が必要なものを上に、あとは新しい順
@@ -1309,9 +1323,9 @@ function agentLimitHint(a) {
   return a === 'claude' ? '' : `${agentLabel(a)} は CLI の作りの都合で、カードでの承認・選択肢の質問・btw（実行中のメッセージ）・既存の会話の引き継ぎに対応していません。権限は設定の権限モードに合わせて CLI 側で許可します。`;
 }
 
-// Pipelineと競争は排他。設定で選んだ方だけを使える（'relay' / 'compete'）
+// Pipelineと競争は排他。設定で選んだ方だけを使える（'relay' / 'compete' / 'none'＝どちらも使わない）
 function orchestrationOf(s) {
-  return s && s.orchestration === 'compete' ? 'compete' : 'relay';
+  return s && (s.orchestration === 'compete' || s.orchestration === 'none') ? s.orchestration : 'relay';
 }
 // タスクを動かすエージェントを選ぶ欄（単独のエージェント / Pipelineか競争の、設定で選んだ方）。使う設定のエージェントだけ出す
 // orchestration: false なら、1つのエージェントだけを選ぶ（会話など）
@@ -1321,7 +1335,7 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
   const v = value || defaultAgent(s);
   const opt = (val, label, disabled) => `<option value="${val}" ${val === v && !disabled ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(label)}</option>`;
   const single = AGENTS.filter(([a]) => on.includes(a)).map(([a, l]) => opt(a, l)).join('');
-  if (!orchestration) return `<label class="field"><span>エージェント</span><select id="${idp}Agent">${single}</select><small id="${idp}AgentHint" class="muted"></small></label>`;
+  if (!orchestration || orchestrationOf(s) === 'none') return `<label class="field"><span>エージェント</span><select id="${idp}Agent">${single}</select><small id="${idp}AgentHint" class="muted"></small></label>`;
   const steps = s.relaySteps || [];
   const relayOff = !steps.length || steps.some((x) => !on.includes(x.agent));
   const comp = (s.competeAgents || []).filter((a) => on.includes(a));
@@ -1882,15 +1896,16 @@ async function openSettings() {
      <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。</small>
      <label class="field"><span>新しいタスク・会話で最初から選んでおくエージェント</span>
        <select id="sDefaultAgent"></select>
-       <small>Pipeline・競争（設定で選んだ方）は、タスクを作るときに「エージェント」の欄で選べます。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
+       <small>Pipeline・競争（設定で選んだ方。「なし」なら出ません）は、タスクを作るときに「エージェント」の欄で選べます。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
 
      <h3 class="s-section">オーケストレーション</h3>
-     <div class="field"><span>使うオーケストレーション（Pipelineと競争は、どちらか1つだけ使えます）</span>
+     <div class="field"><span>使うオーケストレーション（Pipelineと競争は、どちらか1つだけ使えます。使わないこともできます）</span>
        <div class="check-row">
          <label class="check"><input type="radio" name="sOrch" value="relay" ${orchestrationOf(s) === 'relay' ? 'checked' : ''} /> 🔁 Pipeline</label>
          <label class="check"><input type="radio" name="sOrch" value="compete" ${orchestrationOf(s) === 'compete' ? 'checked' : ''} /> 🏁 競争</label>
+         <label class="check"><input type="radio" name="sOrch" value="none" ${orchestrationOf(s) === 'none' ? 'checked' : ''} /> なし</label>
        </div>
-       <small>選んだ方だけ、タスクを作るときに「エージェント」の欄で選べます。</small></div>
+       <small>選んだ方だけ、タスクを作るときに「エージェント」の欄で選べます。「なし」なら、いつも1つのエージェントで動かします（Pipeline・競争の設定は消えずに残ります）。</small></div>
      <div class="field" id="sRelayField"><span>🔁 Pipelineの工程（上から順に、同じ worktree で引き継ぎます）</span>
        <div id="sRelay" class="relay-edit"></div>
        <button class="btn small" id="sRelayAdd" type="button">＋ 工程を足す</button>

@@ -324,13 +324,21 @@ test('Pipelineと競争は排他: 設定で選んだ方だけ使え、もう片�
   store.settings.orchestration = 'compete';
   assert.strictEqual(agents.createTask({ prompt: 'x', agent: 'compete' }).length, 2);
   assert.throws(() => agents.createTask({ prompt: 'x', agent: 'relay' }), /Pipelineは使わない設定/);
-  // 1つのエージェントのタスクは、どちらを選んでいても作れる
+  // 「なし」にすると、Pipelineも競争も使えない
+  store.settings.orchestration = 'none';
+  assert.throws(() => agents.createTask({ prompt: 'x', agent: 'relay' }), /Pipelineは使わない設定/);
+  assert.throws(() => agents.createTask({ prompt: 'x', agent: 'compete' }), /競争は使わない設定/);
+  // 1つのエージェントのタスクは、どれを選んでいても作れる
   assert.strictEqual(agents.createTask({ prompt: 'x', agent: 'claude' })[0].agent, 'claude');
   // 知らない値はPipelineに直す
   const s1 = { orchestration: 'both', enabledAgents: ['claude'] };
   migrateSettings(s1, s1, []);
   assert.strictEqual(s1.orchestration, 'relay');
   assert.strictEqual(providers.cleanOrchestration('compete'), 'compete');
+  assert.strictEqual(providers.cleanOrchestration('none'), 'none');
+  const s2 = { orchestration: 'none', enabledAgents: ['claude'] };
+  migrateSettings(s2, s2, []);
+  assert.strictEqual(s2.orchestration, 'none');
 });
 
 test('使うエージェント: 前のバージョンの設定は、使っていたエージェントにチェックを付け、最初のエージェントからPipeline・競争を外す', () => {

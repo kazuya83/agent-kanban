@@ -680,10 +680,11 @@ class AgentManager extends EventEmitter {
     // 会話の続き、または完了したタスクの修正として作る
     const chat = fromChat ? this.store.card(fromChat) : null;
     const from = isChat(chat) || (chat && chat.status === 'done') ? chat : null;
-    // Pipelineと競争は排他。設定で選んでいない方は使えない
+    // Pipelineと競争は排他。設定で選んでいない方（「なし」ならどちらも）は使えない
     if ((mode === 'relay' || mode === 'compete') && providers.cleanOrchestration(s.orchestration) !== mode) {
       const name = (m) => (m === 'relay' ? 'Pipeline' : '競争');
-      throw new Error(`${name(mode)}は使わない設定になっています（Pipelineと競争はどちらか1つだけ使えます）。⚙ 設定の「オーケストレーション」で${name(mode)}を選んでください`);
+      const why = providers.cleanOrchestration(s.orchestration) === 'none' ? 'オーケストレーションを使わない設定' : 'Pipelineと競争はどちらか1つだけ使えます';
+      throw new Error(`${name(mode)}は使わない設定になっています（${why}）。⚙ 設定の「オーケストレーション」で${name(mode)}を選んでください`);
     }
     if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from });
     if (mode === 'relay') {
