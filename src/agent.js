@@ -1544,11 +1544,11 @@ class AgentManager extends EventEmitter {
             c.lastSpecUnclear = hasSpecMarker(b.text);
             const text = c.lastSpecUnclear ? stripSpecMarker(b.text) : b.text;
             if (!text.trim()) continue;
-            this.log(c, 'text', text);
+            this.log(c, 'text', text, { agent: 'claude' });
             c.lastText = text.trim();
             c.lastMessage = truncate(text.trim(), 200);
           } else if (b.type === 'tool_use') {
-            this.log(c, 'tool', `${b.name}  ${summarizeInput(b.input)}`);
+            this.log(c, 'tool', `${b.name}  ${summarizeInput(b.input)}`, { agent: 'claude' });
             c.lastMessage = `${b.name} ${truncate(summarizeInput(b.input), 80)}`;
           }
         }
@@ -1620,7 +1620,7 @@ class AgentManager extends EventEmitter {
         break;
       }
       case 'tool':
-        this.log(c, 'tool', `${a.name}  ${a.summary || ''}`.trim());
+        this.log(c, 'tool', `${a.name}  ${a.summary || ''}`.trim(), who);
         c.lastMessage = `${a.name} ${truncate(a.summary || '', 80)}`;
         this.changed(c);
         break;

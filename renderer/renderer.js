@@ -847,15 +847,63 @@ document.querySelectorAll('#tabs .tab').forEach((t) =>
   }),
 );
 
+// ログはチャットの形で見せる（Claude Desktop のように、あなたの指示は右の吹き出し、エージェントの返事は左）。
 // Claude の返事やあなたの指示は Markdown として整えて表示する（ツールの出力などはそのまま）
-const MD_KINDS = new Set(['text', 'user', 'question', 'result']);
-function logEntryHtml(e) {
-  const time = new Date(e.t).toLocaleTimeString();
-  const sk = e.skill ? `<span class="skill-chip small">${icon('zap')}/${esc(e.skill)}</span> ` : '';
-  const md = MD_KINDS.has(e.kind) && typeof Markdown !== 'undefined';
-  const body = md ? `<div class="md">${sk ? `<div>${sk}</div>` : ''}${Markdown.render(e.text)}</div>` : `${sk}${esc(e.text)}`;
-  const label = e.kind === 'text' && e.agent ? agentShort(e.agent) : LOG_LABEL[e.kind] || e.kind;
-  return `<div class="log k-${e.kind}${md ? ' log-md' : ''}"><span class="log-k">${esc(label)}</span><span class="log-t">${time}</span><div class="log-x">${body}${logImagesHtml(e.images)}</div></div>`;
+const logTime = (e) => (e && e.t ? new Date(e.t).toLocaleTimeString() : '');
+function mdHtml(text) {
+  return typeof Markdown !== 'undefined' ? `<div class="md">${Markdown.render(text || '')}</div>` : `<div class="c-plain">${esc(text || '')}</div>`;
+}
+function skillChip(e) {
+  return e.skill ? `<div class="c-skill"><span class="skill-chip small">${icon('zap')}/${esc(e.skill)}</span></div>` : '';
+}
+function chatHeadHtml(agent, e) {
+  return `<div class="c-head"><span class="c-avatar">${icon('bot')}</span><b class="c-name">${esc(agentShort(agent))}</b><span class="c-time">${esc(logTime(e))}</span></div>`;
+}
+// ツールの呼び出し「名前  引数の要約」を名前と引数に分ける
+function splitTool(text) {
+  const t = String(text || '');
+  const i = t.indexOf('  ');
+  return i < 0 ? [t, ''] : [t.slice(0, i), t.slice(i + 2)];
+}
+const NOTE_ICON = { result: 'checkCircle', error: 'alert', question: 'question', permission: 'lock', stderr: 'terminal' };
+function chatItemHtml(it, agent, open) {
+  const e = it.entry;
+  if (it.type === 'user') {
+    return `<div class="c-row c-user" title="${esc(logTime(e))}"><div class="c-bubble">${skillChip(e)}${mdHtml(e.text)}${logImagesHtml(e.images)}</div></div>`;
+  }
+  if (it.type === 'assistant') {
+    return `<div class="c-row c-agent">${it.head ? chatHeadHtml(it.agent || agent, e) : ''}<div class="c-text" title="${esc(logTime(e))}">${mdHtml(e.text)}${logImagesHtml(e.images)}</div></div>`;
+  }
+  if (it.type === 'tool') {
+    const r = it.result;
+    const [name, arg] = e ? splitTool(e.text) : ['ツールの結果', ''];
+    const err = r && r.kind === 'tool_error';
+    const st = err ? `<span class="c-tool-st">エラー</span>` : '';
+    const out = r && r.text ? `<pre class="c-tool-out">${esc(r.text)}</pre>` : r ? `<div class="c-tool-out muted small">（出力はありません）</div>` : `<div class="c-tool-out muted small">（結果はまだありません）</div>`;
+    return `<div class="c-row c-agent c-toolrow">${it.head ? chatHeadHtml(it.agent || agent, e || r) : ''}<details class="c-tool${err ? ' err' : ''}"${open ? ' open' : ''}><summary title="${esc(logTime(e || r))}">${icon('wrench')}<span class="c-tool-name">${esc(name)}</span><span class="c-tool-arg">${esc(arg)}</span>${st}</summary>${out}</details>${r ? logImagesHtml(r.images) : ''}</div>`;
+  }
+  // システムのお知らせ・完了・エラー・承認・質問などは、会話の間に小さく挟む
+  const k = e.kind;
+  const body = k === 'question' ? mdHtml(e.text) : k === 'result' ? mdHtml(e.text) : `<span class="c-note-x">${esc(e.text)}</span>`;
+  return `<div class="c-note k-${esc(k)}" title="${esc(LOG_LABEL[k] || k)} ${esc(logTime(e))}">${NOTE_ICON[k] ? icon(NOTE_ICON[k]) : ''}${body}${logImagesHtml(e.images)}</div>`;
+}
+function renderChatLog(body, c, logs) {
+  const agent = agentOf(c);
+  const items = ChatLog.build(logs, agent);
+  state.chat = { id: c.id, items };
+  body.innerHTML = `<div class="chat-log">${items.map((it) => chatItemHtml(it, agent)).join('')}</div>`;
+}
+// 実行中に届いたログを1件ずつ足す（ツールの結果は、呼び出しの折りたたみの中に入れ直す）
+function appendChatLog(body, c, entry) {
+  const box = body.querySelector('.chat-log');
+  if (!box || !state.chat || state.chat.id !== c.id) return renderChatLog(body, c, state.logs.get(c.id) || []);
+  const agent = agentOf(c);
+  const { op, item } = ChatLog.push(state.chat.items, entry, agent);
+  const lastEl = box.lastElementChild;
+  if (op === 'replace' && lastEl) {
+    const open = !!lastEl.querySelector('details[open]');
+    lastEl.outerHTML = chatItemHtml(item, agent, open);
+  } else box.insertAdjacentHTML('beforeend', chatItemHtml(item, agent));
 }
 
 // ツールの結果に入っていた画像（スクリーンショットなど）。クリックで大きく表示する
@@ -1231,7 +1279,11 @@ async function renderDetailBody() {
   const body = $('detailBody');
   if (state.tab === 'log') {
     const logs = state.logs.get(c.id) || [];
-    body.innerHTML = logs.length ? logs.map(logEntryHtml).join('') : `<div class="muted pad">${isChat(c) ? 'まだ会話はありません。' : `まだログはありません。「開始」を押すと ${agentLabel(agentOf(c))} が動き出します。`}</div>`;
+    if (logs.length) renderChatLog(body, c, logs);
+    else {
+      state.chat = null;
+      body.innerHTML = `<div class="muted pad">${isChat(c) ? 'まだ会話はありません。' : `まだログはありません。「開始」を押すと ${agentLabel(agentOf(c))} が動き出します。`}</div>`;
+    }
     body.scrollTop = body.scrollHeight;
   } else if (state.tab === 'diff') {
     await renderDiff(c);
@@ -2353,8 +2405,8 @@ api.onLog(({ id, entry }) => {
   if (state.selected === id && state.tab === 'log') {
     const body = $('detailBody');
     const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
-    body.querySelector('.muted.pad')?.remove();
-    body.insertAdjacentHTML('beforeend', logEntryHtml(entry));
+    const c = card(id);
+    if (c) appendChatLog(body, c, entry);
     if (atBottom) body.scrollTop = body.scrollHeight;
   }
 });

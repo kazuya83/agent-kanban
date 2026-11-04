@@ -181,29 +181,53 @@ body.resizing { cursor: col-resize; user-select: none; }
 .d-foot-row { display: flex; gap: 8px; align-items: flex-end; }
 .d-foot textarea { flex: 1; }
 
-/* ログ */
-.log { padding: 6px 14px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); display: grid; grid-template-columns: 70px 1fr auto; gap: 0 8px; }
-.log-k { font-size: 11px; color: var(--muted); padding-top: 1px; }
-.log-t { font-size: 10.5px; color: var(--muted); grid-column: 3; grid-row: 1; }
-.log-x { grid-column: 2; grid-row: 1; white-space: pre-wrap; word-break: break-word; }
-.k-tool .log-x, .k-tool_result .log-x, .k-tool_error .log-x, .k-stderr .log-x { font-family: var(--mono); font-size: 11.5px; }
-.k-tool .log-k { color: var(--run); }
-.k-tool_result .log-x { color: var(--muted); max-height: 140px; overflow: auto; }
-.k-tool_result .log-x:has(.log-img) { max-height: none; }
+/* ログ（Claude Desktop のようなチャットの形） */
+.chat-log { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px 18px; }
+.c-row { display: flex; flex-direction: column; min-width: 0; }
+.c-user { align-items: flex-end; }
+.c-bubble { max-width: 85%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 8px 12px; line-height: 1.6; word-break: break-word; min-width: 0; }
+.c-skill { margin-bottom: 4px; }
+.c-agent { align-items: stretch; }
+.c-head { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; }
+.c-avatar { width: 22px; height: 22px; border-radius: 6px; flex: none; display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.c-avatar .ic { width: 14px; height: 14px; margin: 0; }
+.c-name { font-size: 12.5px; }
+.c-time { font-size: 10.5px; color: var(--muted); }
+.c-text, .c-tool, .c-agent > .log-imgs { margin-left: 30px; min-width: 0; }
+.c-text { line-height: 1.65; word-break: break-word; }
+.c-plain { white-space: pre-wrap; }
+.c-tool { border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--panel-2) 60%, transparent); font-size: 12px; }
+.c-tool summary { display: flex; align-items: center; gap: 6px; padding: 4px 10px; cursor: pointer; list-style: none; min-width: 0; color: var(--muted); }
+.c-tool summary::-webkit-details-marker { display: none; }
+.c-tool summary::after { content: '▸'; margin-left: auto; padding-left: 6px; font-size: 10px; flex: none; }
+.c-tool[open] summary::after { content: '▾'; }
+.c-tool summary .ic { width: 13px; height: 13px; margin: 0; flex: none; color: var(--run); }
+.c-tool-name { font-family: var(--mono); font-weight: 600; color: var(--text); flex: none; }
+.c-tool-arg { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.c-tool-st { flex: none; color: var(--err); font-size: 11px; }
+.c-tool.err { border-color: color-mix(in srgb, var(--err) 50%, var(--line)); }
+.c-tool.err summary .ic { color: var(--err); }
+.c-tool-out { margin: 0; padding: 6px 10px 8px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; color: var(--muted); }
+.c-tool.err .c-tool-out { color: var(--err); }
+.c-toolrow + .c-toolrow { margin-top: -6px; }
+.c-note { display: flex; align-items: flex-start; gap: 6px; align-self: center; max-width: 92%; font-size: 11.5px; color: var(--muted); padding: 2px 10px; word-break: break-word; }
+.c-note .ic { width: 13px; height: 13px; margin: 2px 0 0; flex: none; }
+.c-note-x { white-space: pre-wrap; }
+.c-note .md { line-height: 1.6; }
+.c-note.k-stderr { align-self: stretch; margin-left: 30px; font-family: var(--mono); max-height: 120px; overflow: auto; }
+.c-note.k-permission { color: var(--warn); }
+.c-note.k-result { color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent); border-radius: 999px; padding: 2px 12px; }
+.c-note.k-result .md { color: var(--ok); }
+.c-note.k-error, .c-note.k-question { align-self: stretch; max-width: none; border-radius: 8px; padding: 8px 12px; font-size: 12.5px; }
+.c-note.k-error { color: var(--err); background: color-mix(in srgb, var(--err) 10%, transparent); border: 1px solid color-mix(in srgb, var(--err) 35%, transparent); }
+.c-note.k-question { color: #b57bff; background: color-mix(in srgb, #b57bff 10%, transparent); border: 1px solid color-mix(in srgb, #b57bff 35%, transparent); }
 .log-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; white-space: normal; }
 .log-img { max-width: 360px; max-height: 240px; border: 1px solid var(--line); border-radius: 4px; cursor: zoom-in; background: #fff; }
 .log-img-omitted { font-size: 11.5px; color: var(--muted); }
 .img-overlay { position: fixed; inset: 0; z-index: 10000; background: rgba(0, 0, 0, 0.8); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
 .img-overlay img { max-width: 95vw; max-height: 95vh; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.6); }
-.k-tool_error .log-x, .k-error .log-x { color: var(--err); }
-.k-user { background: color-mix(in srgb, var(--accent) 8%, transparent); }
-.k-user .log-k { color: var(--accent); }
-.k-result .log-x { color: var(--ok); }
-.k-permission .log-x { color: var(--warn); }
-.k-system .log-x, .k-stderr .log-x { color: var(--muted); font-size: 12px; }
 
 /* ログの Markdown 表示 */
-.log-md .log-x { white-space: normal; line-height: 1.6; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
 .md p, .md ul, .md ol, .md blockquote, .md pre, .md .md-table { margin: 0 0 8px; }
@@ -226,7 +250,6 @@ body.resizing { cursor: col-resize; user-select: none; }
 .md th, .md td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; }
 .md th { background: var(--panel-2); }
 .md a.md-link { color: var(--accent); cursor: pointer; text-decoration: underline; word-break: break-all; }
-.k-result .md { color: var(--ok); }
 
 /* 会話はモーダルで開く */
 .d-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 8; }
@@ -406,7 +429,6 @@ body.resizing { cursor: col-resize; user-select: none; }
 .card-spec { color: #3fb6c9; }
 .d-spec { border-color: color-mix(in srgb, #3fb6c9 55%, transparent); background: color-mix(in srgb, #3fb6c9 8%, var(--panel)); }
 .d-spec p { max-height: 260px; }
-.k-question .log-k, .k-question .log-x { color: #b57bff; }
 .card.asking { border-left-color: #b57bff; border-color: color-mix(in srgb, #b57bff 60%, transparent); animation: pulse-q 2s infinite; }
 @keyframes pulse-q { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, #b57bff 25%, transparent); } }
 
