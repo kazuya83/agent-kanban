@@ -89,7 +89,9 @@ function send(channel, payload) {
 }
 
 function boardState() {
-  return { settings: store.settings, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), weeklyCost: store.weeklyCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath) };
+  const { cleanRepoTabs, repoTabSummary } = require('./src/store');
+  const repoTabs = repoTabSummary(cleanRepoTabs(store.settings.repoTabs, store.settings.repoPath), store.cards);
+  return { settings: store.settings, repoTabs, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), weeklyCost: store.weeklyCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath) };
 }
 
 function remoteSession() {
@@ -611,7 +613,7 @@ app.whenReady().then(async () => {
   });
   // Windows: WSL のディストリビューション（Ubuntu など）。リポジトリを選ぶときに、その中のフォルダも選べるようにする
   handle('wsl:distros', () => (process.platform === 'win32' || process.env.AGENT_KANBAN_WSL ? wsl.listDistros() : []));
-  const { touchRecentRepo } = require('./src/store');
+  const { touchRecentRepo, cleanRepoTabs, openRepoTab, closeRepoTab } = require('./src/store');
   const forgetRecentRepo = (dir) => {
     const s = String(dir || '').trim();
     if (!s) return;
@@ -651,12 +653,12 @@ app.whenReady().then(async () => {
       ...(distro ? { defaultPath: wsl.toUnc(distro, home || '/home') } : {}),
     });
     if (r.canceled || !r.filePaths[0]) return null;
-    return openRepo(await resolveRepoDir(r.filePaths[0]));
+    return openRepo(await resolveRepoDir(r.filePaths[0]), opts || {});
   });
   // 最近開いたリポジトリなど、すでにパスが分かっているものを開く（フォルダダイアログは出さない）
-  handle('repo:open', async ({ path: dir } = {}) => {
+  handle('repo:open', async ({ path: dir, tab } = {}) => {
     const picked = String(dir || '').trim();
-    return openRepo(await resolveRepoDir(picked, { forgetOnMissing: true }));
+    return openRepo(await resolveRepoDir(picked, { forgetOnMissing: true }), { tab });
   });
   // フォルダの中のフォルダを返す。遠隔操作中に、ホストのフォルダを操作側の画面で辿って選ぶのに使う
   // path が空なら、今のリポジトリの親（WSL を選んだときはその中のホーム）→ ホームから始める
@@ -672,14 +674,48 @@ app.whenReady().then(async () => {
     }
     return { ...dirBrowse.listDirs(start, { showHidden: !!showHidden }), home: app.getPath('home') };
   });
-  const openRepo = (dir) => {
-    store.settings.repoPath = dir;
-    store.settings.baseBranch = '';
-    store.settings.recentRepoPaths = touchRecentRepo(store.settings.recentRepoPaths, dir);
+  // リポジトリを開く（tab: 'new' なら新しいタブ、'replace' なら今のタブを置き換える。すでにタブにあればそのタブに移る）
+  // ベースブランチはリポジトリごとに覚えておき、開いたリポジトリの分に戻す
+  const switchRepo = (dir, tabs) => {
+    const s = store.settings;
+    const cur = s.repoPath;
+    const bases = { ...(s.repoBaseBranches || {}) };
+    if (cur) {
+      if (s.baseBranch) bases[cur] = s.baseBranch;
+      else delete bases[cur];
+    }
+    for (const k of Object.keys(bases)) if (!tabs.includes(k)) delete bases[k];
+    s.repoBaseBranches = bases;
+    s.repoPath = dir;
+    s.baseBranch = (dir && bases[dir]) || '';
+    s.repoTabs = tabs;
+  };
+  const openRepo = (dir, { tab } = {}) => {
+    const s = store.settings;
+    switchRepo(dir, openRepoTab(s.repoTabs, s.repoPath, dir, { mode: tab === 'replace' ? 'replace' : 'new' }));
+    s.recentRepoPaths = touchRecentRepo(s.recentRepoPaths, dir);
     store.save();
     notifyBoard();
     return dir;
   };
+  // タブを切り替える（タブにあるリポジトリだけ）
+  handle('repo:switchTab', async ({ path: dir } = {}) => {
+    const picked = String(dir || '').trim();
+    if (!cleanRepoTabs(store.settings.repoTabs, store.settings.repoPath).includes(picked)) throw new Error('そのリポジトリはタブにありません');
+    if (picked === store.settings.repoPath) return picked;
+    return openRepo(await resolveRepoDir(picked));
+  });
+  // タブを閉じる。動いているタスクは止めない。今のタブを閉じたら隣のタブに移る
+  handle('repo:closeTab', ({ path: dir } = {}) => {
+    const s = store.settings;
+    const tabs = cleanRepoTabs(s.repoTabs, s.repoPath);
+    if (tabs.length <= 1) throw new Error('最後のタブは閉じられません');
+    const r = closeRepoTab(tabs, s.repoPath, dir);
+    switchRepo(r.next, r.tabs);
+    store.save();
+    notifyBoard();
+    return r.next;
+  });
   // クローン・新規作成の置き場所（親フォルダ）。前回使ったフォルダ → 今のリポジトリの親 → ホーム
   handle('repo:defaultParent', async (opts = {}) => {
     const distro = opts && opts.wsl;
@@ -704,17 +740,17 @@ app.whenReady().then(async () => {
     return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
   });
   const repoSetup = require('./src/repo-setup');
-  handle('repo:clone', async ({ url, parent, name } = {}) => {
+  handle('repo:clone', async ({ url, parent, name, tab } = {}) => {
     const dir = await repoSetup.cloneRepo({ url, parent, name });
     store.settings.lastRepoParent = parent;
-    openRepo(dir);
+    openRepo(dir, { tab });
     const warning = (await repoSetup.hasCommit(dir)) ? '' : 'クローンしましたが、このリポジトリにはコミットがまだありません。タスクを動かすには、最初のコミットを入れて push してください';
     return { dir, warning };
   });
-  handle('repo:create', async ({ parent, name, github } = {}) => {
+  handle('repo:create', async ({ parent, name, github, tab } = {}) => {
     const r = await repoSetup.createRepo({ parent, name, github });
     store.settings.lastRepoParent = parent;
-    openRepo(r.dir);
+    openRepo(r.dir, { tab });
     return r;
   });
   handle('repo:info', async () => {
