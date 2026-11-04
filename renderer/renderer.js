@@ -18,6 +18,16 @@ const PERMISSION_MODES = [
   ['bypassPermissions', 'すべて自動で許可する（注意）'],
 ];
 
+// エージェント（Claude Code 以外の CLI にも対応）と、オーケストレーション（リレー・競争）
+const AGENTS = [
+  ['claude', 'Claude Code', 'Claude'],
+  ['codex', 'Codex CLI', 'Codex'],
+  ['gemini', 'Gemini CLI', 'Gemini'],
+];
+const agentLabel = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[1];
+const agentShort = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[2];
+const agentOf = (c) => (c && AGENTS.some((x) => x[0] === c.agent) ? c.agent : 'claude');
+
 const state = { board: { settings: {}, cards: [] }, selected: null, tab: 'log', logs: new Map(), headSig: '' };
 const $ = (id) => document.getElementById(id);
 
@@ -298,6 +308,7 @@ function cardHtml(c) {
         ${since ? `<span class="elapsed" data-since="${since}">${elapsed(since)}</span>` : ''}
       </div>
       <div class="card-title">${c.issue ? `<a class="issue-chip" data-url="${esc(c.issue.url)}" title="Issue を開く">#${c.issue.number}</a> ${esc(c.title.replace(/^#\d+\s*/, ''))}` : esc(c.title)}</div>
+      ${orchChipsHtml(c)}
       ${c.skill ? `<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">⚡ /${esc(c.skill)}</span></div>` : ''}
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
       ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(plainText(c.lastMessage))}</div>` : ''}
@@ -310,6 +321,22 @@ function cardHtml(c) {
         ${c.costUsd ? `<span>$${c.costUsd.toFixed(2)}</span>` : ''}
       </div>
     </div>`;
+}
+
+// カードに出すエージェント・リレー・競争の印
+function orchChipsHtml(c) {
+  const chips = [];
+  if (c.relay) chips.push(`<span class="orch-chip relay" title="リレー: 工程ごとに別のエージェントへ順番に引き継ぎます">🔁 ${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${esc(agentShort(agentOf(c)))}</span>`);
+  else if (agentOf(c) !== 'claude') chips.push(`<span class="orch-chip agent">🤖 ${esc(agentLabel(agentOf(c)))}</span>`);
+  if (c.compete) {
+    const n = competitors(c).length;
+    chips.push(c.compete.adopted ? '<span class="orch-chip compete">🏁 採用した案</span>' : `<span class="orch-chip compete" title="同じタスクを複数のエージェントで解いています">🏁 競争 ${n}案</span>`);
+  }
+  return chips.length ? `<div class="card-skill-row">${chips.join('')}</div>` : '';
+}
+function competitors(c) {
+  if (!c || !c.compete) return c ? [c] : [];
+  return state.board.cards.filter((x) => x.compete && x.compete.group === c.compete.group).sort((a, b) => a.compete.index - b.compete.index);
 }
 
 // 週間上限のリセットからリセットまでの合計金額を、期間（何月何日〜何日）と一緒に出す
@@ -519,10 +546,46 @@ function closeDetail() {
   renderBoard();
 }
 
+// 詳細: リレーの工程の進み具合
+function relayRowHtml(c) {
+  if (!c.relay) return '';
+  const r = c.relay;
+  const busy = c.status === 'running' || c.status === 'queued';
+  const steps = r.steps.map((st, i) => {
+    const mark = i < r.index ? '✓' : i === r.index ? (busy ? '▶' : c.status === 'failed' ? '✕' : c.status === 'todo' ? '・' : '✓') : '・';
+    return `<span class="relay-step ${i === r.index ? 'cur' : i < r.index ? 'done' : ''}">${mark} ${i + 1}. ${esc(st.label)} <small>${esc(agentShort(st.agent))}</small></span>`;
+  });
+  return `<dt>リレー</dt><dd class="relay-row">${steps.join('<span class="relay-arrow">→</span>')}</dd>`;
+}
+
+// 詳細: 競争の候補（同じタスクをほかのエージェントで解いたもの）
+function competeBoxHtml(c) {
+  if (!c.compete || isChat(c)) return '';
+  if (c.compete.adopted) return '';
+  const list = competitors(c);
+  if (list.length < 2) return '';
+  const busy = list.some((x) => x.status === 'running' || x.status === 'queued' || x.status === 'todo');
+  const rows = list
+    .map((x) => {
+      const [bcls, blabel] = badgeFor(x);
+      return `<button class="compete-item ${x.id === c.id ? 'cur' : ''}" data-goto="${x.id}"><span class="badge b-${bcls}">${blabel}</span> <b>${esc(agentLabel(agentOf(x)))}</b> <span class="muted small">${esc(x.lastMessage || '')}</span></button>`;
+    })
+    .join('');
+  const canAdopt = c.status === 'review' || c.status === 'failed';
+  return `<div class="compete-box"><b>🏁 競争: 同じタスクを ${list.length} つのエージェントで解いています</b>
+    <div class="compete-list">${rows}</div>
+    <small>${busy ? 'まだ動いている候補があります。' : 'すべての候補が終わりました。'}差分タブでそれぞれの変更を見比べて、よいものを採用してください。採用すると、ほかの候補は worktree とブランチごと破棄します。</small>
+    <div class="d-actions">
+      ${canAdopt ? `<button class="btn primary" data-act="adopt">🏁 この案（${esc(agentShort(agentOf(c)))}）を採用</button>` : ''}
+      <button class="btn" data-act="compare" ${busy ? 'title="終わっていない候補は、その時点の内容で比べます"' : ''}>🤔 Claude に比べてもらう</button>
+      ${c.compete.compareChat && card(c.compete.compareChat) ? `<button class="btn ghost" data-goto="${c.compete.compareChat}">比較の会話を開く</button>` : ''}
+    </div></div>`;
+}
+
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.interrupted]);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch])]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -552,6 +615,8 @@ function renderDetailHead() {
     </div>
     <dl class="d-meta">
       ${c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''}
+      ${!chat ? `<dt>エージェント</dt><dd>${esc(agentLabel(agentOf(c)))}</dd>` : ''}
+      ${relayRowHtml(c)}
       ${sessionRowHtml(c)}
       ${chat ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（worktree は作りません）</span></dd>` : ''}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
@@ -562,10 +627,11 @@ function renderDetailHead() {
       ${(c.alwaysAllow || []).length ? `<dt>常に許可</dt><dd>${c.alwaysAllow.map(esc).join(', ')}</dd>` : ''}
     </dl>
     ${isInterrupted(c) ? interruptedBoxHtml(c) : c.error ? `<div class="d-error">${esc(c.error)}</div>` : ''}
+    ${competeBoxHtml(c)}
     ${conflictBoxHtml(c)}
     ${questionFormHtml(c)}
-    ${isSpecPending(c) ? `<div class="d-awaiting d-spec"><b>📝 内容が詰まっていないので、開発を開始できません</b><p>${esc(String(c.lastText || '').slice(-1200))}</p><small>下の欄で Claude の質問に答えて、仕様を詰めてください。仕様が詰まると、Claude が決まった仕様をまとめてから開発を始めます。</small></div>`
-    : c.awaitingReply && (s === 'review' || s === 'failed') ? `<div class="d-awaiting"><b>💬 Claude が質問しています</b><p>${esc(String(c.lastText || '').slice(-600))}</p><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>` : ''}
+    ${isSpecPending(c) ? `<div class="d-awaiting d-spec"><b>📝 内容が詰まっていないので、開発を開始できません</b><p>${esc(String(c.lastText || '').slice(-1200))}</p><small>下の欄で ${esc(agentShort(agentOf(c)))} の質問に答えて、仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>`
+    : c.awaitingReply && (s === 'review' || s === 'failed') ? `<div class="d-awaiting"><b>💬 ${esc(agentShort(agentOf(c)))} が質問しています</b><p>${esc(String(c.lastText || '').slice(-600))}</p><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>` : ''}
     ${permissionBlock(c, false)}
     <div class="d-actions">${btns.join('')}</div>`;
   $('closeDetail').onclick = closeDetail;
@@ -589,7 +655,7 @@ function renderDetailHead() {
   $('followInput').placeholder =
     chat ? (canFollow ? 'メッセージを送る（Ctrl/⌘ + Enter で送信）。同じ会話の続きとして話せます' : '返事が来たら、続きを話せます')
     : canFollow && isSpecPending(c) ? '質問への答えを書く（Ctrl/⌘ + Enter で送信）。分からないところは「おまかせ」と書いてもかまいません'
-    : canFollow && c.awaitingReply ? 'Claude への回答を書く（Ctrl/⌘ + Enter で送信）'
+    : canFollow && c.awaitingReply ? `${agentShort(agentOf(c))} への回答を書く（Ctrl/⌘ + Enter で送信）`
     : s === 'done' ? '完了したタスクの続きを話す（Ctrl/⌘ + Enter で送信）。同じ場所に worktree を作り直して、同じ会話の続きから動きます'
     : canFollow ? '追加の指示を送る（Ctrl/⌘ + Enter で送信）。同じセッションの続きとして動きます'
     : s === 'todo' ? '開始すると、終わったあとに追加の指示を送れます'
@@ -621,6 +687,8 @@ $('detailHead').addEventListener('click', async (e) => {
   }
   const chip = e.target.closest('.issue-chip');
   if (chip) return run(() => api.openExternal(chip.dataset.url));
+  const go = e.target.closest('[data-goto]');
+  if (go) return select(go.dataset.goto);
   const dec = e.target.closest('[data-decision]');
   if (dec) {
     const p = dec.closest('.perm');
@@ -639,6 +707,17 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'pr') openPr(c);
   if (act === 'prConflict') run(() => api.reopenPrConflict(c.id));
   if (act === 'toTask') newTask({ fromChat: c });
+  if (act === 'adopt') {
+    const others = competitors(c).filter((x) => x.id !== c.id);
+    const msg = `${agentLabel(agentOf(c))} の案を採用しますか？\nほかの候補（${others.map((x) => agentShort(agentOf(x))).join('・')}）は worktree とブランチごと破棄され、元に戻せません。`;
+    if (confirm(msg)) await runBusy('ほかの候補を破棄しています…', () => api.adoptCompetitor(c.id), 'この案を採用しました。マージ（または PR の作成）で取り込めます');
+    return;
+  }
+  if (act === 'compare') {
+    const id = await runBusy('比べてもらう会話を始めています…', () => api.compareCompetitors(c.id));
+    if (id) select(id);
+    return;
+  }
   if (act === 'discard' && isChat(c)) {
     if (confirm(`会話「${c.title}」をボードから削除しますか？\n（Claude Code の会話の記録は残るので、あとで「既存の会話」から引き継げます）`)) {
       await runBusy('削除しています…', () => api.discard(c.id), '削除しました');
@@ -670,7 +749,8 @@ function logEntryHtml(e) {
   const sk = e.skill ? `<span class="skill-chip small">⚡ /${esc(e.skill)}</span> ` : '';
   const md = MD_KINDS.has(e.kind) && typeof Markdown !== 'undefined';
   const body = md ? `<div class="md">${sk ? `<div>${sk}</div>` : ''}${Markdown.render(e.text)}</div>` : `${sk}${esc(e.text)}`;
-  return `<div class="log k-${e.kind}${md ? ' log-md' : ''}"><span class="log-k">${LOG_LABEL[e.kind] || e.kind}</span><span class="log-t">${time}</span><div class="log-x">${body}${logImagesHtml(e.images)}</div></div>`;
+  const label = e.kind === 'text' && e.agent ? agentShort(e.agent) : LOG_LABEL[e.kind] || e.kind;
+  return `<div class="log k-${e.kind}${md ? ' log-md' : ''}"><span class="log-k">${esc(label)}</span><span class="log-t">${time}</span><div class="log-x">${body}${logImagesHtml(e.images)}</div></div>`;
 }
 
 // ツールの結果に入っていた画像（スクリーンショットなど）。クリックで大きく表示する
@@ -1036,6 +1116,8 @@ function updateBtwTab(c) {
   $('btwTab').textContent = n ? `btw (${n})` : 'btw';
   const live = c && (c.status === 'running' || c.status === 'queued');
   $('btwTab').classList.toggle('live', !!live);
+  // Codex / Gemini は実行中のメッセージに対応していない（待機中なら開始の指示に付け足せる）
+  $('btwTab').title = c && agentOf(c) !== 'claude' ? `${agentLabel(agentOf(c))} には、実行中のメッセージは送れません（待機中なら、開始するときの指示に付け足します）` : '実行中のエージェントに、作業を止めずにメッセージを送ります';
 }
 
 async function renderDetailBody() {
@@ -1044,7 +1126,7 @@ async function renderDetailBody() {
   const body = $('detailBody');
   if (state.tab === 'log') {
     const logs = state.logs.get(c.id) || [];
-    body.innerHTML = logs.length ? logs.map(logEntryHtml).join('') : `<div class="muted pad">${isChat(c) ? 'まだ会話はありません。' : 'まだログはありません。「開始」を押すと Claude が動き出します。'}</div>`;
+    body.innerHTML = logs.length ? logs.map(logEntryHtml).join('') : `<div class="muted pad">${isChat(c) ? 'まだ会話はありません。' : `まだログはありません。「開始」を押すと ${agentLabel(agentOf(c))} が動き出します。`}</div>`;
     body.scrollTop = body.scrollHeight;
   } else if (state.tab === 'diff') {
     await renderDiff(c);
@@ -1136,6 +1218,37 @@ document.addEventListener('keydown', (e) => {
   else if (state.selected) closeDetail();
 });
 
+// タスクを動かすエージェントを選ぶ欄（単独のエージェント / リレー / 競争）
+function agentFieldHtml(idp, value) {
+  const s = state.board.settings;
+  const v = value || s.defaultAgent || 'claude';
+  const steps = (s.relaySteps || []).map((x) => `${x.label}(${agentShort(x.agent)})`).join(' → ') || '未設定';
+  const comp = (s.competeAgents || []).map(agentShort).join('・') || '未設定';
+  const opt = (val, label) => `<option value="${val}" ${val === v ? 'selected' : ''}>${esc(label)}</option>`;
+  return `<label class="field"><span>エージェント</span>
+    <select id="${idp}Agent">
+      <optgroup label="1つのエージェントで動かす">${AGENTS.map(([a, l]) => opt(a, l)).join('')}</optgroup>
+      <optgroup label="オーケストレーション">
+        ${opt('relay', `🔁 リレー: ${steps}`)}
+        ${opt('compete', `🏁 競争: ${comp} で同じタスクを解いて比べる`)}
+      </optgroup>
+    </select>
+    <small id="${idp}AgentHint" class="muted"></small></label>`;
+}
+function bindAgentField(idp) {
+  const sel = $(`${idp}Agent`);
+  const hint = () => {
+    const v = sel.value;
+    $(`${idp}AgentHint`).textContent =
+      v === 'relay' ? '同じ worktree で、設定の工程の順にエージェントが作業を引き継ぎます（前の工程の報告を次に渡します）。工程は ⚙ 設定で変えられます。'
+      : v === 'compete' ? 'エージェントごとにカードと worktree を作って並列に解きます。終わったら差分を見比べ、よい案を採用してマージします。'
+      : v !== 'claude' ? `${agentLabel(v)} はカードでの承認・選択肢の質問・btw に対応していません。設定の権限モードに合わせて CLI 側で許可します（既存の会話の引き継ぎも Claude Code だけです）。`
+      : '';
+  };
+  sel.onchange = hint;
+  hint();
+}
+
 function newTask(opts = {}) {
   if (!state.board.settings.repoPath) return chooseRepo();
   const from = opts.fromChat;
@@ -1143,7 +1256,8 @@ function newTask(opts = {}) {
     `<h2>新しいタスク</h2>
      ${from ? `<p class="muted small">会話「${esc(from.title)}」の続きとして、タスクを始めます（会話の内容を Claude が引き継ぎます。会話そのものはそのまま残ります）。</p>` : ''}
      <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
-     <div class="field"><span>Claude への指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></div>
+     ${agentFieldHtml('n')}
+     <div class="field"><span>エージェントへの指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></div>
      ${sessionFieldHtml('n')}
      <p class="muted small">GitHub の Issue から作るときは、右上の「Issue から作成」を使ってください。</p>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
@@ -1152,11 +1266,12 @@ function newTask(opts = {}) {
       $('nPrompt').focus();
       if (from) $('nPrompt').value = 'ここまでの会話の内容をもとに、作業を進めてください。';
       fillSessionField('n', from ? { id: from.sessionId, title: `会話: ${from.title}` } : undefined);
+      bindAgentField('n');
       let skill = state.board.settings.defaultSkill || null;
       const drawSkill = () => renderSkillSlot('nSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
       const submit = async () => {
-        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill }));
+        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value }));
         if (id) {
           closeModal();
           select(id);
@@ -1369,7 +1484,7 @@ function openSessionPicker(c) {
 // 詳細画面の「会話」欄
 function sessionRowHtml(c) {
   const busy = c.status === 'running' || c.status === 'queued';
-  const own = (c.sessions || []).filter((x) => x.origin === 'task');
+  const own = (c.sessions || []).filter((x) => x.origin === 'task' && (x.agent || 'claude') === agentOf(c));
   const imported = (c.sessions || []).find((x) => x.origin === 'imported' && x.id === c.sessionId && c.forkNext);
   const opts = [
     `<option value="__new__" ${!c.sessionId ? 'selected' : ''}>新しい会話で始める</option>`,
@@ -1379,7 +1494,7 @@ function sessionRowHtml(c) {
       return `<option value="${esc(x.id)}" ${x.id === c.sessionId && !c.forkNext ? 'selected' : ''}>会話 ${i + 1}（${esc(fmtTime(x.at))}） ${esc(label)}</option>`;
     }),
     imported ? `<option value="${esc(imported.id)}" selected>引き継ぐ: ${esc(imported.label || imported.id.slice(0, 8))}</option>` : '',
-    `<option value="__pick__">既存の会話から選ぶ…</option>`,
+    agentOf(c) === 'claude' ? `<option value="__pick__">既存の会話から選ぶ…</option>` : '',
   ].join('');
   return `<dt>会話</dt><dd><select id="dSession" class="d-session" ${busy ? 'disabled title="実行中は切り替えられません"' : ''}>${opts}</select>
 </dd>`;
@@ -1388,8 +1503,8 @@ function sessionRowHtml(c) {
 // ---------------- GitHub Issue から作る ----------------
 
 // Issue 番号からカードを作る（上部の枠と、詳細ダイアログの両方から使う）
-async function createFromIssues(numbers, extra, autoStart, session, skill) {
-  const r = await runBusy('Issue を読み込んでタスクを作成しています…', () => api.createFromIssues({ numbers, extra, autoStart, session, skill }));
+async function createFromIssues(numbers, extra, autoStart, session, skill, agent) {
+  const r = await runBusy('Issue を読み込んでタスクを作成しています…', () => api.createFromIssues({ numbers, extra, autoStart, session, skill, agent }));
   if (!r) return false;
   if (r.errors.length) toast(r.errors.join('\n'));
   else toast(`${r.ids.length} 件のタスクを Issue から作りました`, 'ok');
@@ -1406,6 +1521,7 @@ function openIssueModal(prefill = '') {
        <input id="nNumbers" placeholder="例: 12 または 12, 15, 18" inputmode="numeric" value="${esc(prefill)}" /></label>
      <p class="muted small" id="nRepoInfo">リポジトリを確認しています…</p>
      <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div>
+     ${agentFieldHtml('n')}
      ${sessionFieldHtml('n')}
      <div class="field"><span>追加の指示（任意・すべての Issue に付けます）</span><div id="nSkill" class="skill-slot"></div><textarea id="nExtra" rows="4" placeholder="例: 変更したらテストを追加して npm test で確認して"></textarea></div>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
@@ -1423,13 +1539,14 @@ function openIssueModal(prefill = '') {
       );
       refreshGh();
       fillSessionField('n');
+      bindAgentField('n');
       let skill = state.board.settings.defaultSkill || null;
       const drawSkill = () => renderSkillSlot('nSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
       const submit = async () => {
         $('nOk').disabled = true;
         $('nOk').textContent = 'Issue を読み込んでいます…';
-        const ok = await createFromIssues($('nNumbers').value, $('nExtra').value, $('nStart').checked, readSessionField('n'), skill);
+        const ok = await createFromIssues($('nNumbers').value, $('nExtra').value, $('nStart').checked, readSessionField('n'), skill, $('nAgent').value);
         if (ok) return closeModal();
         $('nOk').disabled = false;
         $('nOk').textContent = 'Issue からタスクを作成';
@@ -1616,8 +1733,71 @@ async function openSettings() {
      <small class="field-note">Claude の使用状況（/usage）に出る週間上限のリセット日時に合わせます。自動のときは、Claude がリセット日時を知らせてくるまで月曜 0:00 で区切ります。</small>
      <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath)}" /></label>
 
+     <h3 class="s-section">エージェントとオーケストレーション</h3>
+     <div class="row">
+       <label class="field"><span>codex コマンドのパス</span><input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
+       <label class="field"><span>Codex のモデル（空なら既定）</span><input id="sCodexModel" placeholder="例: gpt-5-codex" value="${esc(s.codexModel || '')}" /></label>
+     </div>
+     <div class="row">
+       <label class="field"><span>gemini コマンドのパス</span><input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
+       <label class="field"><span>Gemini のモデル（空なら既定）</span><input id="sGeminiModel" placeholder="例: gemini-2.5-pro" value="${esc(s.geminiModel || '')}" /></label>
+     </div>
+     <small class="muted s-note">Codex / Gemini はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可）。</small>
+     <label class="field"><span>新しいタスクで最初から選んでおくエージェント</span>
+       <select id="sDefaultAgent">${[...AGENTS.map(([a, l]) => [a, l]), ['relay', '🔁 リレー'], ['compete', '🏁 競争']].map(([v, l]) => `<option value="${v}" ${v === (s.defaultAgent || 'claude') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+     <div class="field"><span>🔁 リレーの工程（上から順に、同じ worktree で引き継ぎます）</span>
+       <div id="sRelay" class="relay-edit"></div>
+       <button class="btn small" id="sRelayAdd" type="button">＋ 工程を足す</button>
+       <small>工程ごとにエージェントと担当の説明を決めます。前の工程の変更はコミットしてから、最後の報告と一緒に次の工程へ渡します。</small></div>
+     <div class="field"><span>🏁 競争させるエージェント（2つ以上）</span>
+       <div class="check-row">${AGENTS.map(([a, l]) => `<label class="check"><input type="checkbox" class="sCompete" value="${a}" ${(s.competeAgents || []).includes(a) ? 'checked' : ''} /> ${esc(l)}</label>`).join('')}</div></div>
+
      <div class="modal-actions"><button class="btn ghost" id="sCancel">キャンセル</button><button class="btn primary" id="sOk">保存</button></div>`,
     () => {
+      let relay = (s.relaySteps || []).map((x) => ({ ...x }));
+      const drawRelay = () => {
+        $('sRelay').innerHTML = relay
+          .map(
+            (st, i) => `<div class="relay-edit-row" data-i="${i}">
+              <span class="relay-no">${i + 1}</span>
+              <select class="rAgent">${AGENTS.map(([a, l]) => `<option value="${a}" ${a === st.agent ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+              <input class="rLabel" placeholder="工程の名前（例: 実装）" value="${esc(st.label)}" />
+              <button class="icon rUp" type="button" title="上へ" ${i === 0 ? 'disabled' : ''}>↑</button>
+              <button class="icon rDel" type="button" title="この工程を消す">✕</button>
+              <textarea class="rInst" rows="2" placeholder="この工程の担当の説明（例: 前の工程の変更をレビューして直す）">${esc(st.instruction)}</textarea>
+            </div>`,
+          )
+          .join('') || '<div class="muted small">工程がありません</div>';
+      };
+      const readRelay = () => {
+        document.querySelectorAll('#sRelay .relay-edit-row').forEach((row) => {
+          const st = relay[Number(row.dataset.i)];
+          st.agent = row.querySelector('.rAgent').value;
+          st.label = row.querySelector('.rLabel').value.trim();
+          st.instruction = row.querySelector('.rInst').value.trim();
+        });
+        return relay;
+      };
+      drawRelay();
+      $('sRelayAdd').onclick = () => {
+        readRelay();
+        relay.push({ agent: 'claude', label: '', instruction: '' });
+        drawRelay();
+      };
+      $('sRelay').onclick = (e) => {
+        const row = e.target.closest('.relay-edit-row');
+        if (!row) return;
+        const i = Number(row.dataset.i);
+        if (e.target.closest('.rDel')) {
+          readRelay();
+          relay.splice(i, 1);
+          drawRelay();
+        } else if (e.target.closest('.rUp') && i > 0) {
+          readRelay();
+          [relay[i - 1], relay[i]] = [relay[i], relay[i - 1]];
+          drawRelay();
+        }
+      };
       let defSkill = s.defaultSkill || null;
       const drawDef = () => renderSkillSlot('sSkill', defSkill, (v) => ((defSkill = v), drawDef()));
       drawDef();
@@ -1647,6 +1827,13 @@ async function openSettings() {
             maxParallel: $('sMax').value,
             model: $('sModel').value.trim(),
             claudePath: $('sClaude').value.trim() || 'claude',
+            codexPath: $('sCodex').value.trim() || 'codex',
+            codexModel: $('sCodexModel').value.trim(),
+            geminiPath: $('sGemini').value.trim() || 'gemini',
+            geminiModel: $('sGeminiModel').value.trim(),
+            defaultAgent: $('sDefaultAgent').value,
+            relaySteps: readRelay(),
+            competeAgents: [...document.querySelectorAll('.sCompete:checked')].map((x) => x.value),
             defaultSkill: defSkill || '',
             issueStatusSync: $('sIssueSync').checked,
             suggestSkillsOnDone: $('sSuggestSkills').checked,
@@ -1972,6 +2159,13 @@ async function checkEnv() {
     if (!env.claude) msgs.push(`${env.wsl}（WSL）の中に claude が見つかりません。${env.wsl} のターミナルで Claude Code をインストールしてログインしてください（このリポジトリのタスクは ${env.wsl} の中で動きます）。`);
   } else if (!env.git) msgs.push(`git が見つかりません。${env.platform === 'win32' ? 'Git for Windows（https://git-scm.com/）' : env.platform === 'darwin' ? 'ターミナルで xcode-select --install を実行するか Homebrew で git' : 'git'} をインストールしてから、アプリを再起動してください。`);
   if (!env.wsl && !env.claude) msgs.push('claude コマンドが見つかりません。Claude Code をインストールしてログインするか、⚙ 設定で claude のフルパスを指定してください（ターミナルで which claude、Windows なら where claude で調べられます）。');
+  // 新しいタスクで最初から選んでおくエージェント（リレー・競争ならその中のエージェント）が見つからないとき
+  const s = state.board.settings || {};
+  const d = s.defaultAgent || 'claude';
+  const used = new Set(d === 'relay' ? (s.relaySteps || []).map((x) => x.agent) : d === 'compete' ? s.competeAgents || [] : [d]);
+  for (const a of ['codex', 'gemini']) {
+    if (used.has(a) && env.agents && !env.agents[a]) msgs.push(`${a} コマンドが見つかりません。${agentLabel(a)} を使うタスク（リレー・競争を含む）は失敗します。インストールするか、⚙ 設定で ${a} のフルパスを指定してください。`);
+  }
   const el = $('envBanner');
   el.innerHTML = msgs.map((m) => `<div>⚠ ${esc(m)}</div>`).join('');
   el.classList.toggle('hidden', msgs.length === 0);

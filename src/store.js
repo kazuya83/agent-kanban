@@ -1,6 +1,7 @@
 // ボードの状態を JSON ファイルに保存する
 const fs = require('fs');
 const path = require('path');
+const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS } = require('./providers');
 
 const DEFAULT_SETTINGS = {
   repoPath: '',
@@ -21,6 +22,15 @@ const DEFAULT_SETTINGS = {
   branchNamingRule: '', // ブランチの命名規則（自然言語）。空なら agent/issue-12-xxxx のようないつもの名前
   weeklyResetDay: '', // 週間上限がリセットされる曜日（'0'=日〜'6'=土）。空なら claude が知らせてくる日時を使う
   weeklyResetTime: '00:00', // 週間上限がリセットされる時刻（HH:MM・ローカル時刻）。weeklyResetDay を決めたときに使う
+  // ---- Claude Code 以外のエージェント ----
+  defaultAgent: 'claude', // 新しいタスクで最初から選んでおくエージェント（claude / codex / gemini / relay / compete）
+  codexPath: 'codex',
+  codexModel: '',
+  geminiPath: 'gemini',
+  geminiModel: '',
+  // ---- オーケストレーション ----
+  relaySteps: DEFAULT_RELAY_STEPS, // リレー: 同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ
+  competeAgents: DEFAULT_COMPETE_AGENTS, // 競争: 同じタスクを、これらのエージェントで並列に解かせる
 };
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
