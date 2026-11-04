@@ -399,34 +399,6 @@ function competitors(c) {
   return state.board.cards.filter((x) => x.compete && x.compete.group === c.compete.group).sort((a, b) => a.compete.index - b.compete.index);
 }
 
-// 週間上限のリセットからリセットまでの合計金額を、期間（何月何日〜何日）と一緒に出す
-let weekRollTimer = null;
-function renderCostInfo(settings) {
-  const el = $('costInfo');
-  el.classList.toggle('hidden', !settings.repoPath);
-  const total = Number(state.board.totalCostUsd) || 0;
-  const w = state.board.weeklyCost;
-  if (!w) {
-    el.textContent = `合計 $${total.toFixed(2)}`;
-    return;
-  }
-  const start = new Date(w.start);
-  const end = new Date(w.end);
-  const md = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
-  const hm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  const full = (d) => `${d.getMonth() + 1}月${d.getDate()}日（${'日月火水木金土'[d.getDay()]}）${hm(d)}`;
-  // 0:00 にリセットされるなら、終わりの日は前の日（例: 月曜 0:00 リセット → 月〜日）
-  const midnight = start.getHours() === 0 && start.getMinutes() === 0;
-  const last = midnight ? new Date(w.end - 1) : end;
-  el.innerHTML = `今週 $${(Number(w.usd) || 0).toFixed(2)}<span class="pill-sub"> ・ ${md(start)}〜${md(last)}</span>`;
-  const src = { claude: 'Claude から届いた週間上限のリセット日時', settings: '設定で決めたリセットの曜日・時刻', default: 'リセット日時がまだ分からないので月曜 0:00（設定で変えられます）' }[w.source] || '';
-  el.title = `Claude の週間上限のリセットに合わせた、今週このリポジトリのタスクで使った金額です\n期間: ${full(start)} 〜 ${full(end)}\n区切り: ${src}\nこれまでの合計: $${total.toFixed(2)}（削除したタスクの分も含みます）`;
-  // 週が変わったら表示を新しい週に切り替える
-  clearTimeout(weekRollTimer);
-  const wait = w.end - Date.now();
-  if (wait > 0 && wait < 2 ** 31 - 1) weekRollTimer = setTimeout(async () => ((state.board = await api.getBoard()), renderBoard()), wait + 1000);
-}
-
 // 遠隔操作（クライアント）で接続中なら、その接続の情報。ボード・リポジトリ・作業ディレクトリはホストのもの
 function remoteClient() {
   const rs = state.board.remoteSession;
@@ -556,7 +528,6 @@ function renderBoard() {
   renderRemoteInfo();
   // 会話は同時実行数に数えない
   const running = cards.filter((c) => c.status === 'running' && !isChat(c)).length;
-  renderCostInfo(settings);
   renderNotifications();
   renderChatBtn();
   $('runInfo').textContent = `実行中 ${running}/${settings.maxParallel || 1}`;
@@ -2858,14 +2829,7 @@ async function openSettings() {
          <label class="field"><span>モデル（空なら既定）</span><input id="sModel" placeholder="例: sonnet / opus" value="${esc(s.model || '')}" /></label>
        </div>
        <label class="field"><span>最初から許可しておくツール（カンマか改行で区切る）</span>
-         <textarea id="sAllowed" rows="2" placeholder="例: Bash(npm test:*), Bash(git status), WebSearch">${esc(s.allowedTools)}</textarea></label>
-       <div class="row">
-         <label class="field"><span>週間上限のリセット曜日（上部の「今週」の区切り）</span>
-           <select id="sResetDay"><option value="">自動（Claude から届く日時を使う）</option>
-           ${'日月火水木金土'.split('').map((d, i) => `<option value="${i}" ${String(s.weeklyResetDay) === String(i) ? 'selected' : ''}>${d}曜日</option>`).join('')}</select></label>
-         <label class="field"><span>リセット時刻</span><input id="sResetTime" type="time" value="${esc(s.weeklyResetTime || '00:00')}" /></label>
-       </div>
-       <small class="field-note">Claude の使用状況（/usage）に出る週間上限のリセット日時に合わせます。自動のときは、Claude がリセット日時を知らせてくるまで月曜 0:00 で区切ります。</small>`)}
+         <textarea id="sAllowed" rows="2" placeholder="例: Bash(npm test:*), Bash(git status), WebSearch">${esc(s.allowedTools)}</textarea></label>`)}
      ${agentConfigHtml('codex', s, `
        <div class="row">
          <label class="field"><span>codex コマンドのパス</span><input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
@@ -3067,8 +3031,6 @@ async function openSettings() {
             suggestSkillsOnDone: $('sSuggestSkills').checked,
             deleteSessionsOnMerge: $('sDeleteSessions').checked,
             specCheck: $('sSpecCheck').checked,
-            weeklyResetDay: $('sResetDay').value,
-            weeklyResetTime: $('sResetTime').value || '00:00',
             statusFieldName: $('sStatusField').value.trim(),
             statusMapping: { inProgress: $('sMapProgress').value.trim(), inReview: $('sMapReview').value.trim(), done: $('sMapDone').value.trim() },
           }),
