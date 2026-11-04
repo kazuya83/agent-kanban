@@ -38,35 +38,34 @@ npm run dist:win
 npm run dist:linux
 ```
 
-`dist/` に出力されます。Mac 用は macOS 上で、Windows 用は Windows 上でビルドしてください（Linux から Windows 用をビルドするには Wine が必要です）。
+`dist/` に出力されます。
 
-GitHub Actions でも自動でビルドします（`.github/workflows/build.yml`）。
-- **push したとき**: まずテストを動かします
-- **main に push したとき**: 最新のリリースからアプリの中身が変わっていれば、**自動で新しい版をリリースします**
-  - バージョンは自動で上がります（例: v0.1.8 → v0.1.9）。`package.json` を書き換える必要はありません
-  - テストが通ったら、すぐにビルドしてリリースします。途中で次の push が来たら前の分は取り消すので、続けてマージしても、リリースまで進むのは最後の1回です
-  - README・docs やテストだけの変更では、リリースしません
-  - 0.2.0 のように大きく上げたいときは、`package.json` の `version` をその番号にして push します
-  - **公開は Mac を待ちません**。Windows と Linux ができたら公開し、Mac の dmg は、Mac のビルドができしだい同じ版に追加します。追加されるまでは、Mac で `install.sh` を使うと「Mac 版はまだ準備中です」と出ます
-  - リリースしたあと、Windows・Linux でインストール用のコマンドを実際に試します（Mac は手元の Mac で確かめます）
-- **手動で実行したとき**（Actions の「Run workflow」）: すぐに3つの OS でビルドして、実行結果ページの「Artifacts」にファイルを置きます（リリースはしません）
-  - アプリの中身が最新のリリースと同じなら、Mac の dmg をその版の番号で作り、**その版に追加します**。Mac がスキップされた版に、後から Mac 版を付けたいときに使います
+### 3つの OS をまとめてビルドする・リリースする（Mac で）
 
-### Mac のビルドが「Queued」のまま進まないとき
+GitHub Actions はテストだけを動かします（`.github/workflows/build.yml`）。**ビルドとリリースは手元の Mac で行います。** Claude Code では `/build-apps` スキルで同じことができます。
 
-GitHub の Mac の実行環境が混んでいると、ジョブが割り当てを待ったまま進みません（ビルドの不具合ではありません）。公開は Mac を待たないので、Windows と Linux の版は先に出ます。待っているあいだに次の push をすると、その実行は取り消されて、新しい実行がまた最初から待つことになります。
+```bash
+scripts/build-all.sh
+```
 
-**Mac が 10 分たっても始まらなければ、Mac はスキップします**（`mac-timeout` ジョブ）。公開とインストールの確認が終わるのを待ってから実行を取り消すので、実行の結果は「cancelled」になりますが、Windows と Linux の版は公開されています（その版には Mac の dmg は付きません）。待つ時間は、**リポジトリの変数 `MACOS_QUEUE_MINUTES`**（分）で変えられます。
+テスト → install.sh / install.ps1 の書き方の確認 → Mac（dmg）・Windows（exe / zip）・Linux（AppImage）のビルドをまとめて行います（レビューのとき）。Apple Silicon の Mac では **Rosetta 2** が必要です（Windows のインストーラーと AppImage を作る道具が Intel 用のため）。
 
-Mac の実行環境の種類は、**リポジトリの変数 `MACOS_RUNNER`** で変えられます（コードを変える必要はありません）。何も入れなければ `macos-14` を使います。
+```bash
+softwareupdate --install-rosetta --agree-to-license
+```
 
-1. GitHub のリポジトリの「Settings → Secrets and variables → Actions → **Variables**」を開きます
-2. 「New repository variable」で、名前を `MACOS_RUNNER`、値を使いたい実行環境（例: `macos-14`、`macos-15`、`macos-latest`、Intel の `macos-15-intel`）にして保存します
-3. 次の push から、その実行環境でビルドとインストールの確認をします
+main にマージしたら、次でリリースします。
 
-Intel の Mac の実行環境でも、Apple Silicon 用（arm64）と Intel 用（x64）の両方の dmg を作れます。
+```bash
+scripts/release-local.sh
+```
 
-新しいバージョンは、main に push すると自動で出ます。インストール用のコマンドは、いつも最新の Release を入れます。
+- 最新のリリースからアプリの中身が変わっていれば、版の番号を1つ上げて（例: v0.1.8 → v0.1.9）ビルドし、GitHub Release を作ります。`package.json` を書き換える必要はありません
+- README・docs やテストだけの変更では、リリースしません
+- 0.2.0 のように大きく上げたいときは、`package.json` の `version` をその番号にして main に入れてから実行します
+- `--dry-run` を付けると、次の版とリリースするかどうかだけを出します
+
+インストール用のコマンドは、いつも最新の Release を入れます。
 
 ## しくみ
 

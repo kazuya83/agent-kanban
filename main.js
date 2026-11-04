@@ -170,6 +170,12 @@ async function dispatch(channel, arg) {
 }
 
 // エラーはメッセージだけをきれいに返す
+// WSL のリポジトリなら、WSL の中の ~/.claude からスキルと会話を読む（会話を消すときも同じ場所）
+async function claudeConfigFor(repo) {
+  const w = wsl.parseWslPath(repo);
+  return w ? (await wsl.claudeConfigDir(w.distro)) || undefined : undefined;
+}
+
 function handle(channel, fn) {
   localHandlers.set(channel, fn);
   ipcMain.handle(channel, async (_e, arg) => {
@@ -380,6 +386,7 @@ app.whenReady().then(async () => {
     mcpDir: path.join(userData, 'mcp'),
     attachDir: path.join(userData, 'attachments'), // 指示に添付したファイル（作業フォルダの外に置く）
     nodeBin: process.execPath, // ELECTRON_RUN_AS_NODE=1 で Node として動かす
+    claudeConfigFor, // 会話を消すときの Claude Code の設定フォルダ（WSL のリポジトリなら WSL の中）
   });
 
   permServer = new PermissionServer((payload, signal) => agents.requestPermission(payload, signal));
@@ -722,10 +729,11 @@ app.whenReady().then(async () => {
     return { branches, current, hasOrigin };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'specCheck', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'competeAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime', 'claudeRemoteControl'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'deleteSessionsOnMerge', 'specCheck', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'competeAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime', 'claudeRemoteControl'];
     if (patch && 'branchNamingRule' in patch) patch = { ...patch, branchNamingRule: String(patch.branchNamingRule || '').trim() };
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     if (patch && 'suggestSkillsOnDone' in patch) patch = { ...patch, suggestSkillsOnDone: !!patch.suggestSkillsOnDone };
+    if (patch && 'deleteSessionsOnMerge' in patch) patch = { ...patch, deleteSessionsOnMerge: !!patch.deleteSessionsOnMerge };
     if (patch && 'specCheck' in patch) patch = { ...patch, specCheck: !!patch.specCheck };
     if (patch && 'claudeRemoteControl' in patch) patch = { ...patch, claudeRemoteControl: !!patch.claudeRemoteControl };
     if (patch && 'weeklyResetDay' in patch) patch = { ...patch, weeklyResetDay: /^[0-6]$/.test(String(patch.weeklyResetDay)) ? String(patch.weeklyResetDay) : '' };
@@ -816,15 +824,17 @@ app.whenReady().then(async () => {
   handle('notifications:read', ({ ids } = {}) => agents.readNotifications(store.settings.repoPath, ids));
   handle('notifications:clear', ({ ids } = {}) => agents.clearNotifications(store.settings.repoPath, ids));
   handle('notifications:act', ({ id }) => agents.actNotification(id));
-  // WSL のリポジトリなら、WSL の中の ~/.claude からスキルと会話を読む
-  const claudeConfigFor = async (repo) => {
-    const w = wsl.parseWslPath(repo);
-    return w ? (await wsl.claudeConfigDir(w.distro)) || undefined : undefined;
-  };
   handle('skills:list', async () => require('./src/skills').listSkills(store.settings.repoPath, { configDir: await claudeConfigFor(store.settings.repoPath) }));
   handle('card:btw', ({ id, text }) => agents.btw(id, text));
   handle('card:setSession', ({ id, session }) => agents.setSession(id, session));
-  handle('sessions:list', async () => require('./src/sessions').listSessions(store.settings.repoPath, { configDir: await claudeConfigFor(store.settings.repoPath) }));
+  // 会話の一覧。どのカードが使っているか（usedBy）も付ける
+  handle('sessions:list', async () => {
+    const usage = agents.sessionUsage();
+    return require('./src/sessions')
+      .listSessions(store.settings.repoPath, { configDir: await claudeConfigFor(store.settings.repoPath) })
+      .map((s) => ({ ...s, usedBy: usage.get(s.id) || [] }));
+  });
+  handle('sessions:delete', ({ ids } = {}) => agents.deleteSessions(ids));
   handle('card:logs', (id) => agents.logs(id));
   handle('card:diff', (id) => agents.diff(id));
   handle('card:worktree', (id) => agents.worktree(id));

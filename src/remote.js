@@ -113,6 +113,7 @@ const PROXY_CHANNELS = new Set([
   'card:btw',
   'card:setSession',
   'sessions:list',
+  'sessions:delete',
   'card:logs',
   'card:diff',
   'card:worktree',

@@ -570,6 +570,107 @@ test('過去の会話の一覧（このリポジトリの会話を見分ける�
   }
 });
 
+// CLAUDE_CONFIG_DIR を一時フォルダにして、会話のファイルを置く
+function fakeClaudeConfig() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-cfg-'));
+  const old = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = dir;
+  const put = (proj, id, cwd) => {
+    const pd = path.join(dir, 'projects', proj);
+    fs.mkdirSync(path.join(pd, id, 'subagents'), { recursive: true });
+    fs.writeFileSync(path.join(pd, `${id}.jsonl`), JSON.stringify({ type: 'user', cwd, message: { role: 'user', content: `会話 ${id}` } }) + '\n');
+    return path.join(pd, `${id}.jsonl`);
+  };
+  const restore = () => {
+    if (old === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = old;
+  };
+  return { dir, put, restore };
+}
+
+test('会話を消す: jsonl と付属フォルダを消し、おかしな ID は無視する', () => {
+  const cfg = fakeClaudeConfig();
+  try {
+    const f1 = cfg.put('p1', 'aaa', '/x');
+    const f2 = cfg.put('p2', 'bbb', '/y');
+    const { deleteSessions } = require('../src/sessions');
+    assert.deepStrictEqual(deleteSessions(['aaa', '../p2/bbb', 'nope']), ['aaa']);
+    assert.ok(!fs.existsSync(f1));
+    assert.ok(!fs.existsSync(path.join(path.dirname(f1), 'aaa')), '付属フォルダも消える');
+    assert.ok(fs.existsSync(f2));
+  } finally {
+    cfg.restore();
+  }
+});
+
+test('会話を消す: タスクとは別に消せる。実行中のカードの会話は消さず、使っていたカードは新しい会話に戻る', async () => {
+  const { store, agents, repo } = setup();
+  const cfg = fakeClaudeConfig();
+  try {
+    store.settings.permissionMode = 'bypassPermissions';
+    const c = agents.createCard({ title: 'a', prompt: 'x' });
+    agents.start(c.id);
+    await waitFor(() => c.status === 'review' && c.sessionId);
+    const sid = c.sessionId;
+    const f = cfg.put('p', sid, repo);
+    const other = cfg.put('p', 'free-1', repo);
+    assert.deepStrictEqual(agents.sessionUsage().get(sid).map((u) => u.id), [c.id]);
+
+    process.env.FAKE_SLEEP = '600';
+    try {
+      agents.send(c.id, 'もう一度');
+      await waitFor(() => c.status === 'running');
+      const r = await agents.deleteSessions([c.sessionId, 'free-1']);
+      assert.deepStrictEqual(r, { removed: ['free-1'], skipped: [c.sessionId] });
+      assert.ok(fs.existsSync(f));
+      assert.ok(!fs.existsSync(other));
+      await waitFor(() => c.status === 'review');
+    } finally {
+      delete process.env.FAKE_SLEEP;
+    }
+    const now = c.sessionId;
+    cfg.put('p', now, repo);
+    const r = await agents.deleteSessions([now]);
+    assert.deepStrictEqual(r.removed, [now]);
+    assert.strictEqual(c.sessionId, null, '次は新しい会話で始める');
+    assert.ok(!c.sessions.some((x) => x.id === now));
+    await assert.rejects(agents.deleteSessions([]), /選んでください/);
+  } finally {
+    cfg.restore();
+  }
+});
+
+test('マージしたら、タスクの会話を消す（引き継いだ元の会話は残す・設定でオフにできる）', async () => {
+  const { store, agents, repo } = setup();
+  const cfg = fakeClaudeConfig();
+  try {
+    store.settings.permissionMode = 'bypassPermissions';
+    const ext = cfg.put('p', 'ext-1', repo);
+    const c = agents.createCard({ title: 'm', prompt: 'x', session: { mode: 'resume', id: 'ext-1', title: 'ターミナル' } });
+    agents.start(c.id);
+    await waitFor(() => c.status === 'review' && c.sessionId === 'fork-of-ext-1');
+    const task = cfg.put('p', 'fork-of-ext-1', `${repo}.worktrees/x`);
+    await agents.merge(c.id);
+    assert.strictEqual(c.status, 'done');
+    assert.ok(!fs.existsSync(task), 'タスクの会話は消える');
+    assert.ok(fs.existsSync(ext), '引き継いだ元の会話は残る');
+    assert.strictEqual(c.sessionId, null);
+    assert.ok(c.logs.some((l) => /会話（1 件）を消しました/.test(l.text)));
+
+    // 設定でオフ
+    store.settings.deleteSessionsOnMerge = false;
+    const d = agents.createCard({ title: 'k', prompt: 'y' });
+    agents.start(d.id);
+    await waitFor(() => d.status === 'review' && d.sessionId);
+    const kept = cfg.put('p', d.sessionId, `${repo}.worktrees/y`);
+    await agents.merge(d.id);
+    assert.strictEqual(d.status, 'done');
+    assert.ok(fs.existsSync(kept));
+  } finally {
+    cfg.restore();
+  }
+});
+
 test('スキルを付けて実行する（最初の指示と追加指示）', async () => {
   const { store, agents } = setup();
   store.settings.permissionMode = 'bypassPermissions';
