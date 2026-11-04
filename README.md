@@ -12,7 +12,7 @@ AI コーディングエージェント（**Claude Code / Codex CLI / Gemini CLI
 ![承認待ちのカードと詳細パネル](docs/detail-permission.png)
 
 ### 2. GitHub Issue の番号だけで、並列に動かす
-「Issue から作成」に `21, 22, 24` のように番号を入れるだけで、Issue のタイトル・本文・コメントから指示を作り、**1つの Issue を1枚のカードにして並列に動かします**。ブランチは `agent/issue-21-…`、PR には `Closes #21` が入ります。
+「＋ 新しいタスク」の「GitHub Issue から作成」タブに `21, 22, 24` のように番号を入れるだけで、Issue のタイトル・本文・コメントから指示を作り、**1つの Issue を1枚のカードにして並列に動かします**。ブランチは `agent/issue-21-…`、PR には `Closes #21` が入ります。
 
 ![Issue から作成するダイアログ](docs/issue-dialog.png)
 
