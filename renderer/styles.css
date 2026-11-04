@@ -137,6 +137,13 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 /* 接続先の名前を出すとタブが潰れて名前が見えなくなるので、アイコンだけにする（接続先はツールチップと、上部の「遠隔操作中」に出る） */
 .repo-host { display: inline-flex; align-items: center; }
 .repo-host-name { display: none; }
+/* 遠隔操作中のこのマシンのタブ（ホストには出ない）。ホストのタブと並ぶので、少し縮められるようにする */
+.repo-tabs.remote .repo-tab { min-width: 72px; }
+.repo-tabs.remote .repo-tab.local { border-color: var(--line); }
+.repo-tabs.remote .repo-tab.local.active { border-color: var(--accent); }
+.repo-host.local { color: var(--muted); margin-left: 6px; }
+.repo-host.local .repo-host-name { display: inline; font-size: 11px; margin-left: 2px; }
+.repo-target-tabs .mtab .ic { margin-right: 4px; }
 
 /* ホストのフォルダを辿る一覧（遠隔操作中） */
 .dir-browser { display: grid; gap: 8px; }

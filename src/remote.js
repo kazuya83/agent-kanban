@@ -141,6 +141,47 @@ function isProxyChannel(channel) {
   return PROXY_CHANNELS.has(channel);
 }
 
+// クライアントとして接続中に、リポジトリを追加する操作で「ホスト / このマシン」を選べるチャンネル（arg.target）
+const TARGET_CHANNELS = new Set(['repo:open', 'repo:choose', 'repo:browse', 'repo:defaultParent', 'repo:chooseParent', 'repo:clone', 'repo:create', 'wsl:distros']);
+// タブの操作。arg.remote でホストのタブ（true）か、このマシンのタブ（false）かを選ぶ
+const TAB_CHANNELS = new Set(['repo:switchTab', 'repo:closeTab']);
+// うまくいったら、見ている側をその側に変えるチャンネル（リポジトリを開いた・タブを切り替えた）
+const VIEW_CHANNELS = new Set(['repo:open', 'repo:choose', 'repo:switchTab', 'repo:clone', 'repo:create']);
+
+// その操作を、ホスト（'host'）とこのマシン（'local'）のどちらで行うか。view は今見ているタブの側
+function routeSide(channel, arg, view = 'host') {
+  const a = arg && typeof arg === 'object' ? arg : {};
+  if (TAB_CHANNELS.has(channel) && typeof a.remote === 'boolean') return a.remote ? 'host' : 'local';
+  if (TARGET_CHANNELS.has(channel) && (a.target === 'host' || a.target === 'local')) return a.target;
+  return view === 'local' ? 'local' : 'host';
+}
+
+// ホストへ送る前に、どちらで行うかの印を外す
+function stripRouting(arg) {
+  if (!arg || typeof arg !== 'object' || Array.isArray(arg)) return arg;
+  if (!('target' in arg) && !('remote' in arg)) return arg;
+  const { target, remote, ...rest } = arg;
+  return rest;
+}
+
+// 画面に出すボード: 見ている側のボードに、ホストのタブ（remote: true）とこのマシンのタブ（remote: false）を並べる
+// host が null なら（接続していない）、このマシンのタブだけ
+function composeTabs(host, local, view = 'host') {
+  const side = (board, remote, on) => {
+    const cur = (board && board.settings && board.settings.repoPath) || '';
+    return ((board && board.repoTabs) || []).filter((t) => t && t.path).map((t) => ({ ...t, remote, active: on && t.path === cur }));
+  };
+  if (!host) return { ...local, repoTabs: side(local, false, true) };
+  const v = view === 'local' ? 'local' : 'host';
+  const base = v === 'local' ? local : host;
+  return {
+    ...base,
+    repoTabs: [...side(host, true, v === 'host'), ...side(local, false, v === 'local')],
+    // リポジトリを選ぶ画面で、側ごとの「最近開いたリポジトリ」を出すため
+    recentBySide: { host: (host.settings && host.settings.recentRepoPaths) || [], local: (local.settings && local.settings.recentRepoPaths) || [] },
+  };
+}
+
 class RemoteHost extends EventEmitter {
   // invoke(channel, arg) => Promise<any>
   // tokens: 永続化したペアリング済みトークン（配列）
@@ -578,6 +619,10 @@ module.exports = {
   PROXY_CHANNELS,
   isProxyChannel,
   isLocalChannel,
+  routeSide,
+  stripRouting,
+  composeTabs,
+  VIEW_CHANNELS,
   redactForRemote,
   MAX_PAIR_FAILURES,
   RemoteHost,
