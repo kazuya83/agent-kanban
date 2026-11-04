@@ -43,18 +43,18 @@
     merge: '<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="13" r="2.5"/><path d="M6 7.5v9"/><path d="M6 7.5a8 8 0 0 0 9.5 5.5"/>',
     sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
     // エージェントのブランド寄りのマーク（モノクロ・currentColor。ぱっと見で見分けられる形）
-    // Claude / Anthropic: 曲線のアスタリスク（縦＋横の花弁）
+    // Claude / Anthropic: 長さ違いの放射（スターバースト）
     claude:
-      '<path fill="currentColor" stroke="none" d="M12 2c.4 4 1.9 6.7 5.5 8.5C13.9 12.3 12.4 15 12 19c-.4-4-1.9-6.7-5.5-8.5C10.1 8.7 11.6 6 12 2z"/><path fill="currentColor" stroke="none" d="M2 12c4-.4 6.7-1.9 8.5-5.5C12.3 10.1 15 11.6 19 12c-4 .4-6.7 1.9-8.5 5.5C10.1 13.9 7.4 12.4 2 12z"/>',
-    // Codex / OpenAI: 六角＋内側の輪（結び目の簡略）
+      '<g stroke-width="2.3"><path d="M12 12L13.1 2.5"/><path d="M12 12L16.6 5.9"/><path d="M12 12L20.1 8.5"/><path d="M12 12L18.9 12.8"/><path d="M12 12L19.7 17.8"/><path d="M12 12L15.0 19.0"/><path d="M12 12L10.9 20.7"/><path d="M12 12L7.8 17.6"/><path d="M12 12L3.2 15.8"/><path d="M12 12L4.5 11.1"/><path d="M12 12L5.0 6.7"/><path d="M12 12L9.3 5.6"/></g>',
+    // Codex / OpenAI: 6つのカプセルを重ねた結び目
     codex:
-      '<path fill="currentColor" stroke="none" d="M12 2.2 16.3 4.7 18.8 9v6l-2.5 4.3L12 21.8l-4.3-2.5L5.2 15V9l2.5-4.3z"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>',
-    // Gemini: 四芒星＋小さな星
+      '<g stroke-width="1.6"><rect x="8.6" y="2.6" width="6.8" height="11.4" rx="3.4" transform="rotate(0 12 12)"/><rect x="8.6" y="2.6" width="6.8" height="11.4" rx="3.4" transform="rotate(60 12 12)"/><rect x="8.6" y="2.6" width="6.8" height="11.4" rx="3.4" transform="rotate(120 12 12)"/><rect x="8.6" y="2.6" width="6.8" height="11.4" rx="3.4" transform="rotate(180 12 12)"/><rect x="8.6" y="2.6" width="6.8" height="11.4" rx="3.4" transform="rotate(240 12 12)"/><rect x="8.6" y="2.6" width="6.8" height="11.4" rx="3.4" transform="rotate(300 12 12)"/></g>',
+    // Gemini: 辺が内側に曲がった四芒星
     gemini:
-      '<path fill="currentColor" stroke="none" d="M12 2.5 14.2 9.8 21.5 12 14.2 14.2 12 21.5 9.8 14.2 2.5 12 9.8 9.8z"/><path fill="currentColor" stroke="none" d="M18.5 3.5 19.3 5.7 21.5 6.5 19.3 7.3 18.5 9.5 17.7 7.3 15.5 6.5 17.7 5.7z"/>',
-    // Cursor: 幾何学的なポインタ
+      '<path fill="currentColor" stroke="none" d="M12 2C12.6 7.4 16.6 11.4 22 12C16.6 12.6 12.6 16.6 12 22C11.4 16.6 7.4 12.6 2 12C7.4 11.4 11.4 7.4 12 2z"/>',
+    // Cursor: 六角形の立方体（手前の面を塗る）
     cursor:
-      '<path fill="currentColor" stroke="none" d="M5 3.2 19.5 12.1l-6.2 1.6 2.6 6.8-3.1 1.2-2.7-7.1L5 17.2z"/>',
+      '<path stroke-width="1.7" d="M12 2.5l8.3 4.8v9.4L12 21.5l-8.3-4.8V7.3z"/><path fill="currentColor" stroke="none" d="M3.7 7.3 20.3 7.3 12 21.5z"/>',
   };
 
   // エージェント ID → アイコン名（未知の ID は汎用の bot）

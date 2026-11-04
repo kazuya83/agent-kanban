@@ -34,6 +34,15 @@ test('エージェントごとのブランドアイコンがある', () => {
   assert.match(agentIcon('claude', 'logo'), /class="ic logo"/);
 });
 
+test('使えるエージェントすべてに、見分けられる別々のアイコンがある', () => {
+  const { AGENTS } = require('../src/providers.js');
+  const ids = Object.keys(AGENTS);
+  for (const a of ids) assert.ok(AGENT_ICON[a], `${a} のアイコンがない（bot になる）`);
+  const svgs = ids.map((a) => agentIcon(a));
+  assert.strictEqual(new Set(svgs).size, ids.length, 'エージェントのアイコンが重複している');
+  for (const s of svgs) assert.notStrictEqual(s, icon('bot'));
+});
+
 test('renderer.js の agentIcon() は登録済みのエージェント ID', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf8');
   // agentIcon(agentOf(...)) / agentIcon(st.agent) / agentIcon(a) など変数渡しは除外し、直書きだけ見る
