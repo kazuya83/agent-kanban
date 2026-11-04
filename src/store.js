@@ -5,6 +5,7 @@ const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isA
 
 const DEFAULT_SETTINGS = {
   repoPath: '',
+  lastRepoParent: '', // クローン・新規作成で最後に使った置き場所（親フォルダ）
   baseBranch: '', // 空なら、開始時にチェックアウトしているブランチ
   permissionMode: 'acceptEdits', // default / acceptEdits / plan / bypassPermissions
   allowedTools: '', // カンマ・改行区切り（例: Bash(npm test:*), WebSearch）

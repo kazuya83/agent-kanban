@@ -180,11 +180,49 @@ app.whenReady().then(async () => {
       throw new Error(`git でフォルダを調べられませんでした（${picked}）\n${err.message}`);
     }
     if (!top) throw new Error(`git から答えが返ってきませんでした（${picked}）`);
-    store.settings.repoPath = top;
+    return openRepo(top);
+  });
+  const openRepo = (dir) => {
+    store.settings.repoPath = dir;
     store.settings.baseBranch = '';
     store.save();
     notifyBoard();
-    return top;
+    return dir;
+  };
+  // クローン・新規作成の置き場所（親フォルダ）。前回使ったフォルダ → 今のリポジトリの親 → ホーム
+  handle('repo:defaultParent', async (opts = {}) => {
+    const distro = opts && opts.wsl;
+    const fs = require('fs');
+    const ok = (p) => p && (distro ? wsl.parseWslPath(p)?.distro === distro : !wsl.isWslPath(p)) && fs.existsSync(p);
+    const last = store.settings.lastRepoParent;
+    if (ok(last)) return last;
+    const cur = store.settings.repoPath;
+    if (ok(cur)) return (wsl.isWslPath(cur) ? path.win32 : path).dirname(cur);
+    if (distro) {
+      const home = await wsl.homeDir(distro);
+      return home ? wsl.toUnc(distro, home) : '';
+    }
+    return app.getPath('home');
+  });
+  handle('repo:chooseParent', async (opts = {}) => {
+    const r = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory', 'createDirectory'],
+      title: '置き場所のフォルダを選択',
+      ...(opts && opts.defaultPath ? { defaultPath: opts.defaultPath } : {}),
+    });
+    return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+  });
+  const repoSetup = require('./src/repo-setup');
+  handle('repo:clone', async ({ url, parent, name } = {}) => {
+    const dir = await repoSetup.cloneRepo({ url, parent, name });
+    store.settings.lastRepoParent = parent;
+    return openRepo(dir);
+  });
+  handle('repo:create', async ({ parent, name, github } = {}) => {
+    const r = await repoSetup.createRepo({ parent, name, github });
+    store.settings.lastRepoParent = parent;
+    openRepo(r.dir);
+    return r;
   });
   handle('repo:info', async () => {
     const repo = store.settings.repoPath;
