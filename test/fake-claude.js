@@ -127,6 +127,12 @@ async function turn(prompt, sessionId) {
     out({ type: 'result', subtype: 'success', is_error: false, result: '両方の変更を残して解消しました', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
     return;
   }
+  // [vague] があれば（仕様の確認を頼まれていて、まだ答え [spec-ok] をもらっていなければ）、印を付けて質問して止まる
+  if (prompt.includes('[vague]') && prompt.includes('[[SPEC_UNCLEAR]]') && !prompt.includes('[spec-ok]')) {
+    out({ type: 'assistant', message: { content: [{ type: 'text', text: '[[SPEC_UNCLEAR]]\n内容が詰まっていないので、開発を開始できません。\n1. 対象の画面はどれですか？' }] } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: '対象の画面はどれですか？', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
+    return;
+  }
   // [q] があれば、最後に文章で質問して止まる
   if (prompt.includes('[q]')) {
     out({ type: 'assistant', message: { content: [{ type: 'text', text: 'どちらの方法で進めますか？\n- A: 速い\n- B: 安全' }] } });
