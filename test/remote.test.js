@@ -36,6 +36,18 @@ test('main.js の操作は、転送するか・手元で動かすか・わざと
   assert.deepStrictEqual(unknown, [], `遠隔中に「この操作を使えません」になる操作があります: ${unknown.join(', ')}`);
 });
 
+test('main.js: ホストとして操作側へ渡すボードは、このマシンのボードだけ（別のホストにつないでいても混ぜない）', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  // RemoteHost の invoke で board:get を受けたら、画面用の viewBoard ではなく boardState を返す
+  const invoke = src.slice(src.indexOf('new RemoteHost('), src.indexOf('new RemoteHost(') + 1200);
+  assert.match(invoke, /channel === 'board:get'\) return withRemoteSession\(boardState\(\)\)/);
+  // board:changed の配信も、このマシンのボード（viewBoard ではない）
+  const notify = src.slice(src.indexOf('function notifyBoard()'), src.indexOf('function notifyRemoteOnly()'));
+  assert.match(notify, /const own = withRemoteSession\(boardState\(\)\);\s*remoteHost\?\.broadcast\('board:changed', own\)/);
+});
+
 test('ペアリングコードで接続し、ボード操作とイベントを中継できる', async () => {
   let board = { settings: { repoPath: '/host/repo' }, cards: [{ id: 'c1', title: '遠隔' }] };
   const tokens = [];
