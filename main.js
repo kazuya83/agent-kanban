@@ -872,14 +872,15 @@ app.whenReady().then(async () => {
   // agent: claude / codex / gemini / cursor / relay（Pipeline） / compete（競争。カードが複数できる）。返すのは最初のカードの ID
   // fromChat: 会話の続きとしてタスクを作るときの、元の会話のカードの ID
   // attachments: 添付ファイル [{ name, mediaType, data(base64) }]
-  handle('card:create', ({ title, prompt, autoStart, session, skill, agent, fromChat, attachments }) => {
-    const cards = agents.createTask({ title, prompt, session, skill, agent, fromChat, attachments });
+  // model: このタスク・会話で使うモデル（空なら設定のエージェントごとの既定）
+  handle('card:create', ({ title, prompt, autoStart, session, skill, agent, model, fromChat, attachments }) => {
+    const cards = agents.createTask({ title, prompt, session, skill, agent, model, fromChat, attachments });
     if (autoStart) for (const c of cards) agents.start(c.id);
     return cards[0].id;
   });
-  handle('chat:create', ({ message, title, session, skill, agent, attachments }) => agents.createChat({ message, title, session, skill, agent, attachments }).id);
-  handle('card:createFromIssues', async ({ numbers, extra, autoStart, session, skill, agent }) => {
-    const { cards, errors } = await agents.createFromIssues({ numbers, extra, session, skill, agent });
+  handle('chat:create', ({ message, title, session, skill, agent, model, attachments }) => agents.createChat({ message, title, session, skill, agent, model, attachments }).id);
+  handle('card:createFromIssues', async ({ numbers, extra, autoStart, session, skill, agent, model }) => {
+    const { cards, errors } = await agents.createFromIssues({ numbers, extra, session, skill, agent, model });
     if (autoStart) for (const c of cards) agents.start(c.id);
     return { ids: cards.map((c) => c.id), errors };
   });
