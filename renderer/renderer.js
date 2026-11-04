@@ -2245,8 +2245,7 @@ function fmtTime(ms) {
 function sessionFieldHtml(idp) {
   return `<label class="field"><span>会話（セッション）</span>
     <select id="${idp}Session"><option value="">新しい会話で始める</option><option disabled>過去の会話を読み込んでいます…</option></select>
-    <small>過去の Claude Code の会話を選ぶと、その続きとして始めます（元の会話はそのまま残ります）。</small>
-    <label class="check small"><input type="checkbox" id="${idp}AllSessions" /> ほかのフォルダの会話も表示</label></label>`;
+    <small>過去の Claude Code の会話を選ぶと、その続きとして始めます（元の会話はそのまま残ります）。</small></label>`;
 }
 
 async function fillSessionField(idp, selected) {
@@ -2258,19 +2257,11 @@ async function fillSessionField(idp, selected) {
   }
   const sel = $(`${idp}Session`);
   if (!sel) return;
-  const render = () => {
-    const all = $(`${idp}AllSessions`) && $(`${idp}AllSessions`).checked;
-    const related = list.filter((x) => x.related);
-    const others = all ? list.filter((x) => !x.related).slice(0, 60) : [];
-    const opt = (x) => `<option value="${esc(x.id)}" ${x.id === selectedId ? 'selected' : ''}>${esc(fmtTime(x.updatedAt))}  ${esc(x.title.slice(0, 70))}${all && !x.related ? `  — ${esc(x.cwd)}` : ''}</option>`;
-    sel.innerHTML = `<option value="">新しい会話で始める</option>
-      ${related.length ? `<optgroup label="このリポジトリの会話">${related.map(opt).join('')}</optgroup>` : '<option disabled>（このリポジトリの過去の会話はありません）</option>'}
-      ${others.length ? `<optgroup label="ほかのフォルダの会話">${others.map(opt).join('')}</optgroup>` : ''}`;
-  };
+  const related = list.filter((x) => x.related);
+  const opt = (x) => `<option value="${esc(x.id)}" ${x.id === selectedId ? 'selected' : ''}>${esc(fmtTime(x.updatedAt))}  ${esc(x.title.slice(0, 70))}</option>`;
+  sel.innerHTML = `<option value="">新しい会話で始める</option>
+    ${related.length ? `<optgroup label="このリポジトリの会話">${related.map(opt).join('')}</optgroup>` : '<option disabled>（このリポジトリの過去の会話はありません）</option>'}`;
   sel._list = list;
-  render();
-  const cb = $(`${idp}AllSessions`);
-  if (cb) cb.onchange = render;
 }
 
 function readSessionField(idp) {
@@ -2329,7 +2320,6 @@ function openSessionManager() {
     `<h2>会話（セッション）を消す</h2>
      <p class="muted small">Claude Code の会話の記録（~/.claude/projects の中）を消します。消した会話は元に戻せず、続きから再開することもできません。実行中・待機中のタスクが使っている会話は消せません。</p>
      <div class="row sm-tools">
-       <label class="check small"><input type="checkbox" id="smAll" /> ほかのフォルダの会話も表示</label>
        <label class="check small"><input type="checkbox" id="smToggle" /> 表示中をすべて選ぶ</label>
      </div>
      <div id="smList" class="sm-list muted small">会話を読み込んでいます…</div>
@@ -2337,7 +2327,7 @@ function openSessionManager() {
     async () => {
       let list = [];
       const picked = new Set();
-      const visible = () => ($('smAll').checked ? list : list.filter((x) => x.related));
+      const visible = () => list.filter((x) => x.related);
       const updateCount = () => {
         $('smCount').textContent = picked.size ? `${picked.size} 件を選択中` : '';
         $('smDelete').disabled = !picked.size;
@@ -2358,7 +2348,7 @@ function openSessionManager() {
             const tag = used.length ? `<span class="pill sm-used" title="${esc(used.map((u) => u.title).join('\n'))}">${busy ? '実行中のタスクで使用中' : `タスク「${esc(used[0].title.slice(0, 30))}」${used.length > 1 ? ` ほか ${used.length - 1} 件` : ''}`}</span>` : '';
             return `<label class="sm-row ${busy ? 'disabled' : ''}"><input type="checkbox" class="smPick" value="${esc(x.id)}" ${busy ? 'disabled' : ''} ${picked.has(x.id) ? 'checked' : ''} />
               <span class="sm-main"><span class="sm-title">${esc(x.title.slice(0, 100))}</span>
-              <span class="sm-meta muted small">${esc(fmtTime(x.updatedAt))} · ${esc(x.branch || '')}${!x.related || $('smAll').checked ? ` · ${esc(x.cwd || '')}` : ''}</span></span>${tag}</label>`;
+              <span class="sm-meta muted small">${esc(fmtTime(x.updatedAt))} · ${esc(x.branch || '')}</span></span>${tag}</label>`;
           })
           .join('');
         box.querySelectorAll('.smPick').forEach((cb) => {
@@ -2376,12 +2366,6 @@ function openSessionManager() {
         render();
       };
       $('smClose').onclick = closeModal;
-      $('smAll').onchange = () => {
-        // 隠れた会話は選ばれたままにしない
-        if (!$('smAll').checked) for (const x of list) if (!x.related) picked.delete(x.id);
-        $('smToggle').checked = false;
-        render();
-      };
       $('smToggle').onchange = () => {
         for (const x of visible()) {
           if ((x.usedBy || []).some((u) => u.busy)) continue;
