@@ -176,18 +176,30 @@ run_once() {
     [ -f "dist/agent-kanban-$version-$f" ] || missing="$missing agent-kanban-$version-$f"
   done
   [ -z "$missing" ] || { fail "ビルドしたファイルが足りません:$missing"; return 1; }
-  say "ビルドできました（v${version}）: $wt/dist"
+  # worktree はこのあと消すので、できたファイルは main をチェックアウトしているフォルダの dist/ に写して残す
+  local keep
+  keep="$(main_worktree)"
+  if [ -n "$keep" ] && [ -d "$keep" ]; then
+    rm -rf "$keep/dist" && mkdir -p "$keep/dist" && cp -R "$wt/dist/." "$keep/dist/" >>"$log" 2>&1 \
+      || { fail "ビルドしたファイルを $keep/dist に写せませんでした（worktree: ${wt}）"; return 1; }
+    say "ビルドできました（v${version}）: $keep/dist"
+  else
+    keep="$wt"
+    say "ビルドできました（v${version}）: $wt/dist（main をチェックアウトしているフォルダがないので、worktree を残します）"
+  fi
 
   if [ "$changed" = 1 ]; then
     merge_back "$branch" "$short" || return 1
     say "直したところを main にマージしました"
-    notify "ビルドできました（v${version}）。直したところを main にマージして push しました"
+    notify "ビルドできました（v${version}、${keep}/dist）。直したところを main にマージして push しました"
   else
-    notify "ビルドできました（v${version}）。直すところはありませんでした"
+    notify "ビルドできました（v${version}、${keep}/dist）。直すところはありませんでした"
   fi
   echo "$sha" >"$state/last-done"
-  cd / && "${G[@]}" worktree remove --force "$wt" >>"$log" 2>&1
-  "${G[@]}" branch -D "$branch" >>"$log" 2>&1
+  if [ "$keep" != "$wt" ]; then
+    cd / && "${G[@]}" worktree remove --force "$wt" >>"$log" 2>&1
+    "${G[@]}" branch -D "$branch" >>"$log" 2>&1
+  fi
   return 0
 }
 
