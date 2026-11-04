@@ -1150,7 +1150,9 @@ document.addEventListener(
 const DIFF_STATUS = { A: ['追加', 'fa'], M: ['変更', 'fm'], D: ['削除', 'fd'], R: ['名前変更', 'fr'] };
 const DIFF_BIG = 600; // これより行数が多いファイルは最初は折りたたむ
 // 折りたたみ・表示状態（更新しても保つ）
-const diffUi = { cardId: null, collapsedDirs: new Set(), collapsedFiles: new Set(), openedBig: new Set(), tree: true, active: null };
+// split: 左右に並べて表示する（次に開いたときも同じ表示にする）。full: 画面に大きくモーダルで出す
+const DIFF_SPLIT_KEY = 'agent-kanban.diffSplit';
+const diffUi = { cardId: null, collapsedDirs: new Set(), collapsedFiles: new Set(), openedBig: new Set(), tree: true, active: null, split: localStorage.getItem(DIFF_SPLIT_KEY) === '1', full: false };
 
 function diffTreeHtml(node, depth) {
   const pad = (d) => `style="padding-left:${8 + d * 14}px"`;
@@ -1168,12 +1170,32 @@ function diffTreeHtml(node, depth) {
   return html;
 }
 
+// 左右に並べた表示（左が元、右が変更後）
+function diffSplitHtml(file) {
+  const side = (l, kind) => {
+    if (!l) return '<td class="ln empty"></td><td class="code empty"></td>';
+    const cls = l.type === 'ctx' ? '' : kind;
+    const no = kind === 'del' ? l.oldNo : l.newNo;
+    return `<td class="ln ${cls}">${no ?? ''}</td><td class="code ${cls}">${esc(l.text)}</td>`;
+  };
+  const rows = [];
+  for (const h of file.hunks) {
+    rows.push(`<tr class="dv-hunk"><td class="ln"></td><td class="code" colspan="3">${esc(h.header)}</td></tr>`);
+    for (const r of DiffParse.splitRows(h)) {
+      if (r.type === 'meta') rows.push(`<tr class="dv-meta"><td class="ln"></td><td class="code" colspan="3">${esc(r.text)}</td></tr>`);
+      else rows.push(`<tr>${side(r.left, 'del')}${side(r.right, 'add')}</tr>`);
+    }
+  }
+  return `<table class="dv-tbl dv-split"><colgroup><col class="c-ln"><col><col class="c-ln"><col></colgroup><tbody>${rows.join('')}</tbody></table>`;
+}
+
 function diffLinesHtml(file) {
   if (file.binary) return '<div class="dv-note">バイナリファイルのため表示できません</div>';
   if (!file.hunks.length) {
     const why = file.status === 'R' ? '中身は変わらず、名前だけ変わりました' : file.meta.length ? esc(file.meta.join(' / ')) : '表示できる差分はありません';
     return `<div class="dv-note">${why}</div>`;
   }
+  if (diffUi.split) return diffSplitHtml(file);
   const rows = [];
   for (const h of file.hunks) {
     rows.push(`<tr class="dv-hunk"><td class="ln" colspan="2"></td><td class="code">${esc(h.header)}</td></tr>`);
@@ -1214,8 +1236,10 @@ function diffHtml(text, files) {
     <div class="diff-stat"><button class="btn small ghost" id="toggleDiffTree" title="ファイルツリーの表示を切り替えます">${icon('sidebar')}</button>
       <span><b>${files.length}</b> ファイル <span class="add">+${add}</span> <span class="del">-${del}</span></span>
       <span class="spacer"></span>
+      <span class="dv-mode" role="group" aria-label="差分の並べ方"><button class="btn small ghost ${diffUi.split ? '' : 'on'}" data-diff-mode="unified" title="変更前と変更後を上下に並べます">上下</button><button class="btn small ghost ${diffUi.split ? 'on' : ''}" data-diff-mode="split" title="変更前を左、変更後を右に並べます">左右</button></span>
       <button class="btn small ghost" id="diffExpandAll">すべて開く</button><button class="btn small ghost" id="diffCollapseAll">すべて閉じる</button>
-      <button class="btn small ghost" id="refreshDiff">更新</button></div>
+      <button class="btn small ghost" id="refreshDiff">更新</button>
+      <button class="btn small ghost" id="toggleDiffFull" title="${diffUi.full ? '大きな表示を閉じます（Esc）' : '画面に大きく表示します'}">${diffUi.full ? icon('minimize') : icon('maximize')}</button></div>
     <div class="dv-main">
       <nav class="dv-tree" id="diffTree"><ul>${diffTreeHtml(tree, 0)}</ul></nav>
       <div class="dv-files" id="diffFiles">${order.map((i) => diffFileHtml(files[i], i)).join('')}</div>
@@ -1228,6 +1252,19 @@ function bindDiff(body, files, rerender) {
   $('toggleDiffTree').onclick = () => {
     diffUi.tree = !diffUi.tree;
     body.querySelector('.dv').classList.toggle('no-tree', !diffUi.tree);
+  };
+  body.querySelectorAll('[data-diff-mode]').forEach((b) => {
+    b.onclick = () => {
+      const split = b.dataset.diffMode === 'split';
+      if (split === diffUi.split) return;
+      diffUi.split = split;
+      localStorage.setItem(DIFF_SPLIT_KEY, split ? '1' : '0');
+      rerender();
+    };
+  });
+  $('toggleDiffFull').onclick = () => {
+    diffUi.full = !diffUi.full;
+    rerender();
   };
   $('diffExpandAll').onclick = () => {
     diffUi.collapsedFiles.clear();
@@ -1297,6 +1334,7 @@ async function renderDiff(c) {
     diffUi.openedBig.clear();
   }
   const prev = same ? $('diffFiles') : null;
+  if (!prev) diffUi.full = false; // 別のタスク・別のタブから来たときは、普通の表示で開く
   const top = prev ? prev.scrollTop : 0;
   if (!prev) body.innerHTML = '<div class="muted pad">読み込み中…</div>';
   const d = c.worktreePath || c.status === 'done' ? await run(() => api.diff(c.id)) : '';
@@ -1308,6 +1346,7 @@ async function renderDiff(c) {
     const keep = first || !$('diffFiles') ? top : $('diffFiles').scrollTop;
     first = false;
     body.innerHTML = diffHtml(text, files);
+    applyDiffFull(body, draw);
     const r = $('refreshDiff');
     if (r) r.onclick = () => renderDiff(card(c.id) || c);
     bindDiff(body, files, draw);
@@ -1315,6 +1354,37 @@ async function renderDiff(c) {
   };
   draw();
 }
+
+// 差分を画面に大きくモーダルで出す（.dv をそのまま画面いっぱいに広げ、後ろを暗くする）
+function applyDiffFull(body, rerender) {
+  const dv = body.querySelector('.dv');
+  if (!dv) {
+    diffUi.full = false;
+    return;
+  }
+  dv.classList.toggle('full', diffUi.full);
+  if (!diffUi.full) return;
+  const bd = document.createElement('div');
+  bd.className = 'dv-backdrop';
+  bd.onmousedown = () => {
+    diffUi.full = false;
+    rerender();
+  };
+  body.prepend(bd);
+  dv._closeFull = bd.onmousedown;
+}
+// Esc は、大きな表示を閉じるだけにする（詳細パネルは閉じない）
+document.addEventListener(
+  'keydown',
+  (ev) => {
+    if (ev.key !== 'Escape' || document.querySelector('.img-overlay') || !$('modal').classList.contains('hidden')) return;
+    const dv = document.querySelector('.dv.full');
+    if (!dv || !dv._closeFull) return;
+    dv._closeFull();
+    ev.stopImmediatePropagation();
+  },
+  true,
+);
 
 // ---------------- worktree タブ ----------------
 
