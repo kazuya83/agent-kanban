@@ -50,6 +50,7 @@ GitHub Actions でも自動でビルドします（`.github/workflows/build.yml`
   - **公開は Mac を待ちません**。Windows と Linux ができたら公開し、Mac の dmg は、Mac のビルドができしだい同じ版に追加します。追加されるまでは、Mac で `install.sh` を使うと「Mac 版はまだ準備中です」と出ます
   - リリースしたあと、Windows・Linux でインストール用のコマンドを実際に試します（Mac は手元の Mac で確かめます）
 - **手動で実行したとき**（Actions の「Run workflow」）: すぐに3つの OS でビルドして、実行結果ページの「Artifacts」にファイルを置きます（リリースはしません）
+  - アプリの中身が最新のリリースと同じなら、Mac の dmg をその版の番号で作り、**その版に追加します**。Mac がスキップされた版に、後から Mac 版を付けたいときに使います
 
 ### Mac のビルドが「Queued」のまま進まないとき
 

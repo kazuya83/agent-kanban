@@ -9,6 +9,7 @@
 #   - 0.2.0 のように大きく上げたいときは、package.json の version をその番号にして push する
 #   - バージョンの決め方は scripts/next-version.js
 # - 手動実行（Actions の「Run workflow」）: すぐに 3つの OS でビルドして「Artifacts」に置く（リリースはしない）
+#   - アプリの中身が最新のリリースと同じなら、Mac の dmg をその版の番号で作り、その版に追加する（Mac を後から付けたいとき）
 name: Build desktop apps
 
 on:
@@ -30,6 +31,8 @@ jobs:
     outputs:
       version: ${{ steps.ver.outputs.version }}
       release: ${{ steps.ver.outputs.release }}
+      # 手動実行で、アプリの中身が最新のリリースと同じとき: Mac をその版の番号でビルドして、その版に追加する
+      add_mac: ${{ steps.ver.outputs.add_mac }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -47,6 +50,13 @@ jobs:
           echo "$r"
           version=$(node -e "console.log(JSON.parse(process.argv[1]).version)" "$r")
           release=$(node -e "console.log(JSON.parse(process.argv[1]).release)" "$r")
+          latest=$(node -e "console.log(JSON.parse(process.argv[1]).latest || '')" "$r")
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$release" = "false" ] && [ -n "$latest" ]; then
+            # 最新のリリースからアプリの中身が変わっていない → その版の Mac の dmg を作って追加する
+            version="$latest"
+            echo "add_mac=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$version に Mac の dmg を追加します（アプリの中身が v$version と同じため）"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ] && [ "$release" = "true" ]; then
             echo "release=true" >> "$GITHUB_OUTPUT"
@@ -243,7 +253,10 @@ jobs:
   # Mac の dmg を、公開済みの同じ版に追加する
   release-mac:
     needs: [test, release, build-mac]
-    if: needs.test.outputs.release == 'true' && needs.release.result == 'success' && needs.build-mac.result == 'success'
+    # 自動リリースのあと、または手動実行で最新の版に Mac を追加するとき（そのときは release がスキップされるので !cancelled() にする）
+    if: >-
+      !cancelled() && needs.build-mac.result == 'success' &&
+      ((needs.test.outputs.release == 'true' && needs.release.result == 'success') || needs.test.outputs.add_mac == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
