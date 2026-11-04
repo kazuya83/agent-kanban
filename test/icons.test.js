@@ -5,7 +5,8 @@ const path = require('path');
 const { icon, ICON_NAMES, NOTIF_ICON } = require('../renderer/icons.js');
 
 // 絵文字（カラーで描かれる文字）。UI のアイコンはモノクロの SVG を使う
-const EMOJI = /[\u{1F000}-\u{1FFFF}\u{2600}-\u{26FF}\u{2B50}\u{23E9}-\u{23FA}\u{FE0F}]/u;
+// （✓ ✕ → ▾ など、もともと1色で描かれる記号は使ってよい）
+const EMOJI = /[\u{1F000}-\u{1FFFF}\u{2600}-\u{26FF}\u{2705}\u{270A}\u{270B}\u{2728}\u{274C}\u{274E}\u{2753}-\u{2755}\u{2757}\u{2795}-\u{2797}\u{27B0}\u{27BF}\u{2B1B}\u{2B1C}\u{2B50}\u{2B55}\u{231A}\u{231B}\u{23E9}-\u{23FA}\u{FE0F}]/u;
 
 test('icon() はモノクロ（currentColor）の SVG を返す', () => {
   for (const name of ICON_NAMES) {
@@ -22,9 +23,10 @@ test('通知の種類ごとのアイコンがある', () => {
   for (const name of Object.values(NOTIF_ICON)) assert.ok(ICON_NAMES.includes(name), name);
 });
 
-test('画面（renderer）に絵文字が残っていない', () => {
-  for (const f of ['index.html', 'renderer.js']) {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8');
+test('画面に出す文字に絵文字が残っていない', () => {
+  // src/agent.js・main.js の文言（通知のボタン・会話のタイトル・カードの最後のメッセージ・ダイアログなど）も画面に出る
+  for (const f of ['renderer/index.html', 'renderer/renderer.js', 'src/agent.js', 'main.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
     src.split('\n').forEach((line, i) => assert.doesNotMatch(line, EMOJI, `${f}:${i + 1}: ${line.trim().slice(0, 80)}`));
   }
 });

@@ -80,7 +80,7 @@ const AFTER_DONE_NOTE = [
   'このタスクはもう完了（マージ済み）です。ここではユーザーの質問に答えたり、調べものや相談に乗ったりしてください。',
   '',
   '- ファイルの変更・コミット・マージはしないでください（計画モードで動いています）',
-  '- 修正や追加の作業が必要そうなときは、どう直すかの案を書いたうえで、「🛠 修正タスクを作る」ボタンから別のタスクにするようユーザーに伝えてください',
+  '- 修正や追加の作業が必要そうなときは、どう直すかの案を書いたうえで、「修正タスクを作る」ボタンから別のタスクにするようユーザーに伝えてください',
 ].join('\n');
 // 完了したタスクで最初に話すときの指示。worktree はもうないので新しい会話で始め、元のタスクの中身を渡す
 function buildAfterDonePrompt(c, message) {
@@ -661,7 +661,7 @@ class AgentManager extends EventEmitter {
       'skill',
       `スキルにしませんか？: ${c.title}`,
       `このタスクの作業を振り返って、次から同じような作業を速く・確実にできるスキル（SKILL.md）を ${agentShort(this.helperAgent(c))} に提案してもらえます。`,
-      { action: 'suggestSkills', actionLabel: '💡 スキルを提案してもらう' },
+      { action: 'suggestSkills', actionLabel: 'スキルを提案してもらう' },
     );
   }
 
@@ -998,7 +998,7 @@ class AgentManager extends EventEmitter {
    */
   suggestSkills(id) {
     const src = this.must(id);
-    const chat = this.createChat({ message: buildSkillSuggestPrompt(src), title: `💡 スキルの提案: ${src.title}`, agent: this.helperAgent(src) });
+    const chat = this.createChat({ message: buildSkillSuggestPrompt(src), title: `スキルの提案: ${src.title}`, agent: this.helperAgent(src) });
     chat.skillSuggestFrom = src.id;
     for (const n of this.store.notifications) {
       if (n.cardId === id && n.action === 'suggestSkills' && !n.actedAt) {
@@ -1018,7 +1018,7 @@ class AgentManager extends EventEmitter {
    */
   sendAfterDone(c, message, skill) {
     const first = !c.afterDoneSession;
-    if (first) this.log(c, 'system', '完了したタスクについて話します（ファイルは変えません。修正が必要なときは「🛠 修正タスクを作る」から別のタスクにしてください）');
+    if (first) this.log(c, 'system', '完了したタスクについて話します（ファイルは変えません。修正が必要なときは「修正タスクを作る」から別のタスクにしてください）');
     this.log(c, 'user', message, skill ? { skill } : undefined);
     // 前の作業の会話は worktree のフォルダに保存されているので使わない。完了後の会話はその会話だけを続ける
     c.sessionId = c.afterDoneSession || null;
@@ -1549,7 +1549,7 @@ class AgentManager extends EventEmitter {
             c.lastMessage = truncate(text.trim(), 200);
           } else if (b.type === 'tool_use') {
             this.log(c, 'tool', `${b.name}  ${summarizeInput(b.input)}`);
-            c.lastMessage = `🔧 ${b.name} ${truncate(summarizeInput(b.input), 80)}`;
+            c.lastMessage = `${b.name} ${truncate(summarizeInput(b.input), 80)}`;
           }
         }
         this.changed(c);
@@ -1621,7 +1621,7 @@ class AgentManager extends EventEmitter {
       }
       case 'tool':
         this.log(c, 'tool', `${a.name}  ${a.summary || ''}`.trim());
-        c.lastMessage = `🔧 ${a.name} ${truncate(a.summary || '', 80)}`;
+        c.lastMessage = `${a.name} ${truncate(a.summary || '', 80)}`;
         this.changed(c);
         break;
       case 'tool_result':
