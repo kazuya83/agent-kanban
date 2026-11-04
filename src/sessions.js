@@ -126,4 +126,43 @@ function listSessions(repoPath, opts = {}) {
   return out;
 }
 
-module.exports = { listSessions, projectsDir };
+// 会話の ID として受け付ける形（パスに使うので、記号や「..」を含むものは受け付けない）
+function isValidId(id) {
+  return typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id);
+}
+
+/**
+ * 会話を消す。projects/<フォルダ>/<ID>.jsonl と、同じ名前の付属フォルダ（サブエージェントの記録など）を消す
+ * @param {string[]} ids
+ * @param {{ configDir?: string }} opts
+ * @returns {string[]} 実際に消した会話の ID
+ */
+function deleteSessions(ids, opts = {}) {
+  const dir = opts.configDir ? path.join(opts.configDir, 'projects') : projectsDir();
+  const want = new Set((ids || []).filter(isValidId));
+  if (!want.size) return [];
+  let projects = [];
+  try {
+    projects = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const removed = new Set();
+  for (const p of projects) {
+    const pd = path.join(dir, p);
+    for (const id of want) {
+      const file = path.join(pd, `${id}.jsonl`);
+      try {
+        if (!fs.statSync(file).isFile()) continue;
+      } catch {
+        continue;
+      }
+      fs.rmSync(file, { force: true });
+      fs.rmSync(path.join(pd, id), { recursive: true, force: true });
+      removed.add(id);
+    }
+  }
+  return [...removed];
+}
+
+module.exports = { listSessions, deleteSessions, projectsDir };

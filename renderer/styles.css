@@ -761,3 +761,17 @@ body.resizing-row { cursor: row-resize; user-select: none; }
   .tab { padding: 6px 10px; }
 }
 .modal-box .task-mode-tabs { padding: 0; margin: -4px 0 14px; }
+
+/* 会話（セッション）を消すダイアログ */
+.sm-tools { gap: 16px; align-items: center; margin: 4px 0 8px; }
+.sm-list { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.sm-list > p { margin: 12px; }
+.sm-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer; color: var(--text); }
+.sm-row:last-child { border-bottom: none; }
+.sm-row.disabled { opacity: 0.55; cursor: not-allowed; }
+.sm-row input { margin-top: 3px; }
+.sm-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sm-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-used { font-size: 11px; padding: 1px 8px; align-self: center; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.sm-count { margin-right: auto; align-self: center; }

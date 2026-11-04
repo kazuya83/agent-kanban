@@ -1123,6 +1123,99 @@ class AgentManager extends EventEmitter {
     this.changed(c);
   }
 
+  // ---------- 会話（Claude Code のセッション）を消す ----------
+
+  // カードが覚えている会話の ID（次に続ける会話・完了後の会話・これまでの会話）
+  cardSessionIds(c) {
+    return new Set([c.sessionId, c.afterDoneSession, ...(c.sessions || []).map((x) => x.id)].filter(Boolean));
+  }
+
+  /**
+   * 会話ごとに、どのカードが使っているか
+   * @returns {Map<string, Array<{ id: string, title: string, busy: boolean }>>}
+   */
+  sessionUsage() {
+    const out = new Map();
+    for (const c of this.store.cards) {
+      const busy = c.status === 'running' || c.status === 'queued';
+      for (const id of this.cardSessionIds(c)) {
+        if (!out.has(id)) out.set(id, []);
+        out.get(id).push({ id: c.id, title: c.title, busy });
+      }
+    }
+    return out;
+  }
+
+  // Claude Code の設定フォルダ（WSL のリポジトリなら WSL の中の ~/.claude）。分からなければ既定の場所
+  async claudeConfigDir(repoPath) {
+    if (!this.opts.claudeConfigFor) return undefined;
+    try {
+      return (await this.opts.claudeConfigFor(repoPath)) || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // 消した会話をカードから外す（次に動かすときに、消した会話の続きにしようとしないように）
+  forgetSessions(ids, except) {
+    const gone = new Set(ids);
+    for (const c of this.store.cards) {
+      let touched = false;
+      if (c.sessionId && gone.has(c.sessionId)) {
+        c.sessionId = null;
+        c.forkNext = false;
+        touched = true;
+      }
+      if (c.afterDoneSession && gone.has(c.afterDoneSession)) {
+        c.afterDoneSession = null;
+        touched = true;
+      }
+      if ((c.sessions || []).some((x) => gone.has(x.id))) {
+        c.sessions = c.sessions.filter((x) => !gone.has(x.id));
+        touched = true;
+      }
+      if (touched && c !== except) this.changed(c);
+    }
+  }
+
+  /**
+   * タスクに関係なく、会話を選んで消す。実行中・待機中のカードが使っている会話は消さない
+   * @param {string[]} ids
+   * @returns {Promise<{ removed: string[], skipped: string[] }>}
+   */
+  async deleteSessions(ids, repoPath = this.store.settings.repoPath) {
+    const list = [...new Set((Array.isArray(ids) ? ids : []).filter(isSessionId))];
+    if (!list.length) throw new Error('消す会話を選んでください');
+    const usage = this.sessionUsage();
+    const skipped = list.filter((id) => (usage.get(id) || []).some((u) => u.busy));
+    const target = list.filter((id) => !skipped.includes(id));
+    const removed = target.length ? require('./sessions').deleteSessions(target, { configDir: await this.claudeConfigDir(repoPath) }) : [];
+    // ファイルが見つからなかった会話も、カードからは外しておく（もう続けられないので）
+    this.forgetSessions(target);
+    this.store.save();
+    return { removed, skipped };
+  }
+
+  /**
+   * マージして完了したタスクの、作業中の会話を消す（設定でオフにできる）。
+   * 引き継いだ元の会話（ターミナルの会話など）と、完了後に話した会話は残す。Claude Code の会話だけが対象
+   */
+  async deleteTaskSessions(c) {
+    if (this.store.settings.deleteSessionsOnMerge === false || isChat(c)) return;
+    const keep = new Set([c.afterDoneSession].filter(Boolean));
+    // ほかのカードが使っている会話（このタスクから作った修正タスクが引き継いだものなど）も残す
+    for (const o of this.store.cards) if (o !== c) for (const id of this.cardSessionIds(o)) keep.add(id);
+    const ids = (c.sessions || []).filter((x) => x.origin === 'task' && (x.agent || 'claude') === 'claude' && isSessionId(x.id) && !keep.has(x.id)).map((x) => x.id);
+    if (!ids.length) return;
+    try {
+      const removed = require('./sessions').deleteSessions(ids, { configDir: await this.claudeConfigDir(c.repoPath) });
+      this.forgetSessions(ids, c);
+      if (removed.length) this.log(c, 'system', `マージしたので、このタスクの会話（${removed.length} 件）を消しました`);
+    } catch (err) {
+      this.log(c, 'error', `会話を消せませんでした: ${err.message}`);
+    }
+  }
+
   commitMessage(c) {
     return c.issue ? `agent: ${c.title.replace(/^#\d+\s*/, '')} (#${c.issue.number})` : `agent: ${c.title}`;
   }
@@ -2245,6 +2338,7 @@ class AgentManager extends EventEmitter {
       c.status = 'done';
       c.mergedAt = Date.now();
       this.completed(c);
+      await this.deleteTaskSessions(c);
       this.changed(c);
       return { merged: true };
     } finally {
@@ -2437,6 +2531,7 @@ class AgentManager extends EventEmitter {
     c.mergedAt = c.prMergedAt;
     if (!wasDone) this.completed(c);
     else this.notify(c, 'done', `PR がマージされました: ${c.title}`, url);
+    await this.deleteTaskSessions(c);
     this.changed(c);
     return true;
   }

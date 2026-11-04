@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('api', {
   btw: (id, text) => call('card:btw', { id, text }),
   setSession: (id, session) => call('card:setSession', { id, session }),
   listSessions: () => call('sessions:list'),
+  deleteSessions: (ids) => call('sessions:delete', { ids }),
   logs: (id) => call('card:logs', id),
   diff: (id) => call('card:diff', id),
   worktree: (id) => call('card:worktree', id),

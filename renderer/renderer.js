@@ -2129,6 +2129,92 @@ function sessionRowHtml(c) {
 </dd>`;
 }
 
+// ---------------- 会話（セッション）を消す ----------------
+
+// タスクとは別に、Claude Code の会話を一覧して選んで消す
+function openSessionManager() {
+  openModal(
+    `<h2>会話（セッション）を消す</h2>
+     <p class="muted small">Claude Code の会話の記録（~/.claude/projects の中）を消します。消した会話は元に戻せず、続きから再開することもできません。実行中・待機中のタスクが使っている会話は消せません。</p>
+     <div class="row sm-tools">
+       <label class="check small"><input type="checkbox" id="smAll" /> ほかのフォルダの会話も表示</label>
+       <label class="check small"><input type="checkbox" id="smToggle" /> 表示中をすべて選ぶ</label>
+     </div>
+     <div id="smList" class="sm-list muted small">会話を読み込んでいます…</div>
+     <div class="modal-actions"><span id="smCount" class="muted small sm-count"></span><button class="btn ghost" id="smClose">閉じる</button><button class="btn danger" id="smDelete" disabled>選んだ会話を消す</button></div>`,
+    async () => {
+      let list = [];
+      const picked = new Set();
+      const visible = () => ($('smAll').checked ? list : list.filter((x) => x.related));
+      const updateCount = () => {
+        $('smCount').textContent = picked.size ? `${picked.size} 件を選択中` : '';
+        $('smDelete').disabled = !picked.size;
+      };
+      const render = () => {
+        const box = $('smList');
+        if (!box) return;
+        const rows = visible();
+        if (!rows.length) {
+          box.innerHTML = '<p class="muted small">（消せる会話はありません）</p>';
+          updateCount();
+          return;
+        }
+        box.innerHTML = rows
+          .map((x) => {
+            const used = x.usedBy || [];
+            const busy = used.some((u) => u.busy);
+            const tag = used.length ? `<span class="pill sm-used" title="${esc(used.map((u) => u.title).join('\n'))}">${busy ? '実行中のタスクで使用中' : `タスク「${esc(used[0].title.slice(0, 30))}」${used.length > 1 ? ` ほか ${used.length - 1} 件` : ''}`}</span>` : '';
+            return `<label class="sm-row ${busy ? 'disabled' : ''}"><input type="checkbox" class="smPick" value="${esc(x.id)}" ${busy ? 'disabled' : ''} ${picked.has(x.id) ? 'checked' : ''} />
+              <span class="sm-main"><span class="sm-title">${esc(x.title.slice(0, 100))}</span>
+              <span class="sm-meta muted small">${esc(fmtTime(x.updatedAt))} · ${esc(x.branch || '')}${!x.related || $('smAll').checked ? ` · ${esc(x.cwd || '')}` : ''}</span></span>${tag}</label>`;
+          })
+          .join('');
+        box.querySelectorAll('.smPick').forEach((cb) => {
+          cb.onchange = () => {
+            if (cb.checked) picked.add(cb.value);
+            else picked.delete(cb.value);
+            updateCount();
+          };
+        });
+        updateCount();
+      };
+      const load = async () => {
+        list = (await run(() => api.listSessions())) || [];
+        for (const id of [...picked]) if (!list.some((x) => x.id === id)) picked.delete(id);
+        render();
+      };
+      $('smClose').onclick = closeModal;
+      $('smAll').onchange = () => {
+        // 隠れた会話は選ばれたままにしない
+        if (!$('smAll').checked) for (const x of list) if (!x.related) picked.delete(x.id);
+        $('smToggle').checked = false;
+        render();
+      };
+      $('smToggle').onchange = () => {
+        for (const x of visible()) {
+          if ((x.usedBy || []).some((u) => u.busy)) continue;
+          if ($('smToggle').checked) picked.add(x.id);
+          else picked.delete(x.id);
+        }
+        render();
+      };
+      $('smDelete').onclick = async () => {
+        const ids = [...picked];
+        const used = list.filter((x) => picked.has(x.id) && (x.usedBy || []).length).length;
+        const msg = `選んだ ${ids.length} 件の会話を消しますか？\n消した会話は元に戻せません。${used ? `\n（${used} 件はタスクが使っています。そのタスクは次から新しい会話で始めます）` : ''}`;
+        if (!confirm(msg)) return;
+        const r = await runBusy('会話を消しています…', () => api.deleteSessions(ids));
+        if (!r) return;
+        picked.clear();
+        $('smToggle').checked = false;
+        toast(`${r.removed.length} 件の会話を消しました${r.skipped.length ? `（実行中で使っている ${r.skipped.length} 件は消していません）` : ''}`, 'ok');
+        await load();
+      };
+      await load();
+    },
+  );
+}
+
 // ---------------- GitHub Issue から作る ----------------
 
 // Issue 番号からカードを作る（上部の枠と、詳細ダイアログの両方から使う）
@@ -2659,6 +2745,7 @@ async function openSettings() {
        <small>「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上のベル）</label>
+     <label class="check"><input type="checkbox" id="sDeleteSessions" ${s.deleteSessionsOnMerge !== false ? 'checked' : ''} /> マージして完了したら、そのタスクの作業に使った Claude Code の会話（セッション）を消す（引き継いだ元の会話は残します）</label>
      <label class="check"><input type="checkbox" id="sClaudeRc" ${s.claudeRemoteControl ? 'checked' : ''} /> Claude カード起動時に公式 Remote Control（--remote-control）も付ける（claude.ai/code や Claude アプリから続けられる）</label>
 
      <h3 class="s-section">使うエージェント</h3>
@@ -2876,6 +2963,7 @@ async function openSettings() {
             defaultSkill: defSkill || '',
             issueStatusSync: $('sIssueSync').checked,
             suggestSkillsOnDone: $('sSuggestSkills').checked,
+            deleteSessionsOnMerge: $('sDeleteSessions').checked,
             specCheck: $('sSpecCheck').checked,
             claudeRemoteControl: $('sClaudeRc').checked,
             weeklyResetDay: $('sResetDay').value,
@@ -3165,6 +3253,7 @@ $('newBtn').onclick = () => newTask();
 $('chatBtn').onclick = openChats;
 $('detailBackdrop').addEventListener('mousedown', closeDetail);
 $('settingsBtn').onclick = openSettings;
+$('sessionsBtn').onclick = openSessionManager;
 $('rcBtn').onclick = openRemoteSettings;
 
 // ---------------- gh（GitHub CLI）の案内 ----------------

@@ -54,6 +54,7 @@ const DEFAULT_SETTINGS = {
   statusMapping: { inProgress: '', inReview: '', done: '' }, // 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空なら名前から自動で探す
   pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
   suggestSkillsOnDone: true, // タスクが完了したら「スキルにしませんか？」と通知する
+  deleteSessionsOnMerge: true, // マージして完了したら、そのタスクが作業に使った Claude Code の会話を消す
   specCheck: true, // 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める
   branchNamingRule: '', // ブランチの命名規則（自然言語）。空なら agent/issue-12-xxxx のようないつもの名前
   weeklyResetDay: '', // Claude の週間上限がリセットされる曜日（'0'=日〜'6'=土）。空なら claude が知らせてくる日時を使う
