@@ -868,24 +868,13 @@ function renderDetailHead() {
     // 完了したタスク（完了後の会話の途中も含む）は削除できない
     s !== 'done' && !c.afterDone && `<button class="btn danger" data-act="discard">破棄</button>`,
   ].filter(Boolean);
-  $('detailHead').innerHTML = `
+  $('detailTitle').innerHTML = `
     <div class="d-title-row">
       <span class="badge b-${badgeFor(c)[0]}">${badgeFor(c)[1]}</span>
       <h2 class="d-title">${esc(c.title)}</h2>
       <button class="icon" id="closeDetail" title="閉じる">✕</button>
-    </div>
-    <dl class="d-meta">
-      ${c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''}
-      ${!chat ? `<dt>エージェント</dt><dd>${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</dd>` : ''}
-      ${sessionRowHtml(c)}
-      ${chat ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（worktree は作りません）</span></dd>` : ''}
-      ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
-      ${c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''}
-      ${c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}${c.prState === 'MERGED' ? '（マージ済み）' : c.prState === 'CLOSED' ? '（閉じられました）' : ''}${c.prState === 'OPEN' && c.prMergeable === 'CONFLICTING' ? ` <span class="badge b-conflict">コンフリクト</span>${c.worktreePath && !c.conflict && (s === 'review' || s === 'failed') ? ' <button class="btn small" data-act="prConflict">解消する</button>' : ''}` : ''}</dd>` : ''}
-      ${(c.mergedInto || []).length ? `<dt>マージ済み</dt><dd>${c.mergedInto.map((b) => esc(b) + ((c.pushedTo || []).includes(b) ? '（origin にも push 済み）' : '')).join(', ')}</dd>` : ''}
-      ${c.costUsd ? `<dt>コスト</dt><dd>$${c.costUsd.toFixed(3)}</dd>` : ''}
-      ${(c.alwaysAllow || []).length ? `<dt>常に許可</dt><dd>${c.alwaysAllow.map(esc).join(', ')}</dd>` : ''}
-    </dl>
+    </div>`;
+  $('detailHead').innerHTML = `
     ${isInterrupted(c) ? interruptedBoxHtml(c) : c.error ? `<div class="d-error">${esc(c.error)}</div>` : ''}
     ${relayFlowHtml(c)}
     ${competeBoxHtml(c)}
@@ -897,19 +886,7 @@ function renderDetailHead() {
     <div class="d-actions">${btns.join('')}</div>`;
   $('closeDetail').onclick = closeDetail;
   $('detailHead').querySelectorAll('details[data-rkey]').forEach((d) => (d.ontoggle = () => (d.open ? state.relayOpen.add(d.dataset.rkey) : state.relayOpen.delete(d.dataset.rkey))));
-  const ds = $('dSession');
-  if (ds) {
-    ds.onchange = async () => {
-      const v = ds.value;
-      if (v === '__pick__') {
-        state.headSig = '';
-        renderDetailHead();
-        return openSessionPicker(c);
-      }
-      const sess = v === '__new__' ? { mode: 'new' } : { mode: 'resume', id: v };
-      await run(() => api.setSession(c.id, sess), v === '__new__' ? '次は新しい会話で始めます' : '次はこの会話の続きで始めます');
-    };
-  }
+  if (state.tab === 'info') renderInfo(c);
   const canFollow = canSendFollow(c);
   $('followInput').disabled = !canFollow;
   drawFollowSkill();
@@ -925,6 +902,51 @@ function renderDetailHead() {
     : s === 'todo' ? '開始すると、終わったあとに追加の指示を送れます'
     : 'エージェントの作業中は送れません';
 }
+
+// 詳細の「情報」タブ: エージェント・会話・ブランチ・worktree・PR・コストなど
+function detailMetaHtml(c) {
+  const s = c.status;
+  const chat = isChat(c);
+  return `<dl class="d-meta">
+      ${c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''}
+      ${!chat ? `<dt>エージェント</dt><dd>${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</dd>` : ''}
+      ${sessionRowHtml(c)}
+      ${chat ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（worktree は作りません）</span></dd>` : ''}
+      ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
+      ${c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''}
+      ${c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}${c.prState === 'MERGED' ? '（マージ済み）' : c.prState === 'CLOSED' ? '（閉じられました）' : ''}${c.prState === 'OPEN' && c.prMergeable === 'CONFLICTING' ? ` <span class="badge b-conflict">コンフリクト</span>${c.worktreePath && !c.conflict && (s === 'review' || s === 'failed') ? ' <button class="btn small" data-act="prConflict">解消する</button>' : ''}` : ''}</dd>` : ''}
+      ${(c.mergedInto || []).length ? `<dt>マージ済み</dt><dd>${c.mergedInto.map((b) => esc(b) + ((c.pushedTo || []).includes(b) ? '（origin にも push 済み）' : '')).join(', ')}</dd>` : ''}
+      ${c.costUsd ? `<dt>コスト</dt><dd>$${c.costUsd.toFixed(3)}</dd>` : ''}
+      ${(c.alwaysAllow || []).length ? `<dt>常に許可</dt><dd>${c.alwaysAllow.map(esc).join(', ')}</dd>` : ''}
+    </dl>`;
+}
+
+function renderInfo(c) {
+  const body = $('detailBody');
+  body.innerHTML = `<div class="pad">${detailMetaHtml(c)}</div>`;
+  const ds = $('dSession');
+  if (ds) {
+    ds.onchange = async () => {
+      const v = ds.value;
+      if (v === '__pick__') {
+        state.headSig = '';
+        renderDetailHead(); // 選択を元に戻す（情報タブも描き直す）
+        return openSessionPicker(c);
+      }
+      const sess = v === '__new__' ? { mode: 'new' } : { mode: 'resume', id: v };
+      await run(() => api.setSession(c.id, sess), v === '__new__' ? '次は新しい会話で始めます' : '次はこの会話の続きで始めます');
+    };
+  }
+}
+
+// 情報タブの中のリンク・ボタン
+$('detailBody').addEventListener('click', (e) => {
+  if (state.tab !== 'info') return;
+  const chip = e.target.closest('.issue-chip');
+  if (chip) return run(() => api.openExternal(chip.dataset.url));
+  const c = card(state.selected);
+  if (c && e.target.closest('[data-act="prConflict"]')) run(() => api.reopenPrConflict(c.id));
+});
 
 $('detailHead').addEventListener('input', (e) => {
   if (!e.target.classList.contains('q-other')) return;
@@ -1449,7 +1471,9 @@ async function renderDetailBody() {
   const c = card(state.selected);
   if (!c) return;
   const body = $('detailBody');
-  if (state.tab === 'log') {
+  if (state.tab === 'info') {
+    renderInfo(c);
+  } else if (state.tab === 'log') {
     const logs = state.logs.get(c.id) || [];
     if (logs.length) renderChatLog(body, c, logs);
     else {
@@ -3365,7 +3389,7 @@ api.appInfo().then(
   const h = { ...pref };
   const minH = () => Math.max(24, tabs.offsetHeight);
   // 上下の段とタブを除いた、3つの段で分け合える高さ
-  const avail = () => panel.clientHeight - tabs.offsetHeight;
+  const avail = () => panel.clientHeight - tabs.offsetHeight - $('detailTitle').offsetHeight;
   const cur = (k) => (h[k] > 0 ? h[k] : els[k].offsetHeight);
   const apply = (k) => {
     const el = els[k];
