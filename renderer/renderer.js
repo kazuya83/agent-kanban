@@ -679,6 +679,7 @@ async function select(id) {
   $('detailBackdrop').classList.toggle('hidden', !chatModal);
   $('detail').classList.remove('hidden');
   $('followInput').value = '';
+  followAttach.clear();
   state.followSkill = null;
   renderBoard();
   renderDetailHead();
@@ -912,6 +913,7 @@ function renderDetailHead() {
   const canFollow = canSendFollow(c);
   $('followInput').disabled = !canFollow;
   drawFollowSkill();
+  followAttach.sync();
   $('followBtn').disabled = !canFollow;
   $('followInput').placeholder =
     chat ? (canFollow ? 'メッセージを送る（Ctrl/⌘ + Enter で送信）。同じ会話の続きとして話せます' : '返事が来たら、続きを話せます')
@@ -1037,7 +1039,7 @@ const NOTE_ICON = { result: 'checkCircle', error: 'alert', question: 'question',
 function chatItemHtml(it, agent, open) {
   const e = it.entry;
   if (it.type === 'user') {
-    return `<div class="c-row c-user" title="${esc(logTime(e))}"><div class="c-bubble">${skillChip(e)}${mdHtml(e.text)}${logImagesHtml(e.images)}</div></div>`;
+    return `<div class="c-row c-user" title="${esc(logTime(e))}"><div class="c-bubble">${skillChip(e)}${mdHtml(e.text)}${logImagesHtml(e.images)}${attachFilesHtml(e.attachments)}</div></div>`;
   }
   if (it.type === 'assistant') {
     return `<div class="c-row c-agent">${it.head ? chatHeadHtml(it.agent || agent, e) : ''}<div class="c-text" title="${esc(logTime(e))}">${mdHtml(e.text)}${logImagesHtml(e.images)}</div></div>`;
@@ -1497,7 +1499,7 @@ async function renderDetailBody() {
     const editable = c.status === 'todo';
     body.innerHTML = `<div class="pad">
       <label class="field"><span>タイトル</span><input id="editTitle" value="${esc(c.title)}" ${editable ? '' : 'disabled'} /></label>
-      <div class="field"><span>最初の指示</span><div id="editSkill" class="skill-slot"></div><textarea id="editPrompt" rows="14" ${editable ? '' : 'disabled'}>${esc(c.prompt)}</textarea></div>
+      <div class="field"><span>最初の指示</span><div id="editSkill" class="skill-slot"></div><textarea id="editPrompt" rows="14" ${editable ? '' : 'disabled'}>${esc(c.prompt)}</textarea>${c.attachments && c.attachments.length ? `<small class="muted">添付ファイル</small>${attachFilesHtml(c.attachments, { all: true })}` : ''}</div>
       ${editable ? '<button class="btn primary" id="saveEdit">保存</button>' : '<p class="muted">開始後は編集できません。変更したいときは追加指示を送ってください。</p>'}
     </div>`;
     let editSkill = c.skill || null;
@@ -1505,6 +1507,121 @@ async function renderDetailBody() {
     drawEditSkill();
     if (editable) $('saveEdit').onclick = () => runBusy('保存しています…', () => api.updateCard({ id: c.id, title: $('editTitle').value, prompt: $('editPrompt').value, skill: editSkill || '' }), '保存しました');
   }
+}
+
+// ---------------- 添付ファイル ----------------
+// 指示の入力欄に、ファイル（画像・PDF・テキストなど）を付ける。貼り付け・ドラッグ＆ドロップ・添付ボタンで足せる。
+// 中身は base64 で読んで送る（遠隔操作でもそのままホストに届く。ホストが作業フォルダの外に保存して、エージェントに渡す）
+
+const ATTACH_MAX_FILES = 10;
+const ATTACH_MAX_BYTES = 20 * 1024 * 1024; // 合わせて（1つでも）この大きさまで。ホスト側でも同じ上限で確かめる
+
+function fmtBytes(n) {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)}MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)}KB`;
+  return `${n}B`;
+}
+
+function readFileAsAttachment(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const url = String(r.result || '');
+      const i = url.indexOf(',');
+      resolve({ name: file.name || 'clipboard.png', mediaType: file.type || '', size: file.size, data: i >= 0 ? url.slice(i + 1) : '' });
+    };
+    r.onerror = () => reject(new Error(`「${file.name}」を読めませんでした`));
+    r.readAsDataURL(file);
+  });
+}
+
+/**
+ * 入力欄に添付ファイルの欄を付ける
+ * @param {{ box: HTMLElement, input: HTMLElement, drop?: HTMLElement, enabled?: () => boolean }} o
+ *   box: 添付ボタンと添付の一覧を描く場所 / input: 貼り付けを受け取る入力欄 / drop: ドロップを受け取る場所（省略すると input）
+ * @returns {{ list: () => object[], clear: () => void, render: () => void }}
+ */
+function attachField({ box, input, drop, enabled = () => true }) {
+  let items = [];
+  const total = () => items.reduce((n, a) => n + a.size, 0);
+  const add = async (files) => {
+    if (!enabled()) return;
+    const list = Array.from(files || []).filter((f) => f && f.size >= 0);
+    if (!list.length) return;
+    for (const f of list) {
+      if (items.length >= ATTACH_MAX_FILES) return toast(`添付できるファイルは ${ATTACH_MAX_FILES} 個までです`);
+      if (total() + f.size > ATTACH_MAX_BYTES) return toast(`添付ファイルは合わせて ${fmtBytes(ATTACH_MAX_BYTES)} までです（「${f.name}」は付けられませんでした）`);
+      try {
+        const a = await readFileAsAttachment(f);
+        // クリップボードの画像は名前が同じ（image.png）なので、時刻を付けて見分けられるようにする
+        if (!f.name || f.name === 'image.png') a.name = `clipboard-${new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-')}-${items.length + 1}.png`;
+        items.push(a);
+      } catch (err) {
+        toast(err.message);
+      }
+    }
+    render();
+  };
+  let shown = null; // 最後に描いたときに使えたか
+  const render = () => {
+    const on = enabled();
+    shown = on;
+    box.classList.toggle('hidden', !on);
+    if (!on) return;
+    box.innerHTML = `<button type="button" class="btn small ghost attach-pick" title="ファイルを選んで添付します（貼り付け・ドラッグ＆ドロップでも付けられます）">${icon('paperclip')}ファイルを添付</button><input type="file" multiple class="hidden attach-input" />
+      ${items.map((a, i) => `<span class="attach-chip" title="${esc(a.name)}（${fmtBytes(a.size)}）">${IMG_TYPES.has(a.mediaType) ? `<img src="data:${a.mediaType};base64,${a.data}" alt="" />` : icon('file')}<span class="attach-name">${esc(a.name)}</span><span class="muted">${fmtBytes(a.size)}</span><button type="button" class="chip-x" data-i="${i}" title="添付を外す">×</button></span>`).join('')}`;
+    const fi = box.querySelector('.attach-input');
+    box.querySelector('.attach-pick').onclick = () => fi.click();
+    fi.onchange = () => add(fi.files);
+    box.querySelectorAll('.chip-x').forEach((b) => {
+      b.onclick = () => {
+        items.splice(Number(b.dataset.i), 1);
+        render();
+      };
+    });
+  };
+  input.addEventListener('paste', (e) => {
+    const files = e.clipboardData && e.clipboardData.files;
+    if (!enabled() || !files || !files.length) return;
+    e.preventDefault();
+    add(files);
+  });
+  const target = drop || input;
+  const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+  target.addEventListener('dragover', (e) => {
+    if (!enabled() || !hasFiles(e)) return;
+    e.preventDefault();
+    target.classList.add('attach-over');
+  });
+  target.addEventListener('dragleave', (e) => {
+    if (!target.contains(e.relatedTarget)) target.classList.remove('attach-over');
+  });
+  target.addEventListener('drop', (e) => {
+    target.classList.remove('attach-over');
+    if (!enabled() || !hasFiles(e)) return;
+    e.preventDefault();
+    add(e.dataTransfer.files);
+  });
+  render();
+  return {
+    list: () => items.map(({ name, mediaType, data }) => ({ name, mediaType, data })),
+    clear: () => {
+      items = [];
+      render();
+    },
+    render,
+    // 使える・使えないが変わったときだけ描き直す（ファイルを選んでいる途中に、ボタンを作り直さない）
+    sync: () => {
+      if (enabled() !== shown) render();
+    },
+  };
+}
+
+// ログ・指示のタブに出す、画像以外の添付ファイルの一覧（画像は logImagesHtml で出す）
+function attachFilesHtml(atts, { all = false } = {}) {
+  const list = (Array.isArray(atts) ? atts : []).filter((a) => a && (all || !IMG_TYPES.has(a.mediaType)));
+  if (!list.length) return '';
+  return `<div class="attach-files">${list.map((a) => `<span class="attach-chip" title="${esc(a.path || a.name)}">${icon(IMG_TYPES.has(a.mediaType) ? 'image' : 'file')}<span class="attach-name">${esc(a.name)}</span><span class="muted">${fmtBytes(a.size || 0)}</span></span>`).join('')}</div>`;
 }
 
 // 追加指示を送れる状態か（完了したタスクにも送れる。送ると、タスクは完了のまま、ファイルを変えずに話す）
@@ -1518,13 +1635,26 @@ function drawFollowSkill() {
   renderSkillSlot('followSkill', state.followSkill, (v) => ((state.followSkill = v), drawFollowSkill()), { disabled: !can });
 }
 
+// 会話の入力欄にだけ、添付ファイルを付けられる（タスクの追加の指示には付けない）
+const followAttach = attachField({
+  box: $('followAttach'),
+  input: $('followInput'),
+  drop: $('detailFoot'),
+  enabled: () => {
+    const c = card(state.selected);
+    return isChat(c) && canSendFollow(c);
+  },
+});
+
 async function sendFollow() {
   const c = card(state.selected);
   const msg = $('followInput').value.trim();
   if (!c || !msg) return;
-  const ok = await run(() => api.send(c.id, msg, state.followSkill).then(() => true));
+  const files = isChat(c) ? followAttach.list() : [];
+  const ok = await run(() => api.send(c.id, msg, state.followSkill, files.length ? files : undefined).then(() => true));
   if (ok) {
     $('followInput').value = '';
+    followAttach.clear();
     state.followSkill = null; // スキルはその1回だけ
     drawFollowSkill();
   }
@@ -1628,7 +1758,7 @@ function newTask(opts = {}) {
      : from ? `<p class="muted small">会話「${esc(from.title)}」の続きとして、タスクを始めます（会話の内容をエージェントが引き継ぎます。会話そのものはそのまま残ります）。</p>` : ''}
      <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
      ${agentFieldHtml('n', from && enabledAgents().includes(agentOf(from)) ? agentOf(from) : undefined)}
-     <div class="field"><span>エージェントへの指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></div>
+     <div class="field"><span>エージェントへの指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。画像やファイルは貼り付け・ドラッグ＆ドロップでも添付できます。"></textarea><div id="nAttach" class="attach-bar"></div></div>
      ${sessionFieldHtml('n')}
      <p class="muted small">GitHub の Issue から作るときは、右上の「Issue から作成」を使ってください。</p>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
@@ -1644,8 +1774,10 @@ function newTask(opts = {}) {
       let skill = state.board.settings.defaultSkill || null;
       const drawSkill = () => renderSkillSlot('nSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
+      const att = attachField({ box: $('nAttach'), input: $('nPrompt'), drop: $('nPrompt').closest('.field') });
       const submit = async () => {
-        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value, fromChat: from ? from.id : undefined }));
+        const files = att.list();
+        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value, fromChat: from ? from.id : undefined, attachments: files.length ? files : undefined }));
         if (id) {
           closeModal();
           selectNew(id);
@@ -1694,7 +1826,7 @@ function newChat() {
     `<h2>${icon('chat')}会話を始める</h2>
      <p class="muted small">タスクを作らずに、このリポジトリについてエージェントと話せます（質問・調べもの・相談など）。worktree やブランチは作らず、コミットやマージもしません。</p>
      ${agentFieldHtml('c', undefined, { orchestration: false })}
-     <div class="field"><span>メッセージ</span><div id="cSkill" class="skill-slot"></div><textarea id="cMsg" rows="6" placeholder="例: このリポジトリの全体の構成を教えて"></textarea></div>
+     <div class="field"><span>メッセージ</span><div id="cSkill" class="skill-slot"></div><textarea id="cMsg" rows="6" placeholder="例: このリポジトリの全体の構成を教えて（画像やファイルは貼り付け・ドラッグ＆ドロップでも添付できます）"></textarea><div id="cAttach" class="attach-bar"></div></div>
      <label class="field"><span>タイトル（省略するとメッセージの1行目）</span><input id="cTitle" /></label>
      ${sessionFieldHtml('c')}
      <p class="muted small">会話はリポジトリのフォルダ（手元の作業中のファイル）でそのまま動くので、ファイルの変更やコマンドは毎回カードで確かめます。作業してほしくなったら、詳細画面の「タスクにする」で会話の続きからタスクを作れます。</p>
@@ -1706,8 +1838,10 @@ function newChat() {
       let skill = null;
       const drawSkill = () => renderSkillSlot('cSkill', skill, (v) => ((skill = v), drawSkill()));
       drawSkill();
+      const att = attachField({ box: $('cAttach'), input: $('cMsg'), drop: $('cMsg').closest('.field') });
       const submit = async () => {
-        const id = await runBusy('会話を始めています…', () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: $('cAgent').value === 'claude' ? readSessionField('c') : { mode: 'new' }, skill, agent: $('cAgent').value }));
+        const files = att.list();
+        const id = await runBusy('会話を始めています…', () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: $('cAgent').value === 'claude' ? readSessionField('c') : { mode: 'new' }, skill, agent: $('cAgent').value, attachments: files.length ? files : undefined }));
         if (id) {
           closeModal();
           selectNew(id);
