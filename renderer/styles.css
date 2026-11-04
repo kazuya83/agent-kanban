@@ -47,6 +47,8 @@ input, textarea, select {
   width: 100%;
 }
 textarea { resize: vertical; }
+/* 入力欄・プルダウン・時刻入力の高さをそろえる（横に並べたときに上下がずれないように） */
+.field input:not([type=checkbox]):not([type=radio]):not([type=file]), .field select { line-height: 20px; height: 38px; }
 input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .hidden { display: none !important; }
 .muted { color: var(--muted); }
@@ -290,6 +292,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 .field small, .field-note { color: var(--muted); display: block; margin-top: 4px; }
 .field-note { margin: -4px 0 10px; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* 横並びの項目は、項目名が折り返して行数が違っても入力欄の下端をそろえる */
+.row > .field { display: flex; flex-direction: column; }
+.row > .field > span { flex: 1 0 auto; }
 .status-map { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .status-map .row { grid-template-columns: 1fr 1fr 1fr; }
 .status-map .field { margin-bottom: 6px; }
