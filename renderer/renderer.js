@@ -837,7 +837,7 @@ const RELAY_STATE = {
   done: ['✓', '完了'],
 };
 // 設定: 分岐の行き先の選択肢（'' = 次の工程 / 'end' = 終了 / 工程の番号）
-function targetOpts(v, n) {
+function relayTargetOptions(v, n) {
   const o = (val, label) => `<option value="${val}" ${String(v === undefined ? '' : v) === String(val) ? 'selected' : ''}>${label}</option>`;
   return [o('', '次の工程'), ...Array.from({ length: n }, (_, j) => o(j, `工程${j + 1}へ`)), o('end', '終了（レビューへ）')].join('');
 }
@@ -3035,8 +3035,8 @@ async function openSettings() {
               <button class="icon rDel" type="button" title="この工程を消す">✕</button>
               <textarea class="rInst" rows="2" placeholder="この工程の担当の説明（例: 前の工程の変更をレビューして直す）">${esc(st.instruction)}</textarea>
               <div class="relay-branch" title="合格・差し戻しの行き先を「次の工程」以外にすると、この工程のエージェントに結果を判定してもらい（返事の最後に [[PASS]] / [[FAIL]]）、行き先を変えます。前の工程に戻すとループになります">
-                <label>合格なら <select class="rPass">${targetOpts(st.onPass, relay.length)}</select></label>
-                <label>差し戻しなら <select class="rFail">${targetOpts(st.onFail, relay.length)}</select></label>
+                <label>合格なら <select class="rPass">${relayTargetOptions(st.onPass, relay.length)}</select></label>
+                <label>差し戻しなら <select class="rFail">${relayTargetOptions(st.onFail, relay.length)}</select></label>
                 <label class="rLoopBox" ${st.onPass === undefined && st.onFail === undefined ? 'hidden' : ''}>戻る上限 <input class="rLoops" type="number" min="1" max="10" value="${esc(st.maxLoops || 3)}" /> 回</label>
               </div>
             </div>`,
