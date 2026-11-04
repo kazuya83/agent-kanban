@@ -769,7 +769,8 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .sm-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer; color: var(--text); }
 .sm-row:last-child { border-bottom: none; }
 .sm-row.disabled { opacity: 0.55; cursor: not-allowed; }
-.sm-row input { margin-top: 3px; }
+/* 全体の input { width: 100% } が効くと、チェックボックスが行の幅を取って会話の名前が見えなくなる */
+.sm-row input[type=checkbox] { width: auto; flex: none; padding: 0; margin: 3px 0 0; }
 .sm-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .sm-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sm-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
