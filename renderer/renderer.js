@@ -1334,19 +1334,22 @@ function orchestrationOf(s) {
 function agentFieldHtml(idp, value, { orchestration = true } = {}) {
   const s = state.board.settings;
   const on = enabledAgents(s);
-  const v = value || defaultAgent(s);
-  const opt = (val, label, disabled) => `<option value="${val}" ${val === v && !disabled ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(label)}</option>`;
-  const single = AGENTS.filter(([a]) => on.includes(a)).map(([a, l]) => opt(a, l)).join('');
-  if (!orchestration || orchestrationOf(s) === 'none') return `<label class="field"><span>エージェント</span><select id="${idp}Agent">${single}</select><small id="${idp}AgentHint" class="muted"></small></label>`;
+  const orch = orchestration ? orchestrationOf(s) : 'none';
   const steps = s.relaySteps || [];
   const relayOff = !steps.length || steps.some((x) => !on.includes(x.agent));
   const comp = (s.competeAgents || []).filter((a) => on.includes(a));
+  // 設定でPipeline・競争を選んでいれば、それを最初から選んでおく（使えない状態なら、最初から選んでおくエージェント）
+  const orchUsable = (orch === 'relay' && !relayOff) || (orch === 'compete' && comp.length >= 2);
+  const v = value || (orchUsable ? orch : defaultAgent(s));
+  const opt = (val, label, disabled) => `<option value="${val}" ${val === v && !disabled ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(label)}</option>`;
+  const single = AGENTS.filter(([a]) => on.includes(a)).map(([a, l]) => opt(a, l)).join('');
+  if (orch === 'none') return `<label class="field"><span>エージェント</span><select id="${idp}Agent">${single}</select><small id="${idp}AgentHint" class="muted"></small></label>`;
   const stepsLabel = steps.map((x) => `${x.label}(${agentShort(x.agent)})`).join(' → ') || '未設定';
   return `<label class="field"><span>エージェント</span>
     <select id="${idp}Agent">
       <optgroup label="1つのエージェントで動かす">${single}</optgroup>
       <optgroup label="オーケストレーション">
-        ${orchestrationOf(s) === 'relay'
+        ${orch === 'relay'
           ? opt('relay', `Pipeline: ${stepsLabel}${relayOff ? '（設定で工程のエージェントを使う設定にしてください）' : ''}`, relayOff)
           : opt('compete', comp.length >= 2 ? `競争: ${comp.map(agentShort).join('・')} で同じタスクを解いて比べる` : '競争（設定で使うエージェントを2つ以上選んでください）', comp.length < 2)}
       </optgroup>
@@ -1898,7 +1901,7 @@ async function openSettings() {
      <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。</small>
      <label class="field"><span>新しいタスク・会話で最初から選んでおくエージェント</span>
        <select id="sDefaultAgent"></select>
-       <small>Pipeline・競争（設定で選んだ方。「なし」なら出ません）は、タスクを作るときに「エージェント」の欄で選べます。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
+       <small>オーケストレーションで Pipeline・競争を選んでいれば、タスクを作るときの「エージェント」の欄では、そちらを最初から選んでおきます（使えない状態のときや会話では、このエージェント）。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
 
      <h3 class="s-section">オーケストレーション</h3>
      <div class="field"><span>使うオーケストレーション（Pipelineと競争は、どちらか1つだけ使えます。使わないこともできます）</span>
