@@ -870,37 +870,55 @@ test('マージ先のフォルダで rebase が途中なら、わかりやすく
   await assert.rejects(agents.merge(c.id, { target: 'main' }), /rebase が途中です/);
 });
 
-test('完了（マージ済み）のタスクでも会話を続けられる: 同じ場所に worktree を作り直して同じ会話の続きから動く', async () => {
+test('完了（マージ済み）のタスクと話しても、開き直さない: 完了のまま、worktree を作らず計画モードで答える', async () => {
   const { repo, store, agents, g } = setup();
   const c = agents.createCard({ title: 'reopen', prompt: '最初の作業' });
   agents.start(c.id);
   await waitFor(() => c.status === 'review');
   const sess = c.sessionId;
   const wt = c.worktreePath;
-  const firstBranch = c.branch;
   await agents.merge(c.id);
   assert.strictEqual(c.status, 'done');
   assert.ok(!fs.existsSync(wt));
+  const mainBefore = g('rev-parse', 'main').toString().trim();
+  const outsBefore = fs.readdirSync(repo).filter((f) => f.startsWith('out-')).length;
 
-  // 完了したタスクに追加指示を送る
+  // 完了したタスクに話しかける
   agents.send(c.id, 'スキルを追加して');
-  await waitFor(() => c.status === 'review');
-  assert.strictEqual(c.worktreePath, wt, '前と同じ場所に作り直す（会話がフォルダごとに保存されているため）');
-  assert.strictEqual(c.sessionId, sess, '同じ会話の続き（--resume）');
-  assert.strictEqual(c.branch, firstBranch, 'マージ後に消したブランチ名をそのまま使う');
-  assert.strictEqual(c.baseCommit, g('rev-parse', 'main').toString().trim(), 'マージ先の最新から始める');
-  assert.match(await agents.diff(c.id), /スキルを追加して/);
-  assert.doesNotMatch(await agents.diff(c.id), /最初の作業/, '前の作業はもう取り込み済みなので差分に出ない');
+  assert.strictEqual(c.afterDone, true);
+  await waitFor(() => c.status === 'done' && !c.afterDone);
+  assert.ok(!c.worktreePath && !fs.existsSync(wt), 'worktree を作り直さない');
+  assert.ok(c.logs.some((l) => /権限モード: plan/.test(l.text)), 'ファイルを変えない計画モードで動く');
+  assert.notStrictEqual(c.sessionId, sess, '前の作業の会話（worktree のフォルダの会話）は使わず、新しい会話で始める');
+  assert.match(c.lastPromptSent, /完了したタスクについての会話です/);
+  assert.match(c.lastPromptSent, /最初の作業/, '元のタスクの中身を渡す');
+  assert.match(c.lastPromptSent, /修正タスクを作る/, '修正は別のタスクにするよう伝える');
+  assert.strictEqual(fs.readdirSync(repo).filter((f) => f.startsWith('out-')).length, outsBefore, 'ファイルを変えない');
+  assert.strictEqual(g('rev-parse', 'main').toString().trim(), mainBefore, 'コミットしない');
+  await assert.rejects(agents.merge(c.id, { target: 'main' }), /レビュー中のタスクだけ/, 'マージはできない（ボタンも出ない）');
 
-  // もう一度マージできる
-  await agents.merge(c.id);
-  assert.strictEqual(c.status, 'done');
-  assert.strictEqual(fs.readdirSync(repo).filter((f) => f.startsWith('out-')).length, 2);
+  // 2回目は、完了後の会話の続き
+  const talk = c.sessionId;
+  agents.send(c.id, 'もう少し詳しく');
+  await waitFor(() => c.status === 'done' && !c.afterDone);
+  assert.strictEqual(c.sessionId, talk);
+  assert.strictEqual(c.lastPromptSent, 'もう少し詳しく');
+
+  // 修正は別のタスクにする: 元のタスクのやりとりを引き継ぐ
+  const [fix] = agents.createTask({ title: '修正: reopen', prompt: '直して', agent: 'claude', fromChat: c.id, session: { mode: 'resume', id: c.sessionId } });
+  assert.notStrictEqual(fix.id, c.id);
+  assert.strictEqual(fix.status, 'todo');
+  assert.strictEqual(fix.fromChat, c.id);
+  assert.ok(!fix.forkNext && !fix.sessionId, '会話は引き継がず、やりとりを渡す');
+  assert.match(fix.chatContext, /完了したタスク「reopen」のやりとり/);
+  assert.match(fix.chatContext, /もう少し詳しく/);
+  assert.strictEqual(c.status, 'done', '元のタスクは完了のまま');
+  await agents.discard(fix.id);
 
   // 完了に入ったら、通知で「スキルにしませんか？」と聞く（1つのタスクで1回だけ）
   const notes = agents.listNotifications(c.repoPath).filter((n) => n.cardId === c.id);
   assert.ok(notes.some((n) => n.kind === 'review'), '作業が終わったらレビュー待ちの通知');
-  assert.ok(notes.filter((n) => n.kind === 'done').length >= 2, '完了の通知（マージのたび）');
+  assert.ok(notes.some((n) => n.kind === 'done'), '完了の通知');
   const skillNotes = notes.filter((n) => n.kind === 'skill');
   assert.strictEqual(skillNotes.length, 1, 'スキルの提案の通知は1回だけ');
   assert.strictEqual(skillNotes[0].action, 'suggestSkills');
@@ -917,14 +935,14 @@ test('完了（マージ済み）のタスクでも会話を続けられる: 同
   assert.match(chat.title, /スキルの提案: reopen/);
   assert.match(chat.prompt, /スキル（SKILL\.md）として残しておく/);
   assert.match(chat.prompt, /最初の作業/, '元のタスクの指示を渡す');
-  assert.match(chat.prompt, /スキルを追加して/, '元のタスクのやりとりも渡す');
+  assert.match(chat.prompt, /もう少し詳しく/, '元のタスクのやりとりも渡す');
   await waitFor(() => chat.status === 'review');
   assert.strictEqual(c.status, 'done', '元のタスクは完了のまま（開き直さない）');
   assert.strictEqual(c.logs.length, logsBefore, '元のタスクのログに足さない');
   assert.ok(!fs.existsSync(wt), 'worktree を作り直さない');
 });
 
-test('PR を作って完了したタスクの続きは、origin の前のブランチとぶつからない名前のブランチで動く', async () => {
+test('PR を作って完了したタスクと話しても、PR やブランチには触らない', async () => {
   const { tmp, store, agents, g } = setup();
   store.settings.integration = 'pr';
   const remote = path.join(tmp, 'remote.git');
@@ -943,10 +961,11 @@ test('PR を作って完了したタスクの続きは、origin の前のブラ�
   assert.strictEqual(c.status, 'done');
 
   agents.send(c.id, '続き');
-  await waitFor(() => c.status === 'review');
-  assert.strictEqual(c.branch, `${first}-2`);
-  assert.strictEqual(c.prUrl, null, '次は新しい PR を作る');
-  assert.ok(fs.existsSync(c.worktreePath));
+  await waitFor(() => c.status === 'done' && !c.afterDone);
+  assert.strictEqual(c.branch, first);
+  assert.strictEqual(c.prUrl, 'https://github.com/o/r/pull/9', 'PR はそのまま');
+  assert.ok(!c.worktreePath);
+  await assert.rejects(agents.createPullRequest(c.id, {}), /レビュー中のタスクだけ/);
 });
 
 test('通知: 既読・削除、設定で完了時のスキル提案を止められる', () => {

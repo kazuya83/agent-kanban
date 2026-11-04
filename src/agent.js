@@ -63,7 +63,38 @@ function buildSkillSuggestPrompt(c) {
 function buildChatContext(chat) {
   const picked = talkExcerpt(chat, { size: 8000, skipPrompt: false });
   if (!picked.length) return '';
-  return [`## これまでの会話「${chat.title}」（このタスクは、この会話の続きです）`, '', ...picked].join('\n');
+  // 完了したタスクから修正のタスクを作るときは、元のタスクのやりとり（完了後の会話も含む）を渡す
+  const head = isChat(chat)
+    ? `## これまでの会話「${chat.title}」（このタスクは、この会話の続きです）`
+    : `## 完了したタスク「${chat.title}」のやりとり（このタスクは、完了したこのタスクの修正です）`;
+  const info = [];
+  if (!isChat(chat) && (chat.mergedInto || []).length) info.push(`- 取り込み先: ${chat.mergedInto.join(', ')}（git log で前の変更を確かめられます）`);
+  if (!isChat(chat) && chat.prUrl) info.push(`- PR: ${chat.prUrl}`);
+  return [head, '', ...picked, ...(info.length ? ['', ...info] : [])].join('\n');
+}
+
+// 完了したタスクについて話すときの注意（ファイルは変えず、修正は別のタスクにしてもらう）
+const AFTER_DONE_NOTE = [
+  '# 完了したタスクについての会話です',
+  '',
+  'このタスクはもう完了（マージ済み）です。ここではユーザーの質問に答えたり、調べものや相談に乗ったりしてください。',
+  '',
+  '- ファイルの変更・コミット・マージはしないでください（計画モードで動いています）',
+  '- 修正や追加の作業が必要そうなときは、どう直すかの案を書いたうえで、「🛠 修正タスクを作る」ボタンから別のタスクにするようユーザーに伝えてください',
+].join('\n');
+// 完了したタスクで最初に話すときの指示。worktree はもうないので新しい会話で始め、元のタスクの中身を渡す
+function buildAfterDonePrompt(c, message) {
+  const lines = [AFTER_DONE_NOTE, '', `## 完了したタスク「${c.title}」`, '', '### タスクの指示', truncate(c.prompt, 3000), ''];
+  const picked = talkExcerpt(c);
+  if (picked.length) lines.push('### やりとり（抜粋）', ...picked, '');
+  const info = [];
+  if (c.issue) info.push(`- Issue: #${c.issue.number} ${c.issue.url || ''}`.trim());
+  if (c.branch) info.push(`- ブランチ: ${c.branch}`);
+  if ((c.mergedInto || []).length) info.push(`- 取り込み先: ${c.mergedInto.join(', ')}（git log で変更を確かめられます）`);
+  if (c.prUrl) info.push(`- PR: ${c.prUrl}`);
+  if (info.length) lines.push('### 結果', ...info, '');
+  lines.push('---', '', '## ユーザーのメッセージ', '', message);
+  return lines.join('\n');
 }
 function withChatContext(context, prompt) {
   return context ? `${context}\n\n---\n\n${prompt}` : prompt;
@@ -372,6 +403,13 @@ class AgentManager extends EventEmitter {
       c.permissions = [];
       c.questions = [];
       if (c.conflict) c.conflict.resolving = false;
+      // 完了したタスクについての会話が途中だった: タスクは「完了」のまま（もう一度送れば続きを話せる）
+      if (c.afterDone && (c.status === 'queued' || c.status === 'running')) {
+        if (c.status === 'running' && c.sessionId) c.afterDoneSession = c.sessionId;
+        c.afterDone = false;
+        c.status = 'done';
+        c.error = '前回の返事は、アプリの終了で途中で中断されました。もう一度送ってください';
+      }
       if (c.status === 'queued') {
         // まだ claude に渡していない指示なので、そのまま渡し直せばよい
         c.interrupted = { at: now, kind: 'queued', prompt: c.pendingPrompt || this.firstPrompt(c) };
@@ -476,6 +514,8 @@ class AgentManager extends EventEmitter {
 
   // カードの状態に合う Projects のステータス（変えないときは null）
   issueStatusKey(c) {
+    // 完了したタスクについて話しているだけのときは、Issue のステータスを変えない
+    if (c.afterDone) return null;
     if (c.status === 'running' || c.status === 'queued') return 'inProgress';
     // 仕様の確認中は、まだ開発を始めていないのでレビューにはしない（In progress のまま）
     if (c.status === 'review' && c.specState === 'pending') return null;
@@ -637,8 +677,9 @@ class AgentManager extends EventEmitter {
   createTask({ title, prompt, issue, session, skill, agent, fromChat }) {
     const s = this.store.settings;
     const mode = agent || providers.defaultAgentOf(s);
+    // 会話の続き、または完了したタスクの修正として作る
     const chat = fromChat ? this.store.card(fromChat) : null;
-    const from = isChat(chat) ? chat : null;
+    const from = isChat(chat) || (chat && chat.status === 'done') ? chat : null;
     // Pipelineと競争は排他。設定で選んでいない方（「なし」ならどちらも）は使えない
     if ((mode === 'relay' || mode === 'compete') && providers.cleanOrchestration(s.orchestration) !== mode) {
       const name = (m) => (m === 'relay' ? 'Pipeline' : '競争');
@@ -705,8 +746,9 @@ class AgentManager extends EventEmitter {
     card.sessions = [];
     // 会話の続きとして作るとき: Claude Code どうしなら会話そのものを引き継ぎ（フォーク）、
     // それ以外（エージェントが違う・Claude Code 以外）は会話のやりとりを最初の指示に添えて渡す
+    // 完了したタスクからは、会話そのものは引き継がない（作業フォルダが違う）。やりとりを指示に添えて渡す
     const fromSession = fromChat && session && session.id && session.id === fromChat.sessionId;
-    if (fromChat && !(fromSession && card.agent === 'claude' && agentOf(fromChat) === 'claude')) {
+    if (fromChat && !(fromSession && isChat(fromChat) && card.agent === 'claude' && agentOf(fromChat) === 'claude')) {
       card.chatContext = buildChatContext(fromChat);
       card.fromChat = fromChat.id;
       if (fromSession) session = null;
@@ -941,7 +983,7 @@ class AgentManager extends EventEmitter {
     if (!['review', 'failed', 'done'].includes(c.status)) throw new Error('実行中・待機中は追加指示を送れません');
     if (!message || !message.trim()) throw new Error('追加指示を入力してください');
     skill = cleanSkill(skill);
-    if (c.status === 'done') this.reopen(c);
+    if (c.status === 'done' && !isChat(c)) return this.sendAfterDone(c, message.trim(), skill);
     this.log(c, 'user', message.trim(), skill ? { skill } : undefined);
     // 仕様の確認中の答えには、続けて判断してもらうための一言を添える
     const body = inSpecCheck(c) ? `${message.trim()}\n\n${SPEC_FOLLOW_NOTE}` : message.trim();
@@ -969,17 +1011,20 @@ class AgentManager extends EventEmitter {
   }
 
   /**
-   * 完了（マージ済み）のタスクで、会話を続けられるようにする。
-   * worktree は前と同じ場所に作り直す（claude の会話は作業フォルダごとに保存されているので、
-   * 同じ場所なら --resume でそのまま続きから話せる）。ベースはマージ先のブランチ
+   * 完了（マージ済み）のタスクについて話す。タスクは開き直さない（レビューに戻さず、マージもできない）。
+   * worktree は作り直さずにリポジトリのフォルダで、計画モード（ファイルを変えない）で動かす。
+   * 最初は新しい会話で始めて元のタスクの中身を渡し、2回目からはその会話の続きにする。
+   * 修正が必要なときは「修正タスクを作る」で別のタスクにしてもらう
    */
-  reopen(c) {
-    c.reopenBase = c.lastMergeTarget || c.prBase || c.baseBranch || null;
-    c.reopenFrom = c.branch || null;
-    c.worktreePath = null;
-    c.conflict = null;
-    c.conflictResolved = null;
-    this.log(c, 'system', `完了したタスクの続きを始めます（${c.reopenBase || 'ベースブランチ'} から worktree を作り直します）`);
+  sendAfterDone(c, message, skill) {
+    const first = !c.afterDoneSession;
+    if (first) this.log(c, 'system', '完了したタスクについて話します（ファイルは変えません。修正が必要なときは「🛠 修正タスクを作る」から別のタスクにしてください）');
+    this.log(c, 'user', message, skill ? { skill } : undefined);
+    // 前の作業の会話は worktree のフォルダに保存されているので使わない。完了後の会話はその会話だけを続ける
+    c.sessionId = c.afterDoneSession || null;
+    c.forkNext = false;
+    c.afterDone = true;
+    this.enqueue(c, promptWithSkill(agentOf(c), skill, first ? buildAfterDonePrompt(c, message) : message));
   }
 
   enqueue(c, prompt) {
@@ -1020,7 +1065,10 @@ class AgentManager extends EventEmitter {
   fail(c, msg) {
     this.procs.delete(c.id);
     if (!this.store.card(c.id)) return;
-    c.status = 'failed';
+    // 完了したタスクについての会話は、失敗しても「完了」のまま（レビューやエラーの列に戻さない）
+    const afterDone = !!c.afterDone;
+    c.afterDone = false;
+    c.status = afterDone ? 'done' : 'failed';
     c.error = msg;
     this.log(c, 'error', msg);
     this.changed(c);
@@ -1030,7 +1078,10 @@ class AgentManager extends EventEmitter {
   stop(id) {
     const c = this.must(id);
     if (c.status === 'queued') {
-      c.status = c.worktreePath || isChat(c) ? 'review' : 'todo';
+      if (c.afterDone) {
+        c.afterDone = false;
+        c.status = 'done';
+      } else c.status = c.worktreePath || isChat(c) ? 'review' : 'todo';
       this.changed(c);
       return;
     }
@@ -1266,14 +1317,16 @@ class AgentManager extends EventEmitter {
 
   async launch(c) {
     const chat = isChat(c);
-    if (chat) {
+    // 完了したタスクについての会話: worktree は作らずリポジトリのフォルダで、ファイルを変えない計画モードで動かす
+    const afterDone = !chat && !!c.afterDone;
+    if (chat || afterDone) {
       if (!c.repoPath || !fs.existsSync(c.repoPath)) throw new Error(`リポジトリのフォルダが見つかりません: ${c.repoPath}`);
     } else if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
-    const cwd = chat ? c.repoPath : c.worktreePath;
+    const cwd = chat || afterDone ? c.repoPath : c.worktreePath;
     const s = this.store.settings;
     const agent = agentOf(c);
     const label = agentLabel(agent);
-    const mode = chat ? this.chatPermissionMode(s.permissionMode) : s.permissionMode;
+    const mode = afterDone ? 'plan' : chat ? this.chatPermissionMode(s.permissionMode) : s.permissionMode;
     let args;
     if (agent === 'claude') {
       // stdin を開いたままにして、実行中でもメッセージ（btw）を送れるようにする
@@ -1355,6 +1408,7 @@ class AgentManager extends EventEmitter {
       for (const m of c.btw || []) if (m.state === 'sent') m.state = 'lost';
       this.denyAllPending(c.id, 'エージェントが終了しました');
       if (!this.store.card(c.id)) return; // 破棄された
+      if (afterDone) return this.finishAfterDone(c, code, spawnError, run, cmd);
       // 状態を「レビュー」にする前に、作業内容をブランチにコミットしておく
       if (!spawnError && !chat) {
         try {
@@ -1428,6 +1482,39 @@ class AgentManager extends EventEmitter {
     };
     child.on('error', (err) => finish(null, err));
     child.on('close', (code) => finish(code, null));
+  }
+
+  // 完了したタスクについての会話が終わった: 「完了」に戻す（レビューには回さないので、マージ・PR のボタンは出ない）
+  finishAfterDone(c, code, spawnError, run, cmd) {
+    if (c.sessionId) c.afterDoneSession = c.sessionId;
+    c.afterDone = false;
+    if (this.shuttingDown) {
+      // 終了で止めた: 次の起動で「完了」に戻す（recoverInterrupted）
+      c.afterDone = true;
+      c.stopRequested = false;
+      this.changed(c);
+      return;
+    }
+    c.status = 'done';
+    c.awaitingReply = false;
+    c.error = null;
+    if (spawnError) {
+      c.error = spawnError.code === 'ENOENT' ? notFoundMessage(cmd, run.agent) : spawnError.message;
+    } else if (c.stopRequested) {
+      this.log(c, 'system', '停止しました。');
+    } else if (code === 0 && !run.resultError) {
+      this.notify(c, 'awaiting', `返事: ${c.title}`, c.lastText || `${agentShort(run.agent)} が返事をしました`);
+    } else {
+      c.error = run.resultError || run.lastError || `${cmd} が終了コード ${code} で終了しました`;
+    }
+    if (c.error) {
+      this.log(c, 'error', c.error);
+      this.notify(c, 'failed', `失敗: ${c.title}`, c.error);
+    }
+    c.stopRequested = false;
+    c.finishedAt = Date.now();
+    this.changed(c);
+    this.pump();
   }
 
   handleLine(c, line, run) {
@@ -2294,7 +2381,7 @@ class AgentManager extends EventEmitter {
       await new Promise((r) => (child.exitCode !== null ? r() : child.once('close', r)));
     }
     if (c.worktreePath) await git.removeWorktree(c.repoPath, c.worktreePath);
-    if (c.branch && c.status !== 'done') await git.deleteBranch(c.repoPath, c.branch);
+    if (c.branch && c.status !== 'done' && !c.afterDone) await git.deleteBranch(c.repoPath, c.branch);
     fs.rmSync(path.join(this.opts.mcpDir, `${id}.json`), { force: true });
     this.changed(null);
   }
