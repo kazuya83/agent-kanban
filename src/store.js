@@ -1,7 +1,7 @@
 // ボードの状態を JSON ファイルに保存する
 const fs = require('fs');
 const path = require('path');
-const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS } = require('./providers');
+const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isAgent, cleanEnabledAgents } = require('./providers');
 
 const DEFAULT_SETTINGS = {
   repoPath: '',
@@ -18,12 +18,13 @@ const DEFAULT_SETTINGS = {
   statusMapping: { inProgress: '', inReview: '', done: '' }, // 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空なら名前から自動で探す
   pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
   suggestSkillsOnDone: true, // タスクが完了したら「スキルにしませんか？」と通知する
-  specCheck: true, // 新しいタスクの内容が詰まっていなければ、開発を始める前に Claude と対話して仕様を詰める
+  specCheck: true, // 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める
   branchNamingRule: '', // ブランチの命名規則（自然言語）。空なら agent/issue-12-xxxx のようないつもの名前
-  weeklyResetDay: '', // 週間上限がリセットされる曜日（'0'=日〜'6'=土）。空なら claude が知らせてくる日時を使う
+  weeklyResetDay: '', // Claude の週間上限がリセットされる曜日（'0'=日〜'6'=土）。空なら claude が知らせてくる日時を使う
   weeklyResetTime: '00:00', // 週間上限がリセットされる時刻（HH:MM・ローカル時刻）。weeklyResetDay を決めたときに使う
-  // ---- Claude Code 以外のエージェント ----
-  defaultAgent: 'claude', // 新しいタスクで最初から選んでおくエージェント（claude / codex / gemini / relay / compete）
+  // ---- エージェント ----
+  enabledAgents: DEFAULT_ENABLED_AGENTS, // 使うエージェント（チェックを付けたものだけ、コマンド・モデルを設定してタスクや会話で選べる）
+  defaultAgent: 'claude', // 新しいタスク・会話で最初から選んでおくエージェント（claude / codex / gemini。リレー・競争はタスクを作るときに選ぶ）
   codexPath: 'codex',
   codexModel: '',
   geminiPath: 'gemini',
@@ -54,6 +55,22 @@ function anchorFromDay(day, time, now) {
 
 const MAX_NOTIFICATIONS = 200;
 
+// 前のバージョンの設定を今の形に直す
+function migrateSettings(settings, raw, cards) {
+  if (!Array.isArray(raw.enabledAgents)) {
+    // 「使うエージェント」がなかったころの設定: 今まで使っていたエージェントにチェックを付けておく
+    const used = new Set(['claude']);
+    const d = raw.defaultAgent;
+    if (isAgent(d)) used.add(d);
+    if (d === 'relay') for (const st of settings.relaySteps || []) used.add(st && st.agent);
+    if (d === 'compete') for (const a of settings.competeAgents || []) used.add(a);
+    for (const c of cards) if (c && c.agent) used.add(c.agent);
+    settings.enabledAgents = cleanEnabledAgents([...used]);
+  } else settings.enabledAgents = cleanEnabledAgents(raw.enabledAgents);
+  // 「最初から選んでおくエージェント」にはリレー・競争を選べなくなったので、1つのエージェントにする
+  if (!isAgent(settings.defaultAgent) || !settings.enabledAgents.includes(settings.defaultAgent)) settings.defaultAgent = settings.enabledAgents[0];
+}
+
 class Store {
   constructor(file) {
     this.file = file;
@@ -72,6 +89,7 @@ class Store {
       this.data.notifications = Array.isArray(raw.notifications) ? raw.notifications : [];
       this.data.costLog = Array.isArray(raw.costLog) ? raw.costLog : [];
       this.data.weeklyResetAt = Number(raw.weeklyResetAt) || 0;
+      migrateSettings(this.data.settings, raw.settings || {}, this.data.cards);
     } catch {
       /* 初回起動 */
     }
@@ -177,4 +195,4 @@ class Store {
   }
 }
 
-module.exports = { Store, DEFAULT_SETTINGS, MAX_NOTIFICATIONS, weekAround, anchorFromDay, WEEK_MS };
+module.exports = { migrateSettings, Store, DEFAULT_SETTINGS, MAX_NOTIFICATIONS, weekAround, anchorFromDay, WEEK_MS };

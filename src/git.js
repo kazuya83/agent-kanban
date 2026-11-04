@@ -66,7 +66,7 @@ async function identityArgs(cwd) {
   } catch {
     /* 未設定 */
   }
-  return ['-c', 'user.name=Claude Agent Kanban', '-c', 'user.email=agent-kanban@localhost'];
+  return ['-c', 'user.name=Agent Kanban', '-c', 'user.email=agent-kanban@localhost'];
 }
 
 async function addWorktree(repo, wtPath, branch, baseCommit) {

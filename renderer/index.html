@@ -3,18 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:" />
-    <title>Claude Agent Kanban</title>
+    <title>Agent Kanban</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="topbar">
-      <div class="brand"><span class="logo">▦</span><span class="brand-text"><span class="brand-name">Claude Agent Kanban</span><span id="appVersion" class="brand-ver"></span></span></div>
+      <div class="brand"><span class="logo">▦</span><span class="brand-text"><span class="brand-name">Agent Kanban</span><span id="appVersion" class="brand-ver"></span></span></div>
       <button id="repoBtn" class="repo" title="リポジトリを選ぶ"></button>
       <div class="spacer"></div>
       <span id="costInfo" class="pill cost hidden" title="Claude の週間上限のリセットに合わせた、今週このリポジトリのタスクで使った金額"></span>
       <span id="runInfo" class="pill"></span>
       <button id="settingsBtn" class="btn ghost">⚙ 設定</button>
-      <button id="chatBtn" class="btn chat-btn" title="タスクを作らずに、このリポジトリについて Claude と話します">💬 会話<span id="chatCount" class="chat-count hidden"></span></button>
+      <button id="chatBtn" class="btn chat-btn" title="タスクを作らずに、このリポジトリについてエージェントと話します">💬 会話<span id="chatCount" class="chat-count hidden"></span></button>
       <button id="newBtn" class="btn primary">＋ 新しいタスク</button>
       <button id="issueBtn" class="btn"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="vertical-align:-2px"><path fill="currentColor" d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13ZM8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg> Issue から作成</button>
       <div class="notif-wrap">
