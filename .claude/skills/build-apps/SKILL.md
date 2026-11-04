@@ -1,6 +1,6 @@
 ---
 name: build-apps
-description: Agent Kanban のテストと、Mac（dmg）・Windows（exe / zip）・Linux（AppImage）のビルドをこの Mac で行う。レビューのとき（「ビルドして」「3つの OS でビルドできるか確かめて」「install.sh / install.ps1 を直した」）や、main にマージしたあとリリースするとき（「リリースして」「新しい版を出して」）に使う。GitHub Actions ではビルド・リリースをしないので、これがその代わり。
+description: Agent Kanban のテストと、Mac（dmg）・Windows（exe / zip）・Linux（AppImage）のビルドをこの Mac で行う。レビューのとき（「ビルドして」「3つの OS でビルドできるか確かめて」「install.sh / install.ps1 を直した」）や、main にマージしたあとリリースするとき（「リリースして」「新しい版を出して」「ビルドしてリリースして push して」）に使う。GitHub Actions ではビルド・リリースをしないので、これがその代わり。
 argument-hint: '[review | release]'
 ---
 
@@ -15,7 +15,7 @@ GitHub Actions はテストだけを動かす。**ビルドとリリースは、
 
 - macOS。Apple Silicon では **Rosetta 2** が必要（Windows のインストーラーと AppImage を作る道具が Intel 用のため）
   - 無いときは、ユーザーに `softwareupdate --install-rosetta --agree-to-license` を実行してもらう（管理者のパスワードを聞かれることがある）
-- `release` では `gh` にログイン済みであること（`gh auth status`）
+- `release` では `gh` にログイン済みであること（`gh auth status`）と、`claude` が PATH にあること（中で `claude -p` を動かすため）
 
 ## review（レビューのとき）
 
@@ -28,11 +28,25 @@ GitHub Actions はテストだけを動かす。**ビルドとリリースは、
 
 ## release（main にマージしたあと）
 
-1. `scripts/release-local.sh --dry-run` で、次の版とリリースするかを確かめ、ユーザーに伝える
+マージしたあとの自動の流れ（`scripts/after-merge-build.sh`）を、その場で動かす: テストと3つの OS のビルド → 落ちたら直す → 直したところを main にマージして push → できたファイルで GitHub Release を公開。
+
+1. `scripts/after-merge-build.sh --status` で、裏でもう動いていないかを確かめる
+   - 「動いています」なら、二重に動かさない。今の段階をユーザーに伝え、終わってから `--status` で結果を見る（その実行でも Release まで出る）
+2. main をチェックアウトしていて、コミットしていない変更がないことを確かめる（`git status --porcelain`）
+   - 変更があれば、ユーザーにどうするか聞いて止まる
+3. `git fetch origin main --tags` のあと、手元の main と origin/main を比べる
+   - 手元のほうが進んでいる（push していないコミットがある）ときは、そのコミットの一覧を出し、次の手順の OK と一緒に push してよいかを聞く
+   - origin/main のほうが進んでいる・分かれているときは、ユーザーに伝えて止まる
+4. `scripts/release-local.sh --dry-run` で、次の版とリリースするかを確かめ、ユーザーに伝える
    - 「リリースするものはありません」なら、そこで終わる（README・docs・テストだけの変更では出さない）
-2. ユーザーが OK したら `scripts/release-local.sh` を実行する
-   - main が origin/main と同じで、変更が残っていないことを確かめてから、ビルドして `gh release create` で公開する
-3. 公開した Release の URL と、付けたファイルを報告する
+5. ユーザーが OK したら:
+   1. 手元の main が進んでいれば `git push origin main`
+   2. `scripts/after-merge-build.sh --force` を動かす（5〜10 分かかるので、Bash の `run_in_background` で動かし、終わるのを待つ）
+      - 中で `claude -p "/build-apps review"` が動き、落ちたところを直す。直したところがあればコミットして、もう一度ビルドし、main にマージして push する
+      - 段階ごとに macOS の通知が出る（1/4〜4/4・終わりました）
+6. 終わったら `scripts/after-merge-build.sh --status` を見て報告する: 版の番号、直したところ（マージ・push したか）、公開した Release の URL（出さなかったときはその理由）
+   - 失敗したとき（終了コードが 1）は、`--status` に出るいちばん新しいログの最後を見て、どこで落ちたかと、残したブランチ・worktree を伝える
+   - 直す流れがいらず、今の main をそのまま出すだけでよいときは、代わりに `scripts/release-local.sh` でもよい（もう一度ビルドしてから公開する）
 
 ## 注意
 

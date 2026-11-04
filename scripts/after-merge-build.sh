@@ -3,6 +3,7 @@
 #
 #   scripts/after-merge-build.sh                      → 今の main で 1 回動かす（手で動かすとき）
 #   scripts/after-merge-build.sh --git-dir <.git>     → フックから呼ぶとき
+#   scripts/after-merge-build.sh --force              → 今の main で前に動かしたことがあっても、もう一度動かす（/build-apps release から使う）
 #   scripts/after-merge-build.sh --status             → 今どこまで進んだかと、これまでの結果を出す
 #
 # 1. 今の main から一時的な worktree（ブランチ build-apps/<sha>）を作る
@@ -23,10 +24,12 @@ set -uo pipefail
 
 common=""
 show_status=0
+force=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --git-dir) common="${2:-}"; shift 2 ;;
     --status) show_status=1; shift ;;
+    --force) force=1; shift ;;
     *) echo "知らない引数です: $1" >&2; exit 2 ;;
   esac
 done
@@ -104,6 +107,7 @@ fail() {
 if ! mkdir "$state/lock" 2>/dev/null; then
   if kill -0 "$(cat "$state/lock/pid" 2>/dev/null)" 2>/dev/null; then
     touch "$state/pending"
+    echo "ほかの実行が動いているので、それが終わったあとに今の main でもう一度動きます（scripts/after-merge-build.sh --status で確かめられます）"
     exit 0
   fi
   # 前の実行が途中で落ちて、ロックだけが残っている
@@ -236,7 +240,10 @@ run_once() {
   local sha short branch wt version target changed=0
   sha="$("${G[@]}" rev-parse main)" || return 1
   short="${sha:0:8}"
-  [ "$(cat "$state/last-done" 2>/dev/null)" = "$sha" ] && return 0
+  if [ "$force" != 1 ] && [ "$(cat "$state/last-done" 2>/dev/null)" = "$sha" ]; then
+    say "main ($short) はもう動かしたので、飛ばします（もう一度動かすときは --force）"
+    return 0
+  fi
   cur="$short"
   log="$state/logs/$(date '+%Y%m%d-%H%M%S')-$short.log"
   branch="build-apps/$short"
@@ -314,8 +321,12 @@ run_once() {
   return 0
 }
 
+rc=0
 while :; do
   rm -f "$state/pending"
-  run_once || true
+  if run_once; then rc=0; else rc=1; fi
+  force=0  # --force は最初の 1 回だけ
   [ -f "$state/pending" ] || break
 done
+# 最後の実行が失敗したら 1 で終わる（フックからは見ない。/build-apps release から見る）
+exit "$rc"
