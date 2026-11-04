@@ -12,6 +12,7 @@ const ghCli = require('./gh');
 const { withSkill } = require('./skills');
 const providers = require('./providers');
 const attachments = require('./attachments');
+const { findSimilarTasks } = require('./similar');
 const os = require('os');
 const { agentLabel, agentShort } = providers;
 
@@ -27,6 +28,11 @@ const SKILL_SUGGEST_PROMPT = [
   '- すでにあるスキル（このリポジトリの .claude/skills/ と ~/.claude/skills/）を確かめて、重ならないようにしてください',
   '- 置き場所は、このリポジトリ用（.claude/skills/<名前>/SKILL.md）か、自分用（~/.claude/skills/<名前>/SKILL.md）のどちらがよいかも書いてください',
   '- まだファイルは作らないでください。最後に「どれを追加しますか？」と聞いてください',
+].join('\n');
+// 似たタスクが前にもあったときに足す指示
+const SKILL_SUGGEST_REPEAT_NOTE = [
+  '- 「似ている過去のタスク」と見比べて、何度も繰り返している作業（手順・確かめ方・決まりごと）を中心に提案してください',
+  '- 見比べた結果、繰り返している作業が無ければ、無理に提案せず「スキルにするほどの繰り返しはありません」と答えてください',
 ].join('\n');
 // スキルの提案を頼む会話の最初の指示。元のタスクの指示・やりとり・結果をまとめて渡す
 // カードのやりとり（あなたの指示とエージェントの返事）を、新しいものから size 文字くらいまで抜き出す。
@@ -45,7 +51,7 @@ function talkExcerpt(c, { size: max = 6000, skipPrompt = true } = {}) {
   if (picked.length < talk.length) picked = ['（前のやりとりは省略）', ...picked];
   return picked;
 }
-function buildSkillSuggestPrompt(c) {
+function buildSkillSuggestPrompt(c, similar = []) {
   const lines = [`次のタスク「${c.title}」の作業を振り返ってください。`, ''];
   lines.push('## タスクの指示', truncate(c.prompt, 3000), '');
   const picked = talkExcerpt(c);
@@ -57,7 +63,18 @@ function buildSkillSuggestPrompt(c) {
   if (c.prUrl) info.push(`- PR: ${c.prUrl}`);
   if (c.worktreePath && !isChat(c)) info.push(`- 作業フォルダ: ${c.worktreePath}`);
   if (info.length) lines.push('## 結果', ...info, '');
-  lines.push('---', '', SKILL_SUGGEST_PROMPT.replace('ここまでの作業を振り返って', 'このタスクの作業をもとに'));
+  if (similar.length) {
+    lines.push('## 似ている過去のタスク（このタスクと似た作業を、前にもしています）');
+    for (const s of similar) {
+      const head = [`### ${s.title}`];
+      if (s.branch) head.push(`- ブランチ: ${s.branch}`);
+      if ((s.mergedInto || []).length) head.push(`- 取り込み先: ${s.mergedInto.join(', ')}`);
+      lines.push(...head, truncate(String(s.prompt || '').trim(), 800), '');
+    }
+  }
+  let ask = SKILL_SUGGEST_PROMPT.replace('ここまでの作業を振り返って', similar.length ? 'このタスクと似ている過去のタスクの作業をもとに' : 'このタスクの作業をもとに');
+  if (similar.length) ask += `\n${SKILL_SUGGEST_REPEAT_NOTE}`;
+  lines.push('---', '', ask);
   return lines.join('\n');
 }
 // 会話の続きとしてタスクを作るとき、会話そのものを引き継げない（エージェントが違う・Claude Code 以外）なら、
@@ -834,19 +851,42 @@ class AgentManager extends EventEmitter {
     return result;
   }
 
-  // タスクが「完了」に入ったときに呼ぶ。完了の通知と、スキルにしませんか？の通知を出す
+  // タスクが「完了」に入ったときに呼ぶ。完了の通知を出す。
+  // 前に完了したタスクに似た作業があれば（同じような作業が続いていれば）、スキルにしませんか？の通知も出す
   completed(c) {
     const body = (c.mergedInto || []).length ? `${c.mergedInto.join(', ')} に取り込みました` : c.prUrl ? `PR を作って片付けました: ${c.prUrl}` : 'タスクを完了にしました';
     this.notify(c, 'done', `完了: ${c.title}`, body);
     if (this.store.settings.suggestSkillsOnDone === false || !c.sessionId || c.skillSuggestNotified) return;
+    const similar = this.similarDoneTasks(c);
+    if (!similar.length) return;
     c.skillSuggestNotified = true;
+    c.skillSuggestSimilar = similar.map((x) => x.id);
+    const names = similar.slice(0, 3).map((x) => `「${x.title}」`).join('、') + (similar.length > 3 ? ` ほか ${similar.length - 3} 件` : '');
     this.notify(
       c,
       'skill',
-      `スキルにしませんか？: ${c.title}`,
-      `このタスクの作業を振り返って、次から同じような作業を速く・確実にできるスキル（SKILL.md）を ${agentShort(this.helperAgent(c))} に提案してもらえます。`,
+      `似たタスクが続いています。スキルにしませんか？: ${c.title}`,
+      `前に完了した ${names} と似た作業でした。繰り返している作業を、次から速く・確実にできるスキル（SKILL.md）にするよう ${agentShort(this.helperAgent(c))} に提案してもらえます。`,
       { action: 'suggestSkills', actionLabel: 'スキルを提案してもらう' },
     );
+  }
+
+  /**
+   * c と似た作業の、前に完了したタスクを探す（同じリポジトリのタスクだけ。会話のカードは除く）
+   * - すでにスキルの提案に使ったタスク、c の修正として作ったタスク（またはその元）、同じ競争のタスクは数えない
+   * @returns {object[]} 似ている順のカード
+   */
+  similarDoneTasks(c) {
+    const pool = this.store.cards.filter((x) => x.id !== c.id && x.status === 'done' && x.repoPath === c.repoPath && !isChat(x));
+    const related = (x) =>
+      x.skillSuggestedAt ||
+      x.fromChat === c.id ||
+      c.fromChat === x.id ||
+      (c.compete && x.compete && c.compete.group === x.compete.group);
+    // 比べ方（決まり文句・よく出る文字の重み）は全体から決め、提案の対象にできるものだけを残す
+    return findSimilarTasks(c, pool)
+      .map((r) => r.card)
+      .filter((x) => !related(x));
   }
 
   // ---------- カード操作 ----------
@@ -1321,8 +1361,12 @@ class AgentManager extends EventEmitter {
    */
   suggestSkills(id) {
     const src = this.must(id);
-    const chat = this.createChat({ message: buildSkillSuggestPrompt(src), title: `スキルの提案: ${src.title}`, agent: this.helperAgent(src) });
+    const similar = (src.skillSuggestSimilar || []).map((x) => this.store.card(x)).filter(Boolean);
+    const chat = this.createChat({ message: buildSkillSuggestPrompt(src, similar), title: `スキルの提案: ${src.title}`, agent: this.helperAgent(src) });
     chat.skillSuggestFrom = src.id;
+    // 提案に使ったタスクは、あとで似たタスクが完了しても、もう一度は数えない（同じ提案を何度も出さない）
+    const now = Date.now();
+    for (const x of [src, ...similar]) x.skillSuggestedAt = now;
     for (const n of this.store.notifications) {
       if (n.cardId === id && n.action === 'suggestSkills' && !n.actedAt) {
         n.actedAt = Date.now();
@@ -2812,4 +2856,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };
+module.exports = { AgentManager, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, SKILL_SUGGEST_REPEAT_NOTE, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt };

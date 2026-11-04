@@ -992,6 +992,9 @@ test('完了（マージ済み）のタスクと話しても、開き直さな�
   await waitFor(() => c.status === 'review');
   const sess = c.sessionId;
   const wt = c.worktreePath;
+  // 前にも似たタスクを完了している（同じような作業が続いている）
+  const prev = { id: 'prev-reopen', title: 'reopen の前の作業', prompt: '最初の作業と同じような作業', status: 'done', repoPath: c.repoPath, logs: [], mergedInto: ['main'] };
+  store.cards.push(prev);
   await agents.merge(c.id);
   assert.strictEqual(c.status, 'done');
   assert.ok(!fs.existsSync(wt));
@@ -1034,13 +1037,16 @@ test('完了（マージ済み）のタスクと話しても、開き直さな�
   await assert.rejects(agents.discard(c.id), /完了したタスクは削除できません/);
   assert.ok(store.card(c.id));
 
-  // 完了に入ったら、通知で「スキルにしませんか？」と聞く（1つのタスクで1回だけ）
+  // 似たタスクが前にもあれば、完了に入ったときに通知で「スキルにしませんか？」と聞く（1つのタスクで1回だけ）
   const notes = agents.listNotifications(c.repoPath).filter((n) => n.cardId === c.id);
   assert.ok(notes.some((n) => n.kind === 'review'), '作業が終わったらレビュー待ちの通知');
   assert.ok(notes.some((n) => n.kind === 'done'), '完了の通知');
   const skillNotes = notes.filter((n) => n.kind === 'skill');
   assert.strictEqual(skillNotes.length, 1, 'スキルの提案の通知は1回だけ');
   assert.strictEqual(skillNotes[0].action, 'suggestSkills');
+  assert.match(skillNotes[0].title, /似たタスクが続いています/);
+  assert.match(skillNotes[0].body, /reopen の前の作業/, '似ている過去のタスクを伝える');
+  assert.deepStrictEqual(c.skillSuggestSimilar, [prev.id]);
 
   // 通知のボタンからスキルの提案を頼む（完了したタスクからでも）。元のカードは使い回さず、新しい会話のカードで頼む
   const logsBefore = c.logs.length;
@@ -1055,6 +1061,9 @@ test('完了（マージ済み）のタスクと話しても、開き直さな�
   assert.match(chat.prompt, /スキル（SKILL\.md）として残しておく/);
   assert.match(chat.prompt, /最初の作業/, '元のタスクの指示を渡す');
   assert.match(chat.prompt, /もう少し詳しく/, '元のタスクのやりとりも渡す');
+  assert.match(chat.prompt, /## 似ている過去のタスク[\s\S]*reopen の前の作業[\s\S]*最初の作業と同じような作業/, '似ている過去のタスクも渡す');
+  assert.match(chat.prompt, /何度も繰り返している作業/);
+  assert.ok(c.skillSuggestedAt && prev.skillSuggestedAt, '提案に使ったタスクは、次からは似たタスクとして数えない');
   await waitFor(() => chat.status === 'review');
   assert.strictEqual(c.status, 'done', '元のタスクは完了のまま（開き直さない）');
   assert.strictEqual(c.logs.length, logsBefore, '元のタスクのログに足さない');
@@ -1087,25 +1096,34 @@ test('PR を作って完了したタスクと話しても、PR やブランチ�
   await assert.rejects(agents.createPullRequest(c.id, {}), /レビュー中のタスクだけ/);
 });
 
-test('通知: 既読・削除、設定で完了時のスキル提案を止められる', () => {
+test('通知: 既読・削除、似たタスクが前にあるときだけスキルを提案する、設定で止められる', () => {
   const { store, agents } = setup();
-  const c = agents.createCard({ title: 'n', prompt: 'x' });
+  const c = agents.createCard({ title: 'ログイン画面のボタンの色を直す', prompt: 'ログイン画面のボタンの色を青にしてください' });
   c.sessionId = 'sess-1';
-  store.settings.suggestSkillsOnDone = false;
+  // 前に完了したタスクに似たものがなければ、完了の通知だけ（毎回は聞かない）
   agents.completed(c);
   assert.deepStrictEqual(agents.listNotifications(c.repoPath).map((n) => n.kind), ['done']);
+  assert.ok(!c.skillSuggestNotified);
+  // 似たタスクが前に完了していれば聞く。ただし設定で止められる
+  store.cards.push({ id: 'old-1', title: '設定画面のボタンの色を直す', prompt: '設定画面のボタンの色を青にしてください', status: 'done', repoPath: c.repoPath, logs: [] });
+  store.cards.push({ id: 'old-2', title: 'README の誤字', prompt: 'README の誤字を直して', status: 'done', repoPath: c.repoPath, logs: [] });
+  store.cards.push({ id: 'old-3', title: '設定画面のボタンの色を直す', prompt: '設定画面のボタンの色を青にしてください', status: 'done', repoPath: '/other', logs: [] });
+  store.settings.suggestSkillsOnDone = false;
+  agents.completed(c);
+  assert.deepStrictEqual(agents.listNotifications(c.repoPath).map((n) => n.kind), ['done', 'done']);
   store.settings.suggestSkillsOnDone = true;
   agents.completed(c);
-  assert.deepStrictEqual(agents.listNotifications(c.repoPath).map((n) => n.kind), ['skill', 'done', 'done'], '新しいものが先頭');
+  assert.deepStrictEqual(agents.listNotifications(c.repoPath).map((n) => n.kind), ['skill', 'done', 'done', 'done'], '新しいものが先頭');
+  assert.deepStrictEqual(c.skillSuggestSimilar, ['old-1'], '同じリポジトリの、似ているタスクだけ');
   assert.strictEqual(agents.listNotifications('/other').length, 0, 'ほかのリポジトリの通知は出ない');
 
   const [first] = agents.listNotifications(c.repoPath);
   agents.readNotifications(c.repoPath, [first.id]);
-  assert.deepStrictEqual(agents.listNotifications(c.repoPath).map((n) => n.read), [true, false, false]);
+  assert.deepStrictEqual(agents.listNotifications(c.repoPath).map((n) => n.read), [true, false, false, false]);
   agents.readNotifications(c.repoPath);
   assert.ok(agents.listNotifications(c.repoPath).every((n) => n.read));
   agents.clearNotifications(c.repoPath, [first.id]);
-  assert.strictEqual(agents.listNotifications(c.repoPath).length, 2);
+  assert.strictEqual(agents.listNotifications(c.repoPath).length, 3);
   agents.clearNotifications(c.repoPath);
   assert.strictEqual(agents.listNotifications(c.repoPath).length, 0);
 });

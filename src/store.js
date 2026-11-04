@@ -115,7 +115,7 @@ const DEFAULT_SETTINGS = {
   statusFieldName: '', // Projects で変える項目（単一選択）の名前。空なら「Status」
   statusMapping: { inProgress: '', inReview: '', done: '' }, // 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空なら名前から自動で探す
   pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
-  suggestSkillsOnDone: true, // タスクが完了したら「スキルにしませんか？」と通知する
+  suggestSkillsOnDone: true, // タスクが完了したとき、前に完了したタスクと似た作業なら「スキルにしませんか？」と通知する
   deleteSessionsOnMerge: true, // マージして完了したら、そのタスクが作業に使った Claude Code の会話を消す
   specCheck: true, // 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める
   branchNamingRule: '', // ブランチの命名規則（自然言語）。空なら agent/issue-12-xxxx のようないつもの名前
