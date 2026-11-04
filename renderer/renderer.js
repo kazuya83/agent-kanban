@@ -425,7 +425,7 @@ function renderRepoTabs() {
   const el = $('repoTabs');
   el.classList.toggle('remote', !!rc);
   const host = rc ? remoteHostLabel(rc) : '';
-  const hostHtml = rc ? `<span class="repo-host" title="接続先（${esc(host)}）のリポジトリです。エージェントはホストのフォルダで動きます">${icon('monitor')}${esc(host)}</span>` : '';
+  const hostHtml = rc ? `<span class="repo-host" title="接続先（${esc(host)}）のリポジトリです。エージェントはホストのフォルダで動きます">${icon('monitor')}<span class="repo-host-name">${esc(host)}</span></span>` : '';
   if (!repo) {
     el.innerHTML = `${hostHtml}<button class="repo" id="repoPick" title="${rc ? `接続先（${esc(host)}）のリポジトリを選びます` : 'リポジトリを選ぶ'}">${icon('folder')}${rc ? 'ホストのリポジトリを選ぶ' : 'リポジトリを選ぶ'}</button>`;
     $('repoPick').onclick = () => chooseRepo({ tab: 'replace' });

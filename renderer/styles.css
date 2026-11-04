@@ -110,7 +110,7 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 /* 左上のリポジトリのタブ（3つまで）。幅が足りないときはフォルダ名を省略して縮める */
 .repo-tabs { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; -webkit-app-region: no-drag; }
 .repo-tabs > .repo { min-width: 0; }
-.repo-tab { display: flex; align-items: center; min-width: 0; flex: 0 1 auto; max-width: 240px; border: 1px solid var(--line); border-radius: 8px; background: transparent; }
+.repo-tab { display: flex; align-items: center; min-width: 108px; flex: 0 1 auto; max-width: 240px; border: 1px solid var(--line); border-radius: 8px; background: transparent; }
 .repo-tab:hover { border-color: var(--accent); }
 .repo-tab.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 600; }
 .repo-tab-main { display: flex; align-items: center; min-width: 0; gap: 4px; padding: 4px 8px 4px 10px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
@@ -130,7 +130,10 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 /* 遠隔操作中: ホストのリポジトリだと分かるように、接続先の名前を付けて色を変える */
 .repo-tabs.remote .repo-tab, .repo-tabs.remote > .repo { border-color: color-mix(in srgb, var(--run) 45%, var(--line)); }
 .repo-host { flex: none; color: var(--run); font-weight: 600; margin-right: 2px; white-space: nowrap; }
-.repo-host::after { content: ':'; }
+/* 接続先の名前を出すとタブが潰れて名前が見えなくなるので、アイコンだけにする（接続先はツールチップと、上部の「遠隔操作中」に出る） */
+.repo-host { display: inline-flex; align-items: center; }
+.repo-host-name { display: none; }
+
 /* ホストのフォルダを辿る一覧（遠隔操作中） */
 .dir-browser { display: grid; gap: 8px; }
 .dir-browser-inline { margin: -4px 0 12px; padding: 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; }
@@ -811,3 +814,6 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .sm-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sm-used { font-size: 11px; padding: 1px 8px; align-self: center; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .sm-count { margin-right: auto; align-self: center; }
+
+/* 遠隔操作中は上部に「遠隔操作中」のピルが増えて、リポジトリのタブが潰れるので、ほかのボタンはアイコンだけにする（名前はツールチップに出る） */
+.topbar:has(#remoteInfo:not(.hidden)) .btn:not(.primary) .btn-label { display: none; }
