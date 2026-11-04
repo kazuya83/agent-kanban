@@ -363,6 +363,14 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .chat-btn { position: relative; }
 .chat-count { margin-left: 6px; font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--line); color: var(--text); }
 .chat-count.warn { background: var(--warn); color: #000; font-weight: 600; }
+/* 未読の返事がある会話は緑、返答中の会話があるときは青で、ボタンそのものの色を変える（未読を優先） */
+.chat-count.unread { background: var(--ok); color: #06210f; font-weight: 600; }
+.chat-count.replying { background: var(--run); color: #001a2b; font-weight: 600; }
+.chat-btn.has-replying { border-color: var(--run); color: var(--run); background: color-mix(in srgb, var(--run) 14%, transparent); animation: chat-replying 1.6s ease-in-out infinite; }
+.chat-btn.has-unread { border-color: var(--ok); color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); animation: none; }
+@keyframes chat-replying { 50% { background: color-mix(in srgb, var(--run) 4%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .chat-btn.has-replying { animation: none; } }
+.unread-chip { margin-right: auto; font-size: 10px; padding: 0 6px; border-radius: 999px; background: var(--ok); color: #06210f; font-weight: 600; }
 .chat-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; margin-bottom: 12px; }
 
 /* 差分（GitHub 風） */

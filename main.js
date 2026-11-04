@@ -851,6 +851,7 @@ app.whenReady().then(async () => {
   handle('card:resume', (id) => agents.resume(id));
   handle('card:resumeAll', () => agents.resumeAll(store.settings.repoPath));
   handle('card:dismissInterrupted', (id) => agents.dismissInterrupted(id));
+  handle('card:markSeen', (id) => agents.markSeen(id));
   handle('card:stop', (id) => agents.stop(id));
   handle('card:send', ({ id, message, skill, attachments }) => agents.send(id, message, skill, attachments));
   handle('compete:adopt', (id) => agents.adoptCompetitor(id));

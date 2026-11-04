@@ -1133,6 +1133,9 @@ test('会話（チャット）: worktree を作らずリポジトリで話し、
     await waitFor(() => c.status === 'review');
     assert.ok(!c.worktreePath && !c.branch, 'worktree もブランチも作らない');
     assert.strictEqual(c.awaitingReply, false);
+    assert.strictEqual(c.unread, true, '返事が来たら、開くまで未読');
+    agents.markSeen(c.id);
+    assert.strictEqual(c.unread, false);
     assert.ok(!c.logs.some((l) => /コミット/.test(l.text)), 'コミットしない');
     assert.ok(fs.readdirSync(repo).some((f) => f.startsWith('out-')), 'リポジトリのフォルダで動く');
     assert.ok(!g('branch', '--list', 'agent/*').toString().trim().split('\n').some((b) => b.includes(c.id)));
@@ -1148,6 +1151,8 @@ test('会話（チャット）: worktree を作らずリポジトリで話し、
     agents.answerPermission(c.id, c.permissions[0].id, 'allow');
     await waitFor(() => c.status === 'review');
     assert.strictEqual(c.sessionId, first);
+    assert.strictEqual(c.unread, true, '続きの返事も未読になる');
+    assert.ok(!t.unread, 'タスクは未読にしない');
 
     // 会話の続きからタスクを作る（会話はフォークして残す）
     const t2 = agents.createCard({ title: 'from chat', prompt: '作業して', session: { mode: 'resume', id: c.sessionId, title: c.title } });
