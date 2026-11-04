@@ -733,8 +733,12 @@ class AgentManager extends EventEmitter {
   // リレーの次の工程へ進める（同じ worktree のまま、次のエージェントで新しい会話を始める）
   advanceRelay(c) {
     const r = c.relay;
-    r.history = [...(r.history || []), { index: r.index, agent: agentOf(c), sessionId: c.sessionId || null, report: truncate(c.lastText || c.lastMessage || '', 4000), at: Date.now() }];
+    const cost = Math.max(0, (c.costUsd || 0) - (r.stepCostStart || 0));
+    r.history = [...(r.history || []), { index: r.index, agent: agentOf(c), sessionId: c.sessionId || null, report: truncate(c.lastText || c.lastMessage || '', 4000), startedAt: r.stepStartedAt || null, at: Date.now(), costUsd: cost }];
     r.index += 1;
+    // ワークフロー表示のため、工程ごとの開始時刻と、開始したときの金額を残す
+    r.stepStartedAt = null;
+    r.stepCostStart = c.costUsd || 0;
     const st = r.steps[r.index];
     c.agent = st.agent;
     c.sessionId = null;
@@ -1000,6 +1004,8 @@ class AgentManager extends EventEmitter {
       }
       c.status = 'running';
       c.startedAt = Date.now();
+      // リレー: 今の工程を最初に始めた時刻（追加指示で続けたときは変えない）
+      if (c.relay && !isChat(c) && !c.relay.stepStartedAt) c.relay.stepStartedAt = c.startedAt;
       this.changed(c);
       this.launch(c).catch((err) => this.fail(c, err.message));
     }

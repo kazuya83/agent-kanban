@@ -148,6 +148,12 @@ test('リレー: Codex で実装 → Claude でレビューと、同じ worktree
   assert.strictEqual(c.worktreePath, wt, '同じ worktree のまま');
   assert.deepStrictEqual(c.relay.history.map((h) => h.agent), ['codex', 'gemini']);
   assert.match(c.relay.history[0].report, /codex done/);
+  // ワークフロー表示のため、工程ごとの開始・終了の時刻と金額を残す
+  for (const h of c.relay.history) {
+    assert.ok(h.startedAt && h.at >= h.startedAt, '工程の開始と終了の時刻');
+    assert.strictEqual(typeof h.costUsd, 'number');
+  }
+  assert.ok(c.relay.stepStartedAt >= c.relay.history[1].at, '今の工程の開始時刻');
   // レビュー待ちの通知はリレーが終わったときの1回だけ
   assert.strictEqual(store.notifications.filter((n) => n.cardId === c.id && n.kind === 'review').length, 1);
   // 3つの工程の変更がすべてブランチに入っている
