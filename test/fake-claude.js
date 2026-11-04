@@ -139,6 +139,12 @@ async function turn(prompt, sessionId) {
     out({ type: 'result', subtype: 'success', is_error: false, result: 'どちらの方法で進めますか？', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
     return;
   }
+  // 計画モードではファイルを変えず、文章で答えるだけ（本物の claude と同じ）
+  if (opt('--permission-mode') === 'plan') {
+    out({ type: 'assistant', message: { content: [{ type: 'text', text: `（計画モード）${prompt.slice(-200)}` }] } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: 'ok', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
+    return;
+  }
   const file = `out-${Date.now()}.txt`;
   const input = { command: `echo > ${file}` };
   out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input }] } });

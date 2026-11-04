@@ -685,8 +685,10 @@ function renderDetailHead() {
       (state.board.settings.integration === 'pr'
         ? `<button class="btn primary" data-act="pr">${c.prUrl ? '⇡ PR を更新…' : '⇡ PR を作成…'}</button>`
         : `<button class="btn primary" data-act="merge">⇲ マージ…</button>`),
+    // 完了したタスクは開き直さない。修正は別のタスクにする（このタスクのやりとりを引き継ぐ）
+    s === 'done' && `<button class="btn" data-act="fixTask" title="このタスクのやりとり（完了後の会話も含む）を引き継いで、修正のための新しいタスクを作ります">🛠 修正タスクを作る</button>`,
     c.worktreePath && `<button class="btn ghost" data-act="open">フォルダを開く</button>`,
-    `<button class="btn danger" data-act="discard">${s === 'done' ? '削除' : '破棄'}</button>`,
+    `<button class="btn danger" data-act="discard">${s === 'done' || c.afterDone ? '削除' : '破棄'}</button>`,
   ].filter(Boolean);
   $('detailHead').innerHTML = `
     <div class="d-title-row">
@@ -738,7 +740,8 @@ function renderDetailHead() {
     chat ? (canFollow ? 'メッセージを送る（Ctrl/⌘ + Enter で送信）。同じ会話の続きとして話せます' : '返事が来たら、続きを話せます')
     : canFollow && isSpecPending(c) ? '質問への答えを書く（Ctrl/⌘ + Enter で送信）。分からないところは「おまかせ」と書いてもかまいません'
     : canFollow && c.awaitingReply ? `${agentShort(agentOf(c))} への回答を書く（Ctrl/⌘ + Enter で送信）`
-    : s === 'done' ? '完了したタスクの続きを話す（Ctrl/⌘ + Enter で送信）。同じ場所に worktree を作り直して、同じ会話の続きから動きます'
+    : s === 'done' ? '完了したタスクについて話す（Ctrl/⌘ + Enter で送信）。ファイルは変えずに答えます。修正が必要なときは「🛠 修正タスクを作る」から別のタスクにしてください'
+    : c.afterDone ? '返事が来たら、続きを話せます'
     : canFollow ? '追加の指示を送る（Ctrl/⌘ + Enter で送信）。同じセッションの続きとして動きます'
     : s === 'todo' ? '開始すると、終わったあとに追加の指示を送れます'
     : 'エージェントの作業中は送れません';
@@ -789,6 +792,7 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'pr') openPr(c);
   if (act === 'prConflict') run(() => api.reopenPrConflict(c.id));
   if (act === 'toTask') newTask({ fromChat: c });
+  if (act === 'fixTask') newTask({ fromChat: c });
   if (act === 'adopt') {
     const others = competitors(c).filter((x) => x.id !== c.id);
     const msg = `${agentLabel(agentOf(c))} の案を採用しますか？\nほかの候補（${others.map((x) => agentShort(agentOf(x))).join('・')}）は worktree とブランチごと破棄され、元に戻せません。`;
@@ -1251,7 +1255,7 @@ async function renderDetailBody() {
   }
 }
 
-// 追加指示を送れる状態か（完了したタスクにも送れる。送ると worktree を作り直して続きから動く）
+// 追加指示を送れる状態か（完了したタスクにも送れる。送ると、タスクは完了のまま、ファイルを変えずに話す）
 function canSendFollow(c) {
   return !!c && (c.status === 'review' || c.status === 'failed' || c.status === 'done');
 }
@@ -1362,9 +1366,11 @@ function toggleSessionField(idp, agent) {
 function newTask(opts = {}) {
   if (!state.board.settings.repoPath) return chooseRepo();
   const from = opts.fromChat;
+  const fromDone = from && !isChat(from);
   openModal(
-    `<h2>新しいタスク</h2>
-     ${from ? `<p class="muted small">会話「${esc(from.title)}」の続きとして、タスクを始めます（会話の内容をエージェントが引き継ぎます。会話そのものはそのまま残ります）。</p>` : ''}
+    `<h2>${fromDone ? '修正タスク' : '新しいタスク'}</h2>
+     ${fromDone ? `<p class="muted small">完了したタスク「${esc(from.title)}」の修正として、新しいタスクを始めます（元のタスクのやりとりをエージェントが引き継ぎます。元のタスクはそのまま残ります）。</p>`
+     : from ? `<p class="muted small">会話「${esc(from.title)}」の続きとして、タスクを始めます（会話の内容をエージェントが引き継ぎます。会話そのものはそのまま残ります）。</p>` : ''}
      <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
      ${agentFieldHtml('n', from && enabledAgents().includes(agentOf(from)) ? agentOf(from) : undefined)}
      <div class="field"><span>エージェントへの指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。"></textarea></div>
@@ -1374,9 +1380,10 @@ function newTask(opts = {}) {
      <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">作成（Ctrl/⌘ + Enter）</button></div>`,
     () => {
       $('nPrompt').focus();
-      if (from) $('nPrompt').value = 'ここまでの会話の内容をもとに、作業を進めてください。';
-      // Claude Code の会話なら会話そのものを引き継ぐ。それ以外の会話は、やりとりを指示に添えて渡す
-      const fromClaude = from && agentOf(from) === 'claude';
+      if (from) $('nPrompt').value = fromDone ? '完了したタスクの内容をもとに、次の点を修正してください。\n\n' : 'ここまでの会話の内容をもとに、作業を進めてください。';
+      if (fromDone) $('nTitle').value = `修正: ${from.title}`;
+      // Claude Code の会話なら会話そのものを引き継ぐ。それ以外の会話・完了したタスクは、やりとりを指示に添えて渡す
+      const fromClaude = from && !fromDone && agentOf(from) === 'claude';
       fillSessionField('n', fromClaude ? { id: from.sessionId, title: `会話: ${from.title}` } : undefined);
       bindAgentField('n', (v) => toggleSessionField('n', fromClaude || !from ? firstAgentOf(v) : ''));
       let skill = state.board.settings.defaultSkill || null;
