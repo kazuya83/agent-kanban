@@ -2182,7 +2182,30 @@ function openRemoteSettings() {
           ? `<div class="remote-key"><div><strong>前回の接続を再開しています…</strong>（${esc(c.reconnecting.attempt)}/${esc(c.reconnecting.max)} 回目） → ${targetText}</div>
                ${c.reconnecting.lastError ? `<small class="muted">前回の失敗: ${esc(c.reconnecting.lastError)}</small>` : ''}
                <div><button class="btn small" type="button" id="rCancelResume">再開をやめる</button></div></div>`
-          : c.canResume
+          : '';
+        // これまでつないだ接続先のカード。押すと、その接続先と保存したトークンでつなぐ
+        const history = c.history || [];
+        const connTitle = (h) => (h.mode === 'direct' ? `${h.host}:${h.port}` : `${h.sshUser ? `${h.sshUser}@` : ''}${h.sshHost}`);
+        const connSub = (h) => (h.mode === 'direct' ? `直接・${h.host}:${h.port}` : `SSH 経由${h.sshPort && h.sshPort !== 22 ? `（ポート ${h.sshPort}）` : ''}・ホストのポート ${h.port}`);
+        const historyBlock = history.length
+          ? `<div class="remote-key"><div><strong>これまでの接続</strong>（カードを押すと、保存したトークンでつなぎます）</div>
+               ${c.resumeError ? `<div class="warn">つながりませんでした: ${esc(c.resumeError)}</div>` : ''}
+               <div class="rc-conn-list">${history
+                 .map((h) => {
+                   const last = h.id === c.currentId;
+                   return `<div class="rc-conn-card${last ? ' last' : ''}${h.hasToken ? '' : ' no-token'}">
+                     <button class="rc-conn-main" type="button" data-conn="${esc(h.id)}" ${h.hasToken ? '' : 'disabled'} title="${h.hasToken ? 'この接続先につなぐ' : 'トークンがないので、6 桁のコードでペアリングし直してください'}">
+                       <span class="rc-conn-title">${h.hasToken ? '↻ ' : ''}${esc(connTitle(h))}${last ? '<span class="rc-conn-badge">前回</span>' : ''}</span>
+                       <span class="rc-conn-sub">${esc(connSub(h))}</span>
+                       <span class="rc-conn-sub">${h.hasToken ? (h.lastConnectedAt ? `最後の接続: ${esc(timeAgo(h.lastConnectedAt))}` : '以前の版で接続') : 'コードでのペアリングが必要'}</span>
+                     </button>
+                     <button class="rc-conn-forget" type="button" data-forget="${esc(h.id)}" title="この接続を一覧から消す（トークンも忘れます）">×</button>
+                   </div>`;
+                 })
+                 .join('')}</div>
+               <small class="muted">新しい接続先につなぐときや、接続先を直すときは、下の欄を入れて接続します。</small></div>`
+          : '';
+        const legacyResume = !c.reconnecting && c.canResume && !history.some((h) => h.id === c.currentId)
             ? `<div class="remote-key"><div><strong>前回の接続</strong> → ${targetText}</div>
                  ${c.resumeError ? `<div class="warn">つながりませんでした: ${esc(c.resumeError)}</div>` : ''}
                  <div><button class="btn small primary" type="button" id="rResume">↻ 前回の接続を再開</button></div>
@@ -2194,6 +2217,8 @@ function openRemoteSettings() {
              <button class="btn small danger" type="button" id="rDisconnect">切断してローカルボードに戻る</button>`
           : `<div><strong>クライアント（操作側）</strong></div>
              ${resumeBlock}
+             ${historyBlock}
+             ${legacyResume}
              <label class="field"><span>接続方法</span>
                <select id="rClientMode">
                  <option value="ssh" ${viaSsh ? 'selected' : ''}>SSH 経由（アプリがトンネルを張る・おすすめ）</option>
@@ -2278,6 +2303,19 @@ function openRemoteSettings() {
           $('rSshKey').onchange = () => drawKey();
         }
         if ($('rResume')) $('rResume').onclick = () => busy(viaSsh ? 'SSH トンネルを張って、前回の接続を再開しています…' : '前回の接続を再開しています…', () => api.remoteResume());
+        box.querySelectorAll('[data-conn]').forEach((b) => {
+          b.onclick = () => {
+            const h = history.find((x) => x.id === b.dataset.conn);
+            busy(h?.mode === 'direct' ? `${connTitle(h)} につないでいます…` : `SSH トンネルを張って、${h ? connTitle(h) : ''} につないでいます…`, () => api.remoteResume({ id: b.dataset.conn }));
+          };
+        });
+        box.querySelectorAll('[data-forget]').forEach((b) => {
+          b.onclick = () => {
+            const h = history.find((x) => x.id === b.dataset.forget);
+            if (!confirm(`「${h ? connTitle(h) : b.dataset.forget}」を、これまでの接続から消しますか？（保存したトークンも忘れます）`)) return;
+            busy('接続を消しています…', () => api.remoteForgetConnection({ id: b.dataset.forget }));
+          };
+        });
         if ($('rCancelResume')) $('rCancelResume').onclick = () => busy('再開をやめています…', () => api.remoteCancelResume());
         if ($('rDisconnect')) $('rDisconnect').onclick = () => busy('切断しています…', () => api.remoteDisconnect());
         if ($('rForgetToken')) $('rForgetToken').onclick = () => busy('トークンを消しています…', () => api.remoteForgetToken());
@@ -3044,7 +3082,7 @@ let remotePhase = '';
 const remotePhaseOf = (rs) => {
   const c = rs?.client || {};
   const r = c.reconnecting;
-  return [rs?.role, c.canResume, c.resumeError, r ? `${r.attempt}:${r.lastError}` : ''].join('|');
+  return [rs?.role, c.canResume, c.resumeError, r ? `${r.attempt}:${r.lastError}` : '', c.currentId, (c.history || []).map((h) => `${h.id}:${h.hasToken}`).join(',')].join('|');
 };
 
 api.onRemote((rs) => {
