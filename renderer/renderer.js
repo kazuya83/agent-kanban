@@ -250,6 +250,21 @@ function specFormHtml(c) {
     <small class="muted">答えていない質問は「おまかせ」として送ります。下の欄に文章で書いて送ってもかまいません。</small>
   </div>`;
 }
+// エージェントが文章で質問してきたとき（回答フォームの JSON がないとき）に、質問のすぐ下に出す回答欄
+function replyFormHtml(c) {
+  const can = canSendFollow(c);
+  return `<div class="qform reply-qform" data-card="${c.id}">
+    <textarea class="q-note" rows="3" placeholder="${esc(agentShort(agentOf(c)))} への回答を書く（Ctrl/⌘ + Enter で送信）"${can ? '' : ' disabled'}></textarea>
+    <div class="q-actions"><button class="btn primary" data-rqact="submit"${can ? '' : ' disabled'}>回答して送る</button></div>
+  </div>`;
+}
+async function sendReplyAnswer(form, c) {
+  const box = form.querySelector('.q-note');
+  const msg = box.value.trim();
+  if (!msg) return toast('回答を書いてください');
+  const ok = await run(() => api.send(c.id, msg, null).then(() => true), '回答を送りました');
+  if (ok) box.value = '';
+}
 const SPEC_AUTO = 'おまかせ（妥当な案で決めてください）';
 // 仕様の確認フォームの答えを、エージェントに送る文章にする
 function specAnswerMessage(questions, answers, note, auto) {
@@ -1019,7 +1034,23 @@ $('detailBody').addEventListener('input', (e) => {
 $('detailBody').addEventListener('click', (e) => {
   if (e.target.closest('.log-actions')) logActionClick(e);
 });
+// 質問のすぐ下の回答欄でも、Ctrl/⌘ + Enter で送る
+$('detailBody').addEventListener('keydown', (e) => {
+  const box = e.target.closest('.reply-qform .q-note');
+  if (!box || e.key !== 'Enter' || e.isComposing || e.keyCode === 229 || e.shiftKey || !(e.metaKey || e.ctrlKey)) return;
+  e.preventDefault();
+  const form = box.closest('.qform');
+  const c = card(form.dataset.card);
+  if (c) sendReplyAnswer(form, c);
+});
 function logActionClick(e) {
+  const rq = e.target.closest('[data-rqact]');
+  if (rq) {
+    const form = rq.closest('.qform');
+    const c = card(form.dataset.card);
+    if (c) sendReplyAnswer(form, c);
+    return;
+  }
   const sq = e.target.closest('[data-sqact]');
   if (sq) {
     const form = sq.closest('.qform');
@@ -1171,7 +1202,7 @@ function chatActionsHtml(c) {
     spec
       ? `<div class="d-awaiting d-spec"><b>${icon('note')}内容が詰まっていないので、開発を開始できません</b><small>${specQuestions(c) ? 'このすぐ下のフォーム（または下の欄）' : '下の欄'}で、上の ${who} の質問に答えて仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>${specFormHtml(c)}`
       : c.awaitingReply && (s === 'review' || s === 'failed')
-        ? `<div class="d-awaiting"><b>${icon('chat')}${who} が質問しています</b><small>下の欄に答えを書いて送ると、同じ会話の続きから進めます。</small></div>`
+        ? `<div class="d-awaiting"><b>${icon('chat')}${who} が質問しています</b><small>このすぐ下の欄（または画面のいちばん下の入力欄）に答えを書いて送ると、同じ会話の続きから進めます。</small></div>${replyFormHtml(c)}`
         : '',
   ];
   return parts.join('');
