@@ -439,7 +439,7 @@ function renderBoard() {
   $('runInfo').textContent = `実行中 ${running}/${settings.maxParallel || 1}`;
 
   if (!settings.repoPath) {
-    $('board').innerHTML = `<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、エージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ</button></div>`;
+    $('board').innerHTML = `<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、エージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ・クローン・新規作成</button></div>`;
     $('emptyRepo').onclick = chooseRepo;
     return;
   }
@@ -2241,20 +2241,24 @@ async function pickRepo(opts) {
   }
 }
 
-// Windows で WSL（Ubuntu など）があれば、このパソコンのフォルダか、WSL の中のフォルダかを選んでもらう
+// リポジトリを選ぶ: 既存のフォルダを開く / URL からクローン / 新しく作る
+// Windows で WSL（Ubuntu など）があれば、このパソコンのフォルダか、WSL の中のフォルダかも選んでもらう
 async function chooseRepo() {
   const distros = (await api.wslDistros().catch(() => [])) || [];
-  if (!distros.length) return pickRepo();
   openModal(
     `<h2>リポジトリを選ぶ</h2>
-     <p class="muted small">選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。</p>
+     ${distros.length ? `<p class="muted small">選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。</p>` : ''}
      <div class="repo-choices">
-       <button class="btn repo-choice" data-pick="">${icon('monitor')}<b>このパソコンのフォルダを選ぶ</b><small>C:\\Users\\… など</small></button>
-       ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">${icon('terminal')}<b>${esc(d)} のフォルダを選ぶ</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}
+       <button class="btn repo-choice" data-pick="">${icon(distros.length ? 'monitor' : 'folder')}<b>${distros.length ? 'このパソコンのフォルダを開く' : '手元のフォルダを開く'}</b><small>${distros.length ? 'C:\\Users\\… など' : 'すでにある git リポジトリ'}</small></button>
+       ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">${icon('terminal')}<b>${esc(d)} のフォルダを開く</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}
+       <button class="btn repo-choice" id="rpClone">${icon('download')}<b>URL からクローンする</b><small>https://github.com/owner/repo・git@github.com:owner/repo.git・owner/repo</small></button>
+       <button class="btn repo-choice" id="rpCreate">${icon('folderPlus')}<b>新しく作る</b><small>空のリポジトリを作ります（GitHub にも作れます）</small></button>
      </div>
      <div class="modal-actions"><button class="btn ghost" id="rpCancel">キャンセル</button></div>`,
     () => {
       $('rpCancel').onclick = closeModal;
+      $('rpClone').onclick = () => repoSetupModal('clone', distros);
+      $('rpCreate').onclick = () => repoSetupModal('create', distros);
       $('modalBox').querySelectorAll('[data-pick]').forEach((b) =>
         b.addEventListener('click', () => {
           const d = b.dataset.pick;
@@ -2262,6 +2266,69 @@ async function chooseRepo() {
           pickRepo(d ? { wsl: d } : {});
         }),
       );
+    },
+  );
+}
+
+// URL から推測するフォルダ名（https://github.com/owner/repo.git → repo）
+function repoNameFromUrl(url) {
+  const last = String(url || '').trim().replace(/[\\/]+$/, '').split(/[/:]/).pop() || '';
+  return last.replace(/\.git$/i, '');
+}
+
+// クローン（mode='clone'）・新規作成（mode='create'）の画面
+async function repoSetupModal(mode, distros = []) {
+  const clone = mode === 'clone';
+  openModal(
+    `<h2>${clone ? 'URL からクローンする' : '新しいリポジトリを作る'}</h2>
+     ${clone ? `<label class="field"><span>リポジトリの URL</span><input id="rsUrl" class="mono" placeholder="https://github.com/owner/repo または owner/repo" autocomplete="off" spellcheck="false" /></label>` : ''}
+     ${distros.length ? `<label class="field"><span>作る場所</span><select id="rsWhere"><option value="">このパソコン</option>${distros.map((d) => `<option value="${esc(d)}">${esc(d)}（WSL）</option>`).join('')}</select></label>` : ''}
+     <label class="field"><span>置き場所（この中にフォルダを作ります）</span>
+       <div class="input-row"><input id="rsParent" class="mono" spellcheck="false" /><button class="btn" id="rsBrowse">選ぶ…</button></div></label>
+     <label class="field"><span>フォルダ名${clone ? '（空なら URL から決めます）' : ''}</span><input id="rsName" class="mono" spellcheck="false" autocomplete="off" placeholder="${clone ? 'repo' : '例: my-app'}" /></label>
+     ${clone ? '' : `<label class="field" id="rsGhWrap"><span>GitHub</span><select id="rsGh"><option value="">作らない（手元だけ）</option><option value="private">GitHub にも作る（非公開）</option><option value="public">GitHub にも作る（公開）</option></select><small>GitHub にも作るときは、gh（GitHub CLI）にログインしている必要があります</small></label>`}
+     <p class="muted small" id="rsPreview"></p>
+     <div class="modal-actions"><button class="btn ghost" id="rsBack">戻る</button><button class="btn primary" id="rsOk">${clone ? 'クローンして開く' : '作って開く'}</button></div>`,
+    async () => {
+      const where = () => ($('rsWhere') ? $('rsWhere').value : '');
+      const sep = () => (where() || /^[A-Za-z]:\\|^\\\\/.test($('rsParent').value) ? '\\' : '/');
+      const name = () => $('rsName').value.trim() || (clone ? repoNameFromUrl($('rsUrl').value) : '');
+      let nameTouched = false;
+      const preview = () => {
+        const p = $('rsParent').value.trim().replace(/[\\/]+$/, '');
+        $('rsPreview').textContent = p && name() ? `作るフォルダ: ${p}${sep()}${name()}` : '';
+      };
+      const loadParent = async () => {
+        $('rsParent').value = (await api.repoDefaultParent(where() ? { wsl: where() } : {}).catch(() => '')) || '';
+        if ($('rsGhWrap')) $('rsGhWrap').hidden = !!where(); // WSL のフォルダでは GitHub に作れない
+        preview();
+      };
+      $('rsBack').onclick = () => chooseRepo();
+      $('rsBrowse').onclick = async () => {
+        const p = await run(() => api.chooseRepoParent({ defaultPath: $('rsParent').value.trim() || undefined }));
+        if (p) $('rsParent').value = p;
+        preview();
+      };
+      if ($('rsWhere')) $('rsWhere').onchange = loadParent;
+      $('rsParent').oninput = preview;
+      $('rsName').oninput = () => ((nameTouched = !!$('rsName').value.trim()), preview());
+      if (clone) $('rsUrl').oninput = () => (nameTouched || ($('rsName').placeholder = repoNameFromUrl($('rsUrl').value) || 'repo'), preview());
+      $('rsOk').onclick = async () => {
+        const parent = $('rsParent').value.trim();
+        const r = clone
+          ? await runBusy('クローンしています…（大きいリポジトリは時間がかかります）', () => api.cloneRepo({ url: $('rsUrl').value.trim(), parent, name: $('rsName').value.trim() }))
+          : await runBusy('リポジトリを作っています…', () => api.createRepo({ parent, name: $('rsName').value.trim(), github: where() ? '' : $('rsGh').value }));
+        if (!r) return;
+        closeModal();
+        closeDetail();
+        if (r.warning) toast(r.warning);
+        else toast(clone ? 'クローンしました' : r.github ? 'リポジトリを作り、GitHub にも push しました' : 'リポジトリを作りました', 'ok');
+        state.board = await api.getBoard();
+        renderBoard();
+        checkEnv();
+      };
+      (clone ? $('rsUrl') : $('rsName')).focus();
+      await loadParent();
     },
   );
 }

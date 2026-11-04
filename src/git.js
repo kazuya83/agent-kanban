@@ -3,14 +3,14 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 const wsl = require('./wsl');
 
-function git(cwd, args, { allowExitCodes = [], network = false } = {}) {
+function git(cwd, args, { allowExitCodes = [], network = false, timeout } = {}) {
   return new Promise((resolve, reject) => {
     // ネットワークを使うときは、パスワード入力を待って止まらないようにする（認証はキーチェーンや SSH の設定を使う）
     const env = network ? { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } : process.env;
     // WSL のフォルダなら、git は WSL の中で動かす（パスは Linux の形にして渡す）
     let file = 'git';
     let argv = args;
-    let opts = { cwd, env, maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: network ? 120000 : 0 };
+    let opts = { cwd, env, maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: timeout ?? (network ? 120000 : 0) };
     const w = wsl.parseWslPath(cwd);
     if (w) {
       const c = wsl.command(w.distro, w.linux, 'git', args.map((a) => (wsl.isWslPath(a) ? wsl.toLinux(a) : a)), {
@@ -424,6 +424,7 @@ module.exports = {
   removeWorktree,
   deleteBranch,
   isDirty,
+  identityArgs,
   commitAll,
   countCommits,
   merge,
