@@ -60,7 +60,7 @@ function shellPath(distro) {
   const p = new Promise((resolve) => {
     execFile(
       wslExe(),
-      ['-d', distro, '--', 'bash', '-lic', 'printf "__AK_PATH__%s__AK_PATH__" "$PATH"'],
+      ['-d', distro, '--exec', 'bash', '-lic', 'printf "__AK_PATH__%s__AK_PATH__" "$PATH"'],
       { windowsHide: true, timeout: 20000, encoding: 'utf8' },
       (err, stdout) => {
         const m = String(stdout || '').match(/__AK_PATH__([\s\S]*?)__AK_PATH__/);
@@ -85,7 +85,8 @@ function command(distro, linuxCwd, cmd, args, opts = {}) {
   if (opts.path) exports.push(`export PATH=${shQuote(opts.path)}`);
   for (const [k, v] of Object.entries(opts.env || {})) exports.push(`export ${k}=${shQuote(v)}`);
   const script = `${exports.map((e) => `${e}; `).join('')}exec "$0" "$@"`;
-  return { file: wslExe(), args: ['-d', distro, '--cd', linuxCwd, '--', 'bash', '-c', script, cmd, ...args] };
+  // --exec: 引数をそのまま渡す（`--` だと、wsl.exe が引数を1つの文字列につなげてシェルに渡すので、引用が崩れる）
+  return { file: wslExe(), args: ['-d', distro, '--cd', linuxCwd, '--exec', 'bash', '-c', script, cmd, ...args] };
 }
 
 // インストールされている WSL のディストリビューション（Ubuntu など）

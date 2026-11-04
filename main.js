@@ -166,8 +166,17 @@ app.whenReady().then(async () => {
       ...(distro ? { defaultPath: wsl.toUnc(distro, home || '/home') } : {}),
     });
     if (r.canceled || !r.filePaths[0]) return null;
-    const top = await git.toplevel(r.filePaths[0]);
-    if (!top) throw new Error('選んだフォルダは git リポジトリではありません');
+    const picked = r.filePaths[0];
+    const pw = wsl.parseWslPath(picked);
+    let top = '';
+    try {
+      top = wsl.fromLinux(picked, (await git.git(picked, ['rev-parse', '--show-toplevel'])).trim());
+    } catch (err) {
+      if (/not a git repository/i.test(err.message)) throw new Error(`選んだフォルダは git リポジトリではありません（${picked}）`);
+      if (pw && /not found|No such file|127/i.test(err.message)) throw new Error(`${pw.distro}（WSL）の中に git が見つかりません。${pw.distro} のターミナルで sudo apt install git を実行してください。\n${err.message}`);
+      throw new Error(`git でフォルダを調べられませんでした（${picked}）\n${err.message}`);
+    }
+    if (!top) throw new Error(`git から答えが返ってきませんでした（${picked}）`);
     store.settings.repoPath = top;
     store.settings.baseBranch = '';
     store.save();

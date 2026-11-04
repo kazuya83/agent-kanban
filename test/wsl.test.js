@@ -25,7 +25,7 @@ test('パスの変換', () => {
 
 test('WSL の中でコマンドを動かす引数（スペースや引用符を含む引数・環境変数）', () => {
   const c = wsl.command('Ubuntu', '/tmp', 'printf', ['%s|%s|%s', "it's a \"test\"", '$HOME', ''], { env: { FOO: "a'b c" }, path: '/usr/bin:/bin' });
-  assert.deepStrictEqual(c.args.slice(0, 6), ['-d', 'Ubuntu', '--cd', '/tmp', '--', 'bash']);
+  assert.deepStrictEqual(c.args.slice(0, 6), ['-d', 'Ubuntu', '--cd', '/tmp', '--exec', 'bash']);
   // bash -c の部分を、この環境でそのまま動かしてみる
   const out = execFileSync(c.args[5], c.args.slice(6), { encoding: 'utf8' });
   assert.strictEqual(out, `it's a "test"|$HOME|`);
@@ -75,6 +75,7 @@ test('WSL のフォルダでは、git を WSL の中で動かし、返ってき�
     assert.strictEqual(await git.worktreeForBranch(unc, 'agent/x1'), wtUnc);
     const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     assert.ok(calls.every((c) => c.seen.includes('distro=Ubuntu')));
+    assert.ok(calls.every((c) => c.mode === 'exec'), '引数がつなげられないよう、--exec で渡す');
     assert.ok(calls.some((c) => c.rest.includes(path.join(tmp, 'repo.worktrees', 'x1'))), 'worktree add には Linux の形のパスを渡す');
     assert.ok(calls.every((c) => !JSON.stringify(c.rest).includes('wsl.localhost')), 'Windows の形のパスは渡さない');
   } finally {
