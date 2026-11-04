@@ -654,7 +654,12 @@ function relayFlowHtml(c) {
     }
     // 判定する工程: 行き先と、最後の判定
     const judge = st.onPass !== undefined || st.onFail !== undefined;
-    const tgt = (to) => (to === 'end' ? '終了' : to === undefined ? '次へ' : `工程${to + 1}${to <= i ? 'に戻る' : 'へ'}`);
+    // 「次の工程」でも最後の工程なら終了（agent.js の relayPlan と同じ）
+    const tgt = (to) => {
+      const j = to === undefined ? i + 1 : to;
+      if (to === 'end' || j >= r.steps.length) return '終了';
+      return to === undefined ? '次へ' : `工程${j + 1}${j <= i ? 'に戻る' : 'へ'}`;
+    };
     const verdict = (i === r.index && r.lastVerdict) || (prev && prev.verdict);
     const judgeHtml = judge
       ? `<div class="rf-info">分岐: 合格 → ${esc(tgt(st.onPass))} ・ 差し戻し → ${esc(tgt(st.onFail))}${(r.loops || {})[i] ? ` ・ 戻した回数 ${r.loops[i]}/${st.maxLoops || 3}` : ''}${verdict ? ` <span class="rf-verdict v-${verdict}">${verdict === 'fail' ? '差し戻し' : '合格'}</span>` : ''}</div>`
