@@ -260,6 +260,18 @@ async function hasRemote(repo, remote = 'origin') {
   return out.split('\n').map((s) => s.trim()).includes(remote);
 }
 
+// origin が GitHub のリポジトリか（origin がない・ほかのサービスなら false）。github.com と GitHub Enterprise（ホスト名に github を含む）
+async function isGitHubRemote(repo, remote = 'origin') {
+  if (!(await hasRemote(repo, remote))) return false;
+  const url = (await git(repo, ['remote', 'get-url', remote]).catch(() => '')).trim();
+  return isGitHubUrl(url);
+}
+
+function isGitHubUrl(url) {
+  const m = String(url || '').trim().match(/^(?:[a-z][a-z0-9+.-]*:\/\/)?(?:[^@/]+@)?([^/:]+)/i);
+  return !!m && /github/i.test(m[1]);
+}
+
 // remote の branch を取ってくる。remote にそのブランチがなければ false
 async function fetchBranch(repo, remote, branch) {
   const heads = await git(repo, ['ls-remote', '--heads', remote, branch], { network: true });
@@ -412,6 +424,8 @@ module.exports = {
   finishMerge,
   abortMerge,
   hasRemote,
+  isGitHubRemote,
+  isGitHubUrl,
   fetchBranch,
   push,
   fastForward,

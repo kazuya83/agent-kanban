@@ -1299,3 +1299,21 @@ test('仕様の確認: JSON ブロックがないときは、本文の番号付�
   ]);
   assert.strictEqual(parseMarkdownQuestions('1. 手順を読む\n2. 直す'), null, '質問でない番号付きの一覧はフォームにしない');
 });
+
+test('ほかのプロジェクトに切り替えても、タスクはそのタスクのプロジェクトの設定（ベースブランチ・権限モード）で動く', async () => {
+  const { repo, store, agents, g } = setup();
+  const { switchRepoSettings } = require('../src/store');
+  switchRepoSettings(store.settings, repo);
+  store.settings.permissionMode = 'bypassPermissions';
+  store.settings.baseBranch = 'develop';
+  g('branch', 'develop');
+  const c = agents.createCard({ title: 'other', prompt: 'develop から' });
+  // 作ったあとで、別のプロジェクトのタブに切り替える（そちらは初期値）
+  switchRepoSettings(store.settings, path.join(path.dirname(repo), 'other-repo'));
+  assert.strictEqual(store.settings.baseBranch, '');
+  assert.strictEqual(store.settings.permissionMode, 'acceptEdits');
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  assert.strictEqual(c.baseBranch, 'develop');
+  assert.ok(!c.permissions || !c.permissions.length, '承認なし（bypassPermissions）で動いた');
+});
