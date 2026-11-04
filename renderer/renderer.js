@@ -24,6 +24,31 @@ const $ = (id) => document.getElementById(id);
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
+
+// カードや通知の短い文章では、Markdown の記号（見出し・太字・コード・表・リスト）を外して、ふつうの文章にする
+function plainText(md) {
+  return String(md ?? '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !/^\|?\s*:?-{3,}/.test(l)) // 表の区切り行
+    .map((l) =>
+      l
+        .replace(/^#{1,6}\s+/, '')
+        .replace(/^[-*+]\s+/, '・')
+        .replace(/^\d+\.\s+/, '')
+        .replace(/^>\s?/, '')
+        .replace(/^\||\|$/g, '')
+        .replace(/\s*\|\s*/g, ' / '),
+    )
+    .join(' ')
+    .replace(/\*\*(.+?)\*\*|__(.+?)__/g, '$1$2')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1$2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 function card(id) {
   return state.board.cards.find((c) => c.id === id);
 }
@@ -275,7 +300,7 @@ function cardHtml(c) {
       <div class="card-title">${c.issue ? `<a class="issue-chip" data-url="${esc(c.issue.url)}" title="Issue を開く">#${c.issue.number}</a> ${esc(c.title.replace(/^#\d+\s*/, ''))}` : esc(c.title)}</div>
       ${c.skill ? `<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">⚡ /${esc(c.skill)}</span></div>` : ''}
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
-      ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(c.lastMessage)}</div>` : ''}
+      ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(plainText(c.lastMessage))}</div>` : ''}
       ${isSpecPending(c) ? '<div class="card-msg card-spec">📝 内容が詰まっていないので、開発を開始できません。開いて質問に答えてください</div>' : ''}
       ${isInterrupted(c) ? `<div class="int-quick"><button class="btn small primary" data-resume="${c.id}" title="中断したところから続けます">▶ 再開</button></div>` : ''}
       ${questionCompactHtml(c)}
@@ -287,21 +312,44 @@ function cardHtml(c) {
     </div>`;
 }
 
+// 週間上限のリセットからリセットまでの合計金額を、期間（何月何日〜何日）と一緒に出す
+let weekRollTimer = null;
+function renderCostInfo(settings) {
+  const el = $('costInfo');
+  el.classList.toggle('hidden', !settings.repoPath);
+  const total = Number(state.board.totalCostUsd) || 0;
+  const w = state.board.weeklyCost;
+  if (!w) {
+    el.textContent = `合計 $${total.toFixed(2)}`;
+    return;
+  }
+  const start = new Date(w.start);
+  const end = new Date(w.end);
+  const md = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+  const hm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const full = (d) => `${d.getMonth() + 1}月${d.getDate()}日（${'日月火水木金土'[d.getDay()]}）${hm(d)}`;
+  // 0:00 にリセットされるなら、終わりの日は前の日（例: 月曜 0:00 リセット → 月〜日）
+  const midnight = start.getHours() === 0 && start.getMinutes() === 0;
+  const last = midnight ? new Date(w.end - 1) : end;
+  el.textContent = `今週 $${(Number(w.usd) || 0).toFixed(2)} ・ ${md(start)}〜${md(last)}`;
+  const src = { claude: 'Claude から届いた週間上限のリセット日時', settings: '設定で決めたリセットの曜日・時刻', default: 'リセット日時がまだ分からないので月曜 0:00（設定で変えられます）' }[w.source] || '';
+  el.title = `Claude の週間上限のリセットに合わせた、今週このリポジトリのタスクで使った金額です\n期間: ${full(start)} 〜 ${full(end)}\n区切り: ${src}\nこれまでの合計: $${total.toFixed(2)}（削除したタスクの分も含みます）`;
+  // 週が変わったら表示を新しい週に切り替える
+  clearTimeout(weekRollTimer);
+  const wait = w.end - Date.now();
+  if (wait > 0 && wait < 2 ** 31 - 1) weekRollTimer = setTimeout(async () => ((state.board = await api.getBoard()), renderBoard()), wait + 1000);
+}
+
 function renderBoard() {
   const { settings, cards } = state.board;
   renderInterruptBanner();
   $('repoBtn').textContent = settings.repoPath ? `📁 ${settings.repoPath}` : '📁 リポジトリを選ぶ';
-  $('baseInfo').textContent = settings.repoPath ? `ベース: ${settings.baseBranch || 'チェックアウト中のブランチ'}` : '';
   // 会話は同時実行数に数えない
   const running = cards.filter((c) => c.status === 'running' && !isChat(c)).length;
-  const queued = cards.filter((c) => c.status === 'queued' && !isChat(c)).length;
-  const waiting = cards.filter((c) => needsYou(c)).length;
-  const total = Number(state.board.totalCostUsd) || 0;
-  $('costInfo').classList.toggle('hidden', !settings.repoPath);
-  $('costInfo').textContent = `合計 $${total.toFixed(2)}`;
+  renderCostInfo(settings);
   renderNotifications();
   renderChatBtn();
-  $('runInfo').innerHTML = `実行中 ${running}/${settings.maxParallel || 1}${queued ? ` ・ 待機 ${queued}` : ''}${waiting ? ` ・ <b class="warn">あなたの対応待ち ${waiting}</b>` : ''}`;
+  $('runInfo').textContent = `実行中 ${running}/${settings.maxParallel || 1}`;
 
   if (!settings.repoPath) {
     $('board').innerHTML = `<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、Claude Code を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ</button></div>`;
@@ -622,8 +670,46 @@ function logEntryHtml(e) {
   const sk = e.skill ? `<span class="skill-chip small">⚡ /${esc(e.skill)}</span> ` : '';
   const md = MD_KINDS.has(e.kind) && typeof Markdown !== 'undefined';
   const body = md ? `<div class="md">${sk ? `<div>${sk}</div>` : ''}${Markdown.render(e.text)}</div>` : `${sk}${esc(e.text)}`;
-  return `<div class="log k-${e.kind}${md ? ' log-md' : ''}"><span class="log-k">${LOG_LABEL[e.kind] || e.kind}</span><span class="log-t">${time}</span><div class="log-x">${body}</div></div>`;
+  return `<div class="log k-${e.kind}${md ? ' log-md' : ''}"><span class="log-k">${LOG_LABEL[e.kind] || e.kind}</span><span class="log-t">${time}</span><div class="log-x">${body}${logImagesHtml(e.images)}</div></div>`;
 }
+
+// ツールの結果に入っていた画像（スクリーンショットなど）。クリックで大きく表示する
+const IMG_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+function logImagesHtml(images) {
+  if (!Array.isArray(images) || !images.length) return '';
+  const items = images.map((im) => {
+    if (im && IMG_TYPES.has(im.mediaType) && typeof im.data === 'string' && /^[A-Za-z0-9+/]+=*$/.test(im.data)) {
+      return `<img class="log-img" src="data:${im.mediaType};base64,${im.data}" alt="画像" title="クリックで大きく表示" />`;
+    }
+    return `<span class="log-img-omitted">🖼 画像（${esc((im && im.omitted) || '表示できません')}）</span>`;
+  });
+  return `<div class="log-imgs">${items.join('')}</div>`;
+}
+
+document.addEventListener('click', (ev) => {
+  const img = ev.target.closest && ev.target.closest('.log-img');
+  if (img) {
+    const ov = document.createElement('div');
+    ov.className = 'img-overlay';
+    ov.title = 'クリックで閉じる';
+    const big = document.createElement('img');
+    big.src = img.src;
+    ov.appendChild(big);
+    ov.onclick = () => ov.remove();
+    document.body.appendChild(ov);
+  }
+});
+// 拡大表示中の Esc は拡大を閉じるだけにする（詳細パネルまで閉じない）
+document.addEventListener(
+  'keydown',
+  (ev) => {
+    const ovs = document.querySelectorAll('.img-overlay');
+    if (ev.key !== 'Escape' || !ovs.length) return;
+    ovs.forEach((o) => o.remove());
+    ev.stopImmediatePropagation();
+  },
+  true,
+);
 
 // ---------------- 差分タブ（GitHub 風: 左にファイルツリー、右にファイルごとの差分） ----------------
 
@@ -1476,12 +1562,16 @@ async function openPr(c) {
 
 async function openSettings() {
   const s = state.board.settings;
-  const info = (await run(() => api.repoInfo())) || { branches: [], current: '' };
+  // ブランチ一覧は git を何回も起動するので（Windows だと遅い）、待たずにモーダルを開いてから後で入れる
+  const baseOptions = (info) =>
+    `<option value="">チェックアウト中のブランチ${info.current ? `（今は ${esc(info.current)}）` : ''}</option>` +
+    [...new Set([...(s.baseBranch ? [s.baseBranch] : []), ...info.branches])]
+      .map((b) => `<option ${b === s.baseBranch ? 'selected' : ''}>${esc(b)}</option>`)
+      .join('');
   openModal(
     `<h2>設定</h2>
      <label class="field"><span>ベースブランチ（worktree の作成元・マージ先）</span>
-       <select id="sBase"><option value="">チェックアウト中のブランチ${info.current ? `（今は ${esc(info.current)}）` : ''}</option>
-       ${info.branches.map((b) => `<option ${b === s.baseBranch ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
+       <select id="sBase">${baseOptions({ branches: [], current: '' })}</select></label>
      <label class="field"><span>レビュー後の取り込み方</span>
        <select id="sIntegration">
          <option value="merge" ${s.integration !== 'pr' ? 'selected' : ''}>直接マージする（ローカルで git merge）</option>
@@ -1517,6 +1607,13 @@ async function openSettings() {
        <small>「＋ 新しいタスク」と「Issue から作成」を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前に Claude と対話して仕様を詰める</label>
      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したら、スキルにしないか通知で聞く（右上の 🔔）</label>
+     <div class="row">
+       <label class="field"><span>週間上限のリセット曜日（上部の「今週」の区切り）</span>
+         <select id="sResetDay"><option value="">自動（Claude から届く日時を使う）</option>
+         ${'日月火水木金土'.split('').map((d, i) => `<option value="${i}" ${String(s.weeklyResetDay) === String(i) ? 'selected' : ''}>${d}曜日</option>`).join('')}</select></label>
+       <label class="field"><span>リセット時刻</span><input id="sResetTime" type="time" value="${esc(s.weeklyResetTime || '00:00')}" /></label>
+     </div>
+     <small class="field-note">Claude の使用状況（/usage）に出る週間上限のリセット日時に合わせます。自動のときは、Claude がリセット日時を知らせてくるまで月曜 0:00 で区切ります。</small>
      <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath)}" /></label>
 
      <div class="modal-actions"><button class="btn ghost" id="sCancel">キャンセル</button><button class="btn primary" id="sOk">保存</button></div>`,
@@ -1524,6 +1621,17 @@ async function openSettings() {
       let defSkill = s.defaultSkill || null;
       const drawDef = () => renderSkillSlot('sSkill', defSkill, (v) => ((defSkill = v), drawDef()));
       drawDef();
+      const sel = $('sBase');
+      api.repoInfo().then(
+        (info) => {
+          // 読み込み中にモーダルを閉じたり別の画面に変わっていたら何もしない
+          if (!info || $('sBase') !== sel || $('modal').classList.contains('hidden')) return;
+          const picked = sel.value;
+          sel.innerHTML = baseOptions({ branches: info.branches || [], current: info.current || '' });
+          sel.value = picked;
+        },
+        () => {},
+      );
       // 「Issue のステータスを自動で変える」にチェックがあるときだけ、項目名と選択肢の指定を出す
       $('sIssueSync').onchange = () => ($('sStatusMap').hidden = !$('sIssueSync').checked);
       refreshGh();
@@ -1543,6 +1651,8 @@ async function openSettings() {
             issueStatusSync: $('sIssueSync').checked,
             suggestSkillsOnDone: $('sSuggestSkills').checked,
             specCheck: $('sSpecCheck').checked,
+            weeklyResetDay: $('sResetDay').value,
+            weeklyResetTime: $('sResetTime').value || '00:00',
             statusFieldName: $('sStatusField').value.trim(),
             statusMapping: { inProgress: $('sMapProgress').value.trim(), inReview: $('sMapReview').value.trim(), done: $('sMapDone').value.trim() },
           }),
@@ -1557,13 +1667,39 @@ async function openSettings() {
   );
 }
 
-async function chooseRepo() {
-  const r = await run(() => api.chooseRepo());
+async function pickRepo(opts) {
+  const r = await run(() => api.chooseRepo(opts));
   if (r) {
     closeDetail();
     state.board = await api.getBoard();
     renderBoard();
+    checkEnv();
   }
+}
+
+// Windows で WSL（Ubuntu など）があれば、このパソコンのフォルダか、WSL の中のフォルダかを選んでもらう
+async function chooseRepo() {
+  const distros = (await api.wslDistros().catch(() => [])) || [];
+  if (!distros.length) return pickRepo();
+  openModal(
+    `<h2>リポジトリを選ぶ</h2>
+     <p class="muted small">選んだフォルダが WSL の中なら、git と claude も WSL の中で動かします（WSL の中にも git と Claude Code が必要です）。</p>
+     <div class="repo-choices">
+       <button class="btn repo-choice" data-pick="">🪟 <b>このパソコンのフォルダを選ぶ</b><small>C:\\Users\\… など</small></button>
+       ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">🐧 <b>${esc(d)} のフォルダを選ぶ</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}
+     </div>
+     <div class="modal-actions"><button class="btn ghost" id="rpCancel">キャンセル</button></div>`,
+    () => {
+      $('rpCancel').onclick = closeModal;
+      $('modalBox').querySelectorAll('[data-pick]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const d = b.dataset.pick;
+          closeModal();
+          pickRepo(d ? { wsl: d } : {});
+        }),
+      );
+    },
+  );
 }
 
 $('repoBtn').onclick = chooseRepo;
@@ -1696,7 +1832,7 @@ function notifItemHtml(n) {
     <span class="notif-icon">${NOTIF_ICON[n.kind] || '🔔'}</span>
     <div class="notif-main">
       <div class="notif-title">${esc(n.title)}</div>
-      ${n.body ? `<div class="notif-body">${esc(n.body)}</div>` : ''}
+      ${n.body ? `<div class="notif-body">${esc(plainText(n.body))}</div>` : ''}
       <div class="notif-foot"><span class="muted small">${timeAgo(n.t)}</span>${action}</div>
     </div>
     <button class="icon notif-x" data-nclear="${esc(n.id)}" title="この通知を消す">✕</button>
@@ -1831,8 +1967,11 @@ async function checkEnv() {
   const env = await run(() => api.checkEnv());
   if (!env) return;
   const msgs = [];
-  if (!env.git) msgs.push(`git が見つかりません。${env.platform === 'win32' ? 'Git for Windows（https://git-scm.com/）' : env.platform === 'darwin' ? 'ターミナルで xcode-select --install を実行するか Homebrew で git' : 'git'} をインストールしてから、アプリを再起動してください。`);
-  if (!env.claude) msgs.push('claude コマンドが見つかりません。Claude Code をインストールしてログインするか、⚙ 設定で claude のフルパスを指定してください（ターミナルで which claude、Windows なら where claude で調べられます）。');
+  if (env.wsl) {
+    if (!env.git) msgs.push(`${env.wsl}（WSL）の中に git が見つかりません。${env.wsl} のターミナルで sudo apt install git を実行してください。`);
+    if (!env.claude) msgs.push(`${env.wsl}（WSL）の中に claude が見つかりません。${env.wsl} のターミナルで Claude Code をインストールしてログインしてください（このリポジトリのタスクは ${env.wsl} の中で動きます）。`);
+  } else if (!env.git) msgs.push(`git が見つかりません。${env.platform === 'win32' ? 'Git for Windows（https://git-scm.com/）' : env.platform === 'darwin' ? 'ターミナルで xcode-select --install を実行するか Homebrew で git' : 'git'} をインストールしてから、アプリを再起動してください。`);
+  if (!env.wsl && !env.claude) msgs.push('claude コマンドが見つかりません。Claude Code をインストールしてログインするか、⚙ 設定で claude のフルパスを指定してください（ターミナルで which claude、Windows なら where claude で調べられます）。');
   const el = $('envBanner');
   el.innerHTML = msgs.map((m) => `<div>⚠ ${esc(m)}</div>`).join('');
   el.classList.toggle('hidden', msgs.length === 0);

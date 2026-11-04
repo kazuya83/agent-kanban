@@ -8,6 +8,8 @@ const { resolveCommand } = require('./env');
 
 function execFileP(cmd, args, opts) {
   return new Promise((resolve, reject) => {
+    // WSL のフォルダを作業フォルダにすると、gh が Windows の git でそのフォルダを調べて止まるので、使わない
+    if (opts && opts.cwd && require('./wsl').isWslPath(opts.cwd)) opts = { ...opts, cwd: undefined };
     execFile(cmd, args, { maxBuffer: 32 * 1024 * 1024, windowsHide: true, ...opts }, (err, stdout, stderr) => {
       if (err) {
         err.stderr = stderr;

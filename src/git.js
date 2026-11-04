@@ -1,12 +1,26 @@
 // git コマンドの薄いラッパー
 const { execFile } = require('child_process');
 const fs = require('fs');
+const wsl = require('./wsl');
 
 function git(cwd, args, { allowExitCodes = [], network = false } = {}) {
   return new Promise((resolve, reject) => {
     // ネットワークを使うときは、パスワード入力を待って止まらないようにする（認証はキーチェーンや SSH の設定を使う）
     const env = network ? { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } : process.env;
-    execFile('git', args, { cwd, env, maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: network ? 120000 : 0 }, (err, stdout, stderr) => {
+    // WSL のフォルダなら、git は WSL の中で動かす（パスは Linux の形にして渡す）
+    let file = 'git';
+    let argv = args;
+    let opts = { cwd, env, maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: network ? 120000 : 0 };
+    const w = wsl.parseWslPath(cwd);
+    if (w) {
+      const c = wsl.command(w.distro, w.linux, 'git', args.map((a) => (wsl.isWslPath(a) ? wsl.toLinux(a) : a)), {
+        env: network ? { GIT_TERMINAL_PROMPT: '0' } : {},
+      });
+      file = c.file;
+      argv = c.args;
+      opts = { ...opts, cwd: undefined };
+    }
+    execFile(file, argv, opts, (err, stdout, stderr) => {
       if (err) {
         if (typeof err.code === 'number' && allowExitCodes.includes(err.code)) return resolve(stdout);
         const e = new Error(`git ${args.join(' ')} に失敗しました: ${(stderr || err.message).trim()}`);
@@ -21,7 +35,7 @@ function git(cwd, args, { allowExitCodes = [], network = false } = {}) {
 
 async function toplevel(dir) {
   try {
-    return (await git(dir, ['rev-parse', '--show-toplevel'])).trim();
+    return wsl.fromLinux(dir, (await git(dir, ['rev-parse', '--show-toplevel'])).trim());
   } catch {
     return null;
   }
@@ -185,7 +199,7 @@ async function worktreeForBranch(repo, branch) {
   let current = null;
   for (const raw of out.split('\n')) {
     const line = raw.replace(/\r$/, '').trim();
-    if (line.startsWith('worktree ')) current = line.slice('worktree '.length).trim();
+    if (line.startsWith('worktree ')) current = wsl.fromLinux(repo, line.slice('worktree '.length).trim());
     else if (line.startsWith('branch ') && line.slice('branch '.length).trim() === want) return current;
   }
   // 念のため、メインのフォルダの HEAD も見る
@@ -195,9 +209,9 @@ async function worktreeForBranch(repo, branch) {
 }
 
 // worktree add で「そのブランチは <フォルダ> で使われています」と断られたときの、そのフォルダ
-function checkedOutAtFromError(err) {
+function checkedOutAtFromError(err, repo) {
   const m = String((err && err.message) || '').match(/(?:already used by worktree at|already checked out at|is already checked out at) '([^']+)'/);
-  return m ? m[1] : null;
+  return m ? wsl.fromLinux(repo, m[1]) : null;
 }
 
 // そのフォルダで rebase / マージ / cherry-pick などが途中か
@@ -213,7 +227,7 @@ async function operationInProgress(dir) {
     ['BISECT_LOG', 'bisect'],
   ];
   for (const [name, label] of checks) {
-    const p = (await git(dir, ['rev-parse', '--git-path', name]).catch(() => '')).trim();
+    const p = wsl.fromLinux(dir, (await git(dir, ['rev-parse', '--git-path', name]).catch(() => '')).trim());
     if (p && fs.existsSync(path.isAbsolute(p) ? p : path.join(dir, p))) return label;
   }
   return null;
@@ -377,7 +391,7 @@ async function listWorktrees(repo) {
   const list = [];
   let cur = null;
   for (const line of out.split('\n')) {
-    if (line.startsWith('worktree ')) list.push((cur = { path: line.slice(9), branch: null, head: null, detached: false, main: list.length === 0 }));
+    if (line.startsWith('worktree ')) list.push((cur = { path: wsl.fromLinux(repo, line.slice(9)), branch: null, head: null, detached: false, main: list.length === 0 }));
     else if (!cur) continue;
     else if (line.startsWith('HEAD ')) cur.head = line.slice(5);
     else if (line.startsWith('branch ')) cur.branch = line.slice(7).replace(/^refs\/heads\//, '');

@@ -105,6 +105,8 @@ test('承認→レビュー→追加指示→マージ、拒否→破棄、同�
     await agents.discard(b.id);
     // 削除したタスクの分も合計金額に残る
     assert.strictEqual(store.totalCost(repo), before);
+    // 週の合計にも、使った金額が日時つきで入っている
+    assert.ok(Math.abs(store.weeklyCost(repo).usd - before) < 1e-9);
     assert.ok(!fs.existsSync(wt));
     assert.ok(!g('branch').toString().includes(b.branch));
     assert.strictEqual(store.card(b.id), undefined);
