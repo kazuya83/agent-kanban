@@ -398,7 +398,15 @@ function renderBoard() {
     $('emptyRepo').onclick = chooseRepo;
     return;
   }
-  $('board').innerHTML = COLUMNS.map((col) => {
+  // 作り直すとスクロールが先頭に戻るので、ボードと各列の位置を覚えておいて戻す
+  const boardEl = $('board');
+  const boardScroll = [boardEl.scrollLeft, boardEl.scrollTop];
+  const colScroll = {};
+  boardEl.querySelectorAll('.column[data-col]').forEach((sec) => {
+    const list = sec.querySelector('.cards');
+    if (list) colScroll[sec.dataset.col] = list.scrollTop;
+  });
+  boardEl.innerHTML = COLUMNS.map((col) => {
     const list = cards
       .filter((c) => !isChat(c) && col.statuses.includes(c.status))
       .sort(byAttention);
@@ -408,6 +416,12 @@ function renderBoard() {
         <div class="cards">${list.map(cardHtml).join('') || `<div class="col-empty">${col.key === 'todo' ? '「＋ 新しいタスク」から追加' : 'なし'}</div>`}</div>
       </section>`;
   }).join('');
+  boardEl.querySelectorAll('.column[data-col]').forEach((sec) => {
+    const top = colScroll[sec.dataset.col];
+    const list = sec.querySelector('.cards');
+    if (top && list) list.scrollTop = top;
+  });
+  [boardEl.scrollLeft, boardEl.scrollTop] = boardScroll;
 }
 
 // 対応が必要なものを上に、あとは新しい順
