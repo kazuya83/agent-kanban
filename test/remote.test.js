@@ -1,7 +1,7 @@
 // Agent Kanban 同士の遠隔操作（ペアリング・RPC・イベント）
 const test = require('node:test');
 const assert = require('node:assert');
-const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, MAX_PAIR_FAILURES } = require('../src/remote');
+const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, MAX_PAIR_FAILURES, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory, redactForRemote, MAX_CONNECTION_HISTORY } = require('../src/remote');
 
 test('遠隔で転送するチャンネルと、しないチャンネル', () => {
   assert.strictEqual(isProxyChannel('board:get'), true);
@@ -248,4 +248,43 @@ test('前回の接続の再開: やめたら、試している最中の結果も
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.strictEqual(connected, false);
   assert.strictEqual(r.active(), false);
+});
+
+test('これまでの接続: つながった接続先を新しい順に残し、同じ接続先は置き換える', () => {
+  const a = { mode: 'ssh', sshHost: '100.1.1.1', sshUser: 'me', port: 17831 };
+  const b = { mode: 'direct', host: '127.0.0.1', port: 18000 };
+  let list = upsertConnectionHistory([], a, { token: 'ta', at: 1 });
+  list = upsertConnectionHistory(list, b, { token: 'tb', at: 2 });
+  assert.deepStrictEqual(list.map((e) => e.token), ['tb', 'ta']);
+  // 鍵ファイルが変わっても同じ接続先。トークンを渡さなければ前のトークンを引き継ぐ
+  list = upsertConnectionHistory(list, { ...a, sshKey: '/k', sshHost: '100.1.1.1 ' }, { at: 3 });
+  assert.strictEqual(list.length, 2);
+  assert.strictEqual(list[0].id, connectionKey(a));
+  assert.strictEqual(list[0].token, 'ta');
+  assert.strictEqual(list[0].sshKey, '/k');
+  assert.strictEqual(list[0].lastConnectedAt, 3);
+  // ユーザー名やポートが違えば別の接続先
+  assert.notStrictEqual(connectionKey(a), connectionKey({ ...a, sshUser: 'other' }));
+  assert.notStrictEqual(connectionKey(a), connectionKey({ ...a, port: 17832 }));
+  assert.strictEqual(findConnectionHistory(list, connectionKey(b)).token, 'tb');
+  list = removeConnectionHistory(list, connectionKey(b));
+  assert.strictEqual(list.length, 1);
+  assert.strictEqual(findConnectionHistory(list, connectionKey(b)), null);
+});
+
+test('これまでの接続: 決められた数までしか残さない', () => {
+  let list = [];
+  for (let i = 0; i < MAX_CONNECTION_HISTORY + 3; i++) list = upsertConnectionHistory(list, { mode: 'direct', host: '127.0.0.1', port: 20000 + i }, { token: `t${i}` });
+  assert.strictEqual(list.length, MAX_CONNECTION_HISTORY);
+  assert.strictEqual(list[0].port, 20000 + MAX_CONNECTION_HISTORY + 2);
+});
+
+test('これまでの接続: 画面や遠隔へはトークンを渡さない', () => {
+  const list = upsertConnectionHistory([], { mode: 'ssh', sshHost: 'h', sshUser: 'u' }, { token: 'secret' });
+  const pub = publicConnectionHistory(list);
+  assert.strictEqual(pub[0].hasToken, true);
+  assert.ok(!('token' in pub[0]));
+  assert.ok(!JSON.stringify(pub).includes('secret'));
+  const red = redactForRemote({ settings: { remoteClientHistory: list, x: 1 } });
+  assert.ok(!('remoteClientHistory' in red.settings));
 });

@@ -16,7 +16,7 @@ const AUTH_TIMEOUT_MS = 30 * 1000;
 // クライアントの TCP 接続を待つ長さ
 const CONNECT_TIMEOUT_MS = 10 * 1000;
 // 遠隔へ渡さない設定（トークンなどの秘密）
-const SECRET_SETTINGS = ['remotePairTokens', 'remoteClientToken'];
+const SECRET_SETTINGS = ['remotePairTokens', 'remoteClientToken', 'remoteClientHistory'];
 
 // board:get / board:changed などで渡すボードから、秘密の設定を抜く
 function redactForRemote(data) {
@@ -511,7 +511,63 @@ class Reconnector extends EventEmitter {
   }
 }
 
+// ---- これまでつないだ接続先（クライアント側）。RC設定でカードにして、選んでつなぎ直せるようにする ----
+const MAX_CONNECTION_HISTORY = 10;
+
+// 接続先の中身（設定の値から）。トークンは別に持つ
+function normalizeConnection(c = {}) {
+  const mode = c.mode === 'direct' ? 'direct' : 'ssh';
+  return {
+    mode,
+    host: String(c.host || '127.0.0.1').trim() || '127.0.0.1',
+    port: parseInt(c.port, 10) || DEFAULT_PORT,
+    sshHost: String(c.sshHost || '').trim(),
+    sshUser: String(c.sshUser || '').trim(),
+    sshPort: parseInt(c.sshPort, 10) || 22,
+    sshKey: String(c.sshKey || '').trim(),
+    sshPath: String(c.sshPath || '').trim() || 'ssh',
+  };
+}
+
+// 同じ接続先かどうかの目印（鍵や ssh コマンドが変わっても同じ接続先とみなす）
+function connectionKey(c = {}) {
+  const n = normalizeConnection(c);
+  return n.mode === 'direct' ? `direct|${n.host.toLowerCase()}|${n.port}` : `ssh|${n.sshUser}@${n.sshHost.toLowerCase()}:${n.sshPort}|${n.port}`;
+}
+
+// つながった接続先を、いちばん前に入れる（同じ接続先は置き換える）
+function upsertConnectionHistory(list, conn, { token = '', at = Date.now(), max = MAX_CONNECTION_HISTORY } = {}) {
+  const n = normalizeConnection(conn);
+  const id = connectionKey(n);
+  const prev = (Array.isArray(list) ? list : []).filter((e) => e && typeof e === 'object');
+  const old = prev.find((e) => connectionKey(e) === id);
+  const entry = { ...n, id, token: token || old?.token || '', lastConnectedAt: at };
+  return [entry, ...prev.filter((e) => connectionKey(e) !== id)].slice(0, max);
+}
+
+function removeConnectionHistory(list, id) {
+  return (Array.isArray(list) ? list : []).filter((e) => e && connectionKey(e) !== id);
+}
+
+function findConnectionHistory(list, id) {
+  return (Array.isArray(list) ? list : []).find((e) => e && connectionKey(e) === id) || null;
+}
+
+// 画面に渡す形（トークンは渡さない）
+function publicConnectionHistory(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter((e) => e && typeof e === 'object')
+    .map((e) => ({ ...normalizeConnection(e), id: connectionKey(e), hasToken: !!e.token, lastConnectedAt: e.lastConnectedAt || 0 }));
+}
+
 module.exports = {
+  MAX_CONNECTION_HISTORY,
+  normalizeConnection,
+  connectionKey,
+  upsertConnectionHistory,
+  removeConnectionHistory,
+  findConnectionHistory,
+  publicConnectionHistory,
   RECONNECT_DELAYS_MS,
   Reconnector,
   DEFAULT_PORT,

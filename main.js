@@ -8,7 +8,7 @@ const git = require('./src/git');
 const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
-const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel } = require('./src/remote');
+const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory } = require('./src/remote');
 const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
 const sshKey = require('./src/ssh-key');
 const dirBrowse = require('./src/dir-browse');
@@ -122,6 +122,9 @@ function remoteSession() {
       canResume: canResumeRemote(),
       reconnecting: reconnector?.status() || null,
       resumeError: resumeError || '',
+      // これまでつないだ接続先（新しい順・トークンは渡さない）。RC設定でカードにして選べるようにする
+      history: publicConnectionHistory(store.settings.remoteClientHistory),
+      currentId: connectionKey(currentConnection()),
     },
   };
 }
@@ -230,6 +233,27 @@ let connectSeq = 0;
 let wantConnected = false;
 const cancelledError = () => Object.assign(new Error('接続を取り消しました'), { cancelled: true });
 
+// いまの設定にある接続先
+function currentConnection() {
+  const s = store.settings;
+  return { mode: s.remoteClientMode, host: s.remoteClientHost, port: s.remoteClientPort, sshHost: s.remoteSshHost, sshUser: s.remoteSshUser, sshPort: s.remoteSshPort, sshKey: s.remoteSshKey, sshPath: s.remoteSshPath };
+}
+
+// これまでの接続から1つ選んで、いまの設定にする（トークンもその接続のものにする）
+function useConnection(entry) {
+  const s = store.settings;
+  s.remoteClientMode = entry.mode === 'direct' ? 'direct' : 'ssh';
+  s.remoteClientHost = entry.host || '127.0.0.1';
+  s.remoteClientPort = entry.port || DEFAULT_PORT;
+  s.remoteSshHost = entry.sshHost || '';
+  s.remoteSshUser = entry.sshUser || '';
+  s.remoteSshPort = entry.sshPort || 22;
+  s.remoteSshKey = entry.sshKey || '';
+  s.remoteSshPath = entry.sshPath || 'ssh';
+  s.remoteClientToken = entry.token || '';
+  store.save();
+}
+
 function canResumeRemote() {
   const s = store.settings;
   if (!s.remoteClientToken || remoteClient?.connected || remoteHost?.listening()) return false;
@@ -278,6 +302,8 @@ async function connectRemote({ code = '' } = {}) {
       // ホスト側でペアが破棄された。コードでペアリングし直すしかない
       store.settings.remoteClientToken = '';
       store.settings.remoteClientResume = false;
+      // これまでの接続からも外す（トークンなしでは選んでもつながらない）
+      store.settings.remoteClientHistory = removeConnectionHistory(store.settings.remoteClientHistory, connectionKey(currentConnection()));
       store.save();
       const e = new Error('保存したトークンがホストで無効になっています。ホストに出ている 6 桁のコードで、もう一度ペアリングしてください');
       e.fatal = true;
@@ -300,6 +326,8 @@ async function connectRemote({ code = '' } = {}) {
     throw cancelledError();
   }
   if (result.token) store.settings.remoteClientToken = result.token;
+  // これまでの接続に残す（RC設定のカードから選んで、またつなげる）
+  store.settings.remoteClientHistory = upsertConnectionHistory(store.settings.remoteClientHistory, currentConnection(), { token: store.settings.remoteClientToken });
   // 次の起動時や切れたときは、この接続を再開する
   store.settings.remoteClientResume = true;
   store.save();
@@ -484,6 +512,9 @@ app.whenReady().then(async () => {
     if (sshPort != null) s.remoteSshPort = Math.min(65535, Math.max(1, parseInt(sshPort, 10) || 22));
     if (sshKey != null) s.remoteSshKey = String(sshKey).trim();
     if (sshPath != null) s.remoteSshPath = String(sshPath).trim() || 'ssh';
+    // 前にトークンをもらった接続先なら、そのトークンを使う
+    const known = findConnectionHistory(s.remoteClientHistory, connectionKey(currentConnection()));
+    if (known?.token) s.remoteClientToken = known.token;
     store.save();
     // 手で接続するときは、裏でのつなぎ直しを止める
     reconnector.cancel();
@@ -491,8 +522,18 @@ app.whenReady().then(async () => {
     return connectRemote({ code });
   });
   // 保存した接続先とトークンで、前回の接続を再開する（ボード上部の「前回の接続を再開」）
-  handle('remote:resume', async () => {
+  // id を渡したときは、これまでの接続（RC設定のカード）から選んだ接続先につなぐ
+  handle('remote:resume', async ({ id } = {}) => {
     if (remoteClient?.connected) return remoteSession();
+    if (id) {
+      if (remoteHost?.listening()) throw new Error('ホストとして待ち受け中は接続できません。先にホストを停止してください');
+      const entry = findConnectionHistory(store.settings.remoteClientHistory, String(id));
+      if (!entry) throw new Error('その接続は見つかりません。RC設定を開き直してください');
+      if (!entry.token) throw new Error('この接続にはトークンがありません。ホストに出ている 6 桁のコードで、もう一度ペアリングしてください');
+      cancelConnecting();
+      sshTunnel?.close();
+      useConnection(entry);
+    }
     if (!canResumeRemote()) throw new Error('再開できる前回の接続がありません。RC設定から接続してください');
     reconnector.cancel();
     resumeError = '';
@@ -517,9 +558,25 @@ app.whenReady().then(async () => {
     send('board:changed', withRemoteSession(boardState()));
     return remoteSession();
   });
+  // これまでの接続から1つ消す（いまの設定の接続先なら、そのトークンも忘れる）
+  handle('remote:forgetConnection', ({ id } = {}) => {
+    const key = String(id || '');
+    const isCurrent = key === connectionKey(currentConnection());
+    if (isCurrent && (remoteClient?.connected || reconnector?.active())) throw new Error('つないでいる接続は消せません。先に切断してください');
+    store.settings.remoteClientHistory = removeConnectionHistory(store.settings.remoteClientHistory, key);
+    if (isCurrent) {
+      store.settings.remoteClientToken = '';
+      store.settings.remoteClientResume = false;
+      resumeError = '';
+    }
+    store.save();
+    notifyRemoteOnly();
+    return remoteSession();
+  });
   handle('remote:forgetToken', () => {
     disconnectRemote();
     store.settings.remoteClientToken = '';
+    store.settings.remoteClientHistory = removeConnectionHistory(store.settings.remoteClientHistory, connectionKey(currentConnection()));
     store.save();
     resumeError = '';
     notifyRemoteOnly();
@@ -800,6 +857,12 @@ app.whenReady().then(async () => {
       store.settings.remoteHostEnabled = false;
       store.save();
     }
+  }
+
+  // 以前の版で保存したトークン（接続先1つ分）を、これまでの接続に移す
+  if (store.settings.remoteClientToken && (store.settings.remoteClientMode === 'direct' || String(store.settings.remoteSshHost || '').trim()) && !findConnectionHistory(store.settings.remoteClientHistory, connectionKey(currentConnection()))) {
+    store.settings.remoteClientHistory = upsertConnectionHistory(store.settings.remoteClientHistory, currentConnection(), { token: store.settings.remoteClientToken, at: 0 });
+    store.save();
   }
 
   createWindow();

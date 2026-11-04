@@ -78,6 +78,7 @@ const DEFAULT_SETTINGS = {
   remoteClientHost: '127.0.0.1', // 接続先（トンネル後は通常 127.0.0.1）
   remoteClientPort: 17831,
   remoteClientToken: '', // ペアリング後に保存するトークン（クライアント側）
+  remoteClientHistory: [], // これまでつないだ接続先とそのトークン（新しい順）。RC設定のカードから選んでつなぎ直す
   remoteClientResume: false, // 前回クライアントとして接続していた（自分で切断していない）。次の起動時や切れたときに自動でつなぎ直す
   remoteClientMode: 'ssh', // 'ssh' = アプリが SSH トンネルを張る / 'direct' = 自分で張ったトンネルなどへ直接つなぐ
   remoteSshHost: '', // SSH の接続先（Tailscale の IP やホスト名）
