@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 次にリリースするバージョンを決める（CI 用）
+// 次にリリースするバージョンを決める（scripts/release-local.sh から使う）
 //   node scripts/next-version.js            → {"version":"0.1.9","release":true,"latest":"0.1.8","reason":"..."} を出す
 //
 // - 最新のリリース（v から始まるタグ）の最後の数字を1つ上げる（0.1.8 → 0.1.9）
