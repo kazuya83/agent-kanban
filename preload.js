@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('api', {
   merge: (id, opts) => call('card:merge', { id, ...(opts || {}) }),
   createPr: (id, opts) => call('card:pr', { id, ...(opts || {}) }),
   discard: (id) => call('card:discard', id),
+  complete: (id) => call('card:complete', id),
   resolveConflict: (id, mode) => call('conflict:resolve', { id, mode }),
   completeConflict: (id) => call('conflict:complete', id),
   abortConflict: (id) => call('conflict:abort', id),

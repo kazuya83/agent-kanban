@@ -122,6 +122,7 @@ const PROXY_CHANNELS = new Set([
   'card:merge',
   'card:pr',
   'card:discard',
+  'card:complete',
   'conflict:resolve',
   'conflict:complete',
   'conflict:abort',

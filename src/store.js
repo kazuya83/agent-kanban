@@ -85,12 +85,28 @@ function closeRepoTab(tabs, current, dir, max = MAX_REPO_TABS) {
 }
 
 // タブに出す、リポジトリごとの動いているタスクと対応を待っているタスクの数
-function repoTabSummary(tabs, cards) {
+// git で管理していないフォルダとして開いたか（settings.noGitRepos に入っている）
+function isNoGitRepo(settings, dir) {
+  const d = String(dir || '').trim();
+  return !!d && Array.isArray(settings && settings.noGitRepos) && settings.noGitRepos.includes(d);
+}
+
+// フォルダを開いたときに、git で管理していないかどうかを覚えておく（git リポジトリになったら外す）
+function markNoGitRepo(settings, dir, noGit) {
+  const d = String(dir || '').trim();
+  if (!d || !settings) return;
+  const list = (Array.isArray(settings.noGitRepos) ? settings.noGitRepos : []).filter((p) => p && p !== d);
+  if (noGit) list.unshift(d);
+  settings.noGitRepos = list.slice(0, 200);
+}
+
+function repoTabSummary(tabs, cards, settings) {
   const all = Array.isArray(cards) ? cards : [];
   return (Array.isArray(tabs) ? tabs : []).map((p) => {
     const mine = all.filter((c) => c && c.repoPath === p);
     return {
       path: p,
+      ...(isNoGitRepo(settings, p) ? { noGit: true } : {}),
       running: mine.filter((c) => c.status === 'running' || c.status === 'queued').length,
       attention: mine.filter((c) => (c.questions || []).length || (c.permissions || []).length || (c.awaitingReply && (c.status === 'review' || c.status === 'failed'))).length,
     };
@@ -103,6 +119,7 @@ const DEFAULT_SETTINGS = {
   repoBaseBranches: {}, // リポジトリごとのベースブランチ（タブを切り替えたら baseBranch に戻す）
   lastRepoParent: '', // クローン・新規作成で最後に使った置き場所（親フォルダ）
   recentRepoPaths: [], // 最近開いたリポジトリ（新しいものが先頭）
+  noGitRepos: [], // git で管理していないフォルダとして開いたもの（worktree を作らず、そのフォルダでタスクを動かす）
   baseBranch: '', // 空なら、開始時にチェックアウトしているブランチ
   permissionMode: 'acceptEdits', // default / acceptEdits / plan / bypassPermissions
   allowedTools: '', // カンマ・改行区切り（例: Bash(npm test:*), WebSearch）
@@ -333,6 +350,8 @@ module.exports = {
   openRepoTab,
   closeRepoTab,
   repoTabSummary,
+  isNoGitRepo,
+  markNoGitRepo,
   cleanRecentRepoPaths,
   touchRecentRepo,
   seedRecentRepoPaths,
