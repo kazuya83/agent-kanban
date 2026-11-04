@@ -340,12 +340,10 @@ function renderBoard() {
   $('repoBtn').textContent = settings.repoPath ? `📁 ${settings.repoPath}` : '📁 リポジトリを選ぶ';
   // 会話は同時実行数に数えない
   const running = cards.filter((c) => c.status === 'running' && !isChat(c)).length;
-  const queued = cards.filter((c) => c.status === 'queued' && !isChat(c)).length;
-  const waiting = cards.filter((c) => needsYou(c)).length;
   renderCostInfo(settings);
   renderNotifications();
   renderChatBtn();
-  $('runInfo').innerHTML = `実行中 ${running}/${settings.maxParallel || 1}${queued ? ` ・ 待機 ${queued}` : ''}${waiting ? ` ・ <b class="warn">あなたの対応待ち ${waiting}</b>` : ''}`;
+  $('runInfo').textContent = `実行中 ${running}/${settings.maxParallel || 1}`;
 
   if (!settings.repoPath) {
     $('board').innerHTML = `<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、Claude Code を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ</button></div>`;
