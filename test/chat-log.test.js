@@ -55,3 +55,21 @@ test('push: 結果が届いたら、直前のツールの項目を描き直す�
   assert.strictEqual(push(items, L('text', 'done')).op, 'append');
   assert.strictEqual(items.length, 2);
 });
+
+test('build: agent の無い返事は Claude とみなす（Claude → Codex の Pipeline で、Claude の返事を Codex と出さない）', () => {
+  const items = build([L('user', 'x'), L('text', 'claude の返事'), L('system', '引き継ぎ'), L('text', 'codex の返事', { agent: 'codex' })], 'codex');
+  assert.strictEqual(items[1].agent, 'claude');
+  assert.strictEqual(items[3].agent, 'codex');
+});
+
+test('build: ツールの agent が替わったら、ツールの項目に名前を出し直す', () => {
+  const items = build([L('text', 'a', { agent: 'claude' }), L('tool', 'Bash  ls', { agent: 'codex' }), L('tool_result', 'ok'), L('text', 'b', { agent: 'codex' })], 'codex');
+  assert.deepStrictEqual(items.map((it) => it.head), [true, true, false]);
+  assert.strictEqual(items[1].agent, 'codex');
+});
+
+test('build: agent の無い古いツールは、まとまりのエージェントを使う（名前は出し直さない）', () => {
+  const items = build([L('text', 'a', { agent: 'gemini' }), L('tool', 'Read  a')], 'claude');
+  assert.strictEqual(items[1].agent, 'gemini');
+  assert.strictEqual(items[1].head, false);
+});

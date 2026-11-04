@@ -880,7 +880,7 @@ function chatItemHtml(it, agent, open) {
     const err = r && r.kind === 'tool_error';
     const st = err ? `<span class="c-tool-st">エラー</span>` : '';
     const out = r && r.text ? `<pre class="c-tool-out">${esc(r.text)}</pre>` : r ? `<div class="c-tool-out muted small">（出力はありません）</div>` : `<div class="c-tool-out muted small">（結果はまだありません）</div>`;
-    return `<div class="c-row c-agent c-toolrow">${it.head ? chatHeadHtml(agent, e || r) : ''}<details class="c-tool${err ? ' err' : ''}"${open ? ' open' : ''}><summary title="${esc(logTime(e || r))}">${icon('wrench')}<span class="c-tool-name">${esc(name)}</span><span class="c-tool-arg">${esc(arg)}</span>${st}</summary>${out}</details>${r ? logImagesHtml(r.images) : ''}</div>`;
+    return `<div class="c-row c-agent c-toolrow">${it.head ? chatHeadHtml(it.agent || agent, e || r) : ''}<details class="c-tool${err ? ' err' : ''}"${open ? ' open' : ''}><summary title="${esc(logTime(e || r))}">${icon('wrench')}<span class="c-tool-name">${esc(name)}</span><span class="c-tool-arg">${esc(arg)}</span>${st}</summary>${out}</details>${r ? logImagesHtml(r.images) : ''}</div>`;
   }
   // システムのお知らせ・完了・エラー・承認・質問などは、会話の間に小さく挟む
   const k = e.kind;
@@ -891,11 +891,11 @@ function renderChatLog(body, c, logs) {
   const agent = agentOf(c);
   const items = ChatLog.build(logs, agent);
   state.chat = { id: c.id, items };
-  body.innerHTML = `<div class="chat">${items.map((it) => chatItemHtml(it, agent)).join('')}</div>`;
+  body.innerHTML = `<div class="chat-log">${items.map((it) => chatItemHtml(it, agent)).join('')}</div>`;
 }
 // 実行中に届いたログを1件ずつ足す（ツールの結果は、呼び出しの折りたたみの中に入れ直す）
 function appendChatLog(body, c, entry) {
-  const box = body.querySelector('.chat');
+  const box = body.querySelector('.chat-log');
   if (!box || !state.chat || state.chat.id !== c.id) return renderChatLog(body, c, state.logs.get(c.id) || []);
   const agent = agentOf(c);
   const { op, item } = ChatLog.push(state.chat.items, entry, agent);

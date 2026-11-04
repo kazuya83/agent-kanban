@@ -19,34 +19,39 @@
    */
   function push(items, entry, defaultAgent) {
     const last = items[items.length - 1];
+    // 末尾から続いているエージェント側のまとまりで、最後に分かっているエージェント
+    const runAgent = isAgentSide(last) ? lastAgentOf(items) : null;
+    // 返事のまとまりの最初（または Pipeline などでエージェントが替わったとき）だけ、アイコンと名前を出す
+    const head = (agent) => !isAgentSide(last) || (!!agent && runAgent !== null && runAgent !== agent);
     if (RESULT_KINDS.has(entry.kind)) {
       // 直前のツール呼び出しの結果なら、その折りたたみの中に入れる
       if (last && last.type === 'tool' && !last.result) {
         last.result = entry;
         return { op: 'replace', item: last };
       }
-      const item = { type: 'tool', entry: null, result: entry, head: !isAgentSide(last) };
+      const item = { type: 'tool', entry: null, result: entry, agent: runAgent || defaultAgent || '', known: false, head: head(null) };
       items.push(item);
       return { op: 'append', item };
     }
     let item;
     if (entry.kind === 'user') item = { type: 'user', entry };
     else if (entry.kind === 'text') {
-      const agent = entry.agent || defaultAgent || '';
-      // 返事のまとまりの最初（または Pipeline などでエージェントが替わったとき）だけ、アイコンと名前を出す
-      // （まとまりがツールの呼び出しから始まったときは、そのツールの項目に出している）
-      const runAgent = isAgentSide(last) ? lastAgentOf(items) : null;
-      item = { type: 'assistant', entry, agent, head: !isAgentSide(last) || (runAgent !== null && runAgent !== agent) };
-    } else if (entry.kind === 'tool') item = { type: 'tool', entry, result: null, head: !isAgentSide(last) };
-    else item = { type: 'notice', entry };
+      // agent が付いていない返事は Claude のもの（Claude 以外は必ず agent を付けて記録している）
+      const agent = entry.agent || 'claude';
+      item = { type: 'assistant', entry, agent, known: true, head: head(agent) };
+    } else if (entry.kind === 'tool') {
+      // 古いログのツールには agent が付いていないので、まとまりのエージェント（なければカードのエージェント）を出す
+      const agent = entry.agent || runAgent || defaultAgent || '';
+      item = { type: 'tool', entry, result: null, agent, known: !!entry.agent, head: head(entry.agent || null) };
+    } else item = { type: 'notice', entry };
     items.push(item);
     return { op: 'append', item };
   }
 
-  // 末尾から続いているエージェント側のまとまりで、最後に話したエージェント（まだ話していなければ null）
+  // 末尾から続いているエージェント側のまとまりで、最後に分かっているエージェント（分からなければ null）
   function lastAgentOf(items) {
     for (let i = items.length - 1; i >= 0 && isAgentSide(items[i]); i--) {
-      if (items[i].type === 'assistant') return items[i].agent;
+      if (items[i].known) return items[i].agent;
     }
     return null;
   }
