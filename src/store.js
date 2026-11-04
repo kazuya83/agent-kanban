@@ -87,7 +87,6 @@ const DEFAULT_SETTINGS = {
   remoteSshPort: 22,
   remoteSshKey: '', // 鍵ファイル（空なら ssh の既定）
   remoteSshPath: 'ssh', // ssh コマンド
-  claudeRemoteControl: false, // Claude カード起動時に公式 Remote Control（--remote-control）も付ける
 };
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;

@@ -1624,11 +1624,6 @@ class AgentManager extends EventEmitter {
       // 添付ファイルの置き場所（作業フォルダの外）も読めるようにする
       const attachDir = this.attachDirOf(c);
       if (attachDir) args.push('--add-dir', attachDir);
-      // 公式 Remote Control: claude.ai/code や Claude アプリからも同じセッションを続けられる（対応 CLI のみ）
-      if (s.claudeRemoteControl) {
-        args.push('--remote-control');
-        this.log(c, 'system', 'Claude 公式 Remote Control を付けて起動します（claude.ai/code や Claude アプリから続けられます）');
-      }
     } else {
       // Codex / Gemini / Cursor は、ほかの CLI の会話は引き継げないので新しい会話で始める
       if (c.forkNext) {
