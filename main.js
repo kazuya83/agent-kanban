@@ -1,6 +1,19 @@
 // Electron メインプロセス
 const { app, BrowserWindow, ipcMain, dialog, shell, Notification } = require('electron');
 const path = require('path');
+
+// 承認用の MCP サーバーとして呼ばれたのに ELECTRON_RUN_AS_NODE が効かなかったとき（Windows で起きる）は、
+// ウィンドウを開かずに、この場で MCP サーバーとして動く（stdin が閉じたら終わる）
+if (require('./src/launch-mode').isMcpLaunch(process.argv)) {
+  require('./src/permission-mcp');
+  return;
+}
+// アプリは1つだけ起動する。2つ目に起動されたら、すぐ終えて、今のウィンドウを前に出す（second-instance）
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  return;
+}
+
 const { Store } = require('./src/store');
 const { AgentManager } = require('./src/agent');
 const { PermissionServer } = require('./src/permission-server');
@@ -1070,6 +1083,18 @@ function setupUpdater(userData) {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// 2つ目のアプリが起動されかけたとき（そちらはすぐ終わる）は、新しいウィンドウを作らず、今のウィンドウを前に出す
+app.on('second-instance', () => {
+  if (!agents) return; // まだ起動の途中
+  if (!win || win.isDestroyed()) {
+    if (quitState === 'idle') createWindow();
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
 });
 
 // 実行中・待機中のタスクがあるときは、終了してよいか確かめる。
