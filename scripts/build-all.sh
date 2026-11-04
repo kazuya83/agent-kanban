@@ -63,11 +63,11 @@ for f in \
   "agent-kanban-$v-mac-x64.dmg" \
   "agent-kanban-$v-win-setup.exe" \
   "agent-kanban-$v-win-portable.exe" \
-  "agent-kanban-$v-win-x64.zip"; do
+  "agent-kanban-$v-win-x64.zip" \
+  "agent-kanban-$v-linux-x86_64.AppImage"; do
   [ -f "dist/$f" ] || { echo "見つかりません: dist/$f" >&2; missing=1; }
 done
-ls dist/agent-kanban-"$v"-linux-*.AppImage >/dev/null 2>&1 || { echo "見つかりません: dist/agent-kanban-$v-linux-*.AppImage" >&2; missing=1; }
 [ "$missing" = 0 ] || die "できていないファイルがあります"
 
-info "できました（v$v）"
+info "できました（v${v}）"
 ls -lh dist/*.dmg dist/*.exe dist/*.zip dist/*.AppImage
