@@ -156,11 +156,13 @@ app.whenReady().then(async () => {
   handle('repo:info', async () => {
     const repo = store.settings.repoPath;
     if (!repo) return { branches: [], current: '' };
-    return {
-      branches: await git.branches(repo).catch(() => []),
-      current: await git.currentBranch(repo).catch(() => ''),
-      hasOrigin: await git.hasRemote(repo, 'origin').catch(() => false),
-    };
+    // git の起動は Windows だと遅いので、並べて走らせる
+    const [branches, current, hasOrigin] = await Promise.all([
+      git.branches(repo).catch(() => []),
+      git.currentBranch(repo).catch(() => ''),
+      git.hasRemote(repo, 'origin').catch(() => false),
+    ]);
+    return { branches, current, hasOrigin };
   });
   handle('settings:update', (patch) => {
     const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'branchNamingRule'];

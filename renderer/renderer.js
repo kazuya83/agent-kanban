@@ -1468,12 +1468,16 @@ async function openPr(c) {
 
 async function openSettings() {
   const s = state.board.settings;
-  const info = (await run(() => api.repoInfo())) || { branches: [], current: '' };
+  // ブランチ一覧は git を何回も起動するので（Windows だと遅い）、待たずにモーダルを開いてから後で入れる
+  const baseOptions = (info) =>
+    `<option value="">チェックアウト中のブランチ${info.current ? `（今は ${esc(info.current)}）` : ''}</option>` +
+    [...new Set([...(s.baseBranch ? [s.baseBranch] : []), ...info.branches])]
+      .map((b) => `<option ${b === s.baseBranch ? 'selected' : ''}>${esc(b)}</option>`)
+      .join('');
   openModal(
     `<h2>設定</h2>
      <label class="field"><span>ベースブランチ（worktree の作成元・マージ先）</span>
-       <select id="sBase"><option value="">チェックアウト中のブランチ${info.current ? `（今は ${esc(info.current)}）` : ''}</option>
-       ${info.branches.map((b) => `<option ${b === s.baseBranch ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
+       <select id="sBase">${baseOptions({ branches: [], current: '' })}</select></label>
      <label class="field"><span>レビュー後の取り込み方</span>
        <select id="sIntegration">
          <option value="merge" ${s.integration !== 'pr' ? 'selected' : ''}>直接マージする（ローカルで git merge）</option>
@@ -1515,6 +1519,17 @@ async function openSettings() {
       let defSkill = s.defaultSkill || null;
       const drawDef = () => renderSkillSlot('sSkill', defSkill, (v) => ((defSkill = v), drawDef()));
       drawDef();
+      const sel = $('sBase');
+      api.repoInfo().then(
+        (info) => {
+          // 読み込み中にモーダルを閉じたり別の画面に変わっていたら何もしない
+          if (!info || $('sBase') !== sel || $('modal').classList.contains('hidden')) return;
+          const picked = sel.value;
+          sel.innerHTML = baseOptions({ branches: info.branches || [], current: info.current || '' });
+          sel.value = picked;
+        },
+        () => {},
+      );
       // 「Issue のステータスを自動で変える」にチェックがあるときだけ、項目名と選択肢の指定を出す
       $('sIssueSync').onchange = () => ($('sStatusMap').hidden = !$('sIssueSync').checked);
       refreshGh();
