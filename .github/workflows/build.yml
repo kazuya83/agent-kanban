@@ -62,8 +62,8 @@ jobs:
         include:
           - os: windows-latest
             target: --win
-          # Mac の実行環境は、リポジトリの変数 MACOS_RUNNER で変えられる（空なら macos-15）
-          - os: ${{ vars.MACOS_RUNNER || 'macos-15' }}
+          # Mac の実行環境は、リポジトリの変数 MACOS_RUNNER で変えられる（空なら macos-14）
+          - os: ${{ vars.MACOS_RUNNER || 'macos-14' }}
             target: --mac
           - os: ubuntu-latest
             target: --linux
@@ -145,7 +145,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["${{ vars.MACOS_RUNNER || 'macos-15' }}", windows-latest, ubuntu-latest]
+        os: ["${{ vars.MACOS_RUNNER || 'macos-14' }}", windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
