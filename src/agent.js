@@ -820,8 +820,8 @@ class AgentManager extends EventEmitter {
   async adoptCompetitor(id) {
     const c = this.must(id);
     if (!c.compete) throw new Error('このタスクは競争のタスクではありません');
-    // 動いている候補も止めて破棄する（discard が止めるのを待つ）。もう取り込んだ（完了の）候補はボードから消すだけ
-    const others = this.competitors(id).filter((x) => x.id !== id);
+    // 動いている候補も止めて破棄する（discard が止めるのを待つ）。もう取り込んだ（完了の）候補は削除できないので残す
+    const others = this.competitors(id).filter((x) => x.id !== id && !this.isUndeletable(x));
     for (const x of others) await this.discard(x.id);
     c.compete = { ...c.compete, adopted: true, total: 1 };
     this.log(c, 'system', `🏁 この案（${agentLabel(agentOf(c))}）を採用しました。ほかの ${others.length} 件の候補は破棄しました`);
@@ -2371,8 +2371,14 @@ class AgentManager extends EventEmitter {
     return true;
   }
 
+  // 完了したタスク（完了後の会話の途中も含む）は削除できない。会話（chat）は対象外
+  isUndeletable(c) {
+    return !!c && !isChat(c) && (c.status === 'done' || !!c.afterDone);
+  }
+
   async discard(id) {
     const c = this.must(id);
+    if (this.isUndeletable(c)) throw new Error('完了したタスクは削除できません');
     const child = this.procs.get(id);
     this.store.removeCard(id);
     this.denyAllPending(id, '破棄されました');
