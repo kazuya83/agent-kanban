@@ -9,6 +9,20 @@ const { EventEmitter } = require('events');
 const DEFAULT_PORT = 17831;
 const PAIR_TTL_MS = 10 * 60 * 1000;
 const MAX_LINE = 32 * 1024 * 1024;
+// 6 桁コードの総当たりを防ぐ: これだけ間違えたらコードを無効にする（ホスト側で再発行）
+const MAX_PAIR_FAILURES = 5;
+// 認証しないまま居座る接続は切る
+const AUTH_TIMEOUT_MS = 30 * 1000;
+// 遠隔へ渡さない設定（トークンなどの秘密）
+const SECRET_SETTINGS = ['remotePairTokens', 'remoteClientToken'];
+
+// board:get / board:changed などで渡すボードから、秘密の設定を抜く
+function redactForRemote(data) {
+  if (!data || typeof data !== 'object' || !data.settings || typeof data.settings !== 'object') return data;
+  const settings = { ...data.settings };
+  for (const k of SECRET_SETTINGS) delete settings[k];
+  return { ...data, settings };
+}
 
 function genPairCode() {
   return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
@@ -62,9 +76,8 @@ const PROXY_CHANNELS = new Set([
   'board:get',
   'env:check',
   'wsl:distros',
-  'repo:choose',
+  // repo:choose / repo:chooseParent はホストの画面にダイアログが出て、操作側からは閉じられないので転送しない
   'repo:defaultParent',
-  'repo:chooseParent',
   'repo:clone',
   'repo:create',
   'repo:info',
@@ -108,8 +121,13 @@ const PROXY_CHANNELS = new Set([
   'conflict:fromPr',
   'card:permission',
   'card:answer',
-  'card:open',
+  // card:open（ホストの Finder を開く）も操作側では見えないので転送しない
 ]);
+
+// 遠隔に接続中でも、操作側のマシンで動かすチャンネル（それ以外の非転送チャンネルは接続中は使えない）
+function isLocalChannel(channel) {
+  return channel === 'app:info' || channel === 'open:external' || String(channel).startsWith('remote:');
+}
 
 function isProxyChannel(channel) {
   return PROXY_CHANNELS.has(channel);
@@ -129,6 +147,7 @@ class RemoteHost extends EventEmitter {
     this.clients = new Set();
     this.pairCode = null;
     this.pairExpiresAt = 0;
+    this.pairFailures = 0;
   }
 
   listening() {
@@ -149,6 +168,7 @@ class RemoteHost extends EventEmitter {
   refreshPairCode() {
     this.pairCode = genPairCode();
     this.pairExpiresAt = Date.now() + PAIR_TTL_MS;
+    this.pairFailures = 0;
     this.emit('changed');
     return { pairCode: this.pairCode, pairExpiresAt: this.pairExpiresAt };
   }
@@ -170,7 +190,8 @@ class RemoteHost extends EventEmitter {
       const server = net.createServer((socket) => this.accept(socket));
       server.on('error', (err) => {
         if (!this.server) reject(err);
-        else this.emit('error', err);
+        // 'error' の聞き手がいないと例外でメインプロセスが落ちるので、いるときだけ流す
+        else if (this.listenerCount('error')) this.emit('error', err);
       });
       server.listen(listenPort, '127.0.0.1', () => {
         this.port = server.address().port;
@@ -201,12 +222,21 @@ class RemoteHost extends EventEmitter {
   accept(socket) {
     let authed = false;
     const authedSockets = this.clients;
+    const authTimer = setTimeout(() => {
+      if (!authed) socket.destroy();
+    }, AUTH_TIMEOUT_MS);
+    authTimer.unref?.();
     readLines(socket, async (msg) => {
       if (!msg || typeof msg !== 'object') return;
       const id = msg.id;
       if (msg.type === 'pair') {
         const code = String(msg.code || '').trim();
         if (!this.pairCode || Date.now() >= this.pairExpiresAt || !timingEqual(code, this.pairCode)) {
+          if (this.pairCode && ++this.pairFailures >= MAX_PAIR_FAILURES) {
+            this.pairCode = null;
+            this.pairExpiresAt = 0;
+            this.emit('changed');
+          }
           send(socket, { id, type: 'result', ok: false, error: 'ペアリングコードが違うか、期限切れです。ホスト側で新しいコードを出してください' });
           return;
         }
@@ -215,7 +245,9 @@ class RemoteHost extends EventEmitter {
         this.onTokens?.([...this.tokens]);
         this.pairCode = null;
         this.pairExpiresAt = 0;
+        this.pairFailures = 0;
         authed = true;
+        clearTimeout(authTimer);
         authedSockets.add(socket);
         send(socket, { id, type: 'result', ok: true, data: { token, port: this.port } });
         this.emit('changed');
@@ -229,6 +261,7 @@ class RemoteHost extends EventEmitter {
           return;
         }
         authed = true;
+        clearTimeout(authTimer);
         authedSockets.add(socket);
         send(socket, { id, type: 'result', ok: true, data: { port: this.port } });
         this.emit('changed');
@@ -245,7 +278,7 @@ class RemoteHost extends EventEmitter {
           return;
         }
         try {
-          const data = await this.invoke(channel, msg.arg);
+          const data = redactForRemote(await this.invoke(channel, msg.arg));
           send(socket, { id, type: 'result', ok: true, data });
         } catch (err) {
           send(socket, { id, type: 'result', ok: false, error: (err && err.message) || String(err) });
@@ -253,6 +286,7 @@ class RemoteHost extends EventEmitter {
       }
     });
     socket.on('close', () => {
+      clearTimeout(authTimer);
       authedSockets.delete(socket);
       this.emit('changed');
     });
@@ -261,7 +295,8 @@ class RemoteHost extends EventEmitter {
 
   // 認証済みクライアントへイベントを配信
   broadcast(channel, payload) {
-    const msg = { type: 'event', channel, payload };
+    if (!this.clients.size) return;
+    const msg = { type: 'event', channel, payload: redactForRemote(payload) };
     for (const s of this.clients) send(s, msg);
   }
 }
@@ -316,9 +351,11 @@ class RemoteClient extends EventEmitter {
       });
       socket.on('error', (err) => {
         if (!this.connected) reject(err);
-        else this.emit('error', err);
+        else if (this.listenerCount('error')) this.emit('error', err);
       });
       socket.on('close', () => {
+        // 再接続で入れ替わった古いソケットの close は、新しい接続の状態を消さない
+        if (this.socket && this.socket !== socket) return;
         const was = this.connected;
         this.failPending('ホストとの接続が切れました');
         this.socket = null;
@@ -384,6 +421,9 @@ module.exports = {
   PAIR_TTL_MS,
   PROXY_CHANNELS,
   isProxyChannel,
+  isLocalChannel,
+  redactForRemote,
+  MAX_PAIR_FAILURES,
   RemoteHost,
   RemoteClient,
   genPairCode,

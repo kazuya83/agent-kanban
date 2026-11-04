@@ -2627,10 +2627,6 @@ api.onRemote((rs) => {
   if (!state.board) state.board = { settings: {}, cards: [] };
   state.board.remoteSession = rs;
   renderRemoteInfo();
-  // 設定モーダルの遠隔欄が開いていれば更新
-  if ($('sRemoteBox') && !$('modal').classList.contains('hidden')) {
-    /* drawRemote は openSettings 内のクロージャなので、状態表示だけヘッダーを更新 */
-  }
 });
 
 api.onBoard((board) => {

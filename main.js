@@ -8,7 +8,7 @@ const git = require('./src/git');
 const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
-const { RemoteHost, RemoteClient, DEFAULT_PORT, isProxyChannel } = require('./src/remote');
+const { RemoteHost, RemoteClient, DEFAULT_PORT, isProxyChannel, isLocalChannel } = require('./src/remote');
 
 // Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
 fixPath();
@@ -142,6 +142,8 @@ async function dispatch(channel, arg) {
     if (channel === 'board:get' && data && typeof data === 'object') return withRemoteSession(data);
     return data;
   }
+  // 接続中に手元のボードを触る操作（リポジトリの選択ダイアログなど）は、ホストと食い違うので止める
+  if (remoteClient?.connected && !isLocalChannel(channel)) throw new Error('遠隔操作中はこの操作を使えません（ホストの Mac 側で行うか、切断してから使ってください）');
   const fn = localHandlers.get(channel);
   if (!fn) throw new Error(`未対応の操作です: ${channel}`);
   return fn(arg);

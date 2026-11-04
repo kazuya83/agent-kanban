@@ -1,7 +1,7 @@
 // Agent Kanban 同士の遠隔操作（ペアリング・RPC・イベント）
 const test = require('node:test');
 const assert = require('node:assert');
-const { RemoteHost, RemoteClient, DEFAULT_PORT, isProxyChannel } = require('../src/remote');
+const { RemoteHost, RemoteClient, DEFAULT_PORT, isProxyChannel, isLocalChannel, MAX_PAIR_FAILURES } = require('../src/remote');
 
 test('遠隔で転送するチャンネルと、しないチャンネル', () => {
   assert.strictEqual(isProxyChannel('board:get'), true);
@@ -10,6 +10,13 @@ test('遠隔で転送するチャンネルと、しないチャンネル', () =>
   assert.strictEqual(isProxyChannel('remote:connect'), false);
   assert.strictEqual(isProxyChannel('app:info'), false);
   assert.strictEqual(isProxyChannel('open:external'), false);
+  // ホストの画面にダイアログや Finder が出るだけの操作は転送しない
+  assert.strictEqual(isProxyChannel('repo:choose'), false);
+  assert.strictEqual(isProxyChannel('repo:chooseParent'), false);
+  assert.strictEqual(isProxyChannel('card:open'), false);
+  assert.strictEqual(isLocalChannel('remote:connect'), true);
+  assert.strictEqual(isLocalChannel('app:info'), true);
+  assert.strictEqual(isLocalChannel('repo:choose'), false);
 });
 
 test('ペアリングコードで接続し、ボード操作とイベントを中継できる', async () => {
@@ -94,4 +101,81 @@ test('間違ったペアリングコードでは接続できない', async () =>
 
 test('既定ポート', () => {
   assert.strictEqual(DEFAULT_PORT, 17831);
+});
+
+test('ペアリングコードを何度も間違えるとコードが無効になる（総当たり対策）', async () => {
+  const host = new RemoteHost({ invoke: async () => ({}) });
+  await host.start(0);
+  try {
+    const right = host.status().pairCode;
+    const wrong = right === '000000' ? '000001' : '000000';
+    for (let i = 0; i < MAX_PAIR_FAILURES; i++) {
+      await assert.rejects(() => new RemoteClient().connect({ host: '127.0.0.1', port: host.port, code: wrong }), /ペアリングコード/);
+    }
+    assert.strictEqual(host.status().pairCode, null);
+    // 正しいコードでも、もう通らない
+    await assert.rejects(() => new RemoteClient().connect({ host: '127.0.0.1', port: host.port, code: right }), /ペアリングコード/);
+    // 再発行すれば通る
+    const fresh = host.refreshPairCode().pairCode;
+    const c = new RemoteClient();
+    await c.connect({ host: '127.0.0.1', port: host.port, code: fresh });
+    assert.strictEqual(c.connected, true);
+    c.disconnect();
+  } finally {
+    await host.stop();
+  }
+});
+
+test('遠隔へ渡すボードからトークンを抜く', async () => {
+  const board = { settings: { repoPath: '/r', remotePairTokens: ['secret'], remoteClientToken: 'mine' }, cards: [] };
+  const host = new RemoteHost({ invoke: async () => board });
+  await host.start(0);
+  try {
+    const c = new RemoteClient();
+    await c.connect({ host: '127.0.0.1', port: host.port, code: host.status().pairCode });
+    const got = await c.invoke('board:get');
+    assert.strictEqual(got.settings.repoPath, '/r');
+    assert.strictEqual('remotePairTokens' in got.settings, false);
+    assert.strictEqual('remoteClientToken' in got.settings, false);
+    const ev = new Promise((resolve) => c.once('event', (_ch, p) => resolve(p)));
+    host.broadcast('board:changed', board);
+    const p = await ev;
+    assert.strictEqual('remotePairTokens' in p.settings, false);
+    // 元のボードは変えない
+    assert.deepStrictEqual(board.settings.remotePairTokens, ['secret']);
+    c.disconnect();
+  } finally {
+    await host.stop();
+  }
+});
+
+test('同じクライアントで接続し直しても、古い接続の close で新しい接続が切れない', async () => {
+  const host = new RemoteHost({ invoke: async () => ({ ok: 1 }) });
+  await host.start(0);
+  try {
+    const c = new RemoteClient();
+    const { token } = await c.connect({ host: '127.0.0.1', port: host.port, code: host.status().pairCode });
+    await c.connect({ host: '127.0.0.1', port: host.port, token });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.strictEqual(c.connected, true);
+    assert.deepStrictEqual(await c.invoke('board:get'), { ok: 1 });
+    c.disconnect();
+  } finally {
+    await host.stop();
+  }
+});
+
+test('接続後のソケットエラーで例外を投げない（error の聞き手がいなくても落ちない）', async () => {
+  const host = new RemoteHost({ invoke: async () => ({}) });
+  await host.start(0);
+  try {
+    const c = new RemoteClient();
+    await c.connect({ host: '127.0.0.1', port: host.port, code: host.status().pairCode });
+    const closed = new Promise((r) => c.once('disconnected', r));
+    c.socket.destroy(new Error('boom'));
+    await closed;
+    assert.strictEqual(c.connected, false);
+  } finally {
+    await host.stop();
+  }
 });
