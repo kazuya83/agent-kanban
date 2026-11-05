@@ -239,11 +239,16 @@ function badgeFor(c) {
   if ((c.permissions || []).length) return ['waiting', '承認待ち'];
   if (c.conflict && !c.conflict.resolving && c.status !== 'running' && c.status !== 'queued') return ['conflict', 'コンフリクト'];
   if (isSpecPending(c)) return ['spec', '仕様の確認'];
+  if (hasSubtaskProposal(c)) return ['spec', 'サブタスクの提案'];
+  if (subtasksRunning(c) && (c.status === 'review' || c.status === 'failed')) return subNeedsYou(c) ? ['awaiting', 'サブタスクが対応待ち'] : ['running', 'サブタスク実行中'];
+  if (c.subtaskOf && subtaskNeedsCheck(c)) return ['awaiting', '確認待ち'];
   if (c.relay && c.relay.waiting && c.status === 'review') return ['queued', '並列の枝を待機中'];
   if (c.awaitingReply && (c.status === 'review' || c.status === 'failed')) return ['awaiting', '回答待ち'];
   return [c.status, (isChat(c) ? CHAT_STATUS_LABEL : STATUS_LABEL)[c.status]];
 }
 function needsYou(c) {
+  if (subtasksRunning(c) && subNeedsYou(c)) return true;
+  if (hasSubtaskProposal(c)) return true;
   return isInterrupted(c) || (c.questions || []).length || (c.permissions || []).length || (c.awaitingReply && c.status === 'review') || (c.conflict && !c.conflict.resolving && c.status === 'review');
 }
 
@@ -452,6 +457,8 @@ function cardHtml(c) {
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
       ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(plainText(c.lastMessage))}</div>` : ''}
       ${isSpecPending(c) ? `<div class="card-msg card-spec">${icon('note')}内容が詰まっていないので、開発を開始できません。開いて質問に答えてください</div>` : ''}
+      ${hasSubtaskProposal(c) ? `<div class="card-msg card-spec">${icon('branch')}サブタスクに分けて進めることを提案しています。開いて、サブタスクでやるかを選んでください</div>` : ''}
+      ${subtasksRunning(c) ? `<div class="card-msg card-sub">${esc(subPhaseText(c))}</div>` : ''}
       ${isInterrupted(c) ? `<div class="int-quick"><button class="btn small primary" data-resume="${c.id}" title="中断したところから続けます">${icon('play')}再開</button></div>` : ''}
       ${canCompleteNoGit(c) ? `<div class="int-quick"><button class="btn small primary" data-complete="${c.id}" title="${COMPLETE_TITLE}">${icon('check')}完了にする</button></div>` : ''}
       ${questionCompactHtml(c)}
@@ -479,7 +486,9 @@ function orchChipsHtml(c) {
     const n = competitors(c).length;
     chips.push(c.compete.adopted ? `<span class="orch-chip compete">${icon('flag')}採用した案</span>` : `<span class="orch-chip compete" title="同じタスクを複数のエージェントで解いています">${icon('flag')}競争 ${n}案</span>`);
   }
-  return (chips.length ? `<div class="card-skill-row">${chips.join('')}</div>` : '') + (c.relay && !isChat(c) ? relayBarHtml(c) : '');
+  const sub = subtaskChipHtml(c);
+  if (sub) chips.push(sub);
+  return (chips.length ? `<div class="card-skill-row">${chips.join('')}</div>` : '') + (c.relay && !isChat(c) ? relayBarHtml(c) : '') + (c.subtasks && !isChat(c) ? subtaskBarHtml(c) : '');
 }
 function competitors(c) {
   if (!c || !c.compete) return c ? [c] : [];
@@ -664,8 +673,9 @@ function renderBoard() {
     if (list) colScroll[sec.dataset.col] = list.scrollTop;
   });
   boardEl.innerHTML = COLUMNS.map((col) => {
+    // サブタスクは親のカードにまとめて出す。サブタスクを動かしている親は「実行中」に置く
     const list = cards
-      .filter((c) => !isChat(c) && col.statuses.includes(c.status))
+      .filter((c) => !isChat(c) && !isHiddenSubtask(c) && col.statuses.includes(subtasksRunning(c) && (c.status === 'review' || c.status === 'failed') ? 'running' : c.status))
       .sort(byAttention);
     return `
       <section class="column" data-col="${col.key}">
@@ -1017,6 +1027,209 @@ function relayHeadHtml(c) {
   return `<div class="relay-head"><div class="rh-row">${icon('pipeline')}<b>Pipeline</b> <span class="muted small">${doneN}/${r.steps.length} 工程が完了${now ? ` ・ ${now}` : ''}</span>${state.tab !== 'progress' ? ' <button class="btn small ghost" data-act="showProgress" type="button">進捗を見る</button>' : ''}</div>${relayBarHtml(c)}${relayWaitHtml(c)}</div>`;
 }
 
+// ---------------- サブタスク ----------------
+// 親のタスクのブランチから分けて動かし、終わったものから親のブランチにマージする。サブタスクのカードはボードに出さず、親のカードにまとめて出す
+// サブタスクに分けられるタスクか（git のふつうのタスク。Pipeline・競争・会話・サブタスク自身は分けない）
+const canHaveSubtasks = (c) => !!c && !isChat(c) && !isNoGit(c) && !c.relay && !c.compete && !c.subtaskOf;
+const subtaskParent = (c) => (c && c.subtaskOf ? card(c.subtaskOf.parent) || null : null);
+// ボードに出さないカード（親が残っているサブタスク）
+const isHiddenSubtask = (c) => !!subtaskParent(c);
+// サブタスクを動かしているあいだ（親は「実行中」の列に置く）
+const subtasksRunning = (c) => !!(c && c.subtasks && c.subtasks.phase === 'run');
+// 親のマージ・PR を止めているか（サブタスクが終わって、仕上げが済むまで）
+const subtasksBlockMerge = (c) => !!(c && c.subtasks && (c.subtasks.phase === 'run' || (c.subtasks.phase === 'plan' && c.status !== 'todo')));
+const hasSubtaskProposal = (c) => !!(c && c.subtaskProposal && (c.status === 'review' || c.status === 'failed'));
+// 親のブランチに取り込める状態のサブタスクか
+function subtaskReady(k) {
+  return !!k && !!k.worktreePath && (k.status === 'review' || k.status === 'failed') && !k.awaitingReply && !isSpecPending(k) && !k.conflict && !isInterrupted(k) && !(k.questions || []).length && !(k.permissions || []).length;
+}
+// 「確かめてからマージ」で、あなたの確認を待っているサブタスクか
+function subtaskNeedsCheck(k) {
+  const p = subtaskParent(k);
+  return !!p && p.subtasks.merge === 'review' && !(k.subtaskOf && k.subtaskOf.approved) && subtaskReady(k) && k.status === 'review';
+}
+function subKids(c) {
+  return c && c.subtasks ? c.subtasks.items.filter((x) => x.cardId && x.state === 'running').map((x) => card(x.cardId)).filter(Boolean) : [];
+}
+function subNeedsYou(c) {
+  return subKids(c).some((k) => needsYou(k) || subtaskNeedsCheck(k));
+}
+const SUB_EXTRA_STATE = { check: ['!', '確認待ち'], merging: ['…', 'マージ待ち'] };
+const subStateInfo = (s) => SUB_EXTRA_STATE[s] || RELAY_STATE[s] || RELAY_STATE.pending;
+// サブタスクひとつの状態（バーと進捗で共通）
+function subItemState(c, x) {
+  if (x.state === 'merged') return 'done';
+  if (x.state === 'skipped') return 'skipped';
+  const k = x.cardId ? card(x.cardId) : null;
+  if (x.state !== 'running' || !k) return 'pending';
+  if (subtaskNeedsCheck(k)) return 'check';
+  if (k.status === 'review' && subtaskReady(k)) return c.conflict && c.conflict.subtask === k.id ? 'conflict' : 'merging';
+  const b = badgeFor(k)[0];
+  if (b === 'todo') return 'queued';
+  if (b === 'review') return 'stopped';
+  return RELAY_STATE[b] ? b : 'running';
+}
+function subCounts(c) {
+  const items = c.subtasks.items;
+  const merged = items.filter((x) => x.state === 'merged').length;
+  const skipped = items.filter((x) => x.state === 'skipped').length;
+  const running = items.filter((x) => x.state === 'running').length;
+  return { total: items.length, merged, skipped, running, pending: items.length - merged - skipped - running };
+}
+// 親のカードの今の段階
+function subPhaseText(c) {
+  const st = c.subtasks;
+  const n = subCounts(c);
+  if (st.phase === 'plan') return c.status === 'todo' ? '開始すると、順番（直列・並列）を決めてから動かします' : '順番（直列・並列）を決めています';
+  if (st.phase === 'done') return c.status === 'running' || c.status === 'queued' ? 'すべてマージしました。全体の仕上げをしています' : 'すべてマージして、仕上げました';
+  if (c.conflict && c.conflict.subtask) return 'サブタスクのマージのコンフリクトを解消しています';
+  return `作業中 ${n.running}・あと ${n.pending}`;
+}
+// ボードのカード: サブタスクの数だけ区切った進み具合のバー
+function subtaskBarHtml(c) {
+  const segs = c.subtasks.items.map((x) => {
+    const s = subItemState(c, x);
+    return `<span class="rb-seg rs-${s}" title="${esc(x.title)}: ${esc(subStateInfo(s)[1])}"></span>`;
+  });
+  return `<div class="relay-bar sub-bar">${segs.join('')}</div>`;
+}
+function subtaskChipHtml(c) {
+  if (c.subtaskOf) {
+    const p = subtaskParent(c);
+    return p ? `<span class="orch-chip sub" title="「${esc(p.title)}」のサブタスク">${icon('branch')}サブタスク</span>` : '';
+  }
+  if (!c.subtasks) return '';
+  const n = subCounts(c);
+  const check = subKids(c).filter(subtaskNeedsCheck).length;
+  return `<span class="orch-chip sub" title="サブタスクに分けて進めています（${esc(subPhaseText(c))}）">${icon('branch')}サブタスク ${n.merged}/${n.total - n.skipped} マージ済み${check ? `・確認待ち ${check}` : ''}</span>`;
+}
+// 詳細: サブタスクの一覧（状態・担当・押すとサブタスクを開く・確かめてから取り込む）
+function subtaskListHtml(c, { detail = false } = {}) {
+  const st = c.subtasks;
+  const title = new Map(st.items.map((x) => [x.key, x.title]));
+  const rows = st.items.map((x, i) => {
+    const s = subItemState(c, x);
+    const [mark, label] = subStateInfo(s);
+    const k = x.cardId && x.state === 'running' ? card(x.cardId) : null;
+    const info = [];
+    if (x.issue) info.push(`<a class="issue-chip" data-url="${esc(x.issue.url)}">#${x.issue.number}</a>`);
+    if (x.after && x.after.length) info.push(`<span class="muted small">${x.after.map((a) => `「${esc(title.get(a) || a)}」`).join('・')} のあと</span>`);
+    else if (st.phase !== 'plan') info.push('<span class="muted small">並列</span>');
+    if (k) info.push(`<span class="rf-agent">${personaIcon(k.persona, agentOf(k))}${esc(whoShort(agentOf(k), k.persona))}</span>`);
+    if (x.agent && !k) info.push(`<span class="rf-agent">${esc(agentShort(x.agent))}</span>`);
+    const cost = k ? k.costUsd : x.costUsd;
+    if (detail && cost) info.push(`<span class="muted small">$${cost.toFixed(3)}</span>`);
+    const name = k ? `<a href="#" data-open-card="${esc(k.id)}">${esc(x.title)}</a>` : esc(x.title);
+    const act = k && subtaskNeedsCheck(k) ? ` <button class="btn small primary" data-sact="approve" data-sid="${esc(k.id)}" title="差分を確かめたら、親のタスクのブランチに取り込みます">${icon('merge')}取り込む</button>` : '';
+    const msg = detail && k && k.lastMessage ? `<div class="rf-info">${esc(plainText(k.lastMessage))}</div>` : '';
+    const rkey = `${c.id}:sub:${x.key}`;
+    const report = detail && x.state === 'merged' && x.report ? `<details class="rf-report" data-rkey="${esc(rkey)}" ${state.relayOpen.has(rkey) ? 'open' : ''}><summary>サブタスクの報告</summary><div class="rf-report-body">${esc(x.report)}</div></details>` : '';
+    return `<li class="rf-node rs-${s}"><span class="rf-dot" title="${esc(label)}">${mark}</span><div class="rf-body"><div class="rf-head"><b>${i + 1}. ${name}</b><span class="rf-state">${esc(label)}</span>${info.join('')}${act}</div>${msg}${report}</div></li>`;
+  });
+  return `<ol class="rf-list">${rows.join('')}</ol>`;
+}
+// 詳細の上: サブタスクの提案・進み具合・サブタスクなら親のタスク
+function subtaskHeadHtml(c) {
+  if (isChat(c)) return '';
+  if (c.subtaskOf) {
+    const p = subtaskParent(c);
+    if (!p) return '';
+    const check = subtaskNeedsCheck(c);
+    return `<div class="sub-box"><div class="rh-row">${icon('branch')}<span>「<a href="#" data-open-card="${esc(p.id)}">${esc(p.title)}</a>」のサブタスクです。ブランチ ${esc(p.branch || '')} から分けて作業し、終わったら${p.subtasks.merge === 'review' ? '、確かめてから' : '自動で'}親のブランチにマージします。</span></div>
+      ${check ? `<div class="d-actions"><button class="btn primary" data-sact="approve" data-sid="${esc(c.id)}">${icon('merge')}親のタスクに取り込む</button><small class="muted">差分タブで変更を確かめてから取り込んでください。直してほしいときは、下の欄から追加の指示を送れます。</small></div>` : ''}</div>`;
+  }
+  if (hasSubtaskProposal(c)) return `<div class="sub-box"><div class="rh-row">${icon('branch')}<b>サブタスクの提案</b> <span class="muted small">${esc(agentShort(agentOf(c)))} が ${c.subtaskProposal.items.length} 個のサブタスクに分けることを提案しています。「チャット」タブの最後で、サブタスクでやるか、分けずに進めるかを選んでください</span>${state.tab !== 'chat' ? ' <button class="btn small ghost" data-act="showChat" type="button">選ぶ</button>' : ''}</div></div>`;
+  if (!c.subtasks) return '';
+  const n = subCounts(c);
+  return `<div class="sub-box"><div class="rh-row">${icon('branch')}<b>サブタスク</b> <span class="muted small">${n.merged}/${n.total - n.skipped} マージ済み ・ ${esc(subPhaseText(c))} ・ ${c.subtasks.merge === 'review' ? '確かめてからマージ' : '自動でマージ'}</span>${state.tab !== 'progress' ? ' <button class="btn small ghost" data-act="showProgress" type="button">進捗を見る</button>' : ''}</div>${subtaskBarHtml(c)}${state.tab !== 'progress' ? subtaskListHtml(c) : ''}</div>`;
+}
+// サブタスクの一覧を編集する欄（提案を直す・開始前に決める）
+function subRowHtml(x, title = new Map(), showAfter = false) {
+  return `<div class="sub-row" data-key="${esc(x.key || '')}" data-after="${esc(JSON.stringify(x.after || []))}" data-issue="${esc(x.issue ? JSON.stringify(x.issue) : '')}">
+      <div class="sub-row-head"><input class="sub-title" placeholder="サブタスクの名前" value="${esc(x.title || '')}" />${x.issue ? `<span class="muted small">#${x.issue.number}</span>` : ''}<button class="icon" type="button" data-sact="remove" title="このサブタスクを外す">✕</button></div>
+      <textarea class="sub-prompt" rows="3" placeholder="このサブタスクでやること">${esc(x.prompt || '')}</textarea>
+      ${showAfter && x.after && x.after.length ? `<small class="muted">${x.after.map((a) => `「${esc(title.get(a) || a)}」`).join('・')} のあとに始めます</small>` : ''}
+    </div>`;
+}
+function subEditorHtml(items, { showAfter = false } = {}) {
+  const title = new Map(items.map((x) => [x.key, x.title]));
+  return `<div class="sub-editor"><div class="sub-rows">${items.map((x) => subRowHtml(x, title, showAfter)).join('')}</div><button class="btn small" type="button" data-sact="add">${icon('plus')}サブタスクを足す</button></div>`;
+}
+function subRowsFrom(root) {
+  return [...root.querySelectorAll('.sub-row')]
+    .map((r, i) => {
+      let after = [];
+      let issue = null;
+      try {
+        after = JSON.parse(r.dataset.after || '[]');
+        issue = r.dataset.issue ? JSON.parse(r.dataset.issue) : null;
+      } catch {
+        /* 読めなければ無し */
+      }
+      const keep = new Set([...root.querySelectorAll('.sub-row')].map((x) => x.dataset.key).filter(Boolean));
+      return { key: r.dataset.key || `n${i + 1}`, title: r.querySelector('.sub-title').value.trim(), prompt: r.querySelector('.sub-prompt').value.trim(), after: after.filter((a) => keep.has(a)), ...(issue ? { issue } : {}) };
+    })
+    .filter((x) => x.title || x.prompt);
+}
+function subMergeSelectHtml(id, value) {
+  return `<label class="field sub-merge"><span>サブタスクが終わったら</span><select id="${id}"><option value="auto"${value !== 'review' ? ' selected' : ''}>自動で親のブランチにマージする</option><option value="review"${value === 'review' ? ' selected' : ''}>確かめてからマージする（サブタスクごとに「取り込む」を押す）</option></select></label>`;
+}
+// サブタスクの提案: 直してから「サブタスクでやる」か、「分けずに進める」
+function subtaskProposalHtml(c) {
+  const who = esc(agentShort(agentOf(c)));
+  const items = c.subtaskProposal.items;
+  return `<div class="sub-box sub-proposal" id="subProposal"><b>${icon('branch')}${who} が、${items.length} 個のサブタスクに分けて進めることを提案しています</b>
+    <small>それぞれ、このタスクのブランチから分けたブランチで別のエージェントが作業し、終わったものからこのブランチにマージします。すべてマージしたら、${who} が全体を仕上げてからレビューに回します。名前や指示は直せます。</small>
+    ${subEditorHtml(items, { showAfter: true })}
+    ${subMergeSelectHtml('subMerge', (state.board.settings || {}).subtaskMerge)}
+    ${c.issue ? `<label class="check"><input type="checkbox" id="subIssues" /> GitHub にもサブIssue を作って、#${c.issue.number} にぶら下げる</label>` : ''}
+    <div class="d-actions"><button class="btn primary" data-sact="accept">${icon('play')}サブタスクでやる</button><button class="btn" data-sact="decline">分けずに進める</button></div>
+    <small>ほかの分け方にしてほしいときは、下の欄に文章で書いて送ってください。</small></div>`;
+}
+// 進捗タブ: サブタスクの一覧（状態・担当・金額・マージしたものの報告）と、動いているサブタスクの TODO
+function subtaskProgressHtml(c) {
+  if (c.subtaskOf) {
+    const p = subtaskParent(c);
+    return p ? `<section class="pg-sec"><div class="rf-wait">${icon('branch')}「<a href="#" data-open-card="${esc(p.id)}">${esc(p.title)}</a>」のサブタスクです。</div></section>` : '';
+  }
+  if (!c.subtasks) return '';
+  const n = subCounts(c);
+  const pct = n.total - n.skipped ? Math.round((n.merged / (n.total - n.skipped)) * 100) : 0;
+  const parts = [`<section class="pg-sec"><div class="pg-sec-head"><b>${icon('branch')}サブタスク</b> <span class="muted small">${n.merged}/${n.total - n.skipped} マージ済み${n.skipped ? `・破棄 ${n.skipped}` : ''} ・ ${esc(subPhaseText(c))} ・ ${c.subtasks.merge === 'review' ? '確かめてからマージ' : '自動でマージ'}</span></div>
+    <div class="pg-bar" title="${pct}%"><span style="width:${pct}%"></span></div>
+    <div class="relay-flow sub-flow">${subtaskListHtml(c, { detail: true })}</div></section>`];
+  for (const k of subKids(c)) if (k.todos && k.todos.items && k.todos.items.length) parts.push(todoListHtml(k.todos, `サブタスク「${esc(c.subtasks.items.find((x) => x.cardId === k.id).title)}」の TODO`));
+  return parts.join('');
+}
+function subKidsSig(c) {
+  if (c.subtaskOf) {
+    const p = subtaskParent(c);
+    return p ? [p.id, p.subtasks.merge, p.branch, c.subtaskOf.approved] : null;
+  }
+  return subKids(c).map((k) => [k.id, k.status, k.awaitingReply, k.specState, !!k.conflict, (k.permissions || []).length, (k.questions || []).length, k.lastMessage, k.costUsd]);
+}
+// 詳細の上のサブタスクの操作（提案に答える・取り込む・編集の行を足す/外す）
+async function subtaskAction(c, el) {
+  const act = el.dataset.sact;
+  if (act === 'add') {
+    const rows = el.closest('.sub-editor').querySelector('.sub-rows');
+    rows.insertAdjacentHTML('beforeend', subRowHtml({ key: '', title: '', prompt: '', after: [] }));
+    rows.lastElementChild?.querySelector('.sub-title')?.focus();
+    return;
+  }
+  if (act === 'remove') return el.closest('.sub-row').remove();
+  if (act === 'approve') return runBusy('親のタスクのブランチに取り込んでいます…', () => api.approveSubtask(el.dataset.sid), '取り込みました');
+  if (act === 'decline') return runBusy('分けずに進めてもらいます…', () => api.declineSubtasks(c.id), '分けずに進めてもらいます');
+  if (act === 'accept') {
+    const box = $('subProposal');
+    const items = subRowsFrom(box);
+    if (!items.length) return toast('サブタスクを1つ以上入れてください');
+    const createIssues = !!($('subIssues') && $('subIssues').checked);
+    if (createIssues && !confirm(`GitHub に ${items.filter((x) => !x.issue).length} 件のサブIssue を作って、#${c.issue.number} にぶら下げます。よろしいですか？`)) return;
+    return runBusy(createIssues ? 'サブIssue を作って、サブタスクを始めています…' : 'サブタスクを始めています…', () => api.acceptSubtasks(c.id, { items, merge: $('subMerge').value, createIssues }), 'サブタスクを始めました');
+  }
+}
+
 // 「進捗」タブ: エージェントの TODO・Pipelineのフローチャート・最近の作業
 const TODO_MARK = { completed: ['✓', '完了'], in_progress: ['▶', '作業中'], pending: ['○', 'これから'], cancelled: ['–', '取りやめ'] };
 function todoListHtml(todos, title) {
@@ -1137,6 +1350,7 @@ function progressHtml(c) {
   if (c.costUsd) rows.push(`<dt>コスト</dt><dd>$${c.costUsd.toFixed(3)}</dd>`);
   const parts = [`<section class="pg-sec"><dl class="d-meta pg-summary">${rows.join('')}</dl></section>`];
   if (s === 'todo') parts.push(`<p class="muted small pg-note">まだ開始していません。開始すると、ここで進み具合を見られます。</p>`);
+  parts.push(subtaskProgressHtml(c));
   if (c.relay && !isChat(c)) {
     parts.push(`<section class="pg-sec"><div class="pg-sec-head"><b>${icon('pipeline')}フローチャート</b></div>${relayChartHtml(c)}</section>`);
     parts.push(`<section class="pg-sec">${relayFlowHtml(c)}</section>`);
@@ -1158,7 +1372,24 @@ function bindPromptEdit(c) {
       <label class="field"><span>タイトル</span><input id="editTitle" value="${esc(c.title)}" /></label>
       <div class="field"><span>最初の指示</span><div id="editSkill" class="skill-slot"></div><textarea id="editPrompt" rows="10">${esc(c.prompt)}</textarea>${c.attachments && c.attachments.length ? `<small class="muted">添付ファイル</small>${attachFilesHtml(c.attachments, { all: true })}` : ''}</div>
       <button class="btn primary" id="saveEdit">保存</button>
-    </section>`;
+    </section>
+    ${canHaveSubtasks(c) ? `<section class="pg-sec" id="subEdit">
+      <div class="pg-sec-head"><b>${icon('branch')}サブタスク</b> <span class="muted small">分けて進めるときに足します。順番（直列・並列）は、開始したときに ${esc(agentShort(agentOf(c)))} が決めます</span></div>
+      ${subEditorHtml(c.subtasks ? c.subtasks.items : [])}
+      ${subMergeSelectHtml('editSubMerge', c.subtasks ? c.subtasks.merge : (state.board.settings || {}).subtaskMerge)}
+      <button class="btn" id="saveSubtasks">サブタスクを保存</button>
+    </section>` : ''}`;
+  const subBox = $('subEdit');
+  if (subBox) {
+    subBox.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-sact]');
+      if (b) subtaskAction(c, b);
+    });
+    $('saveSubtasks').onclick = () => {
+      const items = subRowsFrom(subBox);
+      runBusy('保存しています…', () => api.setSubtasks(c.id, { items, merge: $('editSubMerge').value }), items.length ? `サブタスクを ${items.length} 個にしました` : 'サブタスクをやめました');
+    };
+  }
   let editSkill = c.skill || null;
   const drawEditSkill = () => renderSkillSlot('editSkill', editSkill, (v) => ((editSkill = v), drawEditSkill()), { disabled: false });
   drawEditSkill();
@@ -1190,6 +1421,8 @@ function renderProgress(c, { force = false } = {}) {
   if (chart && scroll) [chart.scrollLeft, chart.scrollTop] = scroll;
   view.querySelectorAll('details[data-rkey]').forEach((d) => (d.ontoggle = () => (d.open ? state.relayOpen.add(d.dataset.rkey) : state.relayOpen.delete(d.dataset.rkey))));
   view.querySelectorAll('[data-open-card]').forEach((a) => (a.onclick = (e) => (e.preventDefault(), card(a.dataset.openCard) && select(a.dataset.openCard))));
+  view.querySelectorAll('[data-sact]').forEach((b) => (b.onclick = () => subtaskAction(c, b)));
+  view.querySelectorAll('.issue-chip').forEach((a) => (a.onclick = () => run(() => api.openExternal(a.dataset.url))));
 }
 // ログが届くたびに描き直すと重いので、まとめて描き直す
 let progressTimer = null;
@@ -1257,7 +1490,7 @@ function competeBoxHtml(c) {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch]), relayKidsSig(c), state.tab === 'progress']);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch]), relayKidsSig(c), c.subtasks, c.subtaskProposal, c.subtaskOf, subKidsSig(c), state.tab === 'progress']);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -1274,7 +1507,7 @@ function renderDetailHead() {
     (s === 'running' || s === 'queued') && `<button class="btn" data-act="stop">${icon('stop')}停止</button>`,
     (s === 'review' || s === 'failed') && isNoGit(c) &&
       `<button class="btn primary" data-act="complete" title="${COMPLETE_TITLE}">${icon('check')}完了にする</button>`,
-    (s === 'review' || s === 'failed') && c.worktreePath &&
+    (s === 'review' || s === 'failed') && c.worktreePath && !isHiddenSubtask(c) && !subtasksBlockMerge(c) &&
       (state.board.settings.integration === 'pr'
         ? `<button class="btn primary" data-act="pr">${icon('pr')}${c.prUrl ? 'PR を更新…' : 'PR を作成…'}</button>`
         : `<button class="btn primary" data-act="merge">${icon('merge')}マージ…</button>`),
@@ -1293,6 +1526,7 @@ function renderDetailHead() {
   $('detailHead').innerHTML = `
     ${isInterrupted(c) ? interruptedBoxHtml(c) : c.error ? `<div class="d-error">${esc(c.error)}</div>` : ''}
     ${relayHeadHtml(c)}
+    ${subtaskHeadHtml(c)}
     ${competeBoxHtml(c)}
     ${conflictBoxHtml(c)}
     <div class="d-actions">${btns.join('')}</div>`;
@@ -1392,6 +1626,12 @@ $('detailBody').addEventListener('keydown', (e) => {
   if (c) sendReplyAnswer(form, c);
 });
 function logActionClick(e) {
+  const sa = e.target.closest('[data-sact]');
+  if (sa) {
+    const c = card(state.selected);
+    if (c) subtaskAction(c, sa);
+    return;
+  }
   const cp = e.target.closest('[data-complete]');
   if (cp) return completeNoGit(card(cp.dataset.complete));
   const op = e.target.closest('[data-act-open]');
@@ -1431,6 +1671,12 @@ function logActionClick(e) {
   }
 }
 $('detailHead').addEventListener('click', async (e) => {
+  const sa = e.target.closest('[data-sact]');
+  if (sa) {
+    const c = card(state.selected);
+    if (c) subtaskAction(c, sa);
+    return;
+  }
   const ca = e.target.closest('[data-cact]');
   if (ca) {
     const c = card(state.selected);
@@ -1448,6 +1694,11 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'resume') runBusy('再開しています…', () => api.resume(c.id), '再開しました');
   if (act === 'dismissInterrupted') run(() => api.dismissInterrupted(c.id));
   if (act === 'stop') runBusy('停止しています…', () => api.stop(c.id));
+  if (act === 'showChat') {
+    setTab('chat');
+    renderDetailHead();
+    renderDetailBody();
+  }
   if (act === 'showProgress') {
     setTab('progress');
     renderDetailHead();
@@ -1583,6 +1834,8 @@ function chatActionsHtml(c) {
     questionFormHtml(c),
     spec
       ? `<div class="d-awaiting d-spec"><b>${icon('note')}内容が詰まっていないので、開発を開始できません</b><small>${specQuestions(c) ? 'このすぐ下のフォーム（または下の欄）' : '下の欄'}で、上の ${who} の質問に答えて仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>${specFormHtml(c)}`
+      : hasSubtaskProposal(c)
+        ? subtaskProposalHtml(c)
       : c.awaitingReply && (s === 'review' || s === 'failed')
         ? `<div class="d-awaiting"><b>${icon('chat')}${who} が質問しています</b><small>このすぐ下の欄（または画面のいちばん下の入力欄）に答えを書いて送ると、同じ会話の続きから進めます。</small></div>${replyFormHtml(c)}`
         : '',
@@ -1594,7 +1847,7 @@ function hasLogActions(c) {
   return !!(c && (c.permissions || []).length);
 }
 function hasChatActions(c) {
-  return !!(c && ((c.questions || []).length || isSpecPending(c) || (c.awaitingReply && (c.status === 'review' || c.status === 'failed'))));
+  return !!(c && ((c.questions || []).length || isSpecPending(c) || hasSubtaskProposal(c) || (c.awaitingReply && (c.status === 'review' || c.status === 'failed'))));
 }
 // 中身が変わったときだけ描き直す（選びかけのラジオや入力中の文字を消さない）
 function drawLogActions(c, force) {
@@ -3411,6 +3664,8 @@ async function openSettings() {
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
        <small>「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
+     <small class="muted s-note">仕様を詰めるときに、分けたほうがよい大きなタスクなら、エージェントがサブタスクに分けることを提案します（「サブタスクでやる」と答えたら分けます）。開始前のタスクには、進捗タブから手動でサブタスクを足せます。</small>
+     <label class="field"><span>サブタスクが終わったら（既定。タスクごとに開始前に変えられます）</span><select id="sSubtaskMerge"><option value="auto"${s.subtaskMerge !== 'review' ? ' selected' : ''}>自動で親のブランチにマージする</option><option value="review"${s.subtaskMerge === 'review' ? ' selected' : ''}>確かめてからマージする</option></select></label>
 
      <h3 class="s-section">アプリ全体の設定</h3>
      <small class="muted s-note">ここから下の項目は、どのプロジェクトでも同じです（「このプロジェクトの設定」と書いた項目だけは、プロジェクトごとに覚えます）。</small>
@@ -3876,6 +4131,7 @@ async function openSettings() {
             suggestSkillsOnDone: $('sSuggestSkills').checked,
             deleteSessionsOnMerge: $('sDeleteSessions').checked,
             specCheck: $('sSpecCheck').checked,
+            subtaskMerge: $('sSubtaskMerge').value,
             statusFieldName: $('sStatusField').value.trim(),
             statusMapping: { inProgress: $('sMapProgress').value.trim(), inReview: $('sMapReview').value.trim(), done: $('sMapDone').value.trim() },
           }),

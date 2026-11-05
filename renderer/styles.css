@@ -1007,3 +1007,29 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .lg-pending { --c: var(--line); }
 .lg-skip { --c: var(--muted); opacity: 0.6; }
 @media (prefers-reduced-motion: reduce) { .fv-edge.e-active path, .fv-node rect, .td-in_progress .td-mark { animation: none; } }
+
+/* サブタスク（親のカード・詳細の上・進捗） */
+.orch-chip.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.card-sub { color: var(--muted); }
+.rs-check { --rs: var(--warn); }
+.rs-merging { --rs: var(--run); }
+.rs-skipped { --rs: var(--muted); }
+.rb-seg.rs-merging { background: color-mix(in srgb, var(--run) 45%, transparent); }
+.sub-box { margin-top: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); background: color-mix(in srgb, var(--accent) 5%, var(--panel)); font-size: 13px; }
+.sub-box .rh-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.sub-box .rh-row .ic { width: 14px; height: 14px; }
+.sub-box .rh-row .btn { margin-left: auto; }
+.sub-box a { color: var(--accent); }
+.sub-box > small { display: block; color: var(--muted); margin: 4px 0 8px; }
+.sub-box .rf-list { margin-top: 8px; }
+.sub-box .d-actions { margin-top: 8px; align-items: center; }
+.sub-flow { margin-top: 8px; }
+.sub-editor { margin: 6px 0 8px; }
+.sub-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
+.sub-row { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; gap: 4px; }
+.sub-row-head { display: flex; align-items: center; gap: 6px; }
+.sub-row-head .sub-title { flex: 1; min-width: 0; }
+.sub-row textarea { width: 100%; resize: vertical; }
+.sub-merge select { max-width: 100%; }
+.sub-flow a, .sub-box .rf-list a, .progress .rf-wait a { color: var(--accent); }
+.sub-box .rh-row > span { flex: 1; min-width: 0; }

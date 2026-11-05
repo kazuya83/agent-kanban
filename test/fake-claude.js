@@ -127,6 +127,22 @@ async function turn(prompt, sessionId) {
     out({ type: 'result', subtype: 'success', is_error: false, result: '両方の変更を残して解消しました', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
     return;
   }
+  // サブタスクの順番を頼まれたら、印とブロックで返す（[serial] なら直列、なければ並列）
+  if (prompt.includes('このタスクはサブタスクに分けて進めます')) {
+    const keys = [...prompt.matchAll(/^### key: (\S+)/gm)].map((m) => m[1]);
+    const serial = prompt.includes('[serial]');
+    const items = keys.map((k, i) => ({ key: k, title: k, prompt: k, after: serial && i ? [keys[i - 1]] : [] }));
+    out({ type: 'assistant', message: { content: [{ type: 'text', text: `[[SUBTASKS]]\n順番を決めました。\n\n\`\`\`subtasks\n${JSON.stringify(items)}\n\`\`\`` }] } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: '順番を決めました。', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
+    return;
+  }
+  // [split-me] があれば（サブタスクの提案を頼まれていれば）、2つのサブタスクを提案して止まる
+  if (prompt.includes('[split-me]') && prompt.includes('[[SUBTASKS]]')) {
+    const items = [{ key: 'api', title: 'API', prompt: 'API を作る [same-file]', after: [] }, { key: 'ui', title: '画面', prompt: '画面を作る [same-file]', after: [] }];
+    out({ type: 'assistant', message: { content: [{ type: 'text', text: `[[SUBTASKS]]\n2つに分けると速く進められます。\n1. API\n2. 画面\nこの分け方で、サブタスクにして進めますか？\n\n\`\`\`subtasks\n${JSON.stringify(items)}\n\`\`\`` }] } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: 'この分け方で、サブタスクにして進めますか？', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
+    return;
+  }
   // [vague] があれば（仕様の確認を頼まれていて、まだ答え [spec-ok] をもらっていなければ）、印を付けて質問して止まる
   if (prompt.includes('[vague]') && prompt.includes('[[SPEC_UNCLEAR]]') && !prompt.includes('[spec-ok]')) {
     // [split] なら、質問の本文とフォーム用のブロックを別々のメッセージで返す
@@ -152,7 +168,8 @@ async function turn(prompt, sessionId) {
     out({ type: 'result', subtype: 'success', is_error: false, result: 'ok', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
     return;
   }
-  const file = `out-${Date.now()}.txt`;
+  // [same-file] があれば、同じファイル（shared.txt）に書く（サブタスク同士のコンフリクトを起こす）
+  const file = prompt.includes('[same-file]') ? 'shared.txt' : `out-${Date.now()}.txt`;
   const input = { command: `echo > ${file}` };
   out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input }] } });
   const cfg = opt('--mcp-config');
