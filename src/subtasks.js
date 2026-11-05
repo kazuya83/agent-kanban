@@ -6,8 +6,13 @@
 //
 // 親のカード: c.subtasks = {
 //   items: [{ key, title, prompt, after: [key], issue?: { number, title, url }, cardId?, state, report?, branch?, costUsd? }],
-//     state: pending（まだ始めていない）/ running（サブタスクのカードがある）/ merged（親のブランチにマージした）/ skipped（破棄された）
+//     state: pending（まだ始めていない）/ running（サブタスクのカードがある）
+//            review（「取り込む」で親のブランチにマージした。完了へドラッグされるのを待っている）
+//            merged（親のブランチにマージして完了） / done（取り込まずに完了にした） / skipped（破棄された）
+//     manual?: このサブタスクだけ開始した（終わったらレビューで止まり、「取り込む」を押してから親のブランチにマージする）
+//     merged?: 親のブランチにマージした（state とは別に覚えておく。状態はドラッグ&ドロップで変える）
 //   merge: 'auto' | 'review'   サブタスクが終わったら自動でマージするか、確かめてからマージするか
+//   auto?: false なら、始められるサブタスクを自動で始めない（サブタスクだけ開始したとき。省略は true）
 //   phase: 'plan'  順番（直列・並列）をエージェントに決めてもらう前（親の最初の実行で決める）
 //          'run'   サブタスクを動かしている
 //          'done'  すべてマージした（親が仕上げをして、レビューへ）
@@ -168,7 +173,9 @@ function withPlanNote(items, prompt) {
   return `${buildPlanPrompt(items)}\n\n---\n\n## タスク（全体）\n\n${prompt}`;
 }
 
-const STATE_LABEL = { pending: 'まだ', running: '作業中', merged: 'マージ済み', skipped: '破棄' };
+const STATE_LABEL = { pending: 'まだ', running: '作業中', review: '取り込み済み', merged: 'マージ済み', done: '完了（取り込まず）', skipped: '破棄' };
+// 完了の列に入っている（もう動かさない）状態
+const SETTLED = ['merged', 'done', 'skipped'];
 
 // サブタスクのカードの最初の指示
 function buildChildPrompt(parent, item) {
@@ -185,7 +192,10 @@ function buildChildPrompt(parent, item) {
   const others = st.items.filter((x) => x.key !== item.key);
   if (others.length) {
     lines.push('', '## ほかのサブタスク（参考。ここでは作業しないでください）');
-    for (const x of others) lines.push(`- ${x.title}（${STATE_LABEL[x.state] || x.state}）${item.after.includes(x.key) ? ' ← 先に終わってマージ済み。その変更はこのブランチに入っています' : ''}`);
+    for (const x of others) {
+      const note = !item.after.includes(x.key) ? '' : x.merged || x.state === 'merged' ? ' ← 先に終わってマージ済み。その変更はこのブランチに入っています' : ' ← 本来はこれが先です（まだこのブランチには入っていません）';
+      lines.push(`- ${x.title}（${STATE_LABEL[x.state] || x.state}）${note}`);
+    }
   }
   if (st.note) lines.push('', '## 分け方の説明', truncate(st.note, 3000));
   lines.push('', '## 親のタスク（全体の指示。参考）', truncate(parent.prompt, 6000));
@@ -193,13 +203,14 @@ function buildChildPrompt(parent, item) {
   return lines.join('\n');
 }
 
-// すべてのサブタスクをマージしたあとに、親のエージェントに頼む仕上げ
-function buildFinishPrompt(parent) {
+// すべてのサブタスクが完了の列に入ったあとに、親のエージェントに頼む仕上げ
+// withTask: 親のエージェントがまだ一度も動いていない（サブタスクだけ開始した）ときは、全体の指示も付ける
+function buildFinishPrompt(parent, { withTask = false } = {}) {
   const items = parent.subtasks.items;
   const merged = items.filter((x) => x.state === 'merged');
-  const skipped = items.filter((x) => x.state === 'skipped');
+  const skipped = items.filter((x) => x.state === 'skipped' || x.state === 'done');
   const lines = [
-    `サブタスク（${merged.length} 個）をすべて、このタスクのブランチにマージしました。`,
+    `サブタスク（${merged.length} 個）を、このタスクのブランチにマージしました。`,
     '',
     'タスク全体を通して、仕上げをしてください。',
     '- サブタスク同士のつなぎ目（呼び出し・型・設定・重なっている変更・抜け）を確かめて、必要なら直す',
@@ -209,15 +220,16 @@ function buildFinishPrompt(parent) {
     '## サブタスクの報告',
   ];
   for (const x of merged) lines.push('', `### ${x.title}${x.branch ? `（${x.branch}）` : ''}`, truncate(x.report || '（報告なし）', 2500));
-  if (skipped.length) lines.push('', '## 破棄されたサブタスク（マージしていません）', ...skipped.map((x) => `- ${x.title}`));
+  if (skipped.length) lines.push('', '## 取り込まずに終えたサブタスク（マージしていません）', ...skipped.map((x) => `- ${x.title}`));
+  if (withTask) lines.push('', '## タスク（全体の指示）', truncate(parent.prompt, 6000));
   return lines.join('\n');
 }
 
 // ---------- 進め方 ----------
 
-// 先に終わっている必要があるサブタスクが、すべてマージ（または破棄）されたか
+// 先に終わっている必要があるサブタスクが、すべてマージ（または完了・破棄）されたか（自動で進めるときの順番に使う）
 function isUnblocked(st, item) {
-  const done = new Set(st.items.filter((x) => x.state === 'merged' || x.state === 'skipped').map((x) => x.key));
+  const done = new Set(st.items.filter((x) => x.merged || x.state === 'review' || SETTLED.includes(x.state)).map((x) => x.key));
   return item.after.every((a) => done.has(a));
 }
 
@@ -226,8 +238,9 @@ function startable(st) {
   return st.items.filter((x) => x.state === 'pending' && isUnblocked(st, x));
 }
 
+// すべてのサブタスクが完了の列に入ったか（マージではなく、状態で決める）
 function allSettled(st) {
-  return st.items.length > 0 && st.items.every((x) => x.state === 'merged' || x.state === 'skipped');
+  return st.items.length > 0 && st.items.every((x) => SETTLED.includes(x.state));
 }
 
 // 順番を決めた返事（plan）を、決まっているサブタスクに当てはめる（after だけを使う）。返事がなければ直列にする
@@ -257,14 +270,16 @@ function progressOf(st) {
   const total = st.items.length;
   const merged = st.items.filter((x) => x.state === 'merged').length;
   const skipped = st.items.filter((x) => x.state === 'skipped').length;
-  const running = st.items.filter((x) => x.state === 'running').length;
-  return { total, merged, skipped, running, pending: total - merged - skipped - running };
+  const done = st.items.filter((x) => x.state === 'done').length;
+  const running = st.items.filter((x) => x.state === 'running' || x.state === 'review').length;
+  return { total, merged, done, skipped, running, pending: total - merged - done - skipped - running };
 }
 
 module.exports = {
   SUBTASK_MARKER,
   SUBTASK_LANG,
   MAX_SUBTASKS,
+  SETTLED,
   cleanMergeMode,
   cleanItems,
   parseItems,

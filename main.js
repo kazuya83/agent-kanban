@@ -996,6 +996,11 @@ app.whenReady().then(async () => {
   handle('subtasks:accept', ({ id, items, merge, createIssues }) => agents.acceptSubtasks(id, { items, merge, createIssues: !!createIssues }));
   handle('subtasks:decline', (id) => agents.declineSubtasks(id));
   handle('subtasks:approve', (id) => agents.approveSubtask(id));
+  // サブタスクだけ開始する・状態をドラッグ&ドロップで変える・残りを自動で進める。ボードのカードの列を変える
+  handle('subtasks:startOne', ({ id, key }) => agents.startSubtaskOnly(id, key));
+  handle('subtasks:move', ({ id, key, to }) => agents.moveSubtask(id, key, to));
+  handle('subtasks:auto', (id) => agents.autoRunSubtasks(id));
+  handle('card:move', ({ id, to }) => agents.moveCard(id, to));
   handle('compete:compare', (id) => agents.compareCompetitors(id).id);
   handle('card:suggestSkills', ({ id }) => agents.suggestSkills(id));
   handle('notifications:read', ({ ids } = {}) => agents.readNotifications(store.settings.repoPath, ids));

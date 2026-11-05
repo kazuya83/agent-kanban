@@ -1,6 +1,6 @@
 /* global api, icon, agentIcon, NOTIF_ICON */
 const COLUMNS = [
-  { key: 'todo', label: 'Todo', statuses: ['todo'], hint: 'ここから「実行中」へドラッグしても開始できます' },
+  { key: 'todo', label: 'Todo', statuses: ['todo'], hint: 'ここから「実行中」へドラッグしても開始できます。レビューと完了のあいだも、ドラッグで動かせます' },
   { key: 'running', label: '実行中', statuses: ['queued', 'running'] },
   { key: 'review', label: 'レビュー', statuses: ['review', 'failed'] },
   { key: 'done', label: '完了', statuses: ['done'] },
@@ -445,7 +445,7 @@ function cardHtml(c) {
   const [bcls, blabel] = badgeFor(c);
   const since = c.status === 'running' ? c.startedAt : null;
   return `
-    <div class="card s-${c.status} ${isChat(c) ? 'chat' : ''} ${waiting ? (bcls === 'waiting' ? 'waiting' : bcls === 'conflict' ? 'conflicting' : 'asking') : ''} ${state.selected === c.id ? 'selected' : ''}" draggable="${c.status === 'todo' && !isChat(c)}" data-id="${c.id}">
+    <div class="card s-${c.status} ${isChat(c) ? 'chat' : ''} ${waiting ? (bcls === 'waiting' ? 'waiting' : bcls === 'conflict' ? 'conflicting' : 'asking') : ''} ${state.selected === c.id ? 'selected' : ''}" draggable="${canDragCard(c)}" data-id="${c.id}">
       <div class="card-top">
         <span class="badge b-${bcls}">${blabel}</span>
         ${isUnreadChat(c) ? '<span class="unread-chip" title="まだ読んでいない返事があります">未読</span>' : ''}
@@ -784,26 +784,63 @@ function boardClick(e) {
   const el = e.target.closest('.card');
   if (el) select(el.dataset.id);
 }
+// ボードのドラッグ&ドロップ: 列を動かして状態を変える（Todo → 実行中で開始、レビュー ⇄ 完了。マージとは切り離す）
+function canDragCard(c) {
+  return !!c && !isChat(c) && !c.afterDone && !isHiddenSubtask(c) && ['todo', 'review', 'failed', 'done'].includes(c.status);
+}
+// カードが今いる列
+function boardColOf(c) {
+  const s = subtasksRunning(c) && (c.status === 'review' || c.status === 'failed') ? 'running' : c.status;
+  return (COLUMNS.find((col) => col.statuses.includes(s)) || {}).key;
+}
+// その列へ動かせるか（動かせない列は、落とす場所として光らせない）
+function canDropCard(c, to) {
+  const from = boardColOf(c);
+  if (!c || from === to) return false;
+  if (from === 'todo') return to === 'running';
+  if (from === 'review') return to === 'done';
+  if (from === 'done') return to === 'review';
+  if (from === 'running') return to === 'done' && subtasksRunning(c); // サブタスクが残っているときは、あとで理由を出す
+  return false;
+}
+let boardDragId = null;
 $('board').addEventListener('dragstart', (e) => {
   const el = e.target.closest('.card');
-  if (el) e.dataTransfer.setData('text/plain', el.dataset.id);
+  if (!el) return;
+  boardDragId = el.dataset.id;
+  e.dataTransfer.setData('text/plain', el.dataset.id);
+});
+$('board').addEventListener('dragend', () => {
+  boardDragId = null;
+  $('board').querySelectorAll('.column.drop').forEach((x) => x.classList.remove('drop'));
 });
 $('board').addEventListener('dragover', (e) => {
-  const col = e.target.closest('.column[data-col="running"]');
-  if (col) {
+  const col = e.target.closest('.column[data-col]');
+  if (col && canDropCard(card(boardDragId), col.dataset.col)) {
     e.preventDefault();
     col.classList.add('drop');
   }
 });
-$('board').addEventListener('dragleave', (e) => e.target.closest('.column')?.classList.remove('drop'));
+$('board').addEventListener('dragleave', (e) => {
+  const col = e.target.closest('.column');
+  if (col && !col.contains(e.relatedTarget)) col.classList.remove('drop');
+});
 $('board').addEventListener('drop', (e) => {
-  const col = e.target.closest('.column[data-col="running"]');
+  const col = e.target.closest('.column[data-col]');
   if (!col) return;
   e.preventDefault();
   col.classList.remove('drop');
-  const id = e.dataTransfer.getData('text/plain');
-  if (card(id)?.status === 'todo') runBusy('タスクを開始しています…', () => api.start(id));
+  const c = card(e.dataTransfer.getData('text/plain'));
+  boardDragId = null;
+  const to = col.dataset.col;
+  if (!canDropCard(c, to)) return;
+  moveCardTo(c, to);
 });
+async function moveCardTo(c, to) {
+  if (to === 'running' && c.status === 'todo') return runBusy('タスクを開始しています…', () => api.start(c.id));
+  if (to === 'done' && !isNoGit(c) && c.worktreePath && !confirm(`「${c.title}」を、マージせずに完了にします。worktree とブランチ ${c.branch || ''} は残すので、あとで「レビュー」の列へ戻して続けられます。よろしいですか？`)) return;
+  return runBusy('列を動かしています…', () => api.moveCard(c.id, to), to === 'done' ? '完了にしました' : 'レビューに戻しました');
+}
 
 async function answer(cardId, reqId, decision, message) {
   await run(() => api.answerPermission(cardId, reqId, decision, message), decision === 'deny' ? '拒否しました' : '許可しました');
@@ -1043,10 +1080,20 @@ const hasSubtaskProposal = (c) => !!(c && c.subtaskProposal && (c.status === 're
 function subtaskReady(k) {
   return !!k && !!k.worktreePath && (k.status === 'review' || k.status === 'failed') && !k.awaitingReply && !isSpecPending(k) && !k.conflict && !isInterrupted(k) && !(k.questions || []).length && !(k.permissions || []).length;
 }
-// 「確かめてからマージ」で、あなたの確認を待っているサブタスクか
-function subtaskNeedsCheck(k) {
+// サブタスクのカードの、親の一覧の項目
+function subItemOf(k) {
   const p = subtaskParent(k);
-  return !!p && p.subtasks.merge === 'review' && !(k.subtaskOf && k.subtaskOf.approved) && subtaskReady(k) && k.status === 'review';
+  return p ? p.subtasks.items.find((x) => x.cardId === k.id) : null;
+}
+// 終わったら「取り込む」を押してからマージするサブタスクか（「確かめてからマージ」・サブタスクだけ開始したもの）
+function subtaskChecked(k) {
+  const p = subtaskParent(k);
+  const item = subItemOf(k);
+  return !!p && (p.subtasks.merge === 'review' || !!(item && item.manual));
+}
+// あなたの確認を待っているサブタスクか
+function subtaskNeedsCheck(k) {
+  return subtaskChecked(k) && !(k.subtaskOf && k.subtaskOf.approved) && subtaskReady(k) && k.status === 'review';
 }
 function subKids(c) {
   return c && c.subtasks ? c.subtasks.items.filter((x) => x.cardId && x.state === 'running').map((x) => card(x.cardId)).filter(Boolean) : [];
@@ -1054,11 +1101,13 @@ function subKids(c) {
 function subNeedsYou(c) {
   return subKids(c).some((k) => needsYou(k) || subtaskNeedsCheck(k));
 }
-const SUB_EXTRA_STATE = { check: ['!', '確認待ち'], merging: ['…', 'マージ待ち'] };
+const SUB_EXTRA_STATE = { check: ['!', '確認待ち'], merging: ['…', 'マージ待ち'], mergedWait: ['✓', '取り込み済み'], closed: ['✓', '完了（取り込まず）'] };
 const subStateInfo = (s) => SUB_EXTRA_STATE[s] || RELAY_STATE[s] || RELAY_STATE.pending;
 // サブタスクひとつの状態（バーと進捗で共通）
 function subItemState(c, x) {
   if (x.state === 'merged') return 'done';
+  if (x.state === 'done') return 'closed';
+  if (x.state === 'review') return 'mergedWait';
   if (x.state === 'skipped') return 'skipped';
   const k = x.cardId ? card(x.cardId) : null;
   if (x.state !== 'running' || !k) return 'pending';
@@ -1072,18 +1121,45 @@ function subItemState(c, x) {
 function subCounts(c) {
   const items = c.subtasks.items;
   const merged = items.filter((x) => x.state === 'merged').length;
+  const closed = items.filter((x) => x.state === 'done').length;
   const skipped = items.filter((x) => x.state === 'skipped').length;
-  const running = items.filter((x) => x.state === 'running').length;
-  return { total: items.length, merged, skipped, running, pending: items.length - merged - skipped - running };
+  const running = items.filter((x) => x.state === 'running' || x.state === 'review').length;
+  // done: 完了の列に入っているもの（マージした・取り込まずに完了にした）
+  return { total: items.length, merged, done: merged + closed, skipped, running, pending: items.length - merged - closed - skipped - running };
+}
+// サブタスクの進捗タブの列（ドラッグ&ドロップで状態を変える）
+const SUB_COLUMNS = [
+  { key: 'todo', label: '未着手' },
+  { key: 'running', label: '作業中' },
+  { key: 'review', label: 'レビュー' },
+  { key: 'done', label: '完了' },
+];
+function subItemColumn(x) {
+  if (['merged', 'done', 'skipped'].includes(x.state)) return 'done';
+  if (x.state === 'review') return 'review';
+  if (x.state === 'pending') return 'todo';
+  const k = x.cardId ? card(x.cardId) : null;
+  return k && (k.status === 'review' || k.status === 'failed') ? 'review' : 'running';
+}
+// そのサブタスクを、その列へ動かせるか
+function canDropSub(c, x, to) {
+  if (!c || !x || c.status === 'running' || c.status === 'queued' || c.status === 'done') return false;
+  const from = subItemColumn(x);
+  if (from === to) return false;
+  if (from === 'todo') return to === 'running' || (to === 'done' && c.status !== 'todo');
+  if (c.status === 'todo') return false;
+  if (from === 'review') return to === 'done' || (to === 'todo' && x.state === 'review');
+  if (from === 'done') return to === 'todo' || (to === 'review' && x.state === 'merged' && !!x.merged);
+  return false;
 }
 // 親のカードの今の段階
 function subPhaseText(c) {
   const st = c.subtasks;
   const n = subCounts(c);
-  if (st.phase === 'plan') return c.status === 'todo' ? '開始すると、順番（直列・並列）を決めてから動かします' : '順番（直列・並列）を決めています';
-  if (st.phase === 'done') return c.status === 'running' || c.status === 'queued' ? 'すべてマージしました。全体の仕上げをしています' : 'すべてマージして、仕上げました';
+  if (st.phase === 'plan') return c.status === 'todo' ? '開始すると、順番（直列・並列）を決めてから動かします。サブタスクだけ開始することもできます' : '順番（直列・並列）を決めています';
+  if (st.phase === 'done') return c.status === 'running' || c.status === 'queued' ? 'すべて完了しました。全体の仕上げをしています' : 'すべて完了しました';
   if (c.conflict && c.conflict.subtask) return 'サブタスクのマージのコンフリクトを解消しています';
-  return `作業中 ${n.running}・あと ${n.pending}`;
+  return `${st.auto === false ? '手で進めています ・ ' : ''}作業中 ${n.running}・あと ${n.pending}`;
 }
 // ボードのカード: サブタスクの数だけ区切った進み具合のバー
 function subtaskBarHtml(c) {
@@ -1101,7 +1177,7 @@ function subtaskChipHtml(c) {
   if (!c.subtasks) return '';
   const n = subCounts(c);
   const check = subKids(c).filter(subtaskNeedsCheck).length;
-  return `<span class="orch-chip sub" title="サブタスクに分けて進めています（${esc(subPhaseText(c))}）">${icon('branch')}サブタスク ${n.merged}/${n.total - n.skipped} マージ済み${check ? `・確認待ち ${check}` : ''}</span>`;
+  return `<span class="orch-chip sub" title="サブタスクに分けて進めています（${esc(subPhaseText(c))}）">${icon('branch')}サブタスク ${n.done}/${n.total - n.skipped} 完了${check ? `・確認待ち ${check}` : ''}</span>`;
 }
 // 詳細: サブタスクの一覧（状態・担当・押すとサブタスクを開く・確かめてから取り込む）
 function subtaskListHtml(c, { detail = false } = {}) {
@@ -1113,7 +1189,7 @@ function subtaskListHtml(c, { detail = false } = {}) {
     const k = x.cardId && x.state === 'running' ? card(x.cardId) : null;
     const info = [];
     if (x.issue) info.push(`<a class="issue-chip" data-url="${esc(x.issue.url)}">#${x.issue.number}</a>`);
-    if (x.after && x.after.length) info.push(`<span class="muted small">${x.after.map((a) => `「${esc(title.get(a) || a)}」`).join('・')} のあと</span>`);
+    if (x.after && x.after.length) info.push(`<span class="muted small" title="自動で進めるときの順番です。サブタスクだけ開始するときは、順番に関係なく始められます">${x.after.map((a) => `「${esc(title.get(a) || a)}」`).join('・')} のあと（目安）</span>`);
     else if (st.phase !== 'plan') info.push('<span class="muted small">並列</span>');
     if (k) info.push(`<span class="rf-agent">${personaIcon(k.persona, agentOf(k))}${esc(whoShort(agentOf(k), k.persona))}</span>`);
     if (x.agent && !k) info.push(`<span class="rf-agent">${esc(agentShort(x.agent))}</span>`);
@@ -1123,7 +1199,7 @@ function subtaskListHtml(c, { detail = false } = {}) {
     const act = k && subtaskNeedsCheck(k) ? ` <button class="btn small primary" data-sact="approve" data-sid="${esc(k.id)}" title="差分を確かめたら、親のタスクのブランチに取り込みます">${icon('merge')}取り込む</button>` : '';
     const msg = detail && k && k.lastMessage ? `<div class="rf-info">${esc(plainText(k.lastMessage))}</div>` : '';
     const rkey = `${c.id}:sub:${x.key}`;
-    const report = detail && x.state === 'merged' && x.report ? `<details class="rf-report" data-rkey="${esc(rkey)}" ${state.relayOpen.has(rkey) ? 'open' : ''}><summary>サブタスクの報告</summary><div class="rf-report-body">${esc(x.report)}</div></details>` : '';
+    const report = detail && x.report && !k ? `<details class="rf-report" data-rkey="${esc(rkey)}" ${state.relayOpen.has(rkey) ? 'open' : ''}><summary>サブタスクの報告</summary><div class="rf-report-body">${esc(x.report)}</div></details>` : '';
     return `<li class="rf-node rs-${s}"><span class="rf-dot" title="${esc(label)}">${mark}</span><div class="rf-body"><div class="rf-head"><b>${i + 1}. ${name}</b><span class="rf-state">${esc(label)}</span>${info.join('')}${act}</div>${msg}${report}</div></li>`;
   });
   return `<ol class="rf-list">${rows.join('')}</ol>`;
@@ -1135,13 +1211,13 @@ function subtaskHeadHtml(c) {
     const p = subtaskParent(c);
     if (!p) return '';
     const check = subtaskNeedsCheck(c);
-    return `<div class="sub-box"><div class="rh-row">${icon('branch')}<span>「<a href="#" data-open-card="${esc(p.id)}">${esc(p.title)}</a>」のサブタスクです。ブランチ ${esc(p.branch || '')} から分けて作業し、終わったら${p.subtasks.merge === 'review' ? '、確かめてから' : '自動で'}親のブランチにマージします。</span></div>
+    return `<div class="sub-box"><div class="rh-row">${icon('branch')}<span>「<a href="#" data-open-card="${esc(p.id)}">${esc(p.title)}</a>」のサブタスクです。ブランチ ${esc(p.branch || '')} から分けて作業し、終わったら${subtaskChecked(c) ? '、確かめてから（「取り込む」を押してから）' : '自動で'}親のブランチにマージします。</span></div>
       ${check ? `<div class="d-actions"><button class="btn primary" data-sact="approve" data-sid="${esc(c.id)}">${icon('merge')}親のタスクに取り込む</button><small class="muted">差分タブで変更を確かめてから取り込んでください。直してほしいときは、下の欄から追加の指示を送れます。</small></div>` : ''}</div>`;
   }
   if (hasSubtaskProposal(c)) return `<div class="sub-box"><div class="rh-row">${icon('branch')}<b>サブタスクの提案</b> <span class="muted small">${esc(agentShort(agentOf(c)))} が ${c.subtaskProposal.items.length} 個のサブタスクに分けることを提案しています。「チャット」タブの最後で、サブタスクでやるか、分けずに進めるかを選んでください</span>${state.tab !== 'chat' ? ' <button class="btn small ghost" data-act="showChat" type="button">選ぶ</button>' : ''}</div></div>`;
   if (!c.subtasks) return '';
   const n = subCounts(c);
-  return `<div class="sub-box"><div class="rh-row">${icon('branch')}<b>サブタスク</b> <span class="muted small">${n.merged}/${n.total - n.skipped} マージ済み ・ ${esc(subPhaseText(c))} ・ ${c.subtasks.merge === 'review' ? '確かめてからマージ' : '自動でマージ'}</span>${state.tab !== 'progress' ? ' <button class="btn small ghost" data-act="showProgress" type="button">進捗を見る</button>' : ''}</div>${subtaskBarHtml(c)}${state.tab !== 'progress' ? subtaskListHtml(c) : ''}</div>`;
+  return `<div class="sub-box"><div class="rh-row">${icon('branch')}<b>サブタスク</b> <span class="muted small">${n.done}/${n.total - n.skipped} 完了 ・ ${esc(subPhaseText(c))} ・ ${c.subtasks.merge === 'review' ? '確かめてからマージ' : '自動でマージ'}</span>${state.tab !== 'progress' ? ' <button class="btn small ghost" data-act="showProgress" type="button">進捗を見る</button>' : ''}</div>${subtaskBarHtml(c)}${state.tab !== 'progress' ? subtaskListHtml(c) : ''}</div>`;
 }
 // サブタスクの一覧を編集する欄（提案を直す・開始前に決める）
 function subRowHtml(x, title = new Map(), showAfter = false) {
@@ -1194,17 +1270,101 @@ function subtaskProgressHtml(c) {
   }
   if (!c.subtasks) return '';
   const n = subCounts(c);
-  const pct = n.total - n.skipped ? Math.round((n.merged / (n.total - n.skipped)) * 100) : 0;
-  const parts = [`<section class="pg-sec"><div class="pg-sec-head"><b>${icon('branch')}サブタスク</b> <span class="muted small">${n.merged}/${n.total - n.skipped} マージ済み${n.skipped ? `・破棄 ${n.skipped}` : ''} ・ ${esc(subPhaseText(c))} ・ ${c.subtasks.merge === 'review' ? '確かめてからマージ' : '自動でマージ'}</span></div>
+  const st = c.subtasks;
+  const pct = n.total - n.skipped ? Math.round((n.done / (n.total - n.skipped)) * 100) : 0;
+  const auto = st.phase === 'run' && st.auto === false && n.pending && c.status !== 'running' && c.status !== 'queued' && !c.conflict
+    ? ` <button class="btn small" data-sact="auto" type="button" title="まだ始めていないサブタスクを、順番（目安）どおりに自動で始めます">${icon('play')}残りを自動で進める</button>`
+    : '';
+  const parts = [`<section class="pg-sec"><div class="pg-sec-head"><b>${icon('branch')}サブタスク</b> <span class="muted small">${n.done}/${n.total - n.skipped} 完了${n.merged !== n.done ? `（マージ ${n.merged}）` : ''}${n.skipped ? `・破棄 ${n.skipped}` : ''} ・ ${esc(subPhaseText(c))} ・ ${st.merge === 'review' ? '確かめてからマージ' : '自動でマージ'}</span>${auto}</div>
     <div class="pg-bar" title="${pct}%"><span style="width:${pct}%"></span></div>
-    <div class="relay-flow sub-flow">${subtaskListHtml(c, { detail: true })}</div></section>`];
+    ${subBoardHtml(c)}
+    <small class="muted">カードをドラッグして状態を変えられます（未着手 → 作業中で、そのサブタスクだけ開始）。サブタスクだけ開始したものは、終わるとレビューで止まるので、「取り込む」で親のブランチにマージしてから完了へ動かします。</small></section>`];
   for (const k of subKids(c)) if (k.todos && k.todos.items && k.todos.items.length) parts.push(todoListHtml(k.todos, `サブタスク「${esc(c.subtasks.items.find((x) => x.cardId === k.id).title)}」の TODO`));
   return parts.join('');
+}
+// 進捗タブ: サブタスクのかんばん（未着手 / 作業中 / レビュー / 完了）
+function subBoardHtml(c) {
+  const st = c.subtasks;
+  const title = new Map(st.items.map((x) => [x.key, x.title]));
+  const startable = c.status !== 'running' && c.status !== 'queued' && c.status !== 'done' && !c.conflict;
+  const cols = SUB_COLUMNS.map((col) => {
+    const items = st.items.filter((x) => subItemColumn(x) === col.key);
+    const rows = items.map((x) => {
+      const s = subItemState(c, x);
+      const [mark, label] = subStateInfo(s);
+      const k = x.cardId && x.state === 'running' ? card(x.cardId) : null;
+      const info = [];
+      if (x.issue) info.push(`<a class="issue-chip" data-url="${esc(x.issue.url)}">#${x.issue.number}</a>`);
+      if (x.after && x.after.length) info.push(`<span class="muted small" title="自動で進めるときの順番です。サブタスクだけ開始するときは、順番に関係なく始められます">${x.after.map((a) => `「${esc(title.get(a) || a)}」`).join('・')} のあと（目安）</span>`);
+      if (x.manual) info.push('<span class="muted small">個別に開始</span>');
+      if (k) info.push(`<span class="rf-agent">${personaIcon(k.persona, agentOf(k))}${esc(whoShort(agentOf(k), k.persona))}</span>`);
+      else if (x.agent) info.push(`<span class="rf-agent">${esc(agentShort(x.agent))}</span>`);
+      const cost = k ? k.costUsd : x.costUsd;
+      if (cost) info.push(`<span class="muted small">$${cost.toFixed(3)}</span>`);
+      const name = k ? `<a href="#" data-open-card="${esc(k.id)}">${esc(x.title)}</a>` : esc(x.title);
+      const acts = [];
+      if (x.state === 'pending' && startable) acts.push(`<button class="btn small" data-sact="startOne" data-key="${esc(x.key)}" type="button" title="ほかのサブタスクは動かさずに、このサブタスクだけを開始します">${icon('play')}開始</button>`);
+      if (k && subtaskNeedsCheck(k)) acts.push(`<button class="btn small primary" data-sact="approve" data-sid="${esc(k.id)}" type="button" title="差分を確かめたら、親のタスクのブランチに取り込みます">${icon('merge')}取り込む</button>`);
+      const msg = k && k.lastMessage ? `<div class="rf-info">${esc(plainText(k.lastMessage))}</div>` : '';
+      const rkey = `${c.id}:sub:${x.key}`;
+      const report = x.report && !k ? `<details class="rf-report" data-rkey="${esc(rkey)}" ${state.relayOpen.has(rkey) ? 'open' : ''}><summary>サブタスクの報告</summary><div class="rf-report-body">${esc(x.report)}</div></details>` : '';
+      const drag = SUB_COLUMNS.some((to) => canDropSub(c, x, to.key));
+      return `<div class="sb-item rs-${s}" draggable="${drag}" data-key="${esc(x.key)}"><div class="sb-head"><span class="rf-dot" title="${esc(label)}">${mark}</span><b>${name}</b></div><div class="sb-info"><span class="rf-state">${esc(label)}</span>${info.join('')}</div>${msg}${acts.length ? `<div class="sb-acts">${acts.join('')}</div>` : ''}${report}</div>`;
+    });
+    return `<div class="sb-col" data-scol="${col.key}"><div class="sb-col-head"><span>${col.label}</span><span class="count">${items.length}</span></div><div class="sb-items">${rows.join('') || '<div class="col-empty">なし</div>'}</div></div>`;
+  });
+  return `<div class="sub-board">${cols.join('')}</div>`;
+}
+// サブタスクのかんばんのドラッグ&ドロップ（描き直すたびに付け直す）
+function bindSubBoard(c, view) {
+  const board = view.querySelector('.sub-board');
+  if (!board) return;
+  let dragKey = null;
+  const itemOf = (key) => (card(c.id)?.subtasks?.items || []).find((x) => x.key === key);
+  board.addEventListener('dragstart', (e) => {
+    const el = e.target.closest('.sb-item');
+    if (!el) return;
+    dragKey = el.dataset.key;
+    e.dataTransfer.setData('text/plain', dragKey);
+  });
+  board.addEventListener('dragend', () => {
+    dragKey = null;
+    board.querySelectorAll('.sb-col.drop').forEach((x) => x.classList.remove('drop'));
+  });
+  board.addEventListener('dragover', (e) => {
+    const col = e.target.closest('.sb-col');
+    if (col && canDropSub(card(c.id), itemOf(dragKey), col.dataset.scol)) {
+      e.preventDefault();
+      col.classList.add('drop');
+    }
+  });
+  board.addEventListener('dragleave', (e) => {
+    const col = e.target.closest('.sb-col');
+    if (col && !col.contains(e.relatedTarget)) col.classList.remove('drop');
+  });
+  board.addEventListener('drop', (e) => {
+    const col = e.target.closest('.sb-col');
+    if (!col) return;
+    e.preventDefault();
+    col.classList.remove('drop');
+    const key = e.dataTransfer.getData('text/plain');
+    dragKey = null;
+    moveSubTo(card(c.id), itemOf(key), col.dataset.scol);
+  });
+}
+async function moveSubTo(c, x, to) {
+  if (!canDropSub(c, x, to)) return;
+  const from = subItemColumn(x);
+  if (to === 'running') return runBusy(`サブタスク「${x.title}」を開始しています…`, () => api.startSubtaskOnly(c.id, x.key), 'サブタスクを開始しました');
+  if (to === 'done' && from === 'review' && x.state === 'running' && !confirm(`サブタスク「${x.title}」を、親のブランチに取り込まずに完了にします。このサブタスクの変更（worktree とブランチ）は消えます。よろしいですか？`)) return;
+  if (to === 'todo' && !confirm(`サブタスク「${x.title}」を未着手に戻します。${x.merged ? '前にマージした変更は親のブランチに残ります。' : ''}よろしいですか？`)) return;
+  return runBusy('サブタスクを動かしています…', () => api.moveSubtask(c.id, x.key, to), '動かしました');
 }
 function subKidsSig(c) {
   if (c.subtaskOf) {
     const p = subtaskParent(c);
-    return p ? [p.id, p.subtasks.merge, p.branch, c.subtaskOf.approved] : null;
+    const item = subItemOf(c);
+    return p ? [p.id, p.subtasks.merge, p.branch, c.subtaskOf.approved, !!(item && item.manual)] : null;
   }
   return subKids(c).map((k) => [k.id, k.status, k.awaitingReply, k.specState, !!k.conflict, (k.permissions || []).length, (k.questions || []).length, k.lastMessage, k.costUsd]);
 }
@@ -1219,6 +1379,8 @@ async function subtaskAction(c, el) {
   }
   if (act === 'remove') return el.closest('.sub-row').remove();
   if (act === 'approve') return runBusy('親のタスクのブランチに取り込んでいます…', () => api.approveSubtask(el.dataset.sid), '取り込みました');
+  if (act === 'startOne') return runBusy('サブタスクを開始しています…', () => api.startSubtaskOnly(c.id, el.dataset.key), 'サブタスクを開始しました');
+  if (act === 'auto') return runBusy('残りのサブタスクを進めています…', () => api.autoRunSubtasks(c.id), '残りを自動で進めます');
   if (act === 'decline') return runBusy('分けずに進めてもらいます…', () => api.declineSubtasks(c.id), '分けずに進めてもらいます');
   if (act === 'accept') {
     const box = $('subProposal');
@@ -1422,6 +1584,7 @@ function renderProgress(c, { force = false } = {}) {
   view.querySelectorAll('details[data-rkey]').forEach((d) => (d.ontoggle = () => (d.open ? state.relayOpen.add(d.dataset.rkey) : state.relayOpen.delete(d.dataset.rkey))));
   view.querySelectorAll('[data-open-card]').forEach((a) => (a.onclick = (e) => (e.preventDefault(), card(a.dataset.openCard) && select(a.dataset.openCard))));
   view.querySelectorAll('[data-sact]').forEach((b) => (b.onclick = () => subtaskAction(c, b)));
+  bindSubBoard(c, view);
   view.querySelectorAll('.issue-chip').forEach((a) => (a.onclick = () => run(() => api.openExternal(a.dataset.url))));
 }
 // ログが届くたびに描き直すと重いので、まとめて描き直す

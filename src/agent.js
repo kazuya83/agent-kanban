@@ -804,7 +804,7 @@ class AgentManager extends EventEmitter {
     if (c.status === 'review' && c.specState === 'pending') return null;
     if (c.status === 'review' || c.status === 'failed') return 'inReview';
     // PR を作って片付けただけのときは、まだ取り込まれていないので In review のまま（PR のマージを見つけたら Done にする）
-    if (c.status === 'done') return (c.mergedInto && c.mergedInto.length) || c.prMergedAt ? 'done' : 'inReview';
+    if (c.status === 'done') return (c.mergedInto && c.mergedInto.length) || c.prMergedAt || c.manualDone ? 'done' : 'inReview';
     return null;
   }
 
@@ -1490,6 +1490,8 @@ class AgentManager extends EventEmitter {
     const p = this.subtaskParentOf(k);
     if (!p) throw new Error('このタスクはサブタスクではありません');
     if (!this.subtaskReady(k, { manual: true })) throw new Error('このサブタスクは、まだ取り込める状態ではありません（作業中・質問への回答待ち・コンフリクトなど）');
+    const item = p.subtasks.items.find((x) => x.cardId === k.id);
+    if (!(p.subtasks.merge === 'review' || (item && item.manual))) throw new Error('このサブタスクは、終わったら自動で親のブランチにマージします');
     k.subtaskOf.approved = true;
     this.log(k, 'system', `親のタスク「${p.title}」のブランチに取り込みます`);
     this.changed(k);
@@ -1520,14 +1522,17 @@ class AgentManager extends EventEmitter {
     item.cardId = card.id;
     item.state = 'running';
     this.log(p, 'system', `サブタスク「${item.title}」を始めます`);
-    this.log(card, 'system', `「${p.title}」のサブタスクです。ブランチ ${p.branch} から分けた worktree で動かし、終わったら${p.subtasks.merge === 'review' ? '、確かめてから' : ''}親のブランチにマージします`);
+    const check = p.subtasks.merge === 'review' || item.manual;
+    this.log(card, 'system', `「${p.title}」のサブタスクです。ブランチ ${p.branch} から分けた worktree で動かし、終わったら${check ? '、確かめてから（「取り込む」を押してから）' : ''}親のブランチにマージします`);
     this.changed(card);
     this.start(card.id);
   }
 
   // マージできたサブタスクを片付ける（報告は親のカードに残す）
+  // 個別に開始したサブタスクは、マージしてもレビューの列に残す（完了へはドラッグで動かす。マージは状態を変えるきっかけにしない）
   async settleSubtaskMerge(p, item, k) {
-    item.state = 'merged';
+    item.state = item.manual ? 'review' : 'merged';
+    item.merged = true;
     item.mergedAt = Date.now();
     if (!k) return;
     item.branch = k.branch;
@@ -1581,7 +1586,7 @@ class AgentManager extends EventEmitter {
         continue;
       }
       const approved = !!k.subtaskOf.approved;
-      if (st.merge === 'review' && !approved) continue;
+      if ((st.merge === 'review' || item.manual) && !approved) continue;
       if (!this.subtaskReady(k, { manual: approved })) continue;
       if (await git.mergeInProgress(p.worktreePath)) return;
       await git.commitAll(p.worktreePath, this.commitMessage(p));
@@ -1601,17 +1606,189 @@ class AgentManager extends EventEmitter {
       await this.settleSubtaskMerge(p, item, k);
       if (!this.store.card(p.id)) return;
     }
-    // 先に終わっている必要があるサブタスクがすべてマージされたものを始める
-    for (const item of Subtasks.startable(st)) this.startSubtask(p, item);
-    if (Subtasks.allSettled(st)) {
-      // すべてマージした: 親のエージェントに仕上げ（テスト・つなぎの直し）を頼んでから、レビューに回す
-      st.phase = 'done';
-      p.error = null;
-      const prompt = Subtasks.buildFinishPrompt(p);
-      this.log(p, 'system', 'サブタスクをすべてマージしました。全体の仕上げ（テスト・つなぎの直し）をしてから、レビューに回します');
-      this.log(p, 'user', prompt);
-      this.enqueue(p, prompt);
+    // 自動で進めるときは、先に終わっている必要があるサブタスクがすべてマージされたものを始める
+    if (st.auto !== false) for (const item of Subtasks.startable(st)) this.startSubtask(p, item);
+    this.finishSubtasksIfSettled(p);
+  }
+
+  // すべてのサブタスクが完了の列に入ったら（マージではなく状態で決める）、親のエージェントに仕上げを頼んでからレビューに回す
+  finishSubtasksIfSettled(p) {
+    const st = p.subtasks;
+    if (!st || st.phase !== 'run' || !Subtasks.allSettled(st)) return;
+    if (p.status === 'running' || p.status === 'queued' || p.conflict) return;
+    st.phase = 'done';
+    p.error = null;
+    if (!st.items.some((x) => x.state === 'merged')) {
+      this.log(p, 'system', 'サブタスクがすべて完了になりました（親のブランチにマージしたものはないので、仕上げはしません）');
+      this.changed(p);
+      return;
     }
+    const prompt = Subtasks.buildFinishPrompt(p, { withTask: !p.sessionId });
+    this.log(p, 'system', 'サブタスクがすべて完了になりました。全体の仕上げ（テスト・つなぎの直し）をしてから、レビューに回します');
+    this.log(p, 'user', prompt);
+    this.enqueue(p, prompt);
+  }
+
+  /**
+   * サブタスクを1つだけ開始する（ほかのサブタスクは動かさない。終わったらレビューで止まり、「取り込む」で親のブランチにマージする）。
+   * 親がまだ開始前なら、親のブランチ（worktree）だけを作り、親のエージェントは動かさない
+   */
+  async startSubtaskOnly(id, key) {
+    const p = this.must(id);
+    const st = p.subtasks;
+    if (!st) throw new Error('このタスクにはサブタスクがありません');
+    const item = st.items.find((x) => x.key === key);
+    if (!item) throw new Error('サブタスクが見つかりません');
+    if (item.state !== 'pending') throw new Error('まだ始めていないサブタスクだけ開始できます');
+    if (p.status === 'running' || p.status === 'queued') throw new Error(st.phase === 'plan' ? 'サブタスクの順番を決めています。終わってから開始してください' : '親のタスクが動いているあいだは開始できません。終わってから開始してください');
+    if (p.conflict) throw new Error('コンフリクトを解消してから開始してください');
+    if (p.status === 'done') throw new Error('完了したタスクのサブタスクは開始できません。レビューの列に戻してから開始してください');
+    this.subStarting = this.subStarting || new Set();
+    if (this.subStarting.has(id)) throw new Error('サブタスクを開始しています');
+    this.subStarting.add(id);
+    try {
+      if (p.status === 'todo') {
+        // 親はまだ開始前: 親のブランチだけ作って、親のエージェントは動かさない（順番は決めずに、手で進める）
+        this.log(p, 'user', p.prompt, userLogExtra(p.skill, p.attachments, p.attachmentsParsed));
+        delete p.attachmentsParsed;
+        await this.prepareWorktree(p);
+        if (!this.store.card(id)) return;
+        p.status = 'review';
+        p.startedAt = Date.now();
+        p.specState = null;
+        st.auto = false;
+        this.log(p, 'system', `サブタスク「${item.title}」だけを開始します。ほかのサブタスクは、進捗タブから1つずつ開始するか「残りを自動で進める」で動かします`);
+      }
+      if (st.phase !== 'run') st.phase = 'run';
+      if (item.state !== 'pending') return;
+      item.manual = true;
+      this.startSubtask(p, item);
+    } finally {
+      this.subStarting.delete(id);
+      if (this.store.card(id)) this.changed(p);
+    }
+  }
+
+  // サブタスクだけ開始していたタスクで、残りのサブタスクを自動で（順番どおりに）進める
+  async autoRunSubtasks(id) {
+    const p = this.must(id);
+    const st = p.subtasks;
+    if (!st || st.phase !== 'run') throw new Error('サブタスクを進めているタスクではありません');
+    st.auto = true;
+    this.log(p, 'user', '残りのサブタスクを自動で進めます');
+    this.changed(p);
+    await this.advanceSubtasks(id);
+  }
+
+  /**
+   * サブタスクの状態を変える（進捗タブのドラッグ&ドロップ）。マージとは切り離して、状態だけを変える
+   * @param {'todo'|'running'|'review'|'done'} to  todo: 未着手 / running: 作業中（開始する） / review: レビュー / done: 完了
+   */
+  async moveSubtask(id, key, to) {
+    const p = this.must(id);
+    const st = p.subtasks;
+    if (!st) throw new Error('このタスクにはサブタスクがありません');
+    const item = st.items.find((x) => x.key === key);
+    if (!item) throw new Error('サブタスクが見つかりません');
+    if (to === 'running') {
+      if (item.state === 'pending') return this.startSubtaskOnly(id, key);
+      throw new Error('作業中へは、まだ始めていないサブタスクだけ動かせます。直してほしいときは、サブタスクを開いて追加の指示を送ってください');
+    }
+    if (p.status === 'todo') throw new Error('親のタスクを開始する前は、サブタスクの開始だけできます（作業中の列へドラッグ）');
+    if (p.status === 'running' || p.status === 'queued') throw new Error('親のタスクが動いているあいだは、サブタスクの状態を変えられません');
+    const k = item.cardId && item.state === 'running' ? this.store.card(item.cardId) : null;
+    if (k && (k.status === 'running' || k.status === 'queued' || k.status === 'todo')) throw new Error('作業中のサブタスクは動かせません。止めてから動かしてください');
+    if (k && p.conflict && p.conflict.subtask === k.id) throw new Error('このサブタスクのマージでのコンフリクトを解消してから動かしてください');
+    if (to === 'done') {
+      if (Subtasks.SETTLED.includes(item.state)) return;
+      if (item.state === 'pending') {
+        item.state = 'done';
+        this.log(p, 'user', `サブタスク「${item.title}」を、始めずに完了にしました`);
+      } else if (item.state === 'review') {
+        item.state = 'merged';
+        this.log(p, 'user', `サブタスク「${item.title}」を完了にしました`);
+      } else {
+        // まだ取り込んでいないサブタスク: 取り込まずに完了にする（サブタスクのカードと worktree は片付ける）
+        item.state = 'done';
+        if (k) {
+          item.branch = k.branch;
+          item.report = truncate(k.lastText || k.lastMessage || '', 4000);
+          item.costUsd = k.costUsd || 0;
+          item.agent = agentOf(k);
+        }
+        this.log(p, 'user', `サブタスク「${item.title}」を、親のブランチに取り込まずに完了にしました`);
+        if (k) await this.discard(k.id).catch((err) => this.log(p, 'error', `サブタスクのカード「${k.title}」を片付けられませんでした: ${err.message}`));
+        if (!this.store.card(id)) return;
+      }
+    } else if (to === 'todo') {
+      if (item.state === 'pending') return;
+      if (k) throw new Error('取り込んでいないサブタスクは、未着手に戻せません。完了にするか、サブタスクを開いて破棄してください');
+      item.state = 'pending';
+      delete item.cardId;
+      delete item.manual;
+      this.log(p, 'user', `サブタスク「${item.title}」を未着手に戻しました${item.merged ? '（前にマージした変更は、親のブランチに残っています）' : ''}`);
+      if (st.phase === 'done') st.phase = 'run';
+    } else if (to === 'review') {
+      if (item.state === 'merged' && item.merged) {
+        item.state = 'review';
+        this.log(p, 'user', `サブタスク「${item.title}」をレビューに戻しました`);
+        if (st.phase === 'done') st.phase = 'run';
+      } else if (item.state !== 'review' && !(k && (k.status === 'review' || k.status === 'failed'))) {
+        throw new Error('レビューへは、取り込んだサブタスクだけ戻せます');
+      }
+    } else throw new Error('知らない列です');
+    this.changed(p);
+    this.finishSubtasksIfSettled(p);
+    if (this.store.card(id)) this.changed(p);
+  }
+
+  /**
+   * ボードのカードを、ドラッグ&ドロップで別の列へ動かす（マージや PR とは切り離して、状態だけを変える）
+   * @param {'todo'|'running'|'review'|'done'} to
+   */
+  moveCard(id, to) {
+    const c = this.must(id);
+    if (isChat(c)) throw new Error('会話は列を動かせません');
+    if (this.subtaskParentOf(c)) throw new Error('サブタスクの状態は、親のタスクの「進捗」タブで変えてください');
+    if (c.afterDone) throw new Error('完了したタスクについて話しているあいだは動かせません');
+    const from = c.status;
+    const shown = c.subtasks && c.subtasks.phase === 'run' && (from === 'review' || from === 'failed') ? 'running' : from;
+    if (shown === to || (to === 'review' && from === 'failed')) return;
+    if (to === 'running') {
+      if (from === 'todo') return this.start(id);
+      throw new Error('開始したタスクを動かすときは、追加の指示を送ってください');
+    }
+    if (to === 'todo') throw new Error('開始したタスクは Todo に戻せません');
+    if (from === 'running' || from === 'queued') throw new Error('実行中のタスクは動かせません。止めてから動かしてください');
+    if (to === 'done') {
+      if (from === 'todo') throw new Error('開始していないタスクは完了にできません');
+      if (isNoGit(c)) return this.complete(id);
+      if (c.subtasks && c.subtasks.phase === 'run') throw new Error('サブタスクが残っています。進捗タブでサブタスクをすべて完了にしてから動かしてください');
+      if (c.conflict) throw new Error('コンフリクトを解消するか、取り込みを中止してから完了にしてください');
+      if (c.relay && c.relay.waiting) throw new Error('Pipelineの並列の枝が終わるのを待っています');
+      c.status = 'done';
+      c.manualDone = true;
+      c.error = null;
+      c.interrupted = null;
+      c.awaitingReply = false;
+      c.subtaskProposal = null;
+      c.completedAt = Date.now();
+      this.log(c, 'user', `完了にしました${c.worktreePath ? `（マージはしていません。worktree とブランチ ${c.branch} は残しています。続けるときは「レビュー」の列へ戻します）` : ''}`);
+      this.completed(c);
+      this.changed(c);
+      return;
+    }
+    if (to === 'review') {
+      if (from !== 'done') throw new Error('レビューへは、完了したタスクだけ戻せます');
+      if (!isNoGit(c) && !(c.worktreePath && fs.existsSync(c.worktreePath))) throw new Error('マージや PR で作業場所（worktree）を片付けたので、レビューに戻せません。続きは「修正タスクを作る」から進めてください');
+      c.status = 'review';
+      c.manualDone = false;
+      c.completedAt = null;
+      this.log(c, 'user', 'レビューに戻しました');
+      this.changed(c);
+      return;
+    }
+    throw new Error('知らない列です');
   }
 
   // 競争の同じグループのカード（自分も含む）
