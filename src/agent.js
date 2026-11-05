@@ -147,6 +147,18 @@ const SPEC_CHECK_PROMPT = [
   '- 詰まったら、決まった仕様を「## 決まった仕様」として箇条書きでまとめてから、開発を始めてください（この返事には印を付けないでください）',
 ].join('\n');
 const SPEC_FOLLOW_NOTE = `（仕様の確認の続きです。この答えで開発を始められるなら、決まった仕様をまとめてから開発を始めてください。まだ足りなければ、1行目に \`${SPEC_MARKER}\` を付けて続きの質問をしてください）`;
+// ソースを変更しないタスク（SQL を作るだけ、調べものだけなど）の指示に添える説明
+const READ_ONLY_NOTE = `## このタスクではソースコードを変更しません
+
+- リポジトリのファイルを作ったり書き換えたり消したりしないでください（ファイルを書き換えるツールは使えないようにしています）。コードを読んだり、ファイルを変えないコマンドで調べたりするのはかまいません
+- 作ったもの（SQL・文章・手順など）は、ファイルに保存せず、返事の中にコードブロックで書いてください（そのままコピーして使えるように）
+- 終わったら、作ったものを返事の最後にまとめてください。コミット・マージ・PR はしません`;
+function withReadOnlyNote(prompt) {
+  return `${READ_ONLY_NOTE}\n\n---\n\n${prompt}`;
+}
+// ソースを変えないタスクで止めるツール（Claude Code の --disallowedTools）
+const READ_ONLY_DISALLOWED_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
+
 function withSpecCheck(prompt) {
   return `${SPEC_CHECK_PROMPT}\n\n---\n\n## タスク\n\n${prompt}`;
 }
@@ -986,7 +998,8 @@ class AgentManager extends EventEmitter {
    * - compete: 設定の競争のエージェントの数だけ（同じタスクを、それぞれ別の worktree で並列に解く）
    * @returns {object[]} 作ったカード
    */
-  createTask({ title, prompt, issue, session, skill, agent, model, fromChat, attachments: files }) {
+  // readOnly: ソースを変更しないタスク（worktree を作らずリポジトリのフォルダで動かし、ファイルを書き換えるツールは止める）
+  createTask({ title, prompt, issue, session, skill, agent, model, fromChat, attachments: files, readOnly }) {
     const s = this.store.settings;
     // 添付は先に確かめておく（カードごとに保存する）
     const parsed = attachments.parseAttachments(files);
@@ -1011,6 +1024,7 @@ class AgentManager extends EventEmitter {
       const why = providers.cleanOrchestration(s.orchestration) === 'none' ? 'オーケストレーションを使わない設定' : 'Pipelineと競争はどちらか1つだけ使えます';
       throw new Error(`${name(mode)}は使わない設定になっています（${why}）。「設定」の「オーケストレーション」で${name(mode)}を選んでください`);
     }
+    if (readOnly && mode === 'compete') throw new Error('ソースを変更しないタスクでは、競争は使えません。ほかのエージェントを選んでください');
     if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from, parsed });
     if (mode === 'relay') {
       // Pipelineのフローチャートは、プロジェクトごとの設定（複数あれば、選んだもの。選んでいなければ既定の Pipeline）
@@ -1025,15 +1039,16 @@ class AgentManager extends EventEmitter {
       const off = steps.find((st) => !providers.isEnabled(s, st.agent));
       if (off) throw new Error(`Pipelineの工程「${off.label}」の ${whoLabel(off.agent, off.persona)} は使わない設定になっています。「設定」で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
       if (isNoGitRepo(s, s.repoPath) && flow.nodes.some((n) => n.type === 'parallel')) throw new Error('git で管理していないフォルダでは、並列のあるPipelineは使えません（枝ごとに別の作業場所を作れないため）。フローチャートから並列を外してください');
+      if (readOnly && flow.nodes.some((n) => n.type === 'parallel')) throw new Error('ソースを変更しないタスクでは、並列のあるPipelineは使えません。フローチャートから並列を外すか、ほかのエージェントを選んでください');
       const first = FlowModel.route(flow, FlowModel.startNode(flow).id, {});
       const index = relayStepIndex({ relay: { steps } }, first.node.id);
       const st = steps[index];
-      const c = this.createCard({ title, prompt, issue, session, skill, agent: st.agent, relay: { flow, steps, index, history: [], counts: {}, pipeline: { id: pipe.id, name: pipe.name } }, fromChat: from, parsed });
+      const c = this.createCard({ title, prompt, issue, session, skill, agent: st.agent, relay: { flow, steps, index, history: [], counts: {}, pipeline: { id: pipe.id, name: pipe.name } }, fromChat: from, parsed, readOnly });
       if (st.model) c.model = st.model;
       if (st.persona) c.persona = st.persona;
       return [c];
     }
-    return [this.createCard({ title, prompt, issue, session, skill, agent: mode, model: m, persona: providers.personaOf(custom), fromChat: from, parsed })];
+    return [this.createCard({ title, prompt, issue, session, skill, agent: mode, model: m, persona: providers.personaOf(custom), fromChat: from, parsed, readOnly })];
   }
 
   // 競争: 同じタスクを、設定のエージェントそれぞれのカードにする（使わない設定のエージェントは外す）
@@ -1087,12 +1102,13 @@ class AgentManager extends EventEmitter {
     return a && providers.isEnabled(s, a) ? a : providers.defaultAgentOf(s);
   }
 
-  createCard({ title, prompt, issue, session, skill, agent, model, persona, relay, compete, fromChat, parsed }) {
+  createCard({ title, prompt, issue, session, skill, agent, model, persona, relay, compete, fromChat, parsed, readOnly }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     if (!prompt || !prompt.trim()) throw new Error('指示を入力してください');
     if (agent) this.assertEnabled(agent);
     const noGit = isNoGitRepo(s, s.repoPath);
+    if (readOnly && compete) throw new Error('ソースを変更しないタスクでは、競争は使えません。ほかのエージェントを選んでください');
     if (noGit && compete) throw new Error('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください');
     const card = {
       id: crypto.randomBytes(4).toString('hex'),
@@ -1106,6 +1122,12 @@ class AgentManager extends EventEmitter {
       logs: [],
     };
     if (noGit) card.noGit = true;
+    // ソースを変更しないタスク: git なしのフォルダと同じく、worktree・ブランチ・コミット・マージを使わず、
+    // リポジトリのフォルダでそのまま動かす。終わったら確かめて「完了にする」で完了にする
+    if (readOnly) {
+      card.noGit = true;
+      card.readOnly = true;
+    }
     if (issue) card.issue = { number: issue.number, title: issue.title, url: issue.url };
     card.agent = agent || 'claude';
     if (model && !relay) card.model = cleanModel(model);
@@ -1141,6 +1163,7 @@ class AgentManager extends EventEmitter {
     if (c.subtasks && c.subtasks.phase === 'plan') body = Subtasks.withPlanNote(c.subtasks.items, body);
     // 提案は、開発を始める前の相談（仕様の確認）の一部として頼む
     else if (inSpecCheck(c) && this.canHaveSubtasks(c) && !c.subtasks) body = Subtasks.withProposeNote(body);
+    if (c.readOnly) body = withReadOnlyNote(body);
     const p = promptWithSkill(agentOf(c), c.skill, providers.withPersona(c.persona, inSpecCheck(c) ? withSpecCheck(body) : body));
     return c.relay && !isChat(c) ? buildRelayFirstPrompt(c, p) : p;
   }
@@ -1221,7 +1244,7 @@ class AgentManager extends EventEmitter {
     delete c.todos; // TODO リストは工程（エージェント）ごと
     const n = relayRunNo(c, r.index);
     this.log(c, 'system', `Pipeline: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」${n > 1 ? `（${n}回目）` : ''}を ${whoLabel(st.agent, st.persona)} に引き継ぎます`);
-    this.enqueue(c, buildRelayStepPrompt(c, r.index));
+    this.enqueue(c, c.readOnly ? withReadOnlyNote(buildRelayStepPrompt(c, r.index)) : buildRelayStepPrompt(c, r.index));
   }
 
   /**
@@ -2509,6 +2532,14 @@ class AgentManager extends EventEmitter {
     return mode === 'plan' || mode === 'bypassPermissions' ? mode : 'default';
   }
 
+  // ソースを変更しないタスクの権限モード。リポジトリのフォルダ（手元の作業中のファイル）で動くので、
+  // Claude Code はファイルを書き換えるツールを止めたうえで、コマンドは毎回カードで確かめる（「計画だけ」ならそれに従う）。
+  // Codex / Gemini / Cursor はツールを個別に止められないので、読み取りだけの「計画」モードで動かす
+  readOnlyPermissionMode(agent, mode) {
+    if (agent !== 'claude') return 'plan';
+    return mode === 'plan' ? 'plan' : 'default';
+  }
+
   async launch(c) {
     const chat = isChat(c);
     // 完了したタスクについての会話: worktree は作らずリポジトリのフォルダで、ファイルを変えない計画モードで動かす
@@ -2523,7 +2554,7 @@ class AgentManager extends EventEmitter {
     const rs = this.store.repoSettings(c.repoPath); // 権限モード・許可しておくツールは、そのタスクのプロジェクトの設定
     const agent = agentOf(c);
     const label = agentLabel(agent);
-    const mode = afterDone ? 'plan' : chat ? this.chatPermissionMode(rs.permissionMode) : rs.permissionMode;
+    const mode = afterDone ? 'plan' : chat ? this.chatPermissionMode(rs.permissionMode) : c.readOnly ? this.readOnlyPermissionMode(agentOf(c), rs.permissionMode) : rs.permissionMode;
     let args;
     if (agent === 'claude') {
       // stdin を開いたままにして、実行中でもメッセージ（btw）を送れるようにする
@@ -2533,6 +2564,8 @@ class AgentManager extends EventEmitter {
       if (model) args.push('--model', model);
       const allowed = splitList(rs.allowedTools);
       if (allowed.length) args.push('--allowedTools', ...allowed);
+      // ソースを変更しないタスクは、ファイルを書き換えるツールを止める
+      if (c.readOnly && !afterDone) args.push('--disallowedTools', ...READ_ONLY_DISALLOWED_TOOLS);
       const mcpConfig = this.writeMcpConfig(c, wsl.parseWslPath(cwd)?.distro);
       if (mcpConfig) args.push('--mcp-config', mcpConfig, '--permission-prompt-tool', PERMISSION_TOOL);
       if (c.sessionId) args.push('--resume', assertSessionId(c.sessionId));
@@ -3810,4 +3843,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { relayStepsOf, whoLabel, AgentManager, isNoGit, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, SKILL_SUGGEST_REPEAT_NOTE, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt, cleanModel, modelOf };
+module.exports = { READ_ONLY_DISALLOWED_TOOLS, withReadOnlyNote, relayStepsOf, whoLabel, AgentManager, isNoGit, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, SKILL_SUGGEST_REPEAT_NOTE, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt, cleanModel, modelOf };

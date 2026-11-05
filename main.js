@@ -939,8 +939,9 @@ app.whenReady().then(async () => {
   // fromChat: 会話の続きとしてタスクを作るときの、元の会話のカードの ID
   // attachments: 添付ファイル [{ name, mediaType, data(base64) }]
   // model: このタスク・会話で使うモデル（空なら設定のエージェントごとの既定）
-  handle('card:create', ({ title, prompt, autoStart, session, skill, agent, model, fromChat, attachments }) => {
-    const cards = agents.createTask({ title, prompt, session, skill, agent, model, fromChat, attachments });
+  // readOnly: ソースを変更しないタスク（SQL を作るだけなど。worktree を作らず、ファイルを書き換えるツールを止める）
+  handle('card:create', ({ title, prompt, autoStart, session, skill, agent, model, fromChat, attachments, readOnly }) => {
+    const cards = agents.createTask({ title, prompt, session, skill, agent, model, fromChat, attachments, readOnly: !!readOnly });
     if (autoStart) for (const c of cards) agents.start(c.id);
     return cards[0].id;
   });
