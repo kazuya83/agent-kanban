@@ -3327,14 +3327,9 @@ async function openSettings() {
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
        <small>「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
-     <div class="field"><span>${icon('bot')}カスタムエージェント（このプロジェクトの設定）</span>
-       <div id="sCustomList" class="ca-list"></div>
-       <div id="sCustomForm" class="ca-form" hidden></div>
-       <div><button class="btn small" id="sCustomAdd" type="button">＋ カスタムエージェントを追加</button></div>
-       <small>元にするエージェント（CLI）とモデルに、プロフィール（名前・アイコンと色・説明・振る舞いの指示）を持たせます。タスク・会話を作るときの「エージェント」の欄、Pipelineの工程、競争で選べます。振る舞いの指示は、最初の指示の前に付けて渡します。</small></div>
 
      <h3 class="s-section">アプリ全体の設定</h3>
-     <small class="muted s-note">ここから下の項目は、どのプロジェクトでも同じです。</small>
+     <small class="muted s-note">ここから下の項目は、どのプロジェクトでも同じです（「このプロジェクトの設定」と書いた項目だけは、プロジェクトごとに覚えます）。</small>
      <label class="field"><span>同時に動かす数</span><input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したとき、前に完了したタスクと似た作業が続いていたら、スキルにしないか通知で聞く（右上のベル）</label>
      <label class="check"><input type="checkbox" id="sDeleteSessions" ${s.deleteSessionsOnMerge !== false ? 'checked' : ''} /> マージして完了したら、そのタスクの作業に使った Claude Code の会話（セッション）を消す（引き継いだ元の会話は残します）</label>
@@ -3362,6 +3357,11 @@ async function openSettings() {
          <label class="field"><span>モデル（空なら既定）</span><input id="sCursorModel" placeholder="例: gpt-5 / sonnet-4.5" value="${esc(s.cursorModel || '')}" /></label>
        </div>`)}
      <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。</small>
+     <div class="field"><span>${icon('bot')}カスタムエージェント（このプロジェクトの設定）</span>
+       <div id="sCustomList" class="ca-list"></div>
+       <div id="sCustomForm" class="ca-form" hidden></div>
+       <div><button class="btn small" id="sCustomAdd" type="button">＋ カスタムエージェントを追加</button></div>
+       <small>元にするエージェント（CLI）とモデルに、プロフィール（名前・アイコンと色・説明・振る舞いの指示）を持たせます。タスク・会話を作るときの「エージェント」の欄、Pipelineの工程、競争で選べます。振る舞いの指示は、最初の指示の前に付けて渡します。</small></div>
      <label class="field"><span>新しいタスク・会話で最初から選んでおくエージェント</span>
        <select id="sDefaultAgent"></select>
        <small>オーケストレーションで Pipeline・競争を選んでいれば、タスクを作るときの「エージェント」の欄では、そちらを最初から選んでおきます（使えない状態のときや会話では、このエージェント）。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
