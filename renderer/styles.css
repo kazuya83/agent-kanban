@@ -919,3 +919,70 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .ca-form input[type='color'] { width: 100%; height: 34px; padding: 2px; }
 .ca-preview { margin: 4px 0 8px; }
 .fe-ca-note { display: block; margin: -4px 0 10px; }
+
+/* 詳細の上: Pipelineの進み具合（短く） */
+.relay-head { margin-top: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--run) 35%, transparent); background: color-mix(in srgb, var(--run) 5%, var(--panel)); }
+.relay-head .rh-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; font-size: 13px; }
+.relay-head .rh-row .ic { width: 14px; height: 14px; }
+.relay-head .rh-row .btn { margin-left: auto; }
+.relay-head .rf-wait { margin: 6px 0 0; }
+
+/* 進捗タブ */
+.progress .pg-sec { margin-bottom: 14px; }
+.progress .pg-sec .relay-flow { margin-top: 0; }
+.pg-sec-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; font-size: 13px; }
+.pg-sec-head .ic { width: 14px; height: 14px; margin-right: 3px; vertical-align: -2px; }
+.pg-summary { margin-top: 0; }
+.pg-note { margin: 0 0 12px; }
+.pg-bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--muted) 22%, transparent); overflow: hidden; margin-bottom: 6px; }
+.pg-bar span { display: block; height: 100%; background: var(--ok); transition: width 0.3s ease; }
+.pg-todos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.pg-todos li { display: flex; gap: 8px; align-items: baseline; }
+.td-mark { flex: none; width: 16px; text-align: center; font-weight: 700; color: var(--muted); }
+.td-completed .td-mark { color: var(--ok); }
+.td-completed .td-text { color: var(--muted); text-decoration: line-through; }
+.td-in_progress .td-mark { color: var(--run); animation: rf-pulse 1.4s ease-in-out infinite; }
+.td-in_progress .td-text { font-weight: 600; }
+.td-cancelled .td-text { color: var(--muted); text-decoration: line-through; opacity: 0.7; }
+.pg-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.pg-recent li { display: flex; gap: 8px; min-width: 0; }
+.pg-recent .rw-t { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pg-recent .rw-x { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-recent .rw-tool .rw-x { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+.pg-recent .rw-error .rw-x { color: var(--err); }
+.pg-recent .rw-result .rw-x { color: var(--ok); }
+
+/* 進捗タブ: Pipelineのフローチャート（読み取り専用） */
+.pg-chart { overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px; background-color: var(--bg); background-image: radial-gradient(color-mix(in srgb, var(--muted) 22%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
+.fv { display: block; margin: 0 auto; }
+.fv-edge path { fill: none; stroke: color-mix(in srgb, var(--muted) 60%, transparent); stroke-width: 2; }
+.fv-edge.back path { stroke-dasharray: 6 4; }
+.fv-edge.e-done path { stroke: var(--ok); stroke-width: 2.5; }
+.fv-edge.e-active path { stroke: var(--run); stroke-width: 2.5; stroke-dasharray: 6 4; animation: fv-flow 0.8s linear infinite; }
+@keyframes fv-flow { to { stroke-dashoffset: -10; } }
+.fv-edge text { font-size: 11px; fill: var(--text); paint-order: stroke; stroke: var(--bg); stroke-width: 4px; text-anchor: middle; dominant-baseline: middle; }
+.fv-arrow { fill: color-mix(in srgb, var(--muted) 60%, transparent); }
+.fv-arrow.done { fill: var(--ok); }
+.fv-arrow.active { fill: var(--run); }
+.fv-node rect { fill: var(--panel); stroke: var(--rs, var(--line)); stroke-width: 2; }
+.fv-node.rs-pending rect { stroke: var(--line); }
+.fv-node.rs-done rect { fill: color-mix(in srgb, var(--ok) 12%, var(--panel)); }
+.fv-node.rs-skipped { opacity: 0.5; }
+.fv-node.cur rect { stroke-width: 3; filter: drop-shadow(0 0 6px color-mix(in srgb, var(--rs, var(--run)) 60%, transparent)); }
+.fv-node.rs-running rect, .fv-node.rs-queued rect { animation: rf-pulse 1.4s ease-in-out infinite; }
+.fv-title { font-size: 12.5px; font-weight: 600; fill: var(--text); dominant-baseline: middle; }
+.fv-title.c { text-anchor: middle; }
+.fv-node.rs-pending .fv-title { fill: var(--muted); }
+.fv-sub { font-size: 11px; fill: var(--muted); dominant-baseline: middle; }
+.fv-dot { fill: var(--panel); stroke: var(--rs, var(--line)); stroke-width: 2; }
+.fv-node.rs-done .fv-dot { fill: var(--ok); }
+.fv-mark { font-size: 11px; font-weight: 700; fill: var(--rs, var(--muted)); text-anchor: middle; dominant-baseline: central; }
+.fv-node.rs-done .fv-mark { fill: #06210f; }
+.pg-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.pg-legend .lg::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; border: 2px solid var(--c); }
+.lg-done { --c: var(--ok); }
+.lg-run { --c: var(--run); }
+.lg-warn { --c: var(--warn); }
+.lg-pending { --c: var(--line); }
+.lg-skip { --c: var(--muted); opacity: 0.6; }
+@media (prefers-reduced-motion: reduce) { .fv-edge.e-active path, .fv-node rect, .td-in_progress .td-mark { animation: none; } }

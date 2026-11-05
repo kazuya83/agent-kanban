@@ -7,6 +7,7 @@
 //   { type: 'text', text }                  エージェントの発言
 //   { type: 'tool', name, summary }         ツールの呼び出し
 //   { type: 'tool_result', text, error }    ツールの結果
+//   { type: 'todos', items }                エージェントの TODO リスト（進捗タブに出す。todoItems の形）
 //   { type: 'log_error', text }             続けられるエラー（ログに出すだけ）
 //   { type: 'result', error? }              1ターンが終わった（error があれば失敗）
 //
@@ -106,6 +107,46 @@ function trunc(s, n) {
   return s.length > n ? `${s.slice(0, n)}…` : s;
 }
 
+// ---------- エージェントの TODO リスト（進捗タブに出す） ----------
+// CLI ごとに形が違うので、[{ text, status: 'pending'|'in_progress'|'completed' }] にそろえる
+//   Claude Code: TodoWrite { todos: [{ content, status, activeForm }] }
+//   Codex CLI:   item.type 'todo_list' { items: [{ text, completed }] }
+//   Gemini CLI:  write_todos { todos: [{ description, status }] }
+//   Cursor CLI:  todoToolCall / updateTodosToolCall { args: { todos: [{ content, status: 'TODO_STATUS_COMPLETED' など }] } }
+const MAX_TODOS = 50;
+const TODO_TOOL_NAMES = new Set(['todowrite', 'write_todos', 'writetodos', 'todo_write', 'update_todos', 'updatetodos', 'todo']);
+function isTodoTool(name) {
+  return TODO_TOOL_NAMES.has(String(name || '').trim().toLowerCase());
+}
+function todoStatus(v, completed) {
+  if (completed === true) return 'completed';
+  const s = String(v || '').toLowerCase().replace(/^todo_status_/, '');
+  if (/^(completed?|done|finished|success)$/.test(s)) return 'completed';
+  if (/^(in[_ -]?progress|active|running|doing|started)$/.test(s)) return 'in_progress';
+  if (/^(cancell?ed|skipped)$/.test(s)) return 'cancelled';
+  return 'pending';
+}
+/** @returns {{ text: string, status: string }[] | null} TODO リストでなければ null */
+function todoItems(list) {
+  if (!Array.isArray(list)) return null;
+  const out = [];
+  for (const t of list) {
+    if (!t || typeof t !== 'object') continue;
+    const status = todoStatus(t.status, t.completed);
+    // 作業中のものは「〜しています」の形（Claude の activeForm）があればそれを出す
+    const text = String((status === 'in_progress' && t.activeForm) || t.content || t.text || t.description || t.title || t.step || '').trim();
+    if (!text) continue;
+    out.push({ text: trunc(text, 200), status });
+    if (out.length >= MAX_TODOS) break;
+  }
+  return out;
+}
+// ツールの呼び出しの入力から、TODO リストを取り出す（TODO のツールでなければ null）
+function todosFromTool(name, input) {
+  if (!isTodoTool(name) || !input || typeof input !== 'object') return null;
+  return todoItems(input.todos || input.items);
+}
+
 // ---------- Codex CLI（codex exec --json） ----------
 // thread.started / turn.started / item.started / item.updated / item.completed / turn.completed / turn.failed / error
 function codexParser({ summarize }) {
@@ -126,6 +167,11 @@ function codexParser({ summarize }) {
     onEvent(ev) {
       const out = [];
       const item = ev.item || {};
+      // 計画（TODO リスト）は、作り直されるたびに最新の形で届く
+      if (item.type === 'todo_list' && /^item\.(started|updated|completed)$/.test(ev.type)) {
+        const items = todoItems(item.items);
+        return items ? [{ type: 'todos', items }] : [];
+      }
       switch (ev.type) {
         case 'thread.started':
           if (ev.thread_id) out.push({ type: 'session', id: String(ev.thread_id) });
@@ -198,8 +244,12 @@ function geminiParser({ summarize }) {
             else return [...flush(), { type: 'text', text: ev.content }].filter((a) => String(a.text).trim());
           }
           return [];
-        case 'tool_use':
-          return [...flush(), { type: 'tool', name: String(ev.tool_name || 'tool'), summary: summarize(ev.parameters) }];
+        case 'tool_use': {
+          const out = [...flush(), { type: 'tool', name: String(ev.tool_name || 'tool'), summary: summarize(ev.parameters) }];
+          const todos = todosFromTool(ev.tool_name, ev.parameters);
+          if (todos) out.push({ type: 'todos', items: todos });
+          return out;
+        }
         case 'tool_result': {
           const failed = ev.status === 'error';
           const body = failed && ev.error ? ev.error.message || '' : ev.output || '';
@@ -288,13 +338,17 @@ function cursorParser({ summarize }) {
           const t = toolOf(ev.tool_call);
           if (!t) return [];
           const id = ev.call_id || '';
+          const todos = t.name === 'TodoWrite' || isTodoTool(t.name) ? todoItems(t.body && t.body.args && (t.body.args.todos || t.body.args.items)) : null;
           if (ev.subtype === 'started') {
             started.add(id);
-            return [...flush(), { type: 'tool', name: t.name, summary: t.summary }];
+            return [...flush(), { type: 'tool', name: t.name, summary: t.summary }, ...(todos ? [{ type: 'todos', items: todos }] : [])];
           }
           if (ev.subtype === 'completed') {
             const out = flush();
-            if (!started.has(id)) out.push({ type: 'tool', name: t.name, summary: t.summary });
+            if (!started.has(id)) {
+              out.push({ type: 'tool', name: t.name, summary: t.summary });
+              if (todos) out.push({ type: 'todos', items: todos });
+            }
             started.delete(id);
             out.push({ type: 'tool_result', ...resultOf(t) });
             return out;
@@ -509,6 +563,8 @@ module.exports = {
   promptViaArg,
   buildArgs,
   createParser,
+  todoItems,
+  todosFromTool,
   codexPolicy,
   geminiApproval,
   cursorPolicy,
