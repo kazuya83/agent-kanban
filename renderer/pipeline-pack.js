@@ -19,6 +19,8 @@
   const MAX_ENTRIES = 200;
   const MAX_TOTAL = 20 * 1024 * 1024; // 取り込む zip の中身の合計の上限
   const MAX_PIPELINES = 30;
+  // Pipeline の名前の長さの上限（src/store.js の PIPELINE_NAME_MAX と同じ）
+  const PIPELINE_NAME_MAX = 15;
   const MAX_CUSTOM_AGENTS = 30;
   const CA_FIELDS = ['name', 'icon', 'color', 'description', 'instruction', 'agent', 'model'];
 
@@ -279,11 +281,11 @@
     return CA_FIELDS.every((k) => String(a[k] || '') === String(b[k] || ''));
   }
   function uniqueName(name, taken, max) {
-    const base = String(name || '').trim().slice(0, max) || 'Pipeline';
+    const base = [...String(name || '').trim()].slice(0, max).join('').trim() || 'Pipeline';
     if (!taken.has(base)) return base;
     for (let i = 2; ; i++) {
       const sfx = ` (${i})`;
-      const n = base.slice(0, max - sfx.length) + sfx;
+      const n = [...base].slice(0, max - sfx.length).join('').trim() + sfx;
       if (!taken.has(n)) return n;
     }
   }
@@ -335,7 +337,7 @@
         if (!cas.some((x) => x.id === n.custom)) res.missing.push(`${p.name}「${n.label || '工程'}」`);
       }
       const id = randomId('p', flowIds);
-      const name = uniqueName(p.name, flowNames, 40);
+      const name = uniqueName(p.name, flowNames, PIPELINE_NAME_MAX);
       flowIds.add(id);
       flowNames.add(name);
       flows.push({ id, name, flow });
@@ -345,6 +347,7 @@
   }
 
   return {
+    PIPELINE_NAME_MAX,
     PIPELINE_FORMAT,
     CUSTOM_FORMAT,
     BUNDLE_FORMAT,
