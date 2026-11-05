@@ -17,6 +17,7 @@ const os = require('os');
 const { agentLabel, agentShort } = providers;
 const { isNoGitRepo, cleanRelayFlow, pipelineOf } = require('./store');
 const FlowModel = require('../renderer/flow-model');
+const Subtasks = require('./subtasks');
 
 const MAX_LOGS = 2000;
 const MCP_SERVER_NAME = 'agent_kanban';
@@ -656,6 +657,10 @@ class AgentManager extends EventEmitter {
     this.attachRoot = (opts && opts.attachDir) || path.join(os.tmpdir(), 'agent-kanban-attachments');
     for (const c of this.store.cards) migrateRelayCard(c);
     this.recoverInterrupted();
+    // 前回の終了で止まっていたサブタスクの続き（終わっていたサブタスクのマージなど）
+    setImmediate(() => {
+      for (const c of this.store.cards) if (c.subtasks && c.subtasks.phase === 'run') this.advanceSubtasks(c.id);
+    });
   }
 
   setPermissionEndpoint(port, token) {
@@ -793,6 +798,8 @@ class AgentManager extends EventEmitter {
     // 完了したタスクについて話しているだけのときは、Issue のステータスを変えない
     if (c.afterDone) return null;
     if (c.status === 'running' || c.status === 'queued') return 'inProgress';
+    // サブタスクを動かしているあいだは、まだ作業中
+    if (c.subtasks && c.subtasks.phase === 'run') return 'inProgress';
     // 仕様の確認中は、まだ開発を始めていないのでレビューにはしない（In progress のまま）
     if (c.status === 'review' && c.specState === 'pending') return null;
     if (c.status === 'review' || c.status === 'failed') return 'inReview';
@@ -1129,7 +1136,11 @@ class AgentManager extends EventEmitter {
   // 最初の指示（スキル・Pipelineの担当の説明を付けたもの）
   firstPrompt(c) {
     // 仕様の確認中は、開発を始める前に内容が足りているかを判断してもらう指示を付ける
-    const body = this.withAttachments(c, withChatContext(c.chatContext, c.prompt), c.attachments);
+    let body = this.withAttachments(c, withChatContext(c.chatContext, c.prompt), c.attachments);
+    // サブタスクが決まっていれば順番を決めてもらい、決まっていなければ、分けたほうがよいときに提案してもらう
+    if (c.subtasks && c.subtasks.phase === 'plan') body = Subtasks.withPlanNote(c.subtasks.items, body);
+    // 提案は、開発を始める前の相談（仕様の確認）の一部として頼む
+    else if (inSpecCheck(c) && this.canHaveSubtasks(c) && !c.subtasks) body = Subtasks.withProposeNote(body);
     const p = promptWithSkill(agentOf(c), c.skill, providers.withPersona(c.persona, inSpecCheck(c) ? withSpecCheck(body) : body));
     return c.relay && !isChat(c) ? buildRelayFirstPrompt(c, p) : p;
   }
@@ -1353,6 +1364,256 @@ class AgentManager extends EventEmitter {
     }
   }
 
+  // ---------- サブタスク ----------
+  // 親のタスクのブランチから分けた worktree でサブタスクを動かし、終わったものから親のブランチにマージする（src/subtasks.js）
+
+  // サブタスクに分けられるタスクか（git のふつうのタスク。Pipeline・競争・会話・サブタスク自身は分けない）
+  canHaveSubtasks(c) {
+    return !!c && !isChat(c) && !isNoGit(c) && !c.relay && !c.compete && !c.subtaskOf && !c.afterDone;
+  }
+
+  // サブタスクのカードの、親のカード
+  subtaskParentOf(c) {
+    const b = c && c.subtaskOf;
+    const p = b && this.store.card(b.parent);
+    return p && p.subtasks && p.subtasks.items.some((x) => x.cardId === c.id) ? p : null;
+  }
+
+  defaultSubtaskMerge(c) {
+    return Subtasks.cleanMergeMode(this.store.repoSettings(c.repoPath).subtaskMerge);
+  }
+
+  // 実行が終わったとき: 返事のサブタスクの印を見る
+  // @returns {'started'|'proposed'|null} started: 順番が決まって動かし始める / proposed: 分けて進めることの提案
+  takeSubtaskPlan(c) {
+    const plan = c.lastSubtaskPlan;
+    c.lastSubtaskPlan = null;
+    c.lastSubtasksMarked = false;
+    if (!this.canHaveSubtasks(c) || c.specState === 'pending') return null;
+    const st = c.subtasks;
+    if (st && st.phase === 'plan') {
+      if (!plan && c.awaitingReply) return null; // 質問で止まった: 答えてもらってから
+      st.items = Subtasks.applyPlan(st.items, plan);
+      st.phase = 'run';
+      st.note = truncate(c.lastText || '', 4000);
+      if (!plan) this.log(c, 'system', 'サブタスクの順番が返ってこなかったので、並んでいる順に1つずつ（直列で）進めます');
+      this.log(c, 'system', `サブタスク ${st.items.length} 個を動かし始めます（${Subtasks.describeOrder(st.items)}）。それぞれ、このブランチ ${c.branch} から分けた worktree で動かし、終わったものからこのブランチにマージします`);
+      return 'started';
+    }
+    if (!st && plan && plan.length >= 2) {
+      c.subtaskProposal = { items: plan, at: Date.now() };
+      return 'proposed';
+    }
+    return null;
+  }
+
+  /**
+   * 開始前のタスクのサブタスクを決める（手動で足す・直す・消す）。順番（直列・並列）は、開始したときにエージェントが決める
+   * @param {{ items: object[], merge?: 'auto'|'review' }} p  items が空ならサブタスクをやめる
+   */
+  setSubtasks(id, { items, merge } = {}) {
+    const c = this.must(id);
+    if (c.status !== 'todo') throw new Error('開始前のタスクだけ、サブタスクを編集できます');
+    if (!this.canHaveSubtasks(c)) throw new Error('このタスクはサブタスクに分けられません（Pipeline・競争・git で管理していないフォルダのタスクと、サブタスク自身は分けられません）');
+    const list = Subtasks.cleanItems(items);
+    if (!list.length) {
+      if (c.subtasks) this.log(c, 'system', 'サブタスクをやめて、このタスクのまま進めます');
+      delete c.subtasks;
+    } else {
+      c.subtasks = { items: list.map((x) => ({ ...x, state: 'pending' })), merge: Subtasks.cleanMergeMode(merge || (c.subtasks && c.subtasks.merge) || this.defaultSubtaskMerge(c)), phase: 'plan' };
+      this.log(c, 'system', `サブタスクを ${list.length} 個にしました（${c.subtasks.merge === 'review' ? '終わったら確かめてからマージ' : '終わったら自動でマージ'}）。開始すると、順番を ${agentShort(agentOf(c))} が決めてから動かします`);
+    }
+    this.changed(c);
+  }
+
+  /**
+   * サブタスクの提案に「サブタスクでやる」と答える
+   * @param {{ items?: object[], merge?: 'auto'|'review', createIssues?: boolean }} p
+   *   items: 直した一覧（省けば提案のまま） / createIssues: GitHub にもサブIssue を作って、親の Issue にぶら下げる
+   */
+  async acceptSubtasks(id, { items, merge, createIssues } = {}) {
+    const c = this.must(id);
+    if (!c.subtaskProposal) throw new Error('サブタスクの提案はありません');
+    if (!['review', 'failed'].includes(c.status)) throw new Error('実行中は選べません');
+    if (!c.worktreePath) throw new Error('worktree がありません');
+    this.accepting = this.accepting || new Set();
+    if (this.accepting.has(id)) throw new Error('サブタスクを作っています');
+    const list = Subtasks.cleanItems(items || c.subtaskProposal.items);
+    if (!list.length) throw new Error('サブタスクを1つ以上入れてください');
+    if (createIssues && !c.issue) throw new Error('GitHub Issue から作ったタスクだけ、サブIssue を作れます');
+    this.accepting.add(id);
+    try {
+      if (createIssues) {
+        for (const x of list) {
+          if (x.issue) continue;
+          const made = await this.createSubIssue(c.repoPath, c.issue.number, { title: x.title, body: `${x.prompt}\n\n---\nAgent Kanban のサブタスクとして作成しました（親: #${c.issue.number}）。` });
+          x.issue = { number: made.number, title: made.title, url: made.url };
+          // 途中で失敗しても、作ったサブIssue は覚えておく（もう一度押したときに二重に作らない）
+          c.subtaskProposal.items = list;
+          this.log(c, 'system', `サブIssue #${made.number}「${x.title}」を作って、#${c.issue.number} にぶら下げました`);
+        }
+      }
+      if (!this.store.card(id) || !c.subtaskProposal) return;
+      c.subtasks = { items: list.map((x) => ({ ...x, state: 'pending' })), merge: Subtasks.cleanMergeMode(merge || this.defaultSubtaskMerge(c)), phase: 'run', note: truncate(c.lastText || '', 4000) };
+      c.subtaskProposal = null;
+      c.awaitingReply = false;
+      this.log(c, 'user', `サブタスクに分けて進めます（${list.length} 個・${c.subtasks.merge === 'review' ? '終わったら確かめてからマージ' : '終わったら自動でマージ'}）`);
+      this.log(c, 'system', `サブタスク ${list.length} 個を動かし始めます（${Subtasks.describeOrder(c.subtasks.items)}）。それぞれ、このブランチ ${c.branch} から分けた worktree で動かし、終わったものからこのブランチにマージします`);
+      this.changed(c);
+    } catch (err) {
+      this.changed(c);
+      throw err;
+    } finally {
+      this.accepting.delete(id);
+    }
+    await this.advanceSubtasks(id);
+  }
+
+  // サブタスクの提案に「分けずに進める」と答える
+  declineSubtasks(id) {
+    const c = this.must(id);
+    if (!c.subtaskProposal) throw new Error('サブタスクの提案はありません');
+    c.subtaskProposal = null;
+    this.send(id, 'サブタスクに分けずに、このタスクのまま開発を進めてください（もうサブタスクの提案はしないでください）。');
+  }
+
+  // サブタスクを親のブランチに取り込める状態か（manual: ユーザーが確かめて取り込むときは、失敗で終わったものも取り込める）
+  subtaskReady(k, { manual = false } = {}) {
+    if (!k || !k.worktreePath || !k.branch) return false;
+    if (!(k.status === 'review' || (manual && k.status === 'failed'))) return false;
+    return !k.awaitingReply && !inSpecCheck(k) && !k.conflict && !k.interrupted && !(k.questions || []).length && !(k.permissions || []).length;
+  }
+
+  // 確かめたサブタスクを、親のタスクのブランチに取り込む（「確かめてからマージ」のとき）
+  async approveSubtask(id) {
+    const k = this.must(id);
+    const p = this.subtaskParentOf(k);
+    if (!p) throw new Error('このタスクはサブタスクではありません');
+    if (!this.subtaskReady(k, { manual: true })) throw new Error('このサブタスクは、まだ取り込める状態ではありません（作業中・質問への回答待ち・コンフリクトなど）');
+    k.subtaskOf.approved = true;
+    this.log(k, 'system', `親のタスク「${p.title}」のブランチに取り込みます`);
+    this.changed(k);
+    await this.advanceSubtasks(p.id);
+  }
+
+  // サブタスクを始める: 親のブランチから分けた worktree のカードを作って動かす（ボードには出さず、親のカードにまとめて出す）
+  startSubtask(p, item) {
+    const card = {
+      id: crypto.randomBytes(4).toString('hex'),
+      title: `${p.title} › ${item.title}`,
+      prompt: Subtasks.buildChildPrompt(p, item),
+      status: 'todo',
+      repoPath: p.repoPath,
+      createdAt: Date.now(),
+      permissions: [],
+      alwaysAllow: [],
+      logs: [],
+      sessions: [],
+      agent: agentOf(p),
+      ...(p.model ? { model: p.model } : {}),
+      ...(p.persona ? { persona: p.persona } : {}),
+      skill: null,
+      flowBase: p.branch,
+      subtaskOf: { parent: p.id, key: item.key },
+    };
+    this.store.cards.push(card);
+    item.cardId = card.id;
+    item.state = 'running';
+    this.log(p, 'system', `サブタスク「${item.title}」を始めます`);
+    this.log(card, 'system', `「${p.title}」のサブタスクです。ブランチ ${p.branch} から分けた worktree で動かし、終わったら${p.subtasks.merge === 'review' ? '、確かめてから' : ''}親のブランチにマージします`);
+    this.changed(card);
+    this.start(card.id);
+  }
+
+  // マージできたサブタスクを片付ける（報告は親のカードに残す）
+  async settleSubtaskMerge(p, item, k) {
+    item.state = 'merged';
+    item.mergedAt = Date.now();
+    if (!k) return;
+    item.branch = k.branch;
+    item.report = truncate(k.lastText || k.lastMessage || '', 4000);
+    item.costUsd = k.costUsd || 0;
+    item.agent = agentOf(k);
+    await this.discard(k.id).catch((err) => this.log(p, 'error', `サブタスクのカード「${k.title}」を片付けられませんでした: ${err.message}`));
+  }
+
+  /**
+   * サブタスクを先へ進める（終わったものを親のブランチにマージし、始められるものを始め、すべて終わったら親に仕上げを頼む）。
+   * 同じ親では1つずつ動かす（動いている間に呼ばれたら、終わってからもう一度動かす）
+   */
+  async advanceSubtasks(id) {
+    const p = this.store.card(id);
+    if (!p || !p.subtasks || p.subtasks.phase !== 'run' || this.shuttingDown) return;
+    this.subAdvancing = this.subAdvancing || new Map();
+    if (this.subAdvancing.has(id)) {
+      this.subAdvancing.set(id, true);
+      return;
+    }
+    this.subAdvancing.set(id, false);
+    try {
+      await this.advanceSubtasksOnce(p);
+    } catch (err) {
+      if (this.store.card(id)) {
+        p.error = `サブタスクを進められませんでした: ${err.message}`;
+        this.log(p, 'error', p.error);
+        this.notify(p, 'failed', `失敗: ${p.title}`, p.error);
+      }
+    } finally {
+      const again = this.subAdvancing.get(id);
+      this.subAdvancing.delete(id);
+      if (this.store.card(id)) this.changed(p);
+      if (again) setImmediate(() => this.advanceSubtasks(id));
+      this.pump();
+    }
+  }
+
+  async advanceSubtasksOnce(p) {
+    const st = p.subtasks;
+    if (p.status === 'running' || p.status === 'queued' || p.conflict) return;
+    if (!p.worktreePath) throw new Error('親のタスクの worktree がありません');
+    // 終わったサブタスクを、親のブランチに1つずつマージする
+    for (const item of st.items) {
+      if (item.state !== 'running') continue;
+      const k = item.cardId && this.store.card(item.cardId);
+      if (!k) {
+        item.state = 'skipped';
+        this.log(p, 'system', `サブタスク「${item.title}」のカードが見つからないので、マージせずに先へ進みます`);
+        continue;
+      }
+      const approved = !!k.subtaskOf.approved;
+      if (st.merge === 'review' && !approved) continue;
+      if (!this.subtaskReady(k, { manual: approved })) continue;
+      if (await git.mergeInProgress(p.worktreePath)) return;
+      await git.commitAll(p.worktreePath, this.commitMessage(p));
+      try {
+        await git.merge(p.worktreePath, k.branch, `Merge subtask: ${item.title} (${k.branch})`, p.branch);
+      } catch (err) {
+        if (!err.conflictFiles) throw err;
+        // ほかのサブタスクの変更とぶつかった: 親のエージェントに解消してもらう（解消したら markResolved から続ける）
+        p.conflict = { target: k.branch, files: err.conflictFiles, subtask: k.id, at: Date.now() };
+        p.conflictResolved = null;
+        this.log(p, 'error', `サブタスク「${item.title}」のマージが、ほかのサブタスクの変更とコンフリクトしました（${err.conflictFiles.join(', ')}）。${agentShort(agentOf(p))} に解消してもらいます`);
+        this.changed(p);
+        await this.resolveConflict(p.id, 'agent');
+        return;
+      }
+      this.log(p, 'system', `サブタスク「${item.title}」の変更を、このブランチにマージしました（${k.branch}）`);
+      await this.settleSubtaskMerge(p, item, k);
+      if (!this.store.card(p.id)) return;
+    }
+    // 先に終わっている必要があるサブタスクがすべてマージされたものを始める
+    for (const item of Subtasks.startable(st)) this.startSubtask(p, item);
+    if (Subtasks.allSettled(st)) {
+      // すべてマージした: 親のエージェントに仕上げ（テスト・つなぎの直し）を頼んでから、レビューに回す
+      st.phase = 'done';
+      p.error = null;
+      const prompt = Subtasks.buildFinishPrompt(p);
+      this.log(p, 'system', 'サブタスクをすべてマージしました。全体の仕上げ（テスト・つなぎの直し）をしてから、レビューに回します');
+      this.log(p, 'user', prompt);
+      this.enqueue(p, prompt);
+    }
+  }
+
   // 競争の同じグループのカード（自分も含む）
   competitors(id) {
     const c = this.must(id);
@@ -1459,7 +1720,9 @@ class AgentManager extends EventEmitter {
       try {
         const issue = await this.fetchIssue(s.repoPath, n);
         if (issue.state && issue.state !== 'open') errors.push(`#${n} はクローズ済みですが、タスクを作りました`);
-        cards.push(...this.createTask({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue, session, skill, agent, model }));
+        const made = this.createTask({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue, session, skill, agent, model });
+        cards.push(...made);
+        if (made.length === 1 && this.canHaveSubtasks(made[0])) await this.addSubIssuesAsSubtasks(made[0], issue);
       } catch (err) {
         errors.push(`#${n}: ${err.message}`);
       }
@@ -1471,6 +1734,40 @@ class AgentManager extends EventEmitter {
   // テストで差し替えられるようにメソッドにしておく
   fetchIssue(repoPath, n, opts) {
     return github.fetchIssue(repoPath, n, opts);
+  }
+
+  fetchSubIssues(repoPath, n) {
+    return github.fetchSubIssues(repoPath, n);
+  }
+
+  createSubIssue(repoPath, parentNumber, issue) {
+    return github.createSubIssue(repoPath, parentNumber, issue);
+  }
+
+  // Issue にサブIssue がぶら下がっていれば、開いているものをサブタスクにする（読めなければ、サブタスクなしのまま）
+  async addSubIssuesAsSubtasks(c, issue) {
+    let subs;
+    try {
+      subs = (await this.fetchSubIssues(c.repoPath, issue.number)).filter((x) => x.state !== 'closed');
+    } catch (err) {
+      this.log(c, 'system', `#${issue.number} のサブIssue を読めなかったので、サブタスクなしで作りました（${err.message.split('\n')[0]}）`);
+      this.changed(c);
+      return;
+    }
+    if (!subs.length) return;
+    const items = [];
+    for (const x of subs.slice(0, Subtasks.MAX_SUBTASKS)) {
+      let full = x;
+      try {
+        full = { ...x, ...(await this.fetchIssue(c.repoPath, x.number)) };
+      } catch {
+        /* 本文だけで作る */
+      }
+      items.push({ key: `issue-${x.number}`, title: `#${x.number} ${full.title}`, prompt: github.buildIssuePrompt(full), issue: { number: x.number, title: full.title, url: full.url || x.url } });
+    }
+    c.subtasks = { items: Subtasks.cleanItems(items).map((x) => ({ ...x, state: 'pending' })), merge: this.defaultSubtaskMerge(c), phase: 'plan' };
+    this.log(c, 'system', `#${issue.number} のサブIssue ${c.subtasks.items.length} 件（${c.subtasks.items.map((x) => `#${x.issue.number}`).join(', ')}）を、サブタスクにしました。開始すると、順番を決めてからサブタスクごとに動かします`);
+    this.changed(c);
   }
 
   // ---------- 会話（セッション） ----------
@@ -1641,6 +1938,8 @@ class AgentManager extends EventEmitter {
     if (!['review', 'failed', 'done'].includes(c.status)) throw new Error('実行中・待機中は追加指示を送れません');
     if (!message || !message.trim()) throw new Error('追加指示を入力してください');
     if (c.relay && c.relay.waiting) throw new Error(c.conflict ? '合流でのコンフリクトを、上の「コンフリクト」の欄から解消してください' : 'Pipelineの並列の枝が終わるのを待っています。直したいときは、枝のタスクに追加指示を送ってください');
+    if (c.subtasks && c.subtasks.phase === 'run') throw new Error(c.conflict ? 'サブタスクのマージでのコンフリクトを、上の「コンフリクト」の欄から解消してください' : 'サブタスクが終わるのを待っています。直したいときは、サブタスクに追加指示を送ってください');
+    if (c.subtaskProposal) c.subtaskProposal = null; // 提案に文章で答えた: 提案は閉じて、エージェントに任せる
     skill = cleanSkill(skill);
     const parsed = attachments.parseAttachments(files);
     const atts = attachments.saveAttachments(this.attachRoot, c.id, parsed);
@@ -1716,6 +2015,8 @@ class AgentManager extends EventEmitter {
     c.lastText = '';
     c.lastSpecUnclear = false;
     c.specQuestions = null;
+    c.lastSubtaskPlan = null;
+    c.lastSubtasksMarked = false;
     c.pendingPrompt = prompt;
     c.status = 'queued';
     c.queuedAt = Date.now();
@@ -2152,6 +2453,10 @@ class AgentManager extends EventEmitter {
         if (c.specState !== 'pending') c.specQuestions = null;
         // 会話は返事が来たらいつでも続きを話せるので、「回答待ち」にはしない
         c.awaitingReply = !chat && (c.specState === 'pending' || endsWithQuestion(c.lastText));
+        // サブタスク: 順番が決まったら動かし始める / 分けたほうがよいという提案ならユーザーに聞く
+        const subPlan = this.takeSubtaskPlan(c);
+        if (subPlan === 'started') c.awaitingReply = false;
+        if (subPlan === 'proposed') c.awaitingReply = true;
         // Pipelineの途中なら、レビューに回さずに次の工程へ引き継ぐ（質問で止まったとき・仕様の確認中は、答えてもらってから）
         // btw で追加指示待ちがあるときは、今の工程の続きを優先する
         const plan = c.awaitingReply || hasFollowBtw(c) ? null : this.relayNextStep(c);
@@ -2170,6 +2475,13 @@ class AgentManager extends EventEmitter {
           this.notify(c, 'review', `分岐の行き先がありません: ${c.title}`, plan.stop);
         } else if (c.relay && c.relay.waiting) {
           /* 合流のコンフリクトを解消した: 残りの枝のマージと次の工程へ（tryJoin） */
+        } else if (subPlan === 'proposed') {
+          this.log(c, 'question', `${agentShort(agent)} が、サブタスクに分けて進めることを提案しています。上の「サブタスクの提案」で、サブタスクでやるか、分けずに進めるかを選んでください`);
+          this.emit('awaiting', c);
+          this.notify(c, 'awaiting', `サブタスクの提案: ${c.title}`, c.lastText || 'サブタスクに分けて進めることを提案しています');
+        } else if (c.subtasks && c.subtasks.phase === 'run') {
+          /* サブタスクを動かしている（始めた・マージのコンフリクトを解消した）: advanceSubtasks で続ける */
+          if (c.conflict && !c.conflict.resolving) this.notify(c, 'conflict', `サブタスクのマージでコンフリクト: ${c.title}`, `${c.conflict.target} のマージでコンフリクトが残っています。もう一度エージェントに頼むか、自分で直してください`);
         } else if (c.specState === 'pending') {
           this.log(c, 'question', `内容が詰まっていないので、開発を開始できません。${agentShort(agent)} の質問に下の欄から答えて、仕様を詰めてください（詰まったら、そのまま開発を始めます）`);
           this.emit('awaiting', c);
@@ -2178,6 +2490,10 @@ class AgentManager extends EventEmitter {
           this.log(c, 'question', `${agentShort(agent)} が質問しています。下の欄から答えると、続きから進めます`);
           this.emit('awaiting', c);
           this.notify(c, 'awaiting', `回答待ち: ${c.title}`, c.lastText || `${agentShort(agent)} が質問しています`);
+        } else if (c.subtaskOf) {
+          // サブタスク: 自動でマージするときは知らせない（親が仕上げてから知らせる）
+          const sp = this.subtaskParentOf(c);
+          if (sp && sp.subtasks.merge === 'review') this.notify(c, 'review', `サブタスクの確認: ${c.title}`, `差分を確かめて、「親のタスクに取り込む」を押してください。${c.lastText || ''}`.trim());
         } else {
           if (isChat(c)) this.notify(c, 'awaiting', `返事: ${c.title}`, c.lastText || `${agentShort(agent)} が返事をしました`);
           else if (plan && plan.limitMsg) this.notify(c, 'review', `ループの上限: ${c.title}`, plan.limitMsg);
@@ -2210,6 +2526,12 @@ class AgentManager extends EventEmitter {
         else if (c.status === 'failed' || c.awaitingReply) this.log(relayParent, 'system', `Pipeline: 並列の枝「${c.relay.branchOf.label}」が止まっています（${c.status === 'failed' ? '失敗' : '回答待ち'}）。枝のタスクで直すか答えると、続きから進みます`);
       }
       this.checkCompetitionDone(c);
+      if (c.subtaskOf) {
+        const sp = this.subtaskParentOf(c);
+        if (sp && (c.status === 'failed' || c.awaitingReply)) this.log(sp, 'system', `サブタスク「${c.title}」が止まっています（${c.status === 'failed' ? '失敗' : '回答待ち'}）。サブタスクを開いて、直すか答えると続きから進みます`);
+        this.advanceSubtasks(c.subtaskOf.parent);
+      }
+      if (c.subtasks && c.subtasks.phase === 'run') this.advanceSubtasks(c.id);
       this.pump();
     };
     child.on('error', (err) => finish(null, err));
@@ -2313,7 +2635,7 @@ class AgentManager extends EventEmitter {
           this.log(c, 'error', `エラーで終了しました: ${run.resultError}`);
         } else {
           // 仕様の確認の印・質問フォーム用のブロックは、カードの一言には出さない
-          const said = typeof ev.result === 'string' ? extractSpecQuestions(stripSpecMarker(ev.result)).text.trim() : '';
+          const said = typeof ev.result === 'string' ? Subtasks.stripSubtasks(extractSpecQuestions(stripSpecMarker(ev.result)).text).trim() : '';
           if (said) c.lastMessage = truncate(said, 200);
           this.log(c, 'result', `完了しました（${secs}秒 / $${cost.toFixed(3)}）`);
         }
@@ -2517,6 +2839,11 @@ class AgentManager extends EventEmitter {
 
   // 返事の文章から仕様の確認の印と、質問フォーム用の JSON ブロックを取り出してカードに覚えておく（どちらも画面に出さない）
   takeSpecQuestions(c, raw) {
+    // サブタスクの印と ```subtasks のブロックも、ここで取り出す（画面には出さない）
+    const sub = Subtasks.extractSubtasks(raw);
+    if (sub.items && (sub.marked || c.lastSubtasksMarked)) c.lastSubtaskPlan = sub.items;
+    if (sub.marked) c.lastSubtasksMarked = true;
+    raw = sub.text;
     const marked = hasSpecMarker(raw);
     const { text, questions } = extractSpecQuestions(marked ? stripSpecMarker(raw) : String(raw || ''));
     // 印付きの返事のすぐあとに、ブロックだけが別のメッセージで来たときは、同じ質問のフォームとして扱う（仕様が詰まったとは見なさない）
@@ -2789,6 +3116,9 @@ class AgentManager extends EventEmitter {
     const title = c.issue ? c.title.replace(/^#\d+\s*/, '') : c.title;
     const lines = [];
     if (c.issue) lines.push(`Closes #${c.issue.number}`, '');
+    // サブIssue も、このタスクのブランチで閉じる
+    const subIssues = c.subtasks ? c.subtasks.items.filter((x) => x.issue && x.state === 'merged').map((x) => `Closes #${x.issue.number}`) : [];
+    if (subIssues.length) lines.push(...subIssues, '');
     if (c.lastMessage) lines.push(c.lastMessage, '');
     lines.push('---', 'Agent Kanban のタスクから作成しました。');
     return { title, body: lines.join('\n') };
@@ -3159,6 +3489,19 @@ class AgentManager extends EventEmitter {
   }
 
   markResolved(c, msg) {
+    // サブタスクのマージでのコンフリクト: そのサブタスクはマージできたので、残りのサブタスクへ進む
+    if (c.conflict.subtask && c.subtasks) {
+      const kid = this.store.card(c.conflict.subtask);
+      const item = c.subtasks.items.find((x) => x.cardId === c.conflict.subtask);
+      c.conflict = null;
+      c.conflictResolved = null;
+      c.error = null;
+      this.log(c, 'system', `${msg}。サブタスクの続きへ進みます`);
+      if (item) this.settleSubtaskMerge(c, item, kid);
+      this.changed(c);
+      setImmediate(() => this.advanceSubtasks(c.id));
+      return;
+    }
     // Pipelineの合流でのコンフリクト: その枝はマージできたので、残りの枝のマージと次の工程へ進む
     if (c.conflict.join && c.relay && c.relay.waiting) {
       const w = c.relay.waiting;
@@ -3224,6 +3567,8 @@ class AgentManager extends EventEmitter {
 
   // Pipelineの並列の途中（枝を待っている・枝のタスク）は、マージ・PR の作成ができない
   assertNotInRelayJoin(c) {
+    if (c.subtaskOf && this.subtaskParentOf(c)) throw new Error('サブタスクは、親のタスクのブランチに取り込みます。「親のタスクに取り込む」を使うか、自動でマージされるのを待ってください');
+    if (c.subtasks && (c.subtasks.phase === 'run' || (c.subtasks.phase === 'plan' && c.status !== 'todo'))) throw new Error('サブタスクがすべて終わって、親のタスクの仕上げが済んでから取り込んでください');
     if (c.relay && c.relay.waiting) throw new Error('Pipelineの並列の枝が終わるのを待っています。合流してPipelineが終わってから取り込んでください');
     if (this.relayParentOf(c)) throw new Error('Pipelineの並列の枝のタスクは、合流で元のタスクにマージします。元のタスクから取り込んでください');
   }
@@ -3232,8 +3577,11 @@ class AgentManager extends EventEmitter {
     const c = this.must(id);
     if (this.isUndeletable(c)) throw new Error('完了したタスクは削除できません');
     // 並列の枝を待っているカードを消すときは、枝のタスクも消す。枝のタスクを消したら、親は合流できなくなる
-    const kids = c.relay && c.relay.waiting ? c.relay.waiting.children : [];
+    const kids = c.relay && c.relay.waiting ? [...c.relay.waiting.children] : [];
+    // サブタスクのある親を消すときは、サブタスクも消す
+    if (c.subtasks) for (const x of c.subtasks.items) if (x.cardId && x.state === 'running') kids.push(x.cardId);
     const parent = this.relayParentOf(c);
+    const subParent = this.subtaskParentOf(c);
     const child = this.procs.get(id);
     this.store.removeCard(id);
     this.denyAllPending(id, '破棄されました');
@@ -3248,6 +3596,16 @@ class AgentManager extends EventEmitter {
     this.changed(null);
     for (const k of kids) if (this.store.card(k)) await this.discard(k);
     if (parent) this.tryJoin(parent.id);
+    if (subParent) {
+      // サブタスクを破棄した（マージして片付けたときは、もう merged になっている）
+      const item = subParent.subtasks.items.find((x) => x.cardId === id);
+      if (item && item.state === 'running') {
+        item.state = 'skipped';
+        this.log(subParent, 'system', `サブタスク「${item.title}」が破棄されたので、マージせずに先へ進みます`);
+        this.changed(subParent);
+      }
+      this.advanceSubtasks(subParent.id);
+    }
   }
 }
 

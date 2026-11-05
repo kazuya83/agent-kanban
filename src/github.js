@@ -310,7 +310,65 @@ async function setIssueProjectStatus(repoPath, number, key, opts = {}) {
   return result;
 }
 
+// ---------- サブIssue ----------
+
+// Issue にぶら下がっているサブIssue（GitHub の sub-issues）。gh があれば gh api、なければ REST API（public のみ）
+async function fetchSubIssues(repoPath, number) {
+  const slug = await repoSlug(repoPath);
+  const pathName = `repos/${slug.owner}/${slug.repo}/issues/${Number(number)}/sub_issues`;
+  const gh = resolveCommand('gh');
+  let list;
+  if (gh) {
+    const out = await execFileP(gh, ['api', '-H', 'Accept: application/vnd.github+json', `${pathName}?per_page=100`], { cwd: repoPath, timeout: 30000 });
+    list = JSON.parse(out || '[]');
+  } else {
+    const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
+    const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'agent-kanban' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`https://api.github.com/${pathName}?per_page=100`, { headers });
+    if (res.status === 404) return [];
+    if (!res.ok) throw new Error(`サブIssue を読めませんでした（GitHub API ${res.status}）`);
+    list = await res.json();
+  }
+  return (Array.isArray(list) ? list : [])
+    .filter((d) => d && d.number && !d.pull_request)
+    .map((d) => ({
+      id: d.id,
+      number: d.number,
+      title: d.title || '',
+      body: d.body || '',
+      url: d.html_url || '',
+      state: String(d.state || '').toLowerCase(),
+      labels: (d.labels || []).map((l) => (typeof l === 'string' ? l : l && l.name)).filter(Boolean),
+      comments: [],
+    }));
+}
+
+/**
+ * Issue を作って、parent のサブIssue にする（gh が必要）
+ * @returns {Promise<{ number: number, title: string, url: string }>}
+ */
+async function createSubIssue(repoPath, parentNumber, { title, body }) {
+  const gh = resolveCommand('gh');
+  if (!gh) throw new Error('サブIssue を作るには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます');
+  const slug = await repoSlug(repoPath);
+  const base = `repos/${slug.owner}/${slug.repo}/issues`;
+  const run = async (args) => {
+    try {
+      return JSON.parse((await execFileP(gh, args, { cwd: repoPath, timeout: 30000 })) || '{}');
+    } catch (err) {
+      throw new Error(`GitHub がエラーを返しました: ${String(err.stderr || err.message).trim().split('\n')[0]}`);
+    }
+  };
+  const issue = await run(['api', '-X', 'POST', base, '-f', `title=${String(title || '').slice(0, 250)}`, '-f', `body=${String(body || '')}`]);
+  if (!issue.number) throw new Error('Issue を作れませんでした');
+  await run(['api', '-X', 'POST', `${base}/${Number(parentNumber)}/sub_issues`, '-F', `sub_issue_id=${issue.id}`]);
+  return { number: issue.number, title: issue.title || title, url: issue.html_url || '' };
+}
+
 module.exports = {
+  fetchSubIssues,
+  createSubIssue,
   parseGithubRemote,
   parseIssueNumbers,
   repoSlug,
