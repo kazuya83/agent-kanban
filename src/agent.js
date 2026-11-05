@@ -856,6 +856,12 @@ class AgentManager extends EventEmitter {
     while (this.issueSyncs && this.issueSyncs.size) await Promise.all([...this.issueSyncs.values()]);
   }
 
+  // エージェントの TODO リスト（進捗タブに出す）。いちばん新しいものだけを残す
+  setTodos(card, items) {
+    if (!Array.isArray(items)) return;
+    card.todos = { items: items.slice(0, 50), at: Date.now(), agent: agentOf(card) };
+  }
+
   log(card, kind, text, extra) {
     const entry = { t: Date.now(), kind, text, ...(extra || {}) };
     card.logs = card.logs || [];
@@ -1193,6 +1199,7 @@ class AgentManager extends EventEmitter {
     else delete c.persona;
     c.sessionId = null;
     c.forkNext = false;
+    delete c.todos; // TODO リストは工程（エージェント）ごと
     const n = relayRunNo(c, r.index);
     this.log(c, 'system', `Pipeline: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」${n > 1 ? `（${n}回目）` : ''}を ${whoLabel(st.agent, st.persona)} に引き継ぎます`);
     this.enqueue(c, buildRelayStepPrompt(c, r.index));
@@ -2268,6 +2275,8 @@ class AgentManager extends EventEmitter {
           } else if (b.type === 'tool_use') {
             this.log(c, 'tool', `${b.name}  ${summarizeInput(b.input)}`, { agent: 'claude' });
             c.lastMessage = `${b.name} ${truncate(summarizeInput(b.input), 80)}`;
+            const todos = providers.todosFromTool(b.name, b.input);
+            if (todos) this.setTodos(c, todos);
           }
         }
         this.changed(c);
@@ -2345,6 +2354,10 @@ class AgentManager extends EventEmitter {
         break;
       case 'tool_result':
         this.log(c, a.error ? 'tool_error' : 'tool_result', truncate(a.text, 1500));
+        break;
+      case 'todos':
+        this.setTodos(c, a.items);
+        this.changed(c);
         break;
       case 'log_error':
         run.lastError = truncate(a.text, 500);

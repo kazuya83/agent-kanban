@@ -990,6 +990,141 @@ function relayFlowHtml(c) {
   return `<div class="relay-flow"><div class="rf-title">${icon('pipeline')}Pipeline <span class="muted small">${doneN}/${r.steps.length} 工程が完了${loopN ? `・ループ ${loopN} 回` : ''}${r.limitReached ? '・ループの上限で終了' : ''}</span></div>${relayWaitHtml(c)}<ol class="rf-list">${nodes.join('')}</ol></div>`;
 }
 
+// 詳細の上: Pipelineの進み具合を短く（工程のバーと、今の工程）。くわしくは「進捗」タブで見る
+function relayHeadHtml(c) {
+  if (!c.relay || isChat(c)) return '';
+  const r = c.relay;
+  const doneN = r.steps.filter((_, i) => relayStepState(c, i) === 'done').length;
+  const st = r.steps[r.index];
+  const now = r.waiting ? `並列「${esc((FlowModel.nodeOf(r.flow, r.waiting.node) || {}).label || '')}」の枝を待っています` : r.done ? 'すべての工程を終えました' : st ? `今: ${r.index + 1}. ${esc(st.label)}（${esc(RELAY_STATE[relayStepState(c, r.index)][1])}）` : '';
+  return `<div class="relay-head"><div class="rh-row">${icon('pipeline')}<b>Pipeline</b> <span class="muted small">${doneN}/${r.steps.length} 工程が完了${now ? ` ・ ${now}` : ''}</span>${state.tab !== 'progress' ? ' <button class="btn small ghost" data-act="showProgress" type="button">進捗を見る</button>' : ''}</div>${relayBarHtml(c)}${relayWaitHtml(c)}</div>`;
+}
+
+// 「進捗」タブ: エージェントの TODO・Pipelineのフローチャート・最近の作業
+const TODO_MARK = { completed: ['✓', '完了'], in_progress: ['▶', '作業中'], pending: ['○', 'これから'], cancelled: ['–', '取りやめ'] };
+function todoListHtml(todos, title) {
+  const items = (todos && todos.items) || [];
+  if (!items.length) return '';
+  const live = items.filter((t) => t.status !== 'cancelled');
+  const doneN = live.filter((t) => t.status === 'completed').length;
+  const pct = live.length ? Math.round((doneN / live.length) * 100) : 0;
+  return `<section class="pg-sec">
+    <div class="pg-sec-head"><b>${title || 'TODO'}</b> <span class="muted small">${doneN}/${live.length} 完了${todos.at ? `・${hhmm(todos.at)} に更新` : ''}</span></div>
+    <div class="pg-bar" title="${pct}%"><span style="width:${pct}%"></span></div>
+    <ul class="pg-todos">${items.map((t) => `<li class="td-${t.status}"><span class="td-mark" title="${TODO_MARK[t.status][1]}">${TODO_MARK[t.status][0]}</span><span class="td-text">${esc(t.text)}</span></li>`).join('')}</ul>
+  </section>`;
+}
+// 最近の作業（ログの最後のツールの呼び出し・返事）
+function recentWorkHtml(c) {
+  const logs = state.logs.get(c.id) || [];
+  const out = [];
+  for (let i = logs.length - 1; i >= 0 && out.length < 8; i--) {
+    const e = logs[i];
+    if (!e || (e.kind !== 'tool' && e.kind !== 'text' && e.kind !== 'error' && e.kind !== 'result')) continue;
+    const txt = String(e.text || '').replace(/\s+/g, ' ').trim();
+    if (!txt) continue;
+    out.push(`<li class="rw-${e.kind}"><span class="rw-t">${e.t ? hhmm(e.t) : ''}</span><span class="rw-x">${esc(txt.length > 160 ? `${txt.slice(0, 159)}…` : txt)}</span></li>`);
+  }
+  if (!out.length) return '';
+  return `<section class="pg-sec"><div class="pg-sec-head"><b>最近の作業</b> <span class="muted small">新しい順（くわしくは「ログ」で見られます）</span></div><ul class="pg-recent">${out.join('')}</ul></section>`;
+}
+// Pipelineのフローチャート（読み取り専用）。終わった工程・今の工程・通った線に色を付ける
+function relayChartHtml(c) {
+  const r = c.relay;
+  if (!r || !r.flow || typeof FlowView === 'undefined') return '';
+  const idx = new Map(r.steps.map((st, i) => [st.id, i]));
+  const states = FlowView.nodeStates(r.flow, (id) => (idx.has(id) ? relayStepState(c, idx.get(id)) : null), {
+    started: !!(r.history || []).length || !!r.stepStartedAt || c.status !== 'todo',
+    finished: !!r.done && !r.waiting && relayStepState(c, r.index) === 'done',
+  });
+  const marks = {};
+  const labels = {};
+  for (const [k, [m, l]] of Object.entries(RELAY_STATE)) (marks[k] = m), (labels[k] = l);
+  const svg = FlowView.html(r.flow, states, {
+    marks,
+    labels,
+    counts: r.counts,
+    current: !r.waiting && !r.done && r.steps[r.index] ? r.steps[r.index].id : null,
+    stepInfo: (n) => {
+      const i = idx.get(n.id);
+      const st = i == null ? null : r.steps[i];
+      if (!st) return {};
+      return { title: `${i + 1}. ${st.label}`, sub: whoShort(st.agent, st.persona), tip: whoLabel(st.agent, st.persona) + (st.model ? ` / ${st.model}` : '') };
+    },
+  });
+  if (!svg) return '';
+  return `<div class="pg-chart">${svg}</div><div class="pg-legend muted small"><span class="lg lg-done">完了</span><span class="lg lg-run">実行中</span><span class="lg lg-warn">止まっている・待っている</span><span class="lg lg-pending">これから</span><span class="lg lg-skip">スキップ</span></div>`;
+}
+function progressHtml(c) {
+  const s = c.status;
+  const live = s === 'running' || s === 'queued';
+  const [bcls, blabel] = badgeFor(c);
+  const rows = [];
+  rows.push(`<dt>状態</dt><dd><span class="badge b-${bcls}">${esc(blabel)}</span>${c.lastMessage && live ? ` <span class="muted small">${esc(c.lastMessage)}</span>` : ''}</dd>`);
+  if (c.startedAt && s !== 'todo') rows.push(`<dt>${live ? '開始' : '最後に開始'}</dt><dd>${hhmm(c.startedAt)}${s === 'running' ? `（<span class="elapsed" data-since="${c.startedAt}">${elapsed(c.startedAt)}</span>）` : ''}</dd>`);
+  if (!isChat(c) || c.persona) rows.push(`<dt>エージェント</dt><dd>${personaIcon(c.persona, agentOf(c))}${esc(whoLabel(agentOf(c), c.persona))}</dd>`);
+  if (c.costUsd) rows.push(`<dt>コスト</dt><dd>$${c.costUsd.toFixed(3)}</dd>`);
+  const parts = [`<section class="pg-sec"><dl class="d-meta pg-summary">${rows.join('')}</dl></section>`];
+  if (s === 'todo') parts.push(`<p class="muted small pg-note">まだ開始していません。開始すると、ここで進み具合を見られます。</p>`);
+  if (c.relay && !isChat(c)) {
+    parts.push(`<section class="pg-sec"><div class="pg-sec-head"><b>${icon('pipeline')}フローチャート</b></div>${relayChartHtml(c)}</section>`);
+    parts.push(`<section class="pg-sec">${relayFlowHtml(c)}</section>`);
+  }
+  // 今のエージェントの TODO（並列の枝を待っているときは、枝ごと）
+  const kids = c.relay && c.relay.waiting ? c.relay.waiting.children.map((id) => card(id)).filter(Boolean) : [];
+  if (kids.length) for (const k of kids) parts.push(todoListHtml(k.todos, `枝「${esc(k.relay.branchOf.label)}」の TODO`));
+  else if (c.todos && c.todos.items && c.todos.items.length) parts.push(todoListHtml(c.todos, c.relay && c.relay.steps[c.relay.index] ? `工程「${esc(c.relay.steps[c.relay.index].label)}」の TODO` : `${esc(whoShort(agentOf(c), c.persona))} の TODO`));
+  else if (live) parts.push(`<p class="muted small pg-note">エージェントが作業の TODO を作ると、ここに出ます（作らないこともあります）。</p>`);
+  parts.push(recentWorkHtml(c));
+  return parts.filter(Boolean).join('');
+}
+// 開始する前は、進捗の下でタイトルと最初の指示を編集できる（指示は「チャット」の上でも見られます）
+function bindPromptEdit(c) {
+  const box = $('progressEdit');
+  if (!box) return;
+  box.innerHTML = `<section class="pg-sec">
+      <div class="pg-sec-head"><b>開始する前に編集</b></div>
+      <label class="field"><span>タイトル</span><input id="editTitle" value="${esc(c.title)}" /></label>
+      <div class="field"><span>最初の指示</span><div id="editSkill" class="skill-slot"></div><textarea id="editPrompt" rows="10">${esc(c.prompt)}</textarea>${c.attachments && c.attachments.length ? `<small class="muted">添付ファイル</small>${attachFilesHtml(c.attachments, { all: true })}` : ''}</div>
+      <button class="btn primary" id="saveEdit">保存</button>
+    </section>`;
+  let editSkill = c.skill || null;
+  const drawEditSkill = () => renderSkillSlot('editSkill', editSkill, (v) => ((editSkill = v), drawEditSkill()), { disabled: false });
+  drawEditSkill();
+  $('saveEdit').onclick = () => runBusy('保存しています…', () => api.updateCard({ id: c.id, title: $('editTitle').value, prompt: $('editPrompt').value, skill: editSkill || '' }), '保存しました');
+}
+// force: 作り直す（タブを開いたとき）。そうでなければ、中身が変わったときだけ描き直す（開いている報告・スクロールは保つ）
+function renderProgress(c, { force = false } = {}) {
+  const body = $('detailBody');
+  const editable = c.status === 'todo' && !isChat(c);
+  if (force || !$('progressView') || body.dataset.progressCard !== c.id || body.dataset.progressEdit !== String(editable)) {
+    body.innerHTML = `<div class="pad progress"><div id="progressView"></div>${editable ? '<div id="progressEdit"></div>' : ''}</div>`;
+    body.dataset.progressCard = c.id;
+    body.dataset.progressEdit = String(editable);
+    body.dataset.progressSig = '';
+    if (editable) bindPromptEdit(c);
+  }
+  const html = progressHtml(c);
+  // 経過時間は1秒ごとに書き換わるので、比べるときは除く
+  const sig = html.replace(/(<span class="elapsed"[^>]*>)[^<]*/g, '$1');
+  if (body.dataset.progressSig === sig) return;
+  body.dataset.progressSig = sig;
+  const view = $('progressView');
+  view.innerHTML = html;
+  view.querySelectorAll('details[data-rkey]').forEach((d) => (d.ontoggle = () => (d.open ? state.relayOpen.add(d.dataset.rkey) : state.relayOpen.delete(d.dataset.rkey))));
+  view.querySelectorAll('[data-open-card]').forEach((a) => (a.onclick = (e) => (e.preventDefault(), card(a.dataset.openCard) && select(a.dataset.openCard))));
+}
+// ログが届くたびに描き直すと重いので、まとめて描き直す
+let progressTimer = null;
+function scheduleProgress() {
+  if (progressTimer) return;
+  progressTimer = setTimeout(() => {
+    progressTimer = null;
+    const c = card(state.selected);
+    if (c && state.tab === 'progress') renderProgress(c);
+  }, 300);
+}
+
 // 並列の枝のタスクの状態が変わったら、元のタスクの詳細も描き直す
 function relayKidsSig(c) {
   const w = c.relay && c.relay.waiting;
@@ -1045,7 +1180,7 @@ function competeBoxHtml(c) {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch]), relayKidsSig(c)]);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch]), relayKidsSig(c), state.tab === 'progress']);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -1080,7 +1215,7 @@ function renderDetailHead() {
     </div>`;
   $('detailHead').innerHTML = `
     ${isInterrupted(c) ? interruptedBoxHtml(c) : c.error ? `<div class="d-error">${esc(c.error)}</div>` : ''}
-    ${relayFlowHtml(c)}
+    ${relayHeadHtml(c)}
     ${competeBoxHtml(c)}
     ${conflictBoxHtml(c)}
     <div class="d-actions">${btns.join('')}</div>`;
@@ -1236,6 +1371,11 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'resume') runBusy('再開しています…', () => api.resume(c.id), '再開しました');
   if (act === 'dismissInterrupted') run(() => api.dismissInterrupted(c.id));
   if (act === 'stop') runBusy('停止しています…', () => api.stop(c.id));
+  if (act === 'showProgress') {
+    setTab('progress');
+    renderDetailHead();
+    renderDetailBody();
+  }
   if (act === 'open') run(() => api.open(c.id));
   if (act === 'merge') openMerge(c);
   if (act === 'complete') {
@@ -1285,6 +1425,7 @@ $('detailHead').addEventListener('click', async (e) => {
 document.querySelectorAll('#tabs .tab').forEach((t) =>
   t.addEventListener('click', () => {
     setTab(t.dataset.tab);
+    renderDetailHead(); // Pipelineの「進捗を見る」は、進捗タブでは出さない
     renderDetailBody();
   }),
 );
@@ -1946,17 +2087,8 @@ async function renderDetailBody() {
     $('btwSend').onclick = send;
     onSendKey($('btwInput'), send);
     if (live) $('btwInput').focus();
-  } else {
-    const editable = c.status === 'todo';
-    body.innerHTML = `<div class="pad">
-      <label class="field"><span>タイトル</span><input id="editTitle" value="${esc(c.title)}" ${editable ? '' : 'disabled'} /></label>
-      <div class="field"><span>最初の指示</span><div id="editSkill" class="skill-slot"></div><textarea id="editPrompt" rows="14" ${editable ? '' : 'disabled'}>${esc(c.prompt)}</textarea>${c.attachments && c.attachments.length ? `<small class="muted">添付ファイル</small>${attachFilesHtml(c.attachments, { all: true })}` : ''}</div>
-      ${editable ? '<button class="btn primary" id="saveEdit">保存</button>' : '<p class="muted">開始後は編集できません。変更したいときは追加指示を送ってください。</p>'}
-    </div>`;
-    let editSkill = c.skill || null;
-    const drawEditSkill = () => renderSkillSlot('editSkill', editSkill, (v) => ((editSkill = v), drawEditSkill()), { disabled: !editable });
-    drawEditSkill();
-    if (editable) $('saveEdit').onclick = () => runBusy('保存しています…', () => api.updateCard({ id: c.id, title: $('editTitle').value, prompt: $('editPrompt').value, skill: editSkill || '' }), '保存しました');
+  } else if (state.tab === 'progress') {
+    renderProgress(c, { force: true });
   }
 }
 
@@ -4033,6 +4165,7 @@ api.onBoard((board) => {
         if (state.wtStatus) renderWorktree(c, { quiet: true });
       }
       state.wtStatus = `${c.id}:${c.status}:${c.worktreePath || ''}`;
+      if (state.tab === 'progress') scheduleProgress();
       if (state.tab === 'btw') {
         const list = $('btwList');
         if (list) list.innerHTML = btwListHtml(c);
@@ -4069,7 +4202,7 @@ api.onLog(({ id, entry }) => {
   } else if (state.selected === id && state.tab === 'chat') {
     const c = card(id);
     if (c) updateChatTab(c);
-  }
+  } else if (state.selected === id && state.tab === 'progress') scheduleProgress();
 });
 api.onFocus((id) => card(id) && select(id));
 
