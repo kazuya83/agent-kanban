@@ -117,7 +117,7 @@ test('WSL のフォルダでは、claude を WSL の中で起動する（Windows
     const file = agents.writeMcpConfig({ id: 'c1' }, 'Ubuntu');
     const conf = JSON.parse(fs.readFileSync(file, 'utf8')).mcpServers.agent_kanban;
     assert.strictEqual(conf.command, '/mnt/c/Users/me/AppData/Local/Programs/Claude Agent Kanban/Claude Agent Kanban.exe');
-    assert.deepStrictEqual(conf.args, ['C:\\app\\resources\\app.asar.unpacked\\src\\permission-mcp.js'], 'スクリプトは Windows のプログラムが読むので Windows の形');
+    assert.deepStrictEqual(conf.args, ['C:\\app\\resources\\app.asar.unpacked\\src\\permission-mcp.js', file], 'スクリプトは Windows のプログラムが読むので Windows の形。env が届かなくても読めるように設定ファイルも渡す');
     assert.match(conf.env.WSLENV, /KANBAN_PORT\/u/);
     assert.match(conf.env.WSLENV, /KANBAN_TOKEN\/u/);
     assert.match(conf.env.WSLENV, /ELECTRON_RUN_AS_NODE\/u/);
