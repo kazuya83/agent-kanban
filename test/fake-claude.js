@@ -162,6 +162,15 @@ async function turn(prompt, sessionId) {
     out({ type: 'result', subtype: 'success', is_error: false, result: 'どちらの方法で進めますか？', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
     return;
   }
+  // ファイルを書き換えるツールを止められていれば、ファイルを変えず、止められたツールと文章で答えるだけ
+  if (args.includes('--disallowedTools')) {
+    const i = args.indexOf('--disallowedTools');
+    const tools = [];
+    for (let j = i + 1; j < args.length && !args[j].startsWith('--'); j++) tools.push(args[j]);
+    out({ type: 'assistant', message: { content: [{ type: 'text', text: `（書き換え禁止: ${tools.join(',')} / 権限モード: ${opt('--permission-mode')}）\n\n\`\`\`sql\nSELECT 1;\n\`\`\`` }] } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: 'SELECT 1;', session_id: sessionId, total_cost_usd: 0, duration_ms: 10 });
+    return;
+  }
   // 計画モードではファイルを変えず、文章で答えるだけ（本物の claude と同じ）
   if (opt('--permission-mode') === 'plan') {
     out({ type: 'assistant', message: { content: [{ type: 'text', text: `（計画モード）${prompt.slice(-200)}` }] } });

@@ -453,6 +453,7 @@ function cardHtml(c) {
       </div>
       <div class="card-title">${c.issue ? `<a class="issue-chip" data-url="${esc(c.issue.url)}" title="Issue を開く">#${c.issue.number}</a> ${esc(c.title.replace(/^#\d+\s*/, ''))}` : esc(c.title)}</div>
       ${orchChipsHtml(c)}
+      ${c.readOnly ? `<div class="card-skill-row"><span class="readonly-chip" title="ソースを変更しないタスク: worktree を作らず、ファイルを書き換えるツールを止めて動かします。確かめたら「完了にする」で完了にします">${icon('lock')}ソース変更なし</span></div>` : ''}
       ${c.skill ? `<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">${icon('zap')}/${esc(c.skill)}</span></div>` : ''}
       ${c.error && c.status === 'failed' ? `<div class="card-err">${esc(c.error)}</div>` : ''}
       ${c.lastMessage && !waiting ? `<div class="card-msg">${esc(plainText(c.lastMessage))}</div>` : ''}
@@ -1758,7 +1759,8 @@ function detailMetaHtml(c) {
       <dt>モデル</dt><dd>${c.model ? esc(c.model) : settingsModel(agentOf(c)) ? `${esc(settingsModel(agentOf(c)))} <span class="muted small">（設定の既定）</span>` : '<span class="muted small">CLI の既定</span>'}</dd>
       ${sessionRowHtml(c)}
       ${chat ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（worktree は作りません）</span></dd>` : ''}
-      ${!chat && isNoGit(c) ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（git で管理していないフォルダ。worktree は作らず、このフォルダで直接動かします）</span></dd>` : ''}
+      ${!chat && c.readOnly ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（ソースを変更しないタスク。worktree は作らず、ファイルを書き換えるツールを止めて、このフォルダで動かします。作ったものはチャットに出ます）</span></dd>` : ''}
+      ${!chat && isNoGit(c) && !c.readOnly ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（git で管理していないフォルダ。worktree は作らず、このフォルダで直接動かします）</span></dd>` : ''}
       ${c.branch ? `<dt>ブランチ</dt><dd>${esc(c.branch)} ← ${esc(c.baseBranch)}</dd>` : ''}
       ${c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''}
       ${c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}${c.prState === 'MERGED' ? '（マージ済み）' : c.prState === 'CLOSED' ? '（閉じられました）' : ''}${c.prState === 'OPEN' && c.prMergeable === 'CONFLICTING' ? ` <span class="badge b-conflict">コンフリクト</span>${c.worktreePath && !c.conflict && (s === 'review' || s === 'failed') ? ' <button class="btn small" data-act="prConflict">解消する</button>' : ''}` : ''}</dd>` : ''}
@@ -1925,7 +1927,8 @@ async function detailAction(e) {
   if (act === 'discard') {
     if (c.status === 'done' || c.afterDone) return toast('完了したタスクは削除できません');
     if (isNoGit(c)) {
-      if (confirm(`「${c.title}」をボードから削除しますか？\nフォルダの中で変えたファイルはそのまま残ります（git で管理していないので、元には戻しません）。`)) {
+      const note = c.readOnly ? 'ソースを変更しないタスクなので、フォルダのファイルはそのままです。' : 'フォルダの中で変えたファイルはそのまま残ります（git で管理していないので、元には戻しません）。';
+      if (confirm(`「${c.title}」をボードから削除しますか？\n${note}`)) {
         await runBusy('削除しています…', () => api.discard(c.id), '削除しました');
         closeDetail();
       }
@@ -2991,6 +2994,7 @@ function newTask(opts = {}) {
      ${modelFieldHtml('n', from && enabledAgents().includes(agentOf(from)) ? from.model || '' : '')}
      <div class="field"><span>エージェントへの指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。画像やファイルは貼り付け・ドラッグ＆ドロップでも添付できます。"></textarea><div id="nAttach" class="attach-bar"></div></div>
      ${sessionFieldHtml('n')}
+     <label class="check" title="SQL を作るだけ・調べるだけなど、ソースコードを変えないタスクにします。worktree とブランチは作らず、リポジトリのフォルダでファイルを書き換えるツールを止めて動かします。作ったものはチャットの返事に出るので、確かめてから「完了にする」を押します"><input type="checkbox" id="nReadOnly" /> ソースを変更しない（調べもの・SQL などの生成だけ）</label>
      <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
      <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">作成（Ctrl/⌘ + Enter）</button></div>`,
     () => {
@@ -3011,7 +3015,7 @@ function newTask(opts = {}) {
       const att = attachField({ box: $('nAttach'), input: $('nPrompt'), drop: $('nPrompt').closest('.field') });
       const submit = async () => {
         const files = att.list();
-        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value, model: readModelField('n', $('nAgent').value), fromChat: from ? from.id : undefined, attachments: files.length ? files : undefined }));
+        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value, model: readModelField('n', $('nAgent').value), fromChat: from ? from.id : undefined, attachments: files.length ? files : undefined, readOnly: $('nReadOnly').checked || undefined }));
         if (id) {
           closeModal();
           selectNew(id);

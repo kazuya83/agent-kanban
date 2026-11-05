@@ -536,6 +536,8 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .skill-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 600; font-size: 12px; font-family: var(--mono); }
 .skill-chip.off { padding-right: 10px; opacity: 0.7; }
 .skill-chip.small { padding: 0 8px; font-size: 11px; }
+.readonly-chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--muted, #888) 18%, transparent); font-size: 11px; font-weight: 600; }
+.readonly-chip svg { width: 11px; height: 11px; }
 .chip-x { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 6px; border-radius: 999px; }
 .chip-x:hover { background: color-mix(in srgb, var(--accent) 25%, transparent); }
 .card-skill { color: var(--accent); font-family: var(--mono); }
