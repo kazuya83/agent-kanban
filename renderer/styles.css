@@ -1032,6 +1032,8 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .sub-modal .d-meta { margin: 8px 0 14px; }
 .sub-modal .pg-sec-head { margin: 12px 0 6px; }
 .sub-modal .md { font-size: 13px; }
+.sub-modal .sub-edit-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; }
+.sub-modal .sub-edit-prompt { width: 100%; box-sizing: border-box; font-size: 13px; resize: vertical; }
 .sb-item.rs-done .rf-dot { background: var(--ok); color: #06210f; }
 .sb-item.rs-running .rf-dot { animation: rf-pulse 1.4s ease-in-out infinite; }
 .sb-item.rs-skipped, .sb-item.rs-closed { opacity: 0.7; }

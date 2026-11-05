@@ -1000,6 +1000,7 @@ app.whenReady().then(async () => {
   handle('subtasks:startOne', ({ id, key }) => agents.startSubtaskOnly(id, key));
   handle('subtasks:move', ({ id, key, to }) => agents.moveSubtask(id, key, to));
   handle('subtasks:auto', (id) => agents.autoRunSubtasks(id));
+  handle('subtasks:edit', ({ id, key, title, prompt }) => agents.editSubtask(id, key, { title, prompt }));
   handle('card:move', ({ id, to }) => agents.moveCard(id, to));
   handle('compete:compare', (id) => agents.compareCompetitors(id).id);
   handle('card:suggestSkills', ({ id }) => agents.suggestSkills(id));

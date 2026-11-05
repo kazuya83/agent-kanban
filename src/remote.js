@@ -114,6 +114,7 @@ const PROXY_CHANNELS = new Set([
   'subtasks:startOne',
   'subtasks:move',
   'subtasks:auto',
+  'subtasks:edit',
   'card:move',
   'card:suggestSkills',
   'notifications:read',

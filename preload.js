@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('api', {
   startSubtaskOnly: (id, key) => call('subtasks:startOne', { id, key }),
   moveSubtask: (id, key, to) => call('subtasks:move', { id, key, to }),
   autoRunSubtasks: (id) => call('subtasks:auto', id),
+  editSubtask: (id, key, p) => call('subtasks:edit', { ...(p || {}), id, key }),
   moveCard: (id, to) => call('card:move', { id, to }),
   compareCompetitors: (id) => call('compete:compare', id),
   suggestSkills: (id) => call('card:suggestSkills', { id }),
