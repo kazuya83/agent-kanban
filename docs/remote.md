@@ -181,6 +181,7 @@ ssh -i ~/.ssh/agent-kanban_ed25519 <ユーザー名>@<ホストの IP> exit
 | ホストの鍵が以前と違う | ホストを入れ直したなどで鍵が変わりました。クライアントで `ssh-keygen -R <IP>` を実行してから、もう一度つなぎます |
 | SSH はつながりましたが、ホストの Agent Kanban に届きませんでした | ホストで「ホストを開始」していないか、待ち受けポートが違います |
 | ポート転送を断られました | ホストの `sshd_config`（Mac は `/etc/ssh/sshd_config`、Windows は `C:\ProgramData\ssh\sshd_config`）で `AllowTcpForwarding no` になっています |
+| ホストの Agent Kanban の版が古いため、次の設定を保存できませんでした | ホストのアプリが古く、カスタムエージェントや Pipeline のフローチャートなどの新しい設定を知りません。ホストの Agent Kanban を新しい版に更新して（設定の「アプリの更新」）、もう一度保存します |
 | ssh コマンドが見つかりません | Windows は「OpenSSH クライアント」を追加します。設定の「ssh コマンド」にフルパスを入れることもできます |
 
 ## そのほか

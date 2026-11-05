@@ -24,6 +24,19 @@
     return id;
   }
 
+  // 名前が空の工程で、カスタムエージェントを選んでいれば、その名前を工程の名前にする（変えたら true）
+  function fillCustomLabels(flow, customs) {
+    let changed = false;
+    for (const n of (flow && flow.nodes) || []) {
+      if (n.type !== 'step' || !n.custom || String(n.label || '').trim()) continue;
+      const ca = (customs || []).find((x) => x && x.id === n.custom);
+      if (!ca || !ca.name) continue;
+      n.label = String(ca.name).slice(0, 30);
+      changed = true;
+    }
+    return changed;
+  }
+
   /**
    * @param {{ flow: object, agents: [string, string][], enabled: string[], customAgents?: object[], modelSuggest?: Record<string, string[]>, defaultAgent: string, onSave: (flow: object) => Promise<boolean>|boolean }} opts
    *   agents: [[id, 表示名]]（すべてのエージェント）、enabled: 使うエージェント、customAgents: カスタムエージェント（{ id, name, icon, agent, model }）
@@ -197,7 +210,7 @@
             ${n.custom
               ? `<small class="muted fe-ca-note">${ca ? `カスタムエージェント「${esc(ca.name)}」のモデル（${esc(ca.model || '設定の既定')}）とプロフィールで動かします。${ca.description ? esc(ca.description) : ''}` : 'このカスタムエージェントは見つかりません。選び直してください。'}</small>`
               : `<label class="field"><span>モデル（空なら設定の既定）</span><input id="feModel" list="feModelList" autocomplete="off" spellcheck="false" maxlength="100" placeholder="例: ${esc(((opts.modelSuggest || {})[n.agent] || [])[0] || '')}" value="${esc(n.model || '')}" /><datalist id="feModelList">${sugg}</datalist></label>`}
-            <label class="field"><span>工程の名前</span><input id="feLabel" maxlength="30" placeholder="例: 実装" value="${esc(n.label || '')}" /></label>
+            <label class="field"><span>工程の名前</span><input id="feLabel" maxlength="30" placeholder="${ca ? esc(ca.name) : '例: 実装'}" value="${esc(n.label || '')}" /></label>
             <label class="field"><span>担当の説明</span><textarea id="feInst" rows="6" placeholder="例: 前の工程の変更をレビューして直す">${esc(n.instruction || '')}</textarea></label>`;
           const j = FM.judgeOf(flow, n.id);
           if (j) body += `<small class="muted">この工程のあとは分岐「${esc(j.node.label || '')}」です。エージェントに、返事の最後へ判定の値（${j.options.map((o) => `<code>${esc(o.value)}</code>`).join(' / ') || 'まだありません'}）を書いてもらいます。</small>`;
@@ -232,9 +245,15 @@
           agentSel.onchange = () => {
             const v = agentSel.value;
             if (v.startsWith('custom:')) {
+              const prev = n.custom ? customOf(n.custom) : null;
               n.custom = v.slice(7);
               const ca = customOf(n.custom);
-              if (ca) n.agent = ca.agent;
+              if (ca) {
+                n.agent = ca.agent;
+                // 工程の名前が空（または前のカスタムエージェントの名前のまま）なら、カスタムエージェントの名前にする
+                const label = String(n.label || '').trim();
+                if (!label || (prev && label === prev.name)) n.label = ca.name;
+              }
               delete n.model;
             } else {
               delete n.custom;
@@ -460,6 +479,8 @@
     }
     box.querySelector('#feCancel').onclick = cancel;
     box.querySelector('#feSave').onclick = async () => {
+      // 名前を入れていないカスタムエージェントの工程は、カスタムエージェントの名前にする
+      fillCustomLabels(flow, customs);
       const clean = FM.cleanFlow(flow);
       const errs = FM.validateFlow(clean);
       if (errs.length) return;
@@ -474,5 +495,5 @@
     draw();
   }
 
-  root.FlowEditor = { open };
+  root.FlowEditor = { open, fillCustomLabels };
 })(typeof self !== 'undefined' ? self : this);
