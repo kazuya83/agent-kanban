@@ -1022,7 +1022,16 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .sb-items { display: flex; flex-direction: column; gap: 6px; }
 .sb-items .col-empty { padding: 8px 0; }
 .sb-item { border: 1px solid var(--line); border-left: 3px solid var(--rs, var(--line)); border-radius: 6px; background: var(--panel); padding: 6px 8px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+.sb-item { cursor: pointer; }
+.sb-item:hover { border-color: var(--accent); }
 .sb-item[draggable="true"] { cursor: grab; }
+/* サブタスクの詳細（カードがないとき）のモーダル */
+.sub-modal .d-title-row { margin-bottom: 4px; }
+.sub-modal .d-title { font-size: 16px; white-space: normal; }
+.sub-modal .rf-dot { width: 22px; height: 22px; font-size: 11px; }
+.sub-modal .d-meta { margin: 8px 0 14px; }
+.sub-modal .pg-sec-head { margin: 12px 0 6px; }
+.sub-modal .md { font-size: 13px; }
 .sb-item.rs-done .rf-dot { background: var(--ok); color: #06210f; }
 .sb-item.rs-running .rf-dot { animation: rf-pulse 1.4s ease-in-out infinite; }
 .sb-item.rs-skipped, .sb-item.rs-closed { opacity: 0.7; }

@@ -895,12 +895,14 @@ async function selectNew(id) {
   if (card(id)) select(id);
 }
 
-async function select(id) {
+async function select(id, { subFrom = null } = {}) {
   state.selected = id;
   state.headSig = '';
+  // サブタスクを親の進捗から開いたときは、閉じると親に戻る
+  state.subFrom = subFrom && card(subFrom) ? subFrom : null;
   if (state.chatListOpen) closeModal();
-  // 会話はボードの横ではなく、画面の中央にモーダルで開く
-  const chatModal = isChat(card(id));
+  // 会話と、親の進捗から開いたサブタスクは、ボードの横ではなく、画面の中央にモーダルで開く
+  const chatModal = isChat(card(id)) || !!state.subFrom;
   $('detail').classList.toggle('as-modal', chatModal);
   $('detailBackdrop').classList.toggle('hidden', !chatModal);
   $('detail').classList.remove('hidden');
@@ -938,10 +940,19 @@ function setTab(tab) {
 
 function closeDetail() {
   state.selected = null;
+  state.subFrom = null;
   $('detail').classList.add('hidden');
   $('detail').classList.remove('as-modal');
   $('detailBackdrop').classList.add('hidden');
   renderBoard();
+}
+// ✕・背景・Esc で閉じる: 親の進捗から開いたサブタスクなら、親のタスクの詳細（進捗タブ）に戻る
+function closeDetailOrBack() {
+  const back = state.subFrom && card(state.subFrom) ? state.subFrom : null;
+  if (!back) return closeDetail();
+  state.subFrom = null;
+  setTab('progress');
+  select(back);
 }
 
 // Pipelineの工程の状態（ワークフロー表示用）
@@ -1238,9 +1249,7 @@ function subtaskProgressHtml(c) {
     : '';
   const parts = [`<section class="pg-sec"><div class="pg-sec-head"><b>${icon('branch')}サブタスク</b> <span class="muted small">${n.done}/${n.total - n.skipped} 完了${n.merged !== n.done ? `（マージ ${n.merged}）` : ''}${n.skipped ? `・破棄 ${n.skipped}` : ''} ・ ${esc(subPhaseText(c))} ・ ${st.merge === 'review' ? '確かめてからマージ' : '自動でマージ'}</span>${auto}</div>
     <div class="pg-bar" title="${pct}%"><span style="width:${pct}%"></span></div>
-    ${subBoardHtml(c)}
-    <small class="muted">カードをドラッグして状態を変えられます（未着手 → 作業中で、そのサブタスクだけ開始）。サブタスクだけ開始したものは、終わるとレビューで止まるので、「取り込む」で親のブランチにマージしてから完了へ動かします。</small></section>`];
-  for (const k of subKids(c)) if (k.todos && k.todos.items && k.todos.items.length) parts.push(todoListHtml(k.todos, `サブタスク「${esc(c.subtasks.items.find((x) => x.cardId === k.id).title)}」の TODO`));
+    ${subBoardHtml(c)}</section>`];
   return parts.join('');
 }
 // 進捗タブ: サブタスクのかんばん（未着手 / 作業中 / レビュー / 完了）
@@ -1262,7 +1271,7 @@ function subBoardHtml(c) {
       else if (x.agent) info.push(`<span class="rf-agent">${esc(agentShort(x.agent))}</span>`);
       const cost = k ? k.costUsd : x.costUsd;
       if (cost) info.push(`<span class="muted small">$${cost.toFixed(3)}</span>`);
-      const name = k ? `<a href="#" data-open-card="${esc(k.id)}">${esc(x.title)}</a>` : esc(x.title);
+      const name = esc(x.title);
       const acts = [];
       if (x.state === 'pending' && startable) acts.push(`<button class="btn small" data-sact="startOne" data-key="${esc(x.key)}" type="button" title="ほかのサブタスクは動かさずに、このサブタスクだけを開始します">${icon('play')}開始</button>`);
       if (k && subtaskNeedsCheck(k)) acts.push(`<button class="btn small primary" data-sact="approve" data-sid="${esc(k.id)}" type="button" title="差分を確かめたら、親のタスクのブランチに取り込みます">${icon('merge')}取り込む</button>`);
@@ -1270,7 +1279,7 @@ function subBoardHtml(c) {
       const rkey = `${c.id}:sub:${x.key}`;
       const report = x.report && !k ? `<details class="rf-report" data-rkey="${esc(rkey)}" ${state.relayOpen.has(rkey) ? 'open' : ''}><summary>サブタスクの報告</summary><div class="rf-report-body">${esc(x.report)}</div></details>` : '';
       const drag = SUB_COLUMNS.some((to) => canDropSub(c, x, to.key));
-      return `<div class="sb-item rs-${s}" draggable="${drag}" data-key="${esc(x.key)}"><div class="sb-head"><span class="rf-dot" title="${esc(label)}">${mark}</span><b>${name}</b></div><div class="sb-info"><span class="rf-state">${esc(label)}</span>${info.join('')}</div>${msg}${acts.length ? `<div class="sb-acts">${acts.join('')}</div>` : ''}${report}</div>`;
+      return `<div class="sb-item rs-${s}" draggable="${drag}" data-key="${esc(x.key)}" title="クリックで詳細を開きます${drag ? '（ドラッグで状態を変えられます）' : ''}"><div class="sb-head"><span class="rf-dot" title="${esc(label)}">${mark}</span><b>${name}</b></div><div class="sb-info"><span class="rf-state">${esc(label)}</span>${info.join('')}</div>${msg}${acts.length ? `<div class="sb-acts">${acts.join('')}</div>` : ''}${report}</div>`;
     });
     return `<div class="sb-col" data-scol="${col.key}"><div class="sb-col-head"><span>${col.label}</span><span class="count">${items.length}</span></div><div class="sb-items">${rows.join('') || '<div class="col-empty">なし</div>'}</div></div>`;
   });
@@ -1312,6 +1321,51 @@ function bindSubBoard(c, view) {
     dragKey = null;
     moveSubTo(card(c.id), itemOf(key), col.dataset.scol);
   });
+  // カードをクリックすると、サブタスクの詳細をモーダルで開く（ボタン・リンク・報告の開け閉めは除く）
+  board.addEventListener('click', (e) => {
+    if (e.target.closest('button, a, details, summary, input, textarea, select')) return;
+    const el = e.target.closest('.sb-item');
+    if (!el) return;
+    const p = card(c.id);
+    const x = itemOf(el.dataset.key);
+    if (p && x) openSubtaskDetail(p, x);
+  });
+}
+// サブタスクの詳細: カードがある（作業中・レビュー）ときは、タスクの詳細と同じものをモーダルで開く。
+// 閉じると親のタスクの詳細（進捗タブ）に戻る。カードがない（未着手・完了）ときは、やることと報告をモーダルで見せる
+function openSubtaskDetail(p, x) {
+  const k = x.cardId && x.state === 'running' ? card(x.cardId) : null;
+  if (k) return select(k.id, { subFrom: p.id });
+  const [mark, label] = subStateInfo(subItemState(p, x));
+  const title = new Map(p.subtasks.items.map((y) => [y.key, y.title]));
+  const startable = x.state === 'pending' && p.status !== 'running' && p.status !== 'queued' && p.status !== 'done' && !p.conflict;
+  const rows = [`<dt>状態</dt><dd><span class="rf-state">${esc(label)}</span></dd>`];
+  if (x.issue) rows.push(`<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(x.issue.url)}">#${x.issue.number}</a> ${esc(x.issue.title || '')}</dd>`);
+  if (x.after && x.after.length) rows.push(`<dt>順番（目安）</dt><dd>${x.after.map((a) => `「${esc(title.get(a) || a)}」`).join('・')} のあと</dd>`);
+  if (x.agent) rows.push(`<dt>エージェント</dt><dd>${esc(agentLabel(x.agent))}</dd>`);
+  if (x.branch) rows.push(`<dt>ブランチ</dt><dd>${esc(x.branch)}</dd>`);
+  if (x.merged) rows.push(`<dt>マージ</dt><dd>親のブランチ ${esc(p.branch || '')} にマージ済み${x.mergedAt ? `（${hhmm(x.mergedAt)}）` : ''}</dd>`);
+  if (x.costUsd) rows.push(`<dt>コスト</dt><dd>$${x.costUsd.toFixed(3)}</dd>`);
+  openModal(
+    `<div class="sub-modal rs-${subItemState(p, x)}">
+      <div class="d-title-row"><span class="rf-dot" title="${esc(label)}">${mark}</span><h2 class="d-title">${esc(x.title)}</h2><button class="icon" id="subModalClose" title="閉じる">✕</button></div>
+      <p class="muted small">「${esc(p.title)}」のサブタスク${x.state === 'pending' ? 'です。まだ始めていません' : 'です。作業は終わっていて、サブタスクのカードは片付けました'}</p>
+      <dl class="d-meta">${rows.join('')}</dl>
+      <div class="pg-sec-head"><b>やること</b></div>
+      ${x.prompt ? mdHtml(x.prompt) : '<p class="muted small">（書かれていません）</p>'}
+      ${x.report ? `<div class="pg-sec-head"><b>サブタスクの報告</b></div>${mdHtml(x.report)}` : ''}
+      <div class="modal-actions">${startable ? `<button class="btn primary" id="subModalStart" title="ほかのサブタスクは動かさずに、このサブタスクだけを開始します">${icon('play')}このサブタスクだけ開始</button>` : ''}<button class="btn ghost" id="subModalOk">閉じる</button></div>
+    </div>`,
+    () => {
+      $('subModalClose').onclick = closeModal;
+      $('subModalOk').onclick = closeModal;
+      $('modalBox').querySelectorAll('.issue-chip').forEach((a) => (a.onclick = () => run(() => api.openExternal(a.dataset.url))));
+      if ($('subModalStart')) $('subModalStart').onclick = () => {
+        closeModal();
+        runBusy(`サブタスク「${x.title}」を開始しています…`, () => api.startSubtaskOnly(p.id, x.key), 'サブタスクを開始しました');
+      };
+    },
+  );
 }
 async function moveSubTo(c, x, to) {
   if (!canDropSub(c, x, to)) return;
@@ -1619,7 +1673,7 @@ function competeBoxHtml(c) {
 
 function renderDetailHead() {
   const c = card(state.selected);
-  if (!c) return closeDetail();
+  if (!c) return closeDetailOrBack();
   const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch]), relayKidsSig(c), c.subtasks, c.subtaskProposal, c.subtaskOf, subKidsSig(c)]);
   if (sig === state.headSig) return;
   state.headSig = sig;
@@ -1656,7 +1710,7 @@ function renderDetailHead() {
   // 上の段はボタンだけ（1行・高さは固定）。Pipeline・サブタスクの進み具合と競争は「進捗」タブ、
   // 中断・エラー・コンフリクト・サブタスクの提案は「チャット」タブの最後に出す
   $('detailHead').innerHTML = `<div class="d-actions">${btns.join('')}</div>`;
-  $('closeDetail').onclick = closeDetail;
+  $('closeDetail').onclick = closeDetailOrBack;
   if (state.tab === 'info') renderInfo(c);
   drawLogActions(c);
   const canFollow = canSendFollow(c);
@@ -2727,7 +2781,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!$('skillPicker').classList.contains('hidden')) $('skillPicker').classList.add('hidden');
   else if (!$('modal').classList.contains('hidden')) closeModal();
-  else if (state.selected) closeDetail();
+  else if (state.selected) closeDetailOrBack();
 });
 
 // エージェントの注意書き（Claude Code 以外は、CLI の作りの都合でできないことがある）
@@ -4585,7 +4639,7 @@ async function repoSetupModal(mode, distros = []) {
 
 $('newBtn').onclick = () => newTask();
 $('chatBtn').onclick = openChats;
-$('detailBackdrop').addEventListener('mousedown', closeDetail);
+$('detailBackdrop').addEventListener('mousedown', closeDetailOrBack);
 $('settingsBtn').onclick = openSettings;
 $('sessionsBtn').onclick = openSessionManager;
 $('rcBtn').onclick = openRemoteSettings;
