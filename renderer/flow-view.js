@@ -84,8 +84,9 @@
    * フローチャートの SVG
    * @param {object} flow
    * @param {Map<string, string>} states nodeStates() の結果
-   * @param {{ marks?: Record<string, string>, labels?: Record<string, string>, stepInfo?: (n: object) => { title?: string, sub?: string, tip?: string }, counts?: Record<string, number>, current?: string|null }} o
+   * @param {{ marks?: Record<string, string>, labels?: Record<string, string>, stepInfo?: (n: object) => { title?: string, sub?: string, tip?: string }, counts?: Record<string, number>, current?: string|null, zoom?: number|null }} o
    *   marks / labels: 状態ごとの印（✓ など）と名前、stepInfo: 工程のノードに出す名前・エージェント、current: 今の工程のノード
+   *   zoom: 倍率（省くと、枠の幅に収まるように縮める）
    */
   function html(flow, states, o = {}) {
     const nodes = ((flow && flow.nodes) || []).filter((n) => Number.isFinite(n.x) && Number.isFinite(n.y));
@@ -144,7 +145,9 @@
       })
       .join('');
 
-    return `<svg class="fv" viewBox="0 0 ${vw} ${vh}" width="${vw}" height="${vh}" style="max-width:100%;height:auto" role="img" aria-label="Pipelineのフローチャート">
+    const z = Number(o.zoom);
+    const dims = Number.isFinite(z) && z > 0 ? `width="${Math.round(vw * z)}" height="${Math.round(vh * z)}"` : `width="${vw}" height="${vh}" style="max-width:100%;height:auto"`;
+    return `<svg class="fv" viewBox="0 0 ${vw} ${vh}" ${dims} role="img" aria-label="Pipelineのフローチャート">
       <defs>
         <marker id="fvArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fv-arrow"/></marker>
         <marker id="fvArrowDone" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fv-arrow done"/></marker>
