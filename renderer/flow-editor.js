@@ -4,6 +4,9 @@
 // - 形は FlowModel（flow-model.js）で確かめ、直すところがあるうちは保存できない
 (function (root) {
   const FM = root.FlowModel;
+  const Z = root.Zoom;
+  // 拡大・縮小の倍率（開き直しても、前の倍率で開く）
+  let lastZoom = 1;
   const W = { start: 120, step: 200, if: 170, parallel: 160, join: 160, end: 120 };
   const H = { start: 40, step: 64, if: 56, parallel: 48, join: 48, end: 40 };
   const ADD = [
@@ -69,9 +72,9 @@
         <h2>Pipelineのフローチャート</h2>
         <div class="fe-tools">${ADD.map(([t, l, tip]) => `<button class="btn small fe-add" data-type="${t}" type="button" title="${esc(tip)}">＋ ${esc(l)}</button>`).join('')}</div>
       </div>
-      <p class="muted small fe-help">ノードはドラッグで動かせます。ノードの下の丸（出口）から別のノードへドラッグすると、線をつなげます。前のノードへ戻る線を引くとループになり、戻る上限を決められます。ノードや線を選んで Delete キーで消せます。</p>
+      <p class="muted small fe-help">ノードはドラッグで動かせます。右上のボタンか、⌘（Ctrl）を押しながらのスクロール・ピンチで拡大・縮小できます。ノードの下の丸（出口）から別のノードへドラッグすると、線をつなげます。前のノードへ戻る線を引くとループになり、戻る上限を決められます。ノードや線を選んで Delete キーで消せます。</p>
       <div class="fe-main">
-        <div class="fe-canvas" id="feCanvas"><div class="fe-inner" id="feInner"><svg class="fe-svg" id="feSvg"></svg></div></div>
+        <div class="fe-canvas-wrap"><div class="fe-canvas" id="feCanvas"><div class="fe-sizer" id="feSizer"><div class="fe-inner" id="feInner"><svg class="fe-svg" id="feSvg"></svg></div></div></div><div class="zoom-host" id="feZoom"></div></div>
         <div class="fe-side" id="feSide"></div>
       </div>
       <div class="fe-errors" id="feErrors"></div>
@@ -81,6 +84,10 @@
     const svg = box.querySelector('#feSvg');
     const canvas = box.querySelector('#feCanvas');
     const side = box.querySelector('#feSide');
+    const sizer = box.querySelector('#feSizer');
+    const zoomHost = box.querySelector('#feZoom');
+    let zoom = Z.clamp(lastZoom);
+    let area = [900, 560]; // 中身の大きさ（倍率をかける前）
 
     const node = (id) => flow.nodes.find((n) => n.id === id);
     const size = (n) => [W[n.type] || 160, H[n.type] || 48];
@@ -150,8 +157,8 @@
       // キャンバスの大きさは、いちばん遠いノードに合わせて広げる
       const maxX = Math.max(900, ...flow.nodes.map((n) => n.x + size(n)[0] + 260));
       const maxY = Math.max(560, ...flow.nodes.map((n) => n.y + size(n)[1] + 160));
-      inner.style.width = `${maxX}px`;
-      inner.style.height = `${maxY}px`;
+      area = [maxX, maxY];
+      applyZoom();
       svg.setAttribute('width', maxX);
       svg.setAttribute('height', maxY);
       const paths = flow.edges
@@ -173,6 +180,47 @@
       if (!keepSide) drawSide(back);
       drawErrors();
     }
+    // ---------- 拡大・縮小 ----------
+    // 中身は倍率をかける前の大きさで描き、transform で縮める。スクロールの範囲は fe-sizer の大きさで決める
+    function applyZoom() {
+      // 縮めたときも、見えている枠いっぱいを中身にする（空いたところを押して選ぶのをやめられるように）
+      const w = Math.max(area[0], Math.floor(canvas.clientWidth / zoom));
+      const h = Math.max(area[1], Math.floor(canvas.clientHeight / zoom));
+      inner.style.width = `${w}px`;
+      inner.style.height = `${h}px`;
+      inner.style.transform = zoom === 1 ? '' : `scale(${zoom})`;
+      sizer.style.width = `${Math.round(w * zoom)}px`;
+      sizer.style.height = `${Math.round(h * zoom)}px`;
+      zoomHost.innerHTML = Z.toolbarHtml(zoom);
+    }
+    // at: 枠の中で動かさない位置（省くと枠のまん中）
+    function setZoom(z, at) {
+      const z1 = Z.clamp(z);
+      if (z1 === zoom) return;
+      const p = at || { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 };
+      const s = Z.anchor(canvas.scrollLeft, canvas.scrollTop, p.x, p.y, zoom, z1);
+      zoom = lastZoom = z1;
+      applyZoom();
+      canvas.scrollLeft = s.left;
+      canvas.scrollTop = s.top;
+    }
+    // すべてのノードが見える大きさにする
+    function fitZoom() {
+      const w = Math.max(...flow.nodes.map((n) => n.x + size(n)[0])) + 80;
+      const h = Math.max(...flow.nodes.map((n) => n.y + size(n)[1])) + 40;
+      zoom = lastZoom = Z.fit(w, h, canvas.clientWidth, canvas.clientHeight);
+      applyZoom();
+      canvas.scrollLeft = 0;
+      canvas.scrollTop = 0;
+    }
+    zoomHost.onclick = (ev) => {
+      const b = ev.target.closest('[data-zoom]');
+      if (!b) return;
+      const k = b.dataset.zoom;
+      if (k === 'fit') fitZoom();
+      else setZoom(k === 'reset' ? 1 : Z.step(zoom, k === 'in' ? 1 : -1));
+    };
+    Z.bindWheel(canvas, { get: () => zoom, set: setZoom });
     function drawErrors() {
       const errs = FM.validateFlow(FM.cleanFlow(flow) || flow);
       box.querySelector('#feErrors').innerHTML = errs.length
@@ -354,7 +402,7 @@
     let drag = null;
     const pt = (ev) => {
       const r = inner.getBoundingClientRect();
-      return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+      return { x: (ev.clientX - r.left) / zoom, y: (ev.clientY - r.top) / zoom };
     };
     inner.onmousedown = (ev) => {
       if (ev.button !== 0) return;
@@ -451,6 +499,9 @@
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+    // 窓の大きさが変わったら、枠いっぱいの中身の大きさを合わせ直す
+    const onResize = () => applyZoom();
+    window.addEventListener('resize', onResize);
 
     // ---------- キー・閉じる・保存 ----------
     const onKey = (ev) => {
@@ -471,6 +522,7 @@
       box.innerHTML = '';
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('resize', onResize);
       document.removeEventListener('keydown', onKey, true);
     }
     function cancel() {

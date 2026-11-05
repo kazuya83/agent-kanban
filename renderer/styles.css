@@ -858,8 +858,10 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .fe-tools { display: flex; gap: 6px; flex-wrap: wrap; }
 .fe-help { margin: 6px 0 8px; }
 .fe-main { flex: 1; min-height: 0; display: flex; gap: 10px; }
+.fe-canvas-wrap { flex: 1; min-width: 0; position: relative; display: flex; }
 .fe-canvas { flex: 1; min-width: 0; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background-color: var(--bg); background-image: radial-gradient(color-mix(in srgb, var(--muted) 28%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
-.fe-inner { position: relative; user-select: none; }
+.fe-sizer { position: relative; overflow: hidden; }
+.fe-inner { position: relative; user-select: none; transform-origin: 0 0; }
 .fe-svg { position: absolute; left: 0; top: 0; overflow: visible; }
 .fe-edge { cursor: pointer; }
 .fe-edge .fe-hit { fill: none; stroke: transparent; stroke-width: 14; }
@@ -955,6 +957,16 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 /* 進捗タブ: Pipelineのフローチャート（読み取り専用） */
 .pg-chart { overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px; background-color: var(--bg); background-image: radial-gradient(color-mix(in srgb, var(--muted) 22%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
 .fv { display: block; margin: 0 auto; }
+.pg-chart-wrap { position: relative; }
+.pg-chart-wrap .pg-chart { max-height: 70vh; }
+
+/* フローチャートの拡大・縮小のボタン（編集画面・進捗タブ） */
+.zoom-host { position: absolute; top: 8px; right: 14px; z-index: 2; }
+.zoom-bar { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18); }
+.zoom-btn { min-width: 26px; height: 24px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font-size: 12px; cursor: pointer; }
+.zoom-btn:hover:not(:disabled) { background: var(--panel-2); }
+.zoom-btn:disabled { opacity: 0.4; cursor: default; }
+.zoom-pct { min-width: 48px; font-variant-numeric: tabular-nums; }
 .fv-edge path { fill: none; stroke: color-mix(in srgb, var(--muted) 60%, transparent); stroke-width: 2; }
 .fv-edge.back path { stroke-dasharray: 6 4; }
 .fv-edge.e-done path { stroke: var(--ok); stroke-width: 2.5; }
