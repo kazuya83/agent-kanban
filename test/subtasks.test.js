@@ -253,7 +253,8 @@ test('サブタスク: 自動で進めているときも、まだのサブタス
   await waitFor(() => k1.status === 'review');
   await agents.approveSubtask(k1.id);
   // 自動で始めたものは、取り込んだら完了になる
-  await waitFor(() => p.subtasks.items[0].state === 'merged');
+  // （先に取り込んだ s2 とコンフリクトしたときは、親のエージェントが解消し終えてレビューに戻るまで待つ）
+  await waitFor(() => p.subtasks.items[0].state === 'merged' && p.status === 'review');
   assert.strictEqual(p.subtasks.phase, 'run', '個別に開始したものが完了になるまでは、仕上げない');
   await agents.moveSubtask(p.id, 's2', 'done');
   await waitFor(() => p.subtasks.phase === 'done' && p.status === 'review');
