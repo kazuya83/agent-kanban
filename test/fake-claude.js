@@ -169,7 +169,7 @@ async function turn(prompt, sessionId) {
     return;
   }
   // [same-file] があれば、同じファイル（shared.txt）に書く（サブタスク同士のコンフリクトを起こす）
-  const file = prompt.includes('[same-file]') ? 'shared.txt' : `out-${Date.now()}.txt`;
+  const file = prompt.includes('[same-file]') ? 'shared.txt' : `out-${Date.now()}-${process.pid}.txt`; // 同じミリ秒に動いても重ならないように
   const input = { command: `echo > ${file}` };
   out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input }] } });
   const cfg = opt('--mcp-config');
