@@ -1669,6 +1669,30 @@ class AgentManager extends EventEmitter {
     }
   }
 
+  /**
+   * サブタスクの名前とやることを変える（サブタスクの詳細のモーダルから）。まだ始めていないサブタスクだけ変えられる
+   * （開始すると、ここで変えた名前とやることでサブタスクのカードを作る）
+   */
+  editSubtask(id, key, { title, prompt } = {}) {
+    const p = this.must(id);
+    const st = p.subtasks;
+    if (!st) throw new Error('このタスクにはサブタスクがありません');
+    const item = st.items.find((x) => x.key === key);
+    if (!item) throw new Error('サブタスクが見つかりません');
+    if (item.state !== 'pending') throw new Error('まだ始めていないサブタスクだけ変えられます');
+    const t = truncate(String(title ?? '').trim(), 120);
+    const body = truncate(String(prompt ?? '').trim(), 20000);
+    if (!t) throw new Error('名前を入れてください');
+    if (!body) throw new Error('やることを入れてください');
+    if (t === item.title && body === item.prompt) return item;
+    const before = item.title;
+    item.title = t;
+    item.prompt = body;
+    this.log(p, 'user', before === t ? `サブタスク「${t}」の内容を変えました` : `サブタスク「${before}」を「${t}」に変えました`);
+    this.changed(p);
+    return item;
+  }
+
   // サブタスクだけ開始していたタスクで、残りのサブタスクを自動で（順番どおりに）進める
   async autoRunSubtasks(id) {
     const p = this.must(id);

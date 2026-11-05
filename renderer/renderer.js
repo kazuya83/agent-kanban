@@ -1333,9 +1333,12 @@ function bindSubBoard(c, view) {
 }
 // サブタスクの詳細: カードがある（作業中・レビュー）ときは、タスクの詳細と同じものをモーダルで開く。
 // 閉じると親のタスクの詳細（進捗タブ）に戻る。カードがない（未着手・完了）ときは、やることと報告をモーダルで見せる
-function openSubtaskDetail(p, x) {
+// 未着手のサブタスクは「編集」で名前とやることを変えられる（editing: true で入力欄を出す）
+function openSubtaskDetail(p, x, { editing = false } = {}) {
   const k = x.cardId && x.state === 'running' ? card(x.cardId) : null;
   if (k) return select(k.id, { subFrom: p.id });
+  const editable = x.state === 'pending';
+  if (!editable) editing = false;
   const [mark, label] = subStateInfo(subItemState(p, x));
   const title = new Map(p.subtasks.items.map((y) => [y.key, y.title]));
   const startable = x.state === 'pending' && p.status !== 'running' && p.status !== 'queued' && p.status !== 'done' && !p.conflict;
@@ -1348,17 +1351,33 @@ function openSubtaskDetail(p, x) {
   if (x.costUsd) rows.push(`<dt>コスト</dt><dd>$${x.costUsd.toFixed(3)}</dd>`);
   openModal(
     `<div class="sub-modal rs-${subItemState(p, x)}">
-      <div class="d-title-row"><span class="rf-dot" title="${esc(label)}">${mark}</span><h2 class="d-title">${esc(x.title)}</h2><button class="icon" id="subModalClose" title="閉じる">✕</button></div>
+      <div class="d-title-row"><span class="rf-dot" title="${esc(label)}">${mark}</span>${editing ? `<input id="subEditTitle" class="sub-edit-title" placeholder="サブタスクの名前" value="${esc(x.title)}" />` : `<h2 class="d-title">${esc(x.title)}</h2>`}<button class="icon" id="subModalClose" title="閉じる">✕</button></div>
       <p class="muted small">「${esc(p.title)}」のサブタスク${x.state === 'pending' ? 'です。まだ始めていません' : 'です。作業は終わっていて、サブタスクのカードは片付けました'}</p>
       <dl class="d-meta">${rows.join('')}</dl>
       <div class="pg-sec-head"><b>やること</b></div>
-      ${x.prompt ? mdHtml(x.prompt) : '<p class="muted small">（書かれていません）</p>'}
-      ${x.report ? `<div class="pg-sec-head"><b>サブタスクの報告</b></div>${mdHtml(x.report)}` : ''}
-      <div class="modal-actions">${startable ? `<button class="btn primary" id="subModalStart" title="ほかのサブタスクは動かさずに、このサブタスクだけを開始します">${icon('play')}このサブタスクだけ開始</button>` : ''}<button class="btn ghost" id="subModalOk">閉じる</button></div>
+      ${editing ? `<textarea id="subEditPrompt" class="sub-edit-prompt" rows="14" placeholder="このサブタスクでやること（Markdown で書けます）">${esc(x.prompt || '')}</textarea>` : x.prompt ? mdHtml(x.prompt) : '<p class="muted small">（書かれていません）</p>'}
+      ${x.report && !editing ? `<div class="pg-sec-head"><b>サブタスクの報告</b></div>${mdHtml(x.report)}` : ''}
+      <div class="modal-actions">${
+        editing
+          ? `<button class="btn primary" id="subModalSave">保存</button><button class="btn ghost" id="subModalCancel">やめる</button>`
+          : `${editable ? `<button class="btn" id="subModalEdit" title="サブタスクの名前とやることを変えます">${icon('note')}編集</button>` : ''}${startable ? `<button class="btn primary" id="subModalStart" title="ほかのサブタスクは動かさずに、このサブタスクだけを開始します">${icon('play')}このサブタスクだけ開始</button>` : ''}<button class="btn ghost" id="subModalOk">閉じる</button>`
+      }</div>
     </div>`,
     () => {
       $('subModalClose').onclick = closeModal;
+      if (editing) {
+        $('subEditTitle').focus();
+        $('subModalCancel').onclick = () => openSubtaskDetail(p, x);
+        $('subModalSave').onclick = async () => {
+          const saved = await runBusy('保存しています…', () => api.editSubtask(p.id, x.key, { title: $('subEditTitle').value, prompt: $('subEditPrompt').value }), '保存しました');
+          if (!saved) return;
+          const np = card(p.id) || p;
+          openSubtaskDetail(np, (np.subtasks?.items || []).find((y) => y.key === x.key) || { ...x, ...saved });
+        };
+        return;
+      }
       $('subModalOk').onclick = closeModal;
+      if ($('subModalEdit')) $('subModalEdit').onclick = () => openSubtaskDetail(p, x, { editing: true });
       $('modalBox').querySelectorAll('.issue-chip').forEach((a) => (a.onclick = () => run(() => api.openExternal(a.dataset.url))));
       if ($('subModalStart')) $('subModalStart').onclick = () => {
         closeModal();

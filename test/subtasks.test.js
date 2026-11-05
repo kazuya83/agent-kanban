@@ -279,3 +279,23 @@ test('ボード: レビューと完了のあいだをドラッグで動かす（
   assert.strictEqual(c.status, 'done');
   assert.throws(() => agents.moveCard(c.id, 'review'), /戻せません/);
 });
+
+test('サブタスク: まだ始めていないサブタスクは、名前とやることを変えられ、開始するとその内容で動く', async () => {
+  const { agents } = setup();
+  const [p] = agents.createTask({ title: '直す作業', prompt: '全体の作業 [manual]', agent: 'claude' });
+  agents.setSubtasks(p.id, { items: [{ title: 'ひとつめ', prompt: 'ひとつめを作る' }, { title: 'ふたつめ', prompt: 'ふたつめを作る' }] });
+  assert.throws(() => agents.editSubtask(p.id, 's1', { title: ' ', prompt: 'x' }), /名前/);
+  assert.throws(() => agents.editSubtask(p.id, 's1', { title: 'x', prompt: '' }), /やること/);
+  assert.throws(() => agents.editSubtask(p.id, 'nope', { title: 'x', prompt: 'y' }), /見つかりません/);
+  const item = agents.editSubtask(p.id, 's1', { title: '  新しい名前 ', prompt: '新しいやること\n2行目' });
+  assert.strictEqual(item.title, '新しい名前');
+  assert.strictEqual(p.subtasks.items[0].prompt, '新しいやること\n2行目');
+  assert.ok((p.logs || []).some((l) => l.kind === 'user' && /「ひとつめ」を「新しい名前」に変えました/.test(l.text)));
+  await agents.startSubtaskOnly(p.id, 's1');
+  const k = agents.store.card(p.subtasks.items[0].cardId);
+  assert.ok(k.title.endsWith('新しい名前'));
+  assert.match(k.prompt, /新しいやること/);
+  // 始めたサブタスクは変えられない
+  assert.throws(() => agents.editSubtask(p.id, 's1', { title: 'x', prompt: 'y' }), /まだ始めていない/);
+  await waitFor(() => k.status === 'review' || k.status === 'failed');
+});
