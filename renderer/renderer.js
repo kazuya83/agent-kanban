@@ -102,7 +102,7 @@ function pipelineOfRef(v, s = state.board.settings || {}) {
   return isRelayRef(v) ? pipelines(s).find((p) => p.id === v.slice(RELAY_PREFIX.length)) || null : null;
 }
 
-const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'chat', logs: new Map(), headSig: '', relayOpen: new Set() };
+const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'chat', logs: new Map(), headSig: '', relayOpen: new Set(), chartZoom: null };
 const $ = (id) => document.getElementById(id);
 // index.html の data-icon="名前" の場所に、モノクロの SVG アイコンを入れる（icons.js）
 for (const el of document.querySelectorAll('[data-icon]')) el.outerHTML = icon(el.dataset.icon, el.className);
@@ -1062,6 +1062,7 @@ function relayChartHtml(c) {
     labels,
     counts: r.counts,
     current: !r.waiting && !r.done && r.steps[r.index] ? r.steps[r.index].id : null,
+    zoom: state.chartZoom,
     stepInfo: (n) => {
       const i = idx.get(n.id);
       const st = i == null ? null : r.steps[i];
@@ -1070,7 +1071,60 @@ function relayChartHtml(c) {
     },
   });
   if (!svg) return '';
-  return `<div class="pg-chart">${svg}</div><div class="pg-legend muted small"><span class="lg lg-done">完了</span><span class="lg lg-run">実行中</span><span class="lg lg-warn">止まっている・待っている</span><span class="lg lg-pending">これから</span><span class="lg lg-skip">スキップ</span></div>`;
+  return `<div class="pg-chart-wrap"><div class="pg-chart">${svg}</div><div class="zoom-host">${chartZoomBar()}</div></div><div class="pg-legend muted small"><span class="lg lg-done">完了</span><span class="lg lg-run">実行中</span><span class="lg lg-warn">止まっている・待っている</span><span class="lg lg-pending">これから</span><span class="lg lg-skip">スキップ</span></div>`;
+}
+// 進捗タブのフローチャートの拡大・縮小（state.chartZoom が null のときは、枠の幅に収める）
+function chartZoomBar() {
+  return state.chartZoom == null ? Zoom.toolbarHtml(1, '全体') : Zoom.toolbarHtml(state.chartZoom);
+}
+// 今の見た目の倍率（枠に収めているときは、実際に縮んでいる割合）
+function chartZoomNow(svg) {
+  if (state.chartZoom != null) return state.chartZoom;
+  const vw = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal.width : 0;
+  return vw ? svg.getBoundingClientRect().width / vw : 1;
+}
+// 描き直さずに、いまの SVG の大きさだけ変える（次に描き直すときも同じ倍率で描く）
+function setChartZoom(chart, z, at) {
+  const svg = chart.querySelector('svg.fv');
+  if (!svg) return;
+  const z0 = chartZoomNow(svg);
+  const vb = svg.viewBox.baseVal;
+  if (z == null) {
+    state.chartZoom = null;
+    svg.setAttribute('width', vb.width);
+    svg.setAttribute('height', vb.height);
+    svg.setAttribute('style', 'max-width:100%;height:auto');
+    chart.scrollLeft = 0;
+    chart.scrollTop = 0;
+  } else {
+    const z1 = Zoom.clamp(z);
+    const p = at || { x: chart.clientWidth / 2, y: chart.clientHeight / 2 };
+    const s = Zoom.anchor(chart.scrollLeft, chart.scrollTop, p.x, p.y, z0, z1);
+    state.chartZoom = z1;
+    svg.removeAttribute('style');
+    svg.setAttribute('width', Math.round(vb.width * z1));
+    svg.setAttribute('height', Math.round(vb.height * z1));
+    chart.scrollLeft = s.left;
+    chart.scrollTop = s.top;
+  }
+  const host = chart.parentElement.querySelector('.zoom-host');
+  if (host) host.innerHTML = chartZoomBar();
+}
+function bindChartZoom(view) {
+  const chart = view.querySelector('.pg-chart');
+  if (!chart) return;
+  const host = chart.parentElement.querySelector('.zoom-host');
+  if (host)
+    host.onclick = (ev) => {
+      const b = ev.target.closest('[data-zoom]');
+      if (!b) return;
+      const k = b.dataset.zoom;
+      const svg = chart.querySelector('svg.fv');
+      if (k === 'fit') setChartZoom(chart, null);
+      else if (k === 'reset') setChartZoom(chart, 1);
+      else if (svg) setChartZoom(chart, Zoom.step(chartZoomNow(svg), k === 'in' ? 1 : -1));
+    };
+  Zoom.bindWheel(chart, { get: () => { const svg = chart.querySelector('svg.fv'); return svg ? chartZoomNow(svg) : 1; }, set: (z, at) => setChartZoom(chart, z, at) });
 }
 function progressHtml(c) {
   const s = c.status;
@@ -1127,7 +1181,13 @@ function renderProgress(c, { force = false } = {}) {
   if (body.dataset.progressSig === sig) return;
   body.dataset.progressSig = sig;
   const view = $('progressView');
+  // 描き直しても、フローチャートのスクロール位置は保つ
+  const oldChart = view.querySelector('.pg-chart');
+  const scroll = oldChart ? [oldChart.scrollLeft, oldChart.scrollTop] : null;
   view.innerHTML = html;
+  bindChartZoom(view);
+  const chart = view.querySelector('.pg-chart');
+  if (chart && scroll) [chart.scrollLeft, chart.scrollTop] = scroll;
   view.querySelectorAll('details[data-rkey]').forEach((d) => (d.ontoggle = () => (d.open ? state.relayOpen.add(d.dataset.rkey) : state.relayOpen.delete(d.dataset.rkey))));
   view.querySelectorAll('[data-open-card]').forEach((a) => (a.onclick = (e) => (e.preventDefault(), card(a.dataset.openCard) && select(a.dataset.openCard))));
 }
