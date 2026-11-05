@@ -395,6 +395,89 @@ function cleanCompeteAgents(list) {
   return out;
 }
 
+// ---------- カスタムエージェント（プロジェクトごと） ----------
+// 元にする CLI・モデルに、プロフィール（名前・アイコンと色・説明・振る舞いの指示）を持たせたもの。
+// タスク・会話・Pipelineの工程・競争で、ふつうのエージェントの代わりに選べる。
+// 選ぶときの値は「custom:<ID>」。タスクを作るときに中身（persona）をカードに写すので、あとで直したり消したりしても動いているタスクは変わらない
+const MAX_CUSTOM_AGENTS = 30;
+const CUSTOM_PREFIX = 'custom:';
+const DEFAULT_CUSTOM_COLOR = '#6366f1';
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$/;
+
+function isCustomRef(v) {
+  return typeof v === 'string' && v.startsWith(CUSTOM_PREFIX) && /^[A-Za-z0-9_-]{1,32}$/.test(v.slice(CUSTOM_PREFIX.length));
+}
+function customIdOf(v) {
+  return isCustomRef(v) ? v.slice(CUSTOM_PREFIX.length) : '';
+}
+function cleanCustomModel(v) {
+  const m = String(v || '').trim();
+  return m && m.length <= 100 && MODEL_RE.test(m) ? m : '';
+}
+function cleanCustomColor(v) {
+  const c = String(v || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(c) ? c.toLowerCase() : DEFAULT_CUSTOM_COLOR;
+}
+// アイコンは絵文字など短い文字（書記素で2つ・16 文字まで）
+function cleanCustomIcon(v) {
+  const s = String(v || '').trim().replace(/[\s<>"'`&]/g, '');
+  if (!s) return '';
+  const parts = typeof Intl !== 'undefined' && Intl.Segmenter ? [...new Intl.Segmenter('ja', { granularity: 'grapheme' }).segment(s)].map((x) => x.segment) : [...s];
+  return parts.slice(0, 2).join('').slice(0, 16);
+}
+
+/**
+ * 設定から読んだカスタムエージェントの一覧を整える（名前のないもの・ID が重なるものは落とす）
+ * @returns {{ id: string, name: string, icon: string, color: string, description: string, instruction: string, agent: string, model: string }[]}
+ */
+function cleanCustomAgents(list) {
+  const out = [];
+  const ids = new Set();
+  for (const x of Array.isArray(list) ? list : []) {
+    if (!x || typeof x !== 'object' || out.length >= MAX_CUSTOM_AGENTS) continue;
+    const name = trunc(String(x.name || '').trim(), 30);
+    if (!name) continue;
+    let id = String(x.id || '').trim();
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(id) || ids.has(id)) {
+      let n = out.length + 1;
+      while (ids.has(`ca${n}`)) n++;
+      id = `ca${n}`;
+    }
+    ids.add(id);
+    out.push({
+      id,
+      name,
+      icon: cleanCustomIcon(x.icon),
+      color: cleanCustomColor(x.color),
+      description: trunc(String(x.description || '').trim(), 200),
+      instruction: trunc(String(x.instruction || '').trim(), 4000),
+      agent: isAgent(x.agent) ? x.agent : 'claude',
+      model: cleanCustomModel(x.model),
+    });
+  }
+  return out;
+}
+function findCustomAgent(list, id) {
+  const k = customIdOf(id) || String(id || '');
+  return (Array.isArray(list) ? list : []).find((x) => x && x.id === k) || null;
+}
+// カードに写すプロフィール
+function personaOf(ca) {
+  if (!ca) return null;
+  return { id: ca.id, name: ca.name, icon: ca.icon || '', color: ca.color || DEFAULT_CUSTOM_COLOR, description: ca.description || '', instruction: ca.instruction || '' };
+}
+// 指示に付けるプロフィールの説明（説明・振る舞いの指示がなければ名前だけ）
+function personaNote(p) {
+  if (!p || !p.name) return '';
+  const lines = ['## あなたのプロフィール', `あなたはカスタムエージェント「${p.name}」です。${p.description ? `役割: ${p.description}` : ''}`.trim()];
+  if (p.instruction) lines.push('', '### 振る舞いの指示（いつも守ってください）', p.instruction);
+  return lines.join('\n');
+}
+function withPersona(p, prompt) {
+  const note = personaNote(p);
+  return note ? `${note}\n\n---\n\n${prompt}` : prompt;
+}
+
 // ---------- 使うエージェント ----------
 // 設定でチェックを付けたエージェントだけを、タスク・会話・Pipeline・競争で選べるようにする（1つは必ず残す）
 const DEFAULT_ENABLED_AGENTS = ['claude'];
@@ -442,4 +525,14 @@ module.exports = {
   enabledAgents,
   isEnabled,
   defaultAgentOf,
+  MAX_CUSTOM_AGENTS,
+  CUSTOM_PREFIX,
+  DEFAULT_CUSTOM_COLOR,
+  isCustomRef,
+  customIdOf,
+  cleanCustomAgents,
+  findCustomAgent,
+  personaOf,
+  personaNote,
+  withPersona,
 };

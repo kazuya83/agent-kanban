@@ -901,3 +901,21 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .fe-errors ul { margin: 2px 0 0; padding-left: 18px; }
 .fe-ok { color: var(--ok); }
 .fe-canvas, .fe-side, .fe-errors { scrollbar-color: var(--line) transparent; }
+
+/* カスタムエージェント（プロフィールのアイコン・一覧・編集） */
+.persona-ic { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 1.45em; height: 1.45em; margin-right: 0.35em; border-radius: 999px; font-size: 0.85em; line-height: 1; vertical-align: -0.3em; background: color-mix(in srgb, var(--pc, #6366f1) 22%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pc, #6366f1) 60%, transparent); color: var(--text); font-weight: 700; }
+.orch-chip.persona { background: color-mix(in srgb, var(--pc, #6366f1) 16%, transparent); color: var(--text); }
+.orch-chip .persona-ic { width: 1.35em; height: 1.35em; margin-right: 4px; vertical-align: 0; }
+.c-avatar .persona-ic { margin-right: 0; }
+.ca-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.ca-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-left: 4px solid var(--pc, #6366f1); border-radius: 8px; background: var(--panel-2); }
+.ca-item > .persona-ic { font-size: 1.1em; margin-top: 2px; }
+.ca-main { flex: 1; min-width: 0; }
+.ca-main .rs-inst { white-space: pre-wrap; max-height: 3.2em; overflow: hidden; }
+.ca-acts { display: flex; gap: 4px; flex-shrink: 0; }
+.ca-form { padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.ca-form h4 { margin: 0 0 8px; }
+.row.ca-row3 { grid-template-columns: 1fr 140px 90px; }
+.ca-form input[type='color'] { width: 100%; height: 34px; padding: 2px; }
+.ca-preview { margin: 4px 0 8px; }
+.fe-ca-note { display: block; margin: -4px 0 10px; }

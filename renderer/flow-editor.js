@@ -25,8 +25,8 @@
   }
 
   /**
-   * @param {{ flow: object, agents: [string, string][], enabled: string[], defaultAgent: string, onSave: (flow: object) => Promise<boolean>|boolean }} opts
-   *   agents: [[id, 表示名]]（すべてのエージェント）、enabled: 使うエージェント
+   * @param {{ flow: object, agents: [string, string][], enabled: string[], customAgents?: object[], modelSuggest?: Record<string, string[]>, defaultAgent: string, onSave: (flow: object) => Promise<boolean>|boolean }} opts
+   *   agents: [[id, 表示名]]（すべてのエージェント）、enabled: 使うエージェント、customAgents: カスタムエージェント（{ id, name, icon, agent, model }）
    */
   function open(opts) {
     const host = document.getElementById('flowModal');
@@ -37,6 +37,19 @@
     let sel = null; // { kind: 'node'|'edge', id }
     let dirty = false;
     const agentName = (a) => (opts.agents.find((x) => x[0] === a) || [a, a])[1];
+    const customs = Array.isArray(opts.customAgents) ? opts.customAgents : [];
+    const customOf = (id) => customs.find((x) => x.id === id) || null;
+    // 工程を動かすエージェント（カスタムエージェントなら、その元の CLI）
+    const stepAgent = (n) => (n.custom && customOf(n.custom) ? customOf(n.custom).agent : n.agent);
+    const stepOff = (n) => (n.custom && !customOf(n.custom)) || !opts.enabled.includes(stepAgent(n));
+    const stepName = (n) => {
+      if (n.custom) {
+        const ca = customOf(n.custom);
+        if (!ca) return 'カスタムエージェントが見つかりません';
+        return `${ca.icon ? `${ca.icon} ` : ''}${ca.name}（${agentName(ca.agent)}${ca.model ? ` / ${ca.model}` : ''}）${opts.enabled.includes(ca.agent) ? '' : '（使わない設定）'}`;
+      }
+      return agentName(n.agent) + (n.model ? ` / ${n.model}` : '') + (opts.enabled.includes(n.agent) ? '' : '（使わない設定）');
+    };
 
     box.innerHTML = `
       <div class="fe-head">
@@ -71,12 +84,12 @@
       if (n.type === 'step') {
         const i = steps.findIndex((x) => x.id === n.id);
         title = `${i + 1}. ${n.label || '（名前なし）'}`;
-        sub = agentName(n.agent) + (opts.enabled.includes(n.agent) ? '' : '（使わない設定）');
+        sub = stepName(n);
       } else if (n.type === 'if') sub = n.question ? n.question : '判定の値で分ける';
       else if (n.type === 'parallel') sub = '同時に動かす';
       else if (n.type === 'join') sub = 'すべて待ってマージ';
       const port = n.type === 'end' ? '' : '<span class="fe-port" title="ドラッグして、つなぐ先のノードで離す"></span>';
-      return `<div class="fe-node t-${n.type} ${sel && sel.kind === 'node' && sel.id === n.id ? 'sel' : ''} ${n.type === 'step' && !opts.enabled.includes(n.agent) ? 'off' : ''}" data-id="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px">
+      return `<div class="fe-node t-${n.type} ${sel && sel.kind === 'node' && sel.id === n.id ? 'sel' : ''} ${n.type === 'step' && stepOff(n) ? 'off' : ''}" data-id="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px">
         <span class="fe-kind">${esc(FM.TYPE_LABEL[n.type])}</span>
         <b class="fe-title">${esc(title)}</b>${sub ? `<span class="fe-sub">${esc(sub)}</span>` : ''}${port}</div>`;
     }
@@ -172,8 +185,18 @@
         const del = n.type === 'start' ? '' : '<button class="btn small danger" id="feDel" type="button">このノードを消す</button>';
         let body = '';
         if (n.type === 'step') {
-          const list = opts.agents.filter(([a]) => opts.enabled.includes(a) || a === n.agent);
-          body = `<label class="field"><span>エージェント</span><select id="feAgent">${list.map(([a, l]) => `<option value="${a}" ${a === n.agent ? 'selected' : ''}>${esc(l)}${opts.enabled.includes(a) ? '' : '（使わない設定）'}</option>`).join('')}</select></label>
+          const list = opts.agents.filter(([a]) => opts.enabled.includes(a) || (a === n.agent && !n.custom));
+          const plain = list.map(([a, l]) => `<option value="${a}" ${a === n.agent && !n.custom ? 'selected' : ''}>${esc(l)}${opts.enabled.includes(a) ? '' : '（使わない設定）'}</option>`).join('');
+          const lost = n.custom && !customOf(n.custom) ? `<option value="custom:${esc(n.custom)}" selected>（見つからないカスタムエージェント）</option>` : '';
+          const custom = customs.length || lost
+            ? `<optgroup label="カスタムエージェント">${customs.map((ca) => `<option value="custom:${esc(ca.id)}" ${ca.id === n.custom ? 'selected' : ''}>${esc(`${ca.icon ? `${ca.icon} ` : ''}${ca.name}（${agentName(ca.agent)}${ca.model ? ` / ${ca.model}` : ''}）`)}${opts.enabled.includes(ca.agent) ? '' : '（使わない設定）'}</option>`).join('')}${lost}</optgroup>`
+            : '';
+          const ca = n.custom ? customOf(n.custom) : null;
+          const sugg = ((opts.modelSuggest || {})[n.agent] || []).map((m) => `<option value="${esc(m)}"></option>`).join('');
+          body = `<label class="field"><span>エージェント</span><select id="feAgent">${custom ? `<optgroup label="エージェント">${plain}</optgroup>${custom}` : plain}</select></label>
+            ${n.custom
+              ? `<small class="muted fe-ca-note">${ca ? `カスタムエージェント「${esc(ca.name)}」のモデル（${esc(ca.model || '設定の既定')}）とプロフィールで動かします。${ca.description ? esc(ca.description) : ''}` : 'このカスタムエージェントは見つかりません。選び直してください。'}</small>`
+              : `<label class="field"><span>モデル（空なら設定の既定）</span><input id="feModel" list="feModelList" autocomplete="off" spellcheck="false" maxlength="100" placeholder="例: ${esc(((opts.modelSuggest || {})[n.agent] || [])[0] || '')}" value="${esc(n.model || '')}" /><datalist id="feModelList">${sugg}</datalist></label>`}
             <label class="field"><span>工程の名前</span><input id="feLabel" maxlength="30" placeholder="例: 実装" value="${esc(n.label || '')}" /></label>
             <label class="field"><span>担当の説明</span><textarea id="feInst" rows="6" placeholder="例: 前の工程の変更をレビューして直す">${esc(n.instruction || '')}</textarea></label>`;
           const j = FM.judgeOf(flow, n.id);
@@ -203,7 +226,32 @@
             if (redraw) redrawKeepSide();
           };
         };
-        bind('#feAgent', 'agent', true);
+        // エージェント: ふつうのエージェントか、カスタムエージェント（custom:<ID>。元の CLI を agent にも入れておく）
+        const agentSel = side.querySelector('#feAgent');
+        if (agentSel)
+          agentSel.onchange = () => {
+            const v = agentSel.value;
+            if (v.startsWith('custom:')) {
+              n.custom = v.slice(7);
+              const ca = customOf(n.custom);
+              if (ca) n.agent = ca.agent;
+              delete n.model;
+            } else {
+              delete n.custom;
+              n.agent = v;
+            }
+            touch();
+            draw();
+          };
+        const modelIn = side.querySelector('#feModel');
+        if (modelIn)
+          modelIn.oninput = () => {
+            const m = modelIn.value.trim();
+            if (m) n.model = m;
+            else delete n.model;
+            touch();
+            redrawKeepSide();
+          };
         bind('#feLabel', 'label', true);
         bind('#feInst', 'instruction');
         bind('#feQuestion', 'question', true);
@@ -415,8 +463,11 @@
       const clean = FM.cleanFlow(flow);
       const errs = FM.validateFlow(clean);
       if (errs.length) return;
-      const off = clean.nodes.find((n) => n.type === 'step' && !opts.enabled.includes(n.agent));
-      if (off && !confirm(`工程「${off.label}」の ${agentName(off.agent)} は使わない設定です。このままだとPipelineを始められません。保存しますか？`)) return;
+      // 使えない文字のモデル名は cleanFlow が落とすので、落ちたものがあれば知らせる
+      const typed = flow.nodes.find((n) => n.type === 'step' && n.model && !clean.nodes.some((x) => x.id === n.id && x.model === n.model));
+      if (typed) return alert(`工程「${typed.label || ''}」のモデル名に使えない文字が入っています: ${typed.model}`);
+      const off = clean.nodes.find((n) => n.type === 'step' && stepOff(n));
+      if (off && !confirm(`工程「${off.label}」の ${stepName(off)} は使えません（${off.custom && !customOf(off.custom) ? 'カスタムエージェントが見つかりません' : '使わない設定です'}）。このままだとPipelineを始められません。保存しますか？`)) return;
       const ok = await opts.onSave(clean);
       if (ok !== false) close();
     };
