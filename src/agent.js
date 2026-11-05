@@ -385,9 +385,31 @@ function promptWithSkill(agent, skill, prompt) {
 //   atJoin?,   枝のタスクが合流まで来た
 // }
 
+// 担当の呼び名（カスタムエージェントなら「名前（CLI）」）
+function whoLabel(agent, persona) {
+  return persona && persona.name ? `${persona.name}（${agentLabel(agent)}）` : agentLabel(agent);
+}
+function whoShort(agent, persona) {
+  return persona && persona.name ? persona.name : agentShort(agent);
+}
+
 // 工程のノードを、カードに持たせる形にする
-function relayStepsOf(flow) {
-  return FlowModel.orderSteps(flow).map((n) => ({ id: n.id, agent: n.agent, label: n.label, instruction: n.instruction || '' }));
+// カスタムエージェントを選んだ工程は、そのエージェントの CLI・モデル・プロフィールを写す（customAgents にないときは missing を付ける）
+function relayStepsOf(flow, customAgents = []) {
+  return FlowModel.orderSteps(flow).map((n) => {
+    const st = { id: n.id, agent: n.agent, label: n.label, instruction: n.instruction || '' };
+    if (n.model) st.model = n.model;
+    if (n.custom) {
+      const ca = providers.findCustomAgent(customAgents, n.custom);
+      if (ca) {
+        st.agent = ca.agent;
+        if (ca.model) st.model = ca.model;
+        else delete st.model;
+        st.persona = providers.personaOf(ca);
+      } else st.missing = n.custom;
+    }
+    return st;
+  });
 }
 function relayStepIndex(c, nodeId) {
   return c.relay.steps.findIndex((st) => st.id === nodeId);
@@ -426,7 +448,8 @@ function relayTargetText(c, edge) {
   if (n.type === 'step') {
     const j = relayStepIndex(c, n.id);
     const back = FlowModel.backEdges(flow).has(edge.id);
-    return `工程${j + 1}「${n.label}」（${agentLabel(n.agent)}）${back ? 'に戻ってやり直します' : 'へ進みます'}`;
+    const st = c.relay.steps[j] || n;
+    return `工程${j + 1}「${n.label}」（${whoLabel(st.agent, st.persona)}）${back ? 'に戻ってやり直します' : 'へ進みます'}`;
   }
   if (n.type === 'parallel') {
     const names = FlowModel.outEdges(flow, n.id).map((e) => `「${(FlowModel.nodeOf(flow, e.to) || {}).label || ''}」`).join('・');
@@ -467,7 +490,7 @@ function relayPlan(c) {
 function buildRelayFirstPrompt(c, prompt) {
   const r = c.relay;
   const st = r.steps[r.index];
-  const next = r.steps.filter((_, j) => j !== r.index).map((x) => `「${x.label}」（${agentLabel(x.agent)}）`).join('・');
+  const next = r.steps.filter((_, j) => j !== r.index).map((x) => `「${x.label}」（${whoLabel(x.agent, x.persona)}）`).join('・');
   return [prompt, '', '---', relayHeader(c, r.index), next ? `このあと、フローに沿って ${next} の工程があります。` : '', st.instruction ? `\n## あなたの担当\n${st.instruction}` : '', relayJudgeNote(c, r.index)]
     .filter((x) => x !== '')
     .join('\n');
@@ -476,7 +499,8 @@ function buildRelayFirstPrompt(c, prompt) {
 // 2つ目以降の工程の指示（元の指示・これまでの工程の報告・担当の説明）
 function buildRelayStepPrompt(c, i) {
   const st = c.relay.steps[i];
-  const lines = [relayHeader(c, i), '', '## タスクの指示', truncate(c.prompt, 6000), ''];
+  const persona = providers.personaNote(st.persona);
+  const lines = [relayHeader(c, i), '', ...(persona ? [persona, ''] : []), '## タスクの指示', truncate(c.prompt, 6000), ''];
   const att = attachments.attachmentNote(c.attachments, { toAgentPath: wsl.parseWslPath(c.repoPath || '') ? (p) => wsl.toLinux(p) : undefined });
   if (att) lines.push(att, '');
   lines.push('## これまでの工程');
@@ -488,7 +512,7 @@ function buildRelayStepPrompt(c, i) {
     const v = h.result === 'fail' ? '・差し戻し' : h.result === 'pass' ? '・合格' : h.result ? `・判定 ${h.result}` : '';
     const n = h.run > 1 ? `・${h.run}回目` : '';
     const b = h.branch ? `・並列の枝 ${h.branch}` : '';
-    lines.push(`### 工程${h.index + 1}「${s.label || ''}」（${agentLabel(h.agent)}${n}${b}${v}）の報告`, truncate(String(h.report || '（報告なし）').trim(), 3000), '');
+    lines.push(`### 工程${h.index + 1}「${s.label || ''}」（${whoLabel(h.agent, h.persona)}${n}${b}${v}）の報告`, truncate(String(h.report || '（報告なし）').trim(), 3000), '');
   }
   lines.push(
     '## 作業の場所',
@@ -509,7 +533,7 @@ function buildComparePrompt(title, list) {
   const lines = [`同じタスク「${title}」を、複数のエージェントがそれぞれ別のブランチで解きました。どの案がよいか比べてください。`, ''];
   lines.push('## タスクの指示', truncate(list[0].prompt, 4000), '', '## 候補');
   for (const c of list) {
-    lines.push(`### ${agentLabel(agentOf(c))}（カード ${c.id}）`);
+    lines.push(`### ${whoLabel(agentOf(c), c.persona)}（カード ${c.id}）`);
     if (c.branch) lines.push(`- ブランチ: ${c.branch}（ベース ${c.baseBranch}。git diff ${c.baseBranch}...${c.branch} で変更を見られます）`);
     else lines.push('- まだブランチがありません');
     lines.push(`- 状態: ${c.status}${c.error ? `（${truncate(c.error, 200)}）` : ''}`);
@@ -953,9 +977,12 @@ class AgentManager extends EventEmitter {
     const s = this.store.settings;
     // 添付は先に確かめておく（カードごとに保存する）
     const parsed = attachments.parseAttachments(files);
-    const mode = agent || providers.defaultAgentOf(s);
-    // Pipeline・競争は工程・カードごとにエージェントが違うので、モデルは設定のものを使う
-    const m = mode === 'relay' || mode === 'compete' ? '' : cleanModel(model);
+    let mode = agent || providers.defaultAgentOf(s);
+    // カスタムエージェント: その CLI・モデル・プロフィールで動かす
+    const custom = providers.isCustomRef(mode) ? this.customAgent(mode) : null;
+    if (custom) mode = custom.agent;
+    // Pipeline・競争は工程・カードごとにエージェントが違うので、モデルは工程・設定のものを使う
+    const m = mode === 'relay' || mode === 'compete' ? '' : custom ? custom.model : cleanModel(model);
     // 会話の続き、または完了したタスクの修正として作る
     const chat = fromChat ? this.store.card(fromChat) : null;
     const from = isChat(chat) || (chat && chat.status === 'done') ? chat : null;
@@ -971,29 +998,59 @@ class AgentManager extends EventEmitter {
       const flow = cleanRelayFlow(this.store.repoSettings(s.repoPath).relayFlow);
       const errs = FlowModel.validateFlow(flow);
       if (errs.length) throw new Error(`Pipelineのフローチャートを直してください（設定の「フローチャートを編集」）: ${errs[0]}`);
-      const steps = relayStepsOf(flow);
+      const steps = relayStepsOf(flow, this.customAgents());
+      const lost = steps.find((st) => st.missing);
+      if (lost) throw new Error(`Pipelineの工程「${lost.label}」のカスタムエージェントが見つかりません（消されたかもしれません）。「設定」のフローチャートで、工程のエージェントを選び直してください`);
       const off = steps.find((st) => !providers.isEnabled(s, st.agent));
-      if (off) throw new Error(`Pipelineの工程「${off.label}」の ${agentLabel(off.agent)} は使わない設定になっています。「設定」で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
+      if (off) throw new Error(`Pipelineの工程「${off.label}」の ${whoLabel(off.agent, off.persona)} は使わない設定になっています。「設定」で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
       if (isNoGitRepo(s, s.repoPath) && flow.nodes.some((n) => n.type === 'parallel')) throw new Error('git で管理していないフォルダでは、並列のあるPipelineは使えません（枝ごとに別の作業場所を作れないため）。フローチャートから並列を外してください');
       const first = FlowModel.route(flow, FlowModel.startNode(flow).id, {});
       const index = relayStepIndex({ relay: { steps } }, first.node.id);
-      const c = this.createCard({ title, prompt, issue, session, skill, agent: steps[index].agent, relay: { flow, steps, index, history: [], counts: {} }, fromChat: from, parsed });
+      const st = steps[index];
+      const c = this.createCard({ title, prompt, issue, session, skill, agent: st.agent, relay: { flow, steps, index, history: [], counts: {} }, fromChat: from, parsed });
+      if (st.model) c.model = st.model;
+      if (st.persona) c.persona = st.persona;
       return [c];
     }
-    return [this.createCard({ title, prompt, issue, session, skill, agent: mode, model: m, fromChat: from, parsed })];
+    return [this.createCard({ title, prompt, issue, session, skill, agent: mode, model: m, persona: providers.personaOf(custom), fromChat: from, parsed })];
   }
 
   // 競争: 同じタスクを、設定のエージェントそれぞれのカードにする（使わない設定のエージェントは外す）
   createCompetition({ title, prompt, issue, session, skill, fromChat, parsed }) {
     const s = this.store.settings;
     if (isNoGitRepo(s, s.repoPath)) throw new Error('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください');
-    const list = providers.cleanCompeteAgents(s.competeAgents).filter((a) => providers.isEnabled(s, a));
-    if (list.length < 2) throw new Error('競争させるエージェントを、設定で2つ以上選んでください（使うエージェントにチェックを付けたものから選べます）');
+    const list = this.competeEntries();
+    if (list.length < 2) throw new Error('競争させるエージェントを、設定で2つ以上選んでください（使うエージェントにチェックを付けたものと、カスタムエージェントから選べます）');
     const group = crypto.randomBytes(4).toString('hex');
     const base = (title && title.trim()) || truncate(String(prompt || '').trim().split('\n')[0], 40);
-    return list.map((a, index) =>
-      this.createCard({ title: `${base} [${agentShort(a)}]`, prompt, issue, session, skill, agent: a, compete: { group, index, total: list.length, title: base }, fromChat, parsed }),
+    return list.map((x, index) =>
+      this.createCard({ title: `${base} [${whoShort(x.agent, x.persona)}]`, prompt, issue, session, skill, agent: x.agent, model: x.model, persona: x.persona, compete: { group, index, total: list.length, title: base }, fromChat, parsed }),
     );
+  }
+
+  // 競争させる顔ぶれ: 設定のふつうのエージェント（使う設定のもの）と、このプロジェクトのカスタムエージェント（元の CLI が使う設定のもの）
+  competeEntries() {
+    const s = this.store.settings;
+    const plain = providers.cleanCompeteAgents(s.competeAgents).filter((a) => providers.isEnabled(s, a)).map((a) => ({ agent: a, model: '', persona: null }));
+    const cas = this.customAgents();
+    const custom = (Array.isArray(s.competeCustomAgents) ? s.competeCustomAgents : [])
+      .map((id) => providers.findCustomAgent(cas, id))
+      .filter((ca) => ca && providers.isEnabled(s, ca.agent))
+      .map((ca) => ({ agent: ca.agent, model: ca.model, persona: providers.personaOf(ca) }));
+    return [...plain, ...custom];
+  }
+
+  // 今のプロジェクトのカスタムエージェント
+  customAgents() {
+    return providers.cleanCustomAgents(this.store.repoSettings(this.store.settings.repoPath).customAgents);
+  }
+
+  // 「custom:<ID>」のカスタムエージェント（なければ・元の CLI が使わない設定ならエラー）
+  customAgent(ref) {
+    const ca = providers.findCustomAgent(this.customAgents(), ref);
+    if (!ca) throw new Error('カスタムエージェントが見つかりません（消されたかもしれません）。選び直してください');
+    if (!providers.isEnabled(this.store.settings, ca.agent)) throw new Error(`カスタムエージェント「${ca.name}」の ${agentLabel(ca.agent)} は使わない設定になっています。「設定」の「使うエージェント」でチェックを付けてください`);
+    return ca;
   }
 
   // 使うエージェントか（設定でチェックを付けていなければエラー）
@@ -1009,7 +1066,7 @@ class AgentManager extends EventEmitter {
     return a && providers.isEnabled(s, a) ? a : providers.defaultAgentOf(s);
   }
 
-  createCard({ title, prompt, issue, session, skill, agent, model, relay, compete, fromChat, parsed }) {
+  createCard({ title, prompt, issue, session, skill, agent, model, persona, relay, compete, fromChat, parsed }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
     if (!prompt || !prompt.trim()) throw new Error('指示を入力してください');
@@ -1030,7 +1087,8 @@ class AgentManager extends EventEmitter {
     if (noGit) card.noGit = true;
     if (issue) card.issue = { number: issue.number, title: issue.title, url: issue.url };
     card.agent = agent || 'claude';
-    if (model && !relay && !compete) card.model = cleanModel(model);
+    if (model && !relay) card.model = cleanModel(model);
+    if (persona && !relay) card.persona = persona;
     if (relay) card.relay = relay;
     if (compete) card.compete = compete;
     card.sessions = [];
@@ -1058,7 +1116,7 @@ class AgentManager extends EventEmitter {
   firstPrompt(c) {
     // 仕様の確認中は、開発を始める前に内容が足りているかを判断してもらう指示を付ける
     const body = this.withAttachments(c, withChatContext(c.chatContext, c.prompt), c.attachments);
-    const p = promptWithSkill(agentOf(c), c.skill, inSpecCheck(c) ? withSpecCheck(body) : body);
+    const p = promptWithSkill(agentOf(c), c.skill, providers.withPersona(c.persona, inSpecCheck(c) ? withSpecCheck(body) : body));
     return c.relay && !isChat(c) ? buildRelayFirstPrompt(c, p) : p;
   }
 
@@ -1113,6 +1171,7 @@ class AgentManager extends EventEmitter {
     const cost = Math.max(0, (c.costUsd || 0) - (r.stepCostStart || 0));
     const entry = { index: from, run: relayRunNo(c, from), agent: agentOf(c), sessionId: c.sessionId || null, report: truncate(c.lastText || c.lastMessage || '', 4000), startedAt: r.stepStartedAt || null, at: Date.now(), costUsd: cost };
     if (r.lastResult) entry.result = r.lastResult;
+    if (c.persona) entry.persona = { name: c.persona.name, icon: c.persona.icon, color: c.persona.color };
     r.history = [...(r.history || []), entry];
     r.lastResult = null;
   }
@@ -1128,10 +1187,14 @@ class AgentManager extends EventEmitter {
     r.stepCostStart = c.costUsd || 0;
     const st = r.steps[r.index];
     c.agent = st.agent;
+    if (st.model) c.model = st.model;
+    else delete c.model;
+    if (st.persona) c.persona = st.persona;
+    else delete c.persona;
     c.sessionId = null;
     c.forkNext = false;
     const n = relayRunNo(c, r.index);
-    this.log(c, 'system', `Pipeline: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」${n > 1 ? `（${n}回目）` : ''}を ${agentLabel(st.agent)} に引き継ぎます`);
+    this.log(c, 'system', `Pipeline: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」${n > 1 ? `（${n}回目）` : ''}を ${whoLabel(st.agent, st.persona)} に引き継ぎます`);
     this.enqueue(c, buildRelayStepPrompt(c, r.index));
   }
 
@@ -1171,6 +1234,8 @@ class AgentManager extends EventEmitter {
       logs: [],
       sessions: [],
       agent: st.agent,
+      ...(st.model ? { model: st.model } : {}),
+      ...(st.persona ? { persona: st.persona } : {}),
       skill: parent.skill || null,
       flowBase: parent.branch,
       relay: {
@@ -1287,7 +1352,7 @@ class AgentManager extends EventEmitter {
     if (list.some((x) => x.status === 'todo' || x.status === 'queued' || x.status === 'running')) return;
     if (list.some((x) => x.compete.notified)) return;
     for (const x of list) x.compete.notified = true;
-    const summary = list.map((x) => `${agentShort(agentOf(x))}: ${x.status === 'failed' ? 'エラー' : 'できた'}`).join(' / ');
+    const summary = list.map((x) => `${whoShort(agentOf(x), x.persona)}: ${x.status === 'failed' ? 'エラー' : 'できた'}`).join(' / ');
     this.notify(c, 'review', `競争の結果がそろいました: ${c.compete.title || c.title}`, `${summary}。差分を比べて、採用する案を選んでください`);
   }
 
@@ -1302,7 +1367,7 @@ class AgentManager extends EventEmitter {
     const others = this.competitors(id).filter((x) => x.id !== id && !this.isUndeletable(x));
     for (const x of others) await this.discard(x.id);
     c.compete = { ...c.compete, adopted: true, total: 1 };
-    this.log(c, 'system', `この案（${agentLabel(agentOf(c))}）を採用しました。ほかの ${others.length} 件の候補は破棄しました`);
+    this.log(c, 'system', `この案（${whoLabel(agentOf(c), c.persona)}）を採用しました。ほかの ${others.length} 件の候補は破棄しました`);
     this.changed(c);
     return others.length;
   }
@@ -1329,9 +1394,10 @@ class AgentManager extends EventEmitter {
     const text = String(message || '').trim();
     if (!text) throw new Error('メッセージを入力してください');
     const parsed = attachments.parseAttachments(files);
-    const a = agent || providers.defaultAgentOf(s);
+    const custom = providers.isCustomRef(agent) ? this.customAgent(agent) : null;
+    const a = custom ? custom.agent : agent || providers.defaultAgentOf(s);
     this.assertEnabled(a);
-    const m = cleanModel(model);
+    const m = custom ? custom.model : cleanModel(model);
     const card = {
       id: crypto.randomBytes(4).toString('hex'),
       kind: 'chat',
@@ -1347,6 +1413,7 @@ class AgentManager extends EventEmitter {
       agent: a,
     };
     if (m) card.model = m;
+    if (custom) card.persona = providers.personaOf(custom);
     // 既存の会話（Claude Code の会話）を引き継げるのは Claude Code だけ
     if (session && session.id && a === 'claude') this.applySession(card, session);
     card.skill = cleanSkill(skill);
@@ -3160,4 +3227,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { AgentManager, isNoGit, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, SKILL_SUGGEST_REPEAT_NOTE, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt, cleanModel, modelOf };
+module.exports = { relayStepsOf, whoLabel, AgentManager, isNoGit, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, SKILL_SUGGEST_REPEAT_NOTE, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt, cleanModel, modelOf };

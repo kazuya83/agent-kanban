@@ -1,7 +1,7 @@
 // ボードの状態を JSON ファイルに保存する
 const fs = require('fs');
 const path = require('path');
-const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isAgent, cleanEnabledAgents, cleanOrchestration, cleanRelaySteps } = require('./providers');
+const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isAgent, cleanEnabledAgents, cleanOrchestration, cleanRelaySteps, cleanCustomAgents } = require('./providers');
 const FlowModel = require('../renderer/flow-model');
 
 // Pipelineのフローチャート（プロジェクトごと）の初期値: 前と同じ「実装 → レビュー」
@@ -143,6 +143,8 @@ const DEFAULT_SETTINGS = {
   issueStatusSync: true, // Issue から作ったタスクの列に合わせて、GitHub Projects の Status（In progress / In review / Done）を変える
   statusFieldName: '', // Projects で変える項目（単一選択）の名前。空なら「Status」
   statusMapping: { inProgress: '', inReview: '', done: '' }, // 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空なら名前から自動で探す
+  customAgents: [], // カスタムエージェント（元にする CLI・モデルと、プロフィール: 名前・アイコンと色・説明・振る舞いの指示）。タスク・会話・Pipeline・競争で選べる
+  competeCustomAgents: [], // 競争に加えるカスタムエージェントの ID（competeAgents のふつうのエージェントと一緒に競争させる）
   relayFlow: DEFAULT_RELAY_FLOW, // Pipelineのフローチャート（工程・分岐・並列・合流・ループ）。設定の「フローチャートを編集」で決める
   pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
   suggestSkillsOnDone: true, // タスクが完了したとき、前に完了したタスクと似た作業なら「スキルにしませんか？」と通知する
@@ -206,13 +208,13 @@ const MAX_NOTIFICATIONS = 200;
 
 // ---------- プロジェクト（リポジトリ）ごとの設定 ----------
 // リポジトリに関わる設定だけをプロジェクトごとに持つ。コマンドのパス・モデル・同時に動かす数・自動更新などはアプリ全体で1つ
-const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'pushAfterMerge', 'relayFlow'];
+const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'pushAfterMerge', 'relayFlow', 'customAgents', 'competeCustomAgents'];
 const MAX_REPO_SETTINGS = 200;
 
 // 初めて開いたプロジェクトの設定（初期値。取り込み方は PR を作成。GitHub でないリポジトリは開いたときに直接マージにする）
 function defaultRepoSettings() {
   const out = {};
-  for (const k of REPO_SETTING_KEYS) out[k] = k === 'statusMapping' ? { ...DEFAULT_SETTINGS.statusMapping } : k === 'relayFlow' ? cloneFlow(DEFAULT_RELAY_FLOW) : DEFAULT_SETTINGS[k];
+  for (const k of REPO_SETTING_KEYS) out[k] = k === 'statusMapping' ? { ...DEFAULT_SETTINGS.statusMapping } : k === 'relayFlow' ? cloneFlow(DEFAULT_RELAY_FLOW) : Array.isArray(DEFAULT_SETTINGS[k]) ? [...DEFAULT_SETTINGS[k]] : DEFAULT_SETTINGS[k];
   return out;
 }
 
@@ -223,6 +225,19 @@ function pickRepoSettings(src) {
   for (const k of REPO_SETTING_KEYS) if (src[k] !== undefined) out[k] = k === 'statusMapping' ? { ...out.statusMapping, ...(src[k] || {}) } : src[k];
   if (!['merge', 'pr'].includes(out.integration)) out.integration = DEFAULT_SETTINGS.integration;
   out.relayFlow = cleanRelayFlow(out.relayFlow);
+  out.customAgents = cleanCustomAgents(out.customAgents);
+  out.competeCustomAgents = cleanCompeteCustomAgents(out.competeCustomAgents, out.customAgents);
+  return out;
+}
+
+// 競争に加えるカスタムエージェントの ID（あるものだけ・重なりなし）
+function cleanCompeteCustomAgents(list, customAgents) {
+  const ids = new Set((customAgents || []).map((x) => x.id));
+  const out = [];
+  for (const v of Array.isArray(list) ? list : []) {
+    const id = String(v || '').replace(/^custom:/, '');
+    if (ids.has(id) && !out.includes(id)) out.push(id);
+  }
   return out;
 }
 

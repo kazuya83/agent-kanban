@@ -51,6 +51,40 @@ const agentLabel = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[1];
 const agentShort = (a) => (AGENTS.find((x) => x[0] === a) || AGENTS[0])[2];
 const agentOf = (c) => (c && AGENTS.some((x) => x[0] === c.agent) ? c.agent : 'claude');
 
+// ---------------- カスタムエージェント（プロジェクトごと） ----------------
+// 元にする CLI・モデルに、プロフィール（名前・アイコンと色・説明・振る舞いの指示）を持たせたもの。選ぶときの値は「custom:<ID>」
+const CUSTOM_PREFIX = 'custom:';
+const isCustomRef = (v) => typeof v === 'string' && v.startsWith(CUSTOM_PREFIX);
+function customAgents(s = state.board.settings || {}) {
+  return Array.isArray(s.customAgents) ? s.customAgents : [];
+}
+function findCustomAgent(ref, list = customAgents()) {
+  const id = isCustomRef(ref) ? ref.slice(CUSTOM_PREFIX.length) : String(ref || '');
+  return list.find((x) => x && x.id === id) || null;
+}
+// プロフィールのアイコン（絵文字がなければ、元の CLI のアイコン）。色の丸の中に出す
+function personaIcon(p, agent) {
+  if (!p) return agentIcon(agent);
+  const color = /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#6366f1';
+  return `<span class="persona-ic" style="--pc:${color}">${p.icon ? esc(p.icon) : esc(String(p.name || '?').slice(0, 1))}</span>`;
+}
+// 担当の呼び名（カスタムエージェントなら「名前（CLI）」）
+function whoLabel(agent, p) {
+  return p && p.name ? `${p.name}（${agentShort(agent)}）` : agentLabel(agent);
+}
+function whoShort(agent, p) {
+  return p && p.name ? p.name : agentShort(agent);
+}
+// Pipelineの工程のノードの、動かすエージェント・プロフィール（カスタムエージェントの工程は、今の設定のものを引く）
+function stepWho(n, list = customAgents()) {
+  if (n && n.custom) {
+    const ca = findCustomAgent(n.custom, list);
+    if (ca) return { agent: ca.agent, persona: ca, model: ca.model || '' };
+    return { agent: n.agent || 'claude', persona: null, model: '', missing: true };
+  }
+  return { agent: (n && n.agent) || 'claude', persona: (n && n.persona) || null, model: (n && n.model) || '' };
+}
+
 const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'chat', logs: new Map(), headSig: '', relayOpen: new Set() };
 const $ = (id) => document.getElementById(id);
 // index.html の data-icon="名前" の場所に、モノクロの SVG アイコンを入れる（icons.js）
@@ -420,8 +454,9 @@ function orchChipsHtml(c) {
     chips.push(`<span class="orch-chip relay" title="Pipeline: 並列の枝が、それぞれ別の worktree で動いています。すべて終わったら合流でマージします">${icon('pipeline')}並列「${esc((n && n.label) || '')}」の枝 ${c.relay.waiting.children.length} 本を待機中</span>`);
   } else if (c.relay) {
     const b = c.relay.branchOf;
-    chips.push(`<span class="orch-chip relay" title="${b ? 'Pipelineの並列の枝: 合流で元のタスクにマージします' : 'Pipeline: フローチャートの工程ごとに、エージェントが作業を引き継ぎます'}">${icon('pipeline')}${b ? `枝${b.index + 1} · ` : ''}${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${agentIcon(agentOf(c))} ${esc(agentShort(agentOf(c)))}</span>`);
+    chips.push(`<span class="orch-chip relay" title="${b ? 'Pipelineの並列の枝: 合流で元のタスクにマージします' : 'Pipeline: フローチャートの工程ごとに、エージェントが作業を引き継ぎます'}">${icon('pipeline')}${b ? `枝${b.index + 1} · ` : ''}${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${personaIcon(c.persona, agentOf(c))} ${esc(whoShort(agentOf(c), c.persona))}</span>`);
   }
+  else if (c.persona) chips.push(`<span class="orch-chip agent persona" style="--pc:${esc(c.persona.color || '#6366f1')}" title="${esc(c.persona.description || 'カスタムエージェント')}">${personaIcon(c.persona, agentOf(c))}${esc(whoLabel(agentOf(c), c.persona))}</span>`);
   else chips.push(`<span class="orch-chip agent">${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</span>`);
   if (c.compete) {
     const n = competitors(c).length;
@@ -892,7 +927,7 @@ function hhmm(t) {
 // ボードのカード: 工程の数だけ区切った進み具合のバー
 function relayBarHtml(c) {
   const r = c.relay;
-  const segs = r.steps.map((st, i) => `<span class="rb-seg rs-${relayStepState(c, i)}" title="${i + 1}. ${esc(st.label)}（${esc(agentShort(st.agent))}）: ${RELAY_STATE[relayStepState(c, i)][1]}"></span>`);
+  const segs = r.steps.map((st, i) => `<span class="rb-seg rs-${relayStepState(c, i)}" title="${i + 1}. ${esc(st.label)}（${esc(whoShort(st.agent, st.persona))}）: ${RELAY_STATE[relayStepState(c, i)][1]}"></span>`);
   return `<div class="relay-bar">${segs.join('')}</div>`;
 }
 
@@ -944,7 +979,7 @@ function relayFlowHtml(c) {
     return `<li class="rf-node rs-${stt} ${i === r.index && !r.waiting ? 'cur' : ''}">
       <span class="rf-dot">${mark}</span>
       <div class="rf-body">
-        <div class="rf-head"><b>${i + 1}. ${esc(st.label)}</b>${h && h.branch ? ` <span class="rf-branch">並列の枝</span>` : ''} <span class="rf-agent">${agentIcon(st.agent)}${esc(agentLabel(st.agent))}</span> <span class="rf-state">${label}</span></div>
+        <div class="rf-head"><b>${i + 1}. ${esc(st.label)}</b>${h && h.branch ? ` <span class="rf-branch">並列の枝</span>` : ''} <span class="rf-agent">${personaIcon(st.persona, st.agent)}${esc(whoLabel(st.agent, st.persona))}${st.model ? ` / ${esc(st.model)}` : ''}</span> <span class="rf-state">${label}</span></div>
         ${info.length ? `<div class="rf-info">${info.join(' ・ ')}</div>` : ''}
         ${judgeHtml}
         ${st.instruction ? `<div class="rf-inst" title="${esc(st.instruction)}">${esc(st.instruction)}</div>` : ''}
@@ -993,7 +1028,7 @@ function competeBoxHtml(c) {
   const rows = list
     .map((x) => {
       const [bcls, blabel] = badgeFor(x);
-      return `<button class="compete-item ${x.id === c.id ? 'cur' : ''}" data-goto="${x.id}"><span class="badge b-${bcls}">${blabel}</span> <b>${agentIcon(agentOf(x))}${esc(agentLabel(agentOf(x)))}</b> <span class="muted small">${esc(x.lastMessage || '')}</span></button>`;
+      return `<button class="compete-item ${x.id === c.id ? 'cur' : ''}" data-goto="${x.id}"><span class="badge b-${bcls}">${blabel}</span> <b>${personaIcon(x.persona, agentOf(x))}${esc(whoLabel(agentOf(x), x.persona))}</b> <span class="muted small">${esc(x.lastMessage || '')}</span></button>`;
     })
     .join('');
   const canAdopt = c.status === 'review' || c.status === 'failed';
@@ -1085,7 +1120,7 @@ function detailMetaHtml(c) {
   const chat = isChat(c);
   return `<dl class="d-meta">
       ${c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''}
-      ${!chat ? `<dt>エージェント</dt><dd>${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</dd>` : ''}
+      ${!chat || c.persona ? `<dt>エージェント</dt><dd>${personaIcon(c.persona, agentOf(c))}${esc(whoLabel(agentOf(c), c.persona))}${c.persona && c.persona.description ? ` <span class="muted small">${esc(c.persona.description)}</span>` : ''}</dd>` : ''}
       <dt>モデル</dt><dd>${c.model ? esc(c.model) : settingsModel(agentOf(c)) ? `${esc(settingsModel(agentOf(c)))} <span class="muted small">（設定の既定）</span>` : '<span class="muted small">CLI の既定</span>'}</dd>
       ${sessionRowHtml(c)}
       ${chat ? `<dt>場所</dt><dd class="mono">${esc(c.repoPath)} <span class="muted small">（worktree は作りません）</span></dd>` : ''}
@@ -1263,8 +1298,12 @@ function mdHtml(text) {
 function skillChip(e) {
   return e.skill ? `<div class="c-skill"><span class="skill-chip small">${icon('zap')}/${esc(e.skill)}</span></div>` : '';
 }
-function chatHeadHtml(agent, e) {
-  return `<div class="c-head"><span class="c-avatar">${agentIcon(agent)}</span><b class="c-name">${esc(agentShort(agent))}</b><span class="c-time">${esc(logTime(e))}</span></div>`;
+function chatHeadHtml(agent, e, persona) {
+  return `<div class="c-head"><span class="c-avatar">${personaIcon(persona, agent)}</span><b class="c-name">${esc(whoShort(agent, persona))}</b><span class="c-time">${esc(logTime(e))}</span></div>`;
+}
+// 返事の頭に出すプロフィール（Pipelineは工程ごとに変わるので出さない）
+function chatPersonaOf(c) {
+  return c && c.persona && !c.relay ? c.persona : null;
 }
 // ツールの呼び出し「名前  引数の要約」を名前と引数に分ける
 function splitTool(text) {
@@ -1273,13 +1312,14 @@ function splitTool(text) {
   return i < 0 ? [t, ''] : [t.slice(0, i), t.slice(i + 2)];
 }
 const NOTE_ICON = { result: 'checkCircle', error: 'alert', question: 'question', permission: 'lock', stderr: 'terminal' };
-function chatItemHtml(it, agent, open) {
+function chatItemHtml(it, agent, open, persona) {
   const e = it.entry;
+  const pp = (it.agent || agent) === agent ? persona : null;
   if (it.type === 'user') {
     return `<div class="c-row c-user" title="${esc(logTime(e))}"><div class="c-bubble">${skillChip(e)}${mdHtml(e.text)}${logImagesHtml(e.images)}${attachFilesHtml(e.attachments)}</div></div>`;
   }
   if (it.type === 'assistant') {
-    return `<div class="c-row c-agent">${it.head ? chatHeadHtml(it.agent || agent, e) : ''}<div class="c-text" title="${esc(logTime(e))}">${mdHtml(e.text)}${logImagesHtml(e.images)}</div></div>`;
+    return `<div class="c-row c-agent">${it.head ? chatHeadHtml(it.agent || agent, e, pp) : ''}<div class="c-text" title="${esc(logTime(e))}">${mdHtml(e.text)}${logImagesHtml(e.images)}</div></div>`;
   }
   if (it.type === 'tool') {
     const r = it.result;
@@ -1287,7 +1327,7 @@ function chatItemHtml(it, agent, open) {
     const err = r && r.kind === 'tool_error';
     const st = err ? `<span class="c-tool-st">エラー</span>` : '';
     const out = r && r.text ? `<pre class="c-tool-out">${esc(r.text)}</pre>` : r ? `<div class="c-tool-out muted small">（出力はありません）</div>` : `<div class="c-tool-out muted small">（結果はまだありません）</div>`;
-    return `<div class="c-row c-agent c-toolrow">${it.head ? chatHeadHtml(it.agent || agent, e || r) : ''}<details class="c-tool${err ? ' err' : ''}"${open ? ' open' : ''}><summary title="${esc(logTime(e || r))}">${icon('wrench')}<span class="c-tool-name">${esc(name)}</span><span class="c-tool-arg">${esc(arg)}</span>${st}</summary>${out}</details>${r ? logImagesHtml(r.images) : ''}</div>`;
+    return `<div class="c-row c-agent c-toolrow">${it.head ? chatHeadHtml(it.agent || agent, e || r, pp) : ''}<details class="c-tool${err ? ' err' : ''}"${open ? ' open' : ''}><summary title="${esc(logTime(e || r))}">${icon('wrench')}<span class="c-tool-name">${esc(name)}</span><span class="c-tool-arg">${esc(arg)}</span>${st}</summary>${out}</details>${r ? logImagesHtml(r.images) : ''}</div>`;
   }
   // システムのお知らせ・完了・エラー・承認・質問などは、会話の間に小さく挟む
   const k = e.kind;
@@ -1298,7 +1338,7 @@ function renderChatLog(body, c, logs) {
   const agent = agentOf(c);
   const items = ChatLog.build(logs, agent);
   state.chat = { id: c.id, items };
-  body.innerHTML = `<div class="chat-log">${items.map((it) => chatItemHtml(it, agent)).join('')}</div><div id="logActions" class="log-actions"></div>`;
+  body.innerHTML = `<div class="chat-log">${items.map((it) => chatItemHtml(it, agent, false, chatPersonaOf(c))).join('')}</div><div id="logActions" class="log-actions"></div>`;
   drawLogActions(c, true);
 }
 
@@ -1374,8 +1414,8 @@ function appendChatLog(body, c, entry) {
   const lastEl = box.lastElementChild;
   if (op === 'replace' && lastEl) {
     const open = !!lastEl.querySelector('details[open]');
-    lastEl.outerHTML = chatItemHtml(item, agent, open);
-  } else box.insertAdjacentHTML('beforeend', chatItemHtml(item, agent));
+    lastEl.outerHTML = chatItemHtml(item, agent, open, chatPersonaOf(c));
+  } else box.insertAdjacentHTML('beforeend', chatItemHtml(item, agent, false, chatPersonaOf(c)));
 }
 
 // 「チャット」タブ: 指示・途中の質問と、エージェントの最後の返事だけを並べる（ツールの呼び出しや結果は出さない）
@@ -1384,8 +1424,8 @@ function chatItemsHtml(c) {
   const agent = agentOf(c);
   const running = c.status === 'running';
   const items = ChatLog.final(state.logs.get(c.id) || [], agent, running);
-  const html = items.map((it) => chatItemHtml(it, agent)).join('');
-  const working = running ? `<div class="c-note k-working">${icon('clock')}<span class="c-note-x">${esc(agentShort(agent))} が作業しています…（途中の様子は「ログ」で見られます）</span></div>` : '';
+  const html = items.map((it) => chatItemHtml(it, agent, false, chatPersonaOf(c))).join('');
+  const working = running ? `<div class="c-note k-working">${icon('clock')}<span class="c-note-x">${esc(whoShort(agent, chatPersonaOf(c)))} が作業しています…（途中の様子は「ログ」で見られます）</span></div>` : '';
   if (!html && !working) {
     return `<div class="muted pad">${isChat(c) ? 'まだ会話はありません。' : `まだ返事はありません。「開始」を押すと ${agentLabel(agent)} が動き出します。`}</div>`;
   }
@@ -2121,13 +2161,17 @@ function relayFlowInfo(flow) {
 }
 function relayFlowLabel(info) {
   const extra = [info.ifs && `分岐${info.ifs}`, info.pars && `並列${info.pars}`, info.loops && `ループ${info.loops}`].filter(Boolean).join('・');
-  return (info.steps.map((x) => `${x.label}(${agentShort(x.agent)})`).join(' → ') || '未設定') + (extra ? `（${extra}）` : '');
+  return (info.steps.map((x) => `${x.label}(${whoShort(stepWho(x).agent, stepWho(x).persona)})`).join(' → ') || '未設定') + (extra ? `（${extra}）` : '');
 }
 // 設定: Pipelineのフローの要約
-function relayFlowSummaryHtml(flow, enabled) {
+function relayFlowSummaryHtml(flow, enabled, cas = customAgents()) {
   const info = relayFlowInfo(flow);
   const steps = info.steps
-    .map((x, i) => `<li><span class="relay-no">${i + 1}</span> ${agentIcon(x.agent)}<b>${esc(x.label)}</b> <span class="muted">${esc(agentLabel(x.agent))}${enabled.includes(x.agent) ? '' : '（使わない設定）'}</span>${x.instruction ? `<div class="muted small rs-inst">${esc(x.instruction)}</div>` : ''}</li>`)
+    .map((x, i) => {
+      const w = stepWho(x, cas);
+      const model = w.model || x.model;
+      return `<li><span class="relay-no">${i + 1}</span> ${personaIcon(w.persona, w.agent)}<b>${esc(x.label)}</b> <span class="muted">${esc(whoLabel(w.agent, w.persona))}${model ? ` / ${esc(model)}` : ''}${w.missing ? '（カスタムエージェントが見つかりません）' : enabled.includes(w.agent) ? '' : '（使わない設定）'}</span>${x.instruction ? `<div class="muted small rs-inst">${esc(x.instruction)}</div>` : ''}</li>`;
+    })
     .join('');
   const extra = [info.ifs && `分岐（if） ${info.ifs}`, info.pars && `並列 ${info.pars}`, info.loops && `ループ ${info.loops}`].filter(Boolean).join(' ・ ');
   return `${steps ? `<ol class="relay-sum-list">${steps}</ol>` : '<div class="muted small">工程がありません</div>'}
@@ -2147,22 +2191,27 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
   const orch = orchestration ? orchestrationOf(s) : 'none';
   const info = relayFlowInfo(s.relayFlow);
   const steps = info.steps;
-  const relayOff = !steps.length || info.errors.length > 0 || steps.some((x) => !on.includes(x.agent));
-  const comp = (s.competeAgents || []).filter((a) => on.includes(a));
+  const relayOff = !steps.length || info.errors.length > 0 || steps.some((x) => stepWho(x).missing || !on.includes(stepWho(x).agent));
+  const comp = competeNames(s);
   // 設定でPipeline・競争を選んでいれば、それを最初から選んでおく（使えない状態なら、最初から選んでおくエージェント）
   const orchUsable = (orch === 'relay' && !relayOff) || (orch === 'compete' && comp.length >= 2);
   const v = value || (orchUsable ? orch : defaultAgent(s));
   const opt = (val, label, disabled) => `<option value="${val}" ${val === v && !disabled ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(label)}</option>`;
-  const single = AGENTS.filter(([a]) => on.includes(a)).map(([a, l]) => opt(a, l)).join('');
+  const plain = AGENTS.filter(([a]) => on.includes(a)).map(([a, l]) => opt(a, l)).join('');
+  const cas = customAgents(s);
+  const custom = cas.length
+    ? `<optgroup label="カスタムエージェント">${cas.map((ca) => opt(CUSTOM_PREFIX + ca.id, `${ca.icon ? `${ca.icon} ` : ''}${ca.name}（${agentShort(ca.agent)}${ca.model ? ` / ${ca.model}` : ''}）${on.includes(ca.agent) ? '' : '（使わない設定）'}`, !on.includes(ca.agent))).join('')}</optgroup>`
+    : '';
+  const single = custom ? `<optgroup label="1つのエージェントで動かす">${plain}</optgroup>${custom}` : plain;
   if (orch === 'none') return `<label class="field"><span>エージェント</span><select id="${idp}Agent">${single}</select><small id="${idp}AgentHint" class="muted"></small></label>`;
   const stepsLabel = relayFlowLabel(info);
   return `<label class="field"><span>エージェント</span>
     <select id="${idp}Agent">
-      <optgroup label="1つのエージェントで動かす">${single}</optgroup>
+      ${custom ? single : `<optgroup label="1つのエージェントで動かす">${single}</optgroup>`}
       <optgroup label="オーケストレーション">
         ${orch === 'relay'
           ? opt('relay', `Pipeline: ${stepsLabel}${info.errors.length ? '（設定のフローチャートを直してください）' : relayOff ? '（設定で工程のエージェントを使う設定にしてください）' : ''}`, relayOff)
-          : opt('compete', comp.length >= 2 ? `競争: ${comp.map(agentShort).join('・')} で同じタスクを解いて比べる` : '競争（設定で使うエージェントを2つ以上選んでください）', comp.length < 2)}
+          : opt('compete', comp.length >= 2 ? `競争: ${comp.join('・')} で同じタスクを解いて比べる` : '競争（設定で使うエージェントを2つ以上選んでください）', comp.length < 2)}
       </optgroup>
     </select>
     <small id="${idp}AgentHint" class="muted"></small></label>`;
@@ -2175,17 +2224,38 @@ function bindAgentField(idp, onChange) {
     $(`${idp}AgentHint`).textContent =
       v === 'relay' ? '設定のフローチャートに沿って、工程ごとにエージェントが作業を引き継ぎます（前の工程の報告を次に渡します。分岐・ループ・並列もフローのとおりに動きます）。フローチャートは「設定」で変えられます。'
       : v === 'compete' ? 'エージェントごとにカードと worktree を作って並列に解きます。終わったら差分を見比べ、よい案を採用してマージします。'
+      : isCustomRef(v) ? customHint(findCustomAgent(v))
       : agentLimitHint(v);
     onChange?.(v);
   };
   sel.onchange = hint;
   hint();
 }
+// カスタムエージェントを選んだときの説明（プロフィール・モデル）
+function customHint(ca) {
+  if (!ca) return 'カスタムエージェントが見つかりません。選び直してください。';
+  const parts = [`${agentLabel(ca.agent)} を「${ca.name}」のプロフィールで動かします（モデル: ${ca.model || settingsModel(ca.agent) || 'CLI の既定'}）。`];
+  if (ca.description) parts.push(ca.description);
+  const lim = agentLimitHint(ca.agent);
+  if (lim) parts.push(lim);
+  return parts.join(' ');
+}
+// 競争させる顔ぶれの名前（使う設定のふつうのエージェントと、このプロジェクトのカスタムエージェント）
+function competeNames(s = state.board.settings || {}) {
+  const on = enabledAgents(s);
+  const plain = (s.competeAgents || []).filter((a) => on.includes(a)).map(agentShort);
+  const custom = (s.competeCustomAgents || []).map((id) => findCustomAgent(id, customAgents(s))).filter((ca) => ca && on.includes(ca.agent)).map((ca) => ca.name);
+  return [...plain, ...custom];
+}
 // 既存の会話（Claude Code の会話）を選べるのは、最初に動くのが Claude Code のときだけ
 function firstAgentOf(v) {
   const s = state.board.settings;
-  if (v === 'relay') return (relayFlowInfo(s.relayFlow).first || {}).agent || 'claude';
+  if (v === 'relay') {
+    const first = relayFlowInfo(s.relayFlow).first;
+    return first ? stepWho(first).agent : 'claude';
+  }
   if (v === 'compete') return (s.competeAgents || []).includes('claude') ? 'claude' : '';
+  if (isCustomRef(v)) return (findCustomAgent(v) || {}).agent || '';
   return v;
 }
 // ---------------- モデルを選ぶ欄（タスク・会話を作るとき） ----------------
@@ -2210,7 +2280,8 @@ function modelFieldHtml(idp, value = '') {
 function updateModelField(idp, agent) {
   const input = $(`${idp}Model`);
   if (!input) return;
-  const multi = agent === 'relay' || agent === 'compete';
+  // カスタムエージェントは、そのエージェントのモデルを使う
+  const multi = agent === 'relay' || agent === 'compete' || isCustomRef(agent);
   input.closest('.field').classList.toggle('hidden', multi);
   if (multi) return;
   const def = settingsModel(agent);
@@ -2220,7 +2291,7 @@ function updateModelField(idp, agent) {
 }
 // 送るモデル（Pipeline・競争のときは送らない）
 function readModelField(idp, agent) {
-  if (agent === 'relay' || agent === 'compete') return undefined;
+  if (agent === 'relay' || agent === 'compete' || isCustomRef(agent)) return undefined;
   return ($(`${idp}Model`)?.value || '').trim() || undefined;
 }
 
@@ -2239,7 +2310,7 @@ function newTask(opts = {}) {
      ${fromDone ? `<p class="muted small">完了したタスク「${esc(from.title)}」の修正として、新しいタスクを始めます（元のタスクのやりとりをエージェントが引き継ぎます。元のタスクはそのまま残ります）。</p>`
      : from ? `<p class="muted small">会話「${esc(from.title)}」の続きとして、タスクを始めます（会話の内容をエージェントが引き継ぎます。会話そのものはそのまま残ります）。</p>` : ''}
      <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
-     ${agentFieldHtml('n', from && enabledAgents().includes(agentOf(from)) ? agentOf(from) : undefined)}
+     ${agentFieldHtml('n', from && from.persona && findCustomAgent(from.persona.id) && !from.relay ? CUSTOM_PREFIX + from.persona.id : from && enabledAgents().includes(agentOf(from)) ? agentOf(from) : undefined)}
      ${modelFieldHtml('n', from && enabledAgents().includes(agentOf(from)) ? from.model || '' : '')}
      <div class="field"><span>エージェントへの指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。画像やファイルは貼り付け・ドラッグ＆ドロップでも添付できます。"></textarea><div id="nAttach" class="attach-bar"></div></div>
      ${sessionFieldHtml('n')}
@@ -2337,7 +2408,7 @@ function newChat() {
       $('cMsg').focus();
       fillSessionField('c');
       bindAgentField('c', (v) => {
-        toggleSessionField('c', v);
+        toggleSessionField('c', firstAgentOf(v));
         updateModelField('c', v);
       });
       let skill = null;
@@ -2346,7 +2417,7 @@ function newChat() {
       const att = attachField({ box: $('cAttach'), input: $('cMsg'), drop: $('cMsg').closest('.field') });
       const submit = async () => {
         const files = att.list();
-        const id = await runBusy('会話を始めています…', () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: $('cAgent').value === 'claude' ? readSessionField('c') : { mode: 'new' }, skill, agent: $('cAgent').value, model: readModelField('c', $('cAgent').value), attachments: files.length ? files : undefined }));
+        const id = await runBusy('会話を始めています…', () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: firstAgentOf($('cAgent').value) === 'claude' ? readSessionField('c') : { mode: 'new' }, skill, agent: $('cAgent').value, model: readModelField('c', $('cAgent').value), attachments: files.length ? files : undefined }));
         if (id) {
           closeModal();
           selectNew(id);
@@ -3124,6 +3195,11 @@ async function openSettings() {
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
        <small>「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
+     <div class="field"><span>${icon('bot')}カスタムエージェント（このプロジェクトの設定）</span>
+       <div id="sCustomList" class="ca-list"></div>
+       <div id="sCustomForm" class="ca-form" hidden></div>
+       <div><button class="btn small" id="sCustomAdd" type="button">＋ カスタムエージェントを追加</button></div>
+       <small>元にするエージェント（CLI）とモデルに、プロフィール（名前・アイコンと色・説明・振る舞いの指示）を持たせます。タスク・会話を作るときの「エージェント」の欄、Pipelineの工程、競争で選べます。振る舞いの指示は、最初の指示の前に付けて渡します。</small></div>
 
      <h3 class="s-section">アプリ全体の設定</h3>
      <small class="muted s-note">ここから下の項目は、どのプロジェクトでも同じです。</small>
@@ -3172,7 +3248,7 @@ async function openSettings() {
        <small>工程（エージェントと担当の説明）を線でつなぎ、分岐（if）・ループ・並列を組めます。工程が終わるたびに変更をコミットし、最後の報告と一緒に次の工程へ渡します。フローチャートの画面の「保存」で、すぐに保存します。</small></div>
      <div class="field" id="sCompeteField"><span>${icon('flag')}競争させるエージェント（2つ以上）</span>
        <div class="check-row" id="sCompeteBox"></div>
-       <small>使うエージェントにチェックを付けたものから選べます。</small></div>
+       <small>使うエージェントにチェックを付けたものと、このプロジェクトのカスタムエージェントから選べます（カスタムエージェントの選択は、プロジェクトごとに覚えます）。</small></div>
 
      <div class="modal-actions"><button class="btn ghost" id="sCancel">キャンセル</button><button class="btn primary" id="sOk">保存</button></div>`,
     () => {
@@ -3190,12 +3266,111 @@ async function openSettings() {
         if (!list.includes(cur)) dsel.value = list[0];
         // 競争させるエージェント
         document.querySelectorAll('.sCompete').forEach((x) => (x.checked ? competeSel.add(x.value) : competeSel.delete(x.value)));
-        $('sCompeteBox').innerHTML = list.map((a) => `<label class="check"><input type="checkbox" class="sCompete" value="${a}" ${competeSel.has(a) ? 'checked' : ''} /> ${agentIcon(a)}${esc(agentLabel(a))}</label>`).join('');
+        document.querySelectorAll('.sCompeteCustom').forEach((x) => (x.checked ? competeCustomSel.add(x.value) : competeCustomSel.delete(x.value)));
+        $('sCompeteBox').innerHTML =
+          list.map((a) => `<label class="check"><input type="checkbox" class="sCompete" value="${a}" ${competeSel.has(a) ? 'checked' : ''} /> ${agentIcon(a)}${esc(agentLabel(a))}</label>`).join('') +
+          cas
+            .filter((ca) => list.includes(ca.agent))
+            .map((ca) => `<label class="check"><input type="checkbox" class="sCompeteCustom" value="${esc(ca.id)}" ${competeCustomSel.has(ca.id) ? 'checked' : ''} /> ${personaIcon(ca, ca.agent)}${esc(whoLabel(ca.agent, ca))}</label>`)
+            .join('');
       };
+      // ---- カスタムエージェント（保存するまでは、この画面の中の写しを変える） ----
+      let cas = JSON.parse(JSON.stringify(customAgents(s)));
+      let competeCustomSel = new Set(s.competeCustomAgents || []);
+      const newCaId = () => {
+        let id;
+        do id = `ca${Math.random().toString(16).slice(2, 10)}`;
+        while (cas.some((x) => x.id === id));
+        return id;
+      };
+      const drawCustomList = () => {
+        $('sCustomList').innerHTML = cas.length
+          ? cas
+              .map(
+                (ca, i) => `<div class="ca-item" style="--pc:${esc(ca.color || '#6366f1')}">
+                  ${personaIcon(ca, ca.agent)}
+                  <div class="ca-main"><b>${esc(ca.name)}</b> <span class="muted small">${agentIcon(ca.agent)}${esc(agentLabel(ca.agent))}${ca.model ? ` / ${esc(ca.model)}` : ''}${using().includes(ca.agent) ? '' : '（使わない設定）'}</span>
+                    ${ca.description ? `<div class="small">${esc(ca.description)}</div>` : ''}
+                    ${ca.instruction ? `<div class="muted small rs-inst">${esc(ca.instruction)}</div>` : ''}</div>
+                  <div class="ca-acts"><button class="btn small" type="button" data-ca-edit="${i}">編集</button><button class="btn small danger" type="button" data-ca-del="${i}">削除</button></div>
+                </div>`,
+              )
+              .join('')
+          : '<div class="muted small">まだありません</div>';
+        $('sCustomList').querySelectorAll('[data-ca-edit]').forEach((b) => (b.onclick = () => openCustomForm(Number(b.dataset.caEdit))));
+        $('sCustomList').querySelectorAll('[data-ca-del]').forEach((b) => {
+          b.onclick = () => {
+            const ca = cas[Number(b.dataset.caDel)];
+            const used = relayFlow && (relayFlow.nodes || []).some((n) => n.type === 'step' && n.custom === ca.id);
+            if (!confirm(`カスタムエージェント「${ca.name}」を削除しますか？${used ? '\nPipelineの工程で使っています。削除すると、その工程を選び直すまでPipelineを始められません。' : ''}\n（作ってあるタスクは、そのまま動きます）`)) return;
+            cas.splice(Number(b.dataset.caDel), 1);
+            competeCustomSel.delete(ca.id);
+            $('sCustomForm').hidden = true;
+            redrawCustom();
+          };
+        });
+      };
+      const redrawCustom = () => {
+        drawCustomList();
+        drawRelay();
+        drawAgents();
+      };
+      // 追加（index が null）・編集のフォーム
+      const openCustomForm = (index) => {
+        const cur = index === null ? { id: '', name: '', icon: '', color: '#6366f1', description: '', instruction: '', agent: using()[0] || 'claude', model: '' } : cas[index];
+        const box = $('sCustomForm');
+        box.hidden = false;
+        box.innerHTML = `<h4>${index === null ? 'カスタムエージェントを追加' : `「${esc(cur.name)}」を編集`}</h4>
+          <div class="row ca-row3">
+            <label class="field"><span>名前</span><input id="caName" maxlength="30" placeholder="例: 慎重なレビュアー" value="${esc(cur.name)}" /></label>
+            <label class="field"><span>アイコン（絵文字）</span><input id="caIcon" maxlength="8" placeholder="絵文字か1文字" value="${esc(cur.icon || '')}" /></label>
+            <label class="field"><span>色</span><input id="caColor" type="color" value="${esc(cur.color || '#6366f1')}" /></label>
+          </div>
+          <label class="field"><span>説明（役割の一言）</span><input id="caDesc" maxlength="200" placeholder="例: セキュリティとテストの抜けを重点的に見る" value="${esc(cur.description || '')}" /></label>
+          <div class="row">
+            <label class="field"><span>元にするエージェント</span><select id="caAgent">${AGENTS.map(([a, l]) => `<option value="${a}" ${a === cur.agent ? 'selected' : ''}>${esc(l)}${using().includes(a) ? '' : '（使わない設定）'}</option>`).join('')}</select></label>
+            <label class="field"><span>モデル（空なら設定の既定）</span><input id="caModel" list="caModelList" autocomplete="off" spellcheck="false" value="${esc(cur.model || '')}" /><datalist id="caModelList"></datalist></label>
+          </div>
+          <label class="field"><span>振る舞いの指示（性格・やり方。最初の指示の前に付けます）</span><textarea id="caInst" rows="5" maxlength="4000" placeholder="例: 変更は小さく保ち、直す前に必ず理由を説明してください。テストが通るまで完了にしないでください。">${esc(cur.instruction || '')}</textarea></label>
+          <div class="ca-preview" id="caPreview"></div>
+          <div class="modal-actions"><button class="btn ghost small" id="caCancel" type="button">やめる</button><button class="btn primary small" id="caOk" type="button">${index === null ? '追加' : '決定'}</button></div>`;
+        const read = () => ({
+          id: cur.id || newCaId(),
+          name: $('caName').value.trim(),
+          icon: $('caIcon').value.trim(),
+          color: $('caColor').value,
+          description: $('caDesc').value.trim(),
+          instruction: $('caInst').value.trim(),
+          agent: $('caAgent').value,
+          model: $('caModel').value.trim(),
+        });
+        const preview = () => {
+          const v = read();
+          $('caModelList').innerHTML = (MODEL_SUGGEST[v.agent] || []).map((m) => `<option value="${esc(m)}"></option>`).join('');
+          $('caModel').placeholder = settingsModel(v.agent) ? `例: ${settingsModel(v.agent)}（設定の既定）` : `例: ${(MODEL_SUGGEST[v.agent] || [])[0] || ''}`;
+          $('caPreview').innerHTML = `<span class="orch-chip agent persona" style="--pc:${esc(v.color)}">${personaIcon(v, v.agent)}${esc(whoLabel(v.agent, { ...v, name: v.name || '（名前）' }))}</span>`;
+        };
+        box.querySelectorAll('input, select, textarea').forEach((el) => (el.oninput = el.onchange = preview));
+        preview();
+        $('caName').focus();
+        $('caCancel').onclick = () => (box.hidden = true);
+        $('caOk').onclick = () => {
+          const v = read();
+          if (!v.name) return toast('名前を入れてください');
+          if (v.model && !/^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$/.test(v.model)) return toast(`モデル名に使えない文字が入っています: ${v.model}`);
+          if (cas.some((x, i) => i !== index && x.name === v.name)) return toast(`「${v.name}」という名前のカスタムエージェントはもうあります`);
+          if (index === null) cas.push(v);
+          else cas[index] = v;
+          box.hidden = true;
+          redrawCustom();
+        };
+      };
+      $('sCustomAdd').onclick = () => openCustomForm(null);
       // Pipelineのフローの要約（工程の並びと、分岐・並列・ループの数）
       const drawRelay = () => {
-        $('sRelay').innerHTML = relayFlowSummaryHtml(relayFlow, using());
+        $('sRelay').innerHTML = relayFlowSummaryHtml(relayFlow, using(), cas);
       };
+      drawCustomList();
       drawRelay();
       drawAgents();
       // 選んだオーケストレーションの欄だけ出す（選んでいない方の設定は保存したまま残す）
@@ -3212,8 +3387,7 @@ async function openSettings() {
           const box = cb.closest('.agent-cfg');
           box.classList.toggle('on', cb.checked);
           box.querySelector('.agent-cfg-body').hidden = !cb.checked;
-          drawRelay();
-          drawAgents();
+          redrawCustom();
         };
       });
       $('sRelayEdit').onclick = () =>
@@ -3221,9 +3395,12 @@ async function openSettings() {
           flow: relayFlow || { nodes: [], edges: [] },
           agents: AGENTS,
           enabled: using(),
+          customAgents: cas,
+          modelSuggest: MODEL_SUGGEST,
           defaultAgent: $('sDefaultAgent').value || 'claude',
           onSave: async (flow) => {
-            const r = await runBusy('フローチャートを保存しています…', () => api.updateSettings({ relayFlow: flow }), '保存しました');
+            // 工程で選んだカスタムエージェントも一緒に保存する（この画面で追加したばかりのものを使えるように）
+            const r = await runBusy('フローチャートを保存しています…', () => api.updateSettings({ relayFlow: flow, customAgents: cas }), '保存しました');
             if (!r) return false;
             relayFlow = r.relayFlow || flow;
             drawRelay();
@@ -3252,9 +3429,12 @@ async function openSettings() {
       $('sOk').onclick = async () => {
         const on = using();
         if (!on.length) return toast('使うエージェントを1つ以上選んでください');
+        if (!$('sCustomForm').hidden && !confirm('カスタムエージェントの編集を決定していません。編集中の内容を捨てて保存しますか？')) return;
         const steps = relayFlow ? FlowModel.orderSteps(relayFlow) : [];
-        const offStep = steps.find((st) => !on.includes(st.agent));
-        if (offStep && orch() === 'relay' && !confirm(`Pipelineの工程「${offStep.label || '（名前なし）'}」の ${agentLabel(offStep.agent)} は使わない設定です。このままだとPipelineを始められません。保存しますか？`)) return;
+        const lostStep = steps.find((st) => stepWho(st, cas).missing);
+        if (lostStep && orch() === 'relay' && !confirm(`Pipelineの工程「${lostStep.label || '（名前なし）'}」のカスタムエージェントがありません。このままだとPipelineを始められません。保存しますか？`)) return;
+        const offStep = steps.find((st) => !on.includes(stepWho(st, cas).agent));
+        if (offStep && orch() === 'relay' && !confirm(`Pipelineの工程「${offStep.label || '（名前なし）'}」の ${agentLabel(stepWho(offStep, cas).agent)} は使わない設定です。このままだとPipelineを始められません。保存しますか？`)) return;
         const r = await runBusy('設定を保存しています…', () =>
           api.updateSettings({
             baseBranch: $('sBase').value,
@@ -3276,6 +3456,9 @@ async function openSettings() {
             orchestration: orch(),
             // 使わない設定にしたエージェントの競争の選択は覚えておく（また使う設定にしたら戻る）
             competeAgents: [...new Set([...[...document.querySelectorAll('.sCompete:checked')].map((x) => x.value), ...[...competeSel].filter((a) => !on.includes(a))])],
+            customAgents: cas,
+            // 元の CLI を使わない設定にしたカスタムエージェントの競争の選択も覚えておく
+            competeCustomAgents: [...new Set([...[...document.querySelectorAll('.sCompeteCustom:checked')].map((x) => x.value), ...[...competeCustomSel].filter((id) => { const ca = cas.find((x) => x.id === id); return ca && !on.includes(ca.agent); })])],
             defaultSkill: defSkill || '',
             issueStatusSync: $('sIssueSync').checked,
             suggestSkillsOnDone: $('sSuggestSkills').checked,

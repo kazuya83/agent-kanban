@@ -3,7 +3,7 @@
 //
 // ノード: { id, type, x, y, ... }
 //   start    開始（1つだけ）。線は1本で、工程へ
-//   step     工程: { agent, label, instruction }。線は1本
+//   step     工程: { agent, label, instruction, model?, custom? }。線は1本（custom はカスタムエージェントの ID。あればその CLI・モデル・プロフィールで動かす）
 //   if       分岐: { label, question }。直前の工程のエージェントが返事の最後に書いた [[RESULT:値]] を、線ごとの期待値と比べて行き先を選ぶ
 //   parallel 並列: { label }。線を2本以上出し、枝ごとに別の worktree で同時に動かす
 //   join     合流: { label }。並列の枝がすべて終わるのを待ち、枝の変更をマージして先へ進む。線は1本
@@ -83,6 +83,11 @@
         node.agent = isAgent(x.agent) ? x.agent : 'claude';
         node.label = trunc(String(x.label || '').trim(), 30) || `工程${steps}`;
         node.instruction = trunc(String(x.instruction || '').trim(), 4000);
+        // モデル（空なら設定のエージェントごとの既定）。カスタムエージェントを選んだ工程は、そのエージェント・モデル・プロフィールで動かす
+        const model = String(x.model || '').trim();
+        if (model && model.length <= 100 && /^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$/.test(model)) node.model = model;
+        const custom = cleanId(String(x.custom || '').replace(/^custom:/, ''));
+        if (custom) node.custom = custom;
       } else if (x.type === 'if') {
         node.label = trunc(String(x.label || '').trim(), 30) || '分岐';
         node.question = trunc(String(x.question || '').trim(), 1000);
