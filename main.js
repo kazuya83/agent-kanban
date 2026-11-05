@@ -31,7 +31,7 @@ const git = require('./src/git');
 const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
-const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, routeSide, stripRouting, composeTabs, VIEW_CHANNELS, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory } = require('./src/remote');
+const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, routeSide, stripRouting, droppedSettingKeys, droppedSettingsMessage, composeTabs, VIEW_CHANNELS, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory } = require('./src/remote');
 const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
 const sshKey = require('./src/ssh-key');
 const dirBrowse = require('./src/dir-browse');
@@ -203,6 +203,11 @@ async function dispatch(channel, arg) {
       // 手元のボードを触る操作（リポジトリの選択ダイアログなど）は、ホストの画面に出てしまうので止める
       if (!isProxyChannel(channel)) throw new Error('ホストのタブではこの操作を使えません（このマシンのタブで行うか、ホスト側で行ってください）');
       const data = await remoteClient.invoke(channel, stripRouting(arg));
+      // 古い版のホストは知らない設定を黙って捨てる。「保存しました」と出て残らないので、エラーにして知らせる
+      if (channel === 'settings:update') {
+        const dropped = droppedSettingKeys(stripRouting(arg), data);
+        if (dropped.length) throw new Error(droppedSettingsMessage(dropped));
+      }
       if (channel === 'board:get' && data && typeof data === 'object') {
         hostBoardCache = data;
         return viewBoard();

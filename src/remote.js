@@ -607,7 +607,21 @@ function publicConnectionHistory(list) {
     .map((e) => ({ ...normalizeConnection(e), id: connectionKey(e), hasToken: !!e.token, lastConnectedAt: e.lastConnectedAt || 0 }));
 }
 
+// 保存を頼んだ設定のうち、保存先（ホスト）が受け取らなかった項目
+// 古い版のホストは知らない設定を黙って捨てるので、返ってきた設定に無い項目を探す
+const SETTING_LABELS = { customAgents: 'カスタムエージェント', relayFlow: 'Pipelineのフローチャート', competeCustomAgents: '競争させるカスタムエージェント', enabledAgents: '使うエージェント', orchestration: 'オーケストレーション' };
+function droppedSettingKeys(patch, result) {
+  if (!patch || typeof patch !== 'object' || !result || typeof result !== 'object') return [];
+  return Object.keys(patch).filter((k) => patch[k] !== undefined && result[k] === undefined);
+}
+function droppedSettingsMessage(keys) {
+  const names = [...new Set(keys.map((k) => SETTING_LABELS[k] || k))];
+  return `ホストの Agent Kanban の版が古いため、次の設定を保存できませんでした: ${names.join('、')}。ホストのアプリを新しい版に更新してから、もう一度保存してください。`;
+}
+
 module.exports = {
+  droppedSettingKeys,
+  droppedSettingsMessage,
   MAX_CONNECTION_HISTORY,
   normalizeConnection,
   connectionKey,
