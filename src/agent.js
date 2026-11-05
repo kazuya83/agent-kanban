@@ -1927,7 +1927,10 @@ class AgentManager extends EventEmitter {
           // WSL の中の claude からは、Windows 側のアプリ（/mnt/c/...exe）を呼ぶ。
           // Windows のプログラムには WSLENV に書いた環境変数だけが渡るので、ここに並べる
           command: wslDistro ? wsl.toLinux(this.opts.nodeBin) : this.opts.nodeBin,
-          args: [this.opts.mcpScript],
+          // 2つ目はこの設定ファイル。WSL から Windows のアプリを呼ぶと env（WSLENV）が届かないことがあるので、
+          // そのときはここからポート・トークンを読む（トークンはコマンドラインに出さない）。
+          // WSL でも Windows のアプリが読むので、Windows のパスのまま渡す
+          args: [this.opts.mcpScript, file],
           env: {
             ELECTRON_RUN_AS_NODE: '1',
             KANBAN_PORT: String(this.permission.port),

@@ -2,10 +2,20 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Notification } = require('electron');
 const path = require('path');
 
-// 承認用の MCP サーバーとして呼ばれたのに ELECTRON_RUN_AS_NODE が効かなかったとき（Windows で起きる）は、
-// ウィンドウを開かずに、この場で MCP サーバーとして動く（stdin が閉じたら終わる）
+// 承認用の MCP サーバーとして呼ばれたのに ELECTRON_RUN_AS_NODE が効かなかったとき
+// （Windows、特に WSL の中の claude から呼ばれたときに起きる）は、ウィンドウを開かない。
+// ELECTRON_RUN_AS_NODE を付けて自分を起動し直し、標準入出力をそのまま渡して MCP サーバーとして動かす。
+// 起動し直せないときは、この場で MCP サーバーとして動く（stdin が閉じたら終わる）
 if (require('./src/launch-mode').isMcpLaunch(process.argv)) {
-  require('./src/permission-mcp');
+  const re = require('./src/launch-mode').nodeRelaunch(process.execPath, process.argv, process.env);
+  const inProcess = () => require('./src/permission-mcp').start();
+  if (!re) {
+    inProcess();
+  } else {
+    const child = require('child_process').spawn(re.file, re.args, { env: re.env, cwd: re.cwd, stdio: 'inherit', windowsHide: true });
+    child.on('error', inProcess);
+    child.on('exit', (code) => app.exit(code ?? 0));
+  }
   return;
 }
 // アプリは1つだけ起動する。2つ目に起動されたら、すぐ終えて、今のウィンドウを前に出す（second-instance）

@@ -3,10 +3,33 @@
 // 許可を求められたらアプリ本体（127.0.0.1 の HTTP）に問い合わせ、ユーザーがカード上で
 // 「許可 / 拒否」を押すまで待ってから結果を返す。依存パッケージなし。
 const http = require('http');
+const fs = require('fs');
 
-const PORT = Number(process.env.KANBAN_PORT);
-const TOKEN = process.env.KANBAN_TOKEN || '';
-const CARD = process.env.KANBAN_CARD || '';
+// 接続先（ポート・トークン・カード）。ふつうは env で受け取る。
+// WSL の中の claude から Windows のアプリを呼ぶと env（WSLENV）が届かないことがあるので、
+// env に無いときは、引数で渡された MCP の設定ファイル（mcpServers.agent_kanban.env）から読む
+function loadSettings(env = process.env, argv = process.argv) {
+  let fromFile = {};
+  if (!env.KANBAN_PORT || !env.KANBAN_TOKEN) {
+    const file = (argv || []).slice(2).find((a) => typeof a === 'string' && /\.json$/i.test(a));
+    if (file) {
+      try {
+        const conf = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const servers = (conf && conf.mcpServers) || {};
+        const s = servers.agent_kanban || Object.values(servers)[0] || {};
+        fromFile = s.env || {};
+      } catch {
+        fromFile = {};
+      }
+    }
+  }
+  const pick = (k) => env[k] || fromFile[k] || '';
+  return { port: Number(pick('KANBAN_PORT')), token: pick('KANBAN_TOKEN'), card: pick('KANBAN_CARD') };
+}
+
+let PORT = NaN;
+let TOKEN = '';
+let CARD = '';
 
 const TOOL = {
   name: 'approve',
@@ -94,22 +117,33 @@ async function handle(msg) {
   // notifications/* は返事不要
 }
 
-let buf = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => {
-  buf += chunk;
-  let i;
-  while ((i = buf.indexOf('\n')) >= 0) {
-    const line = buf.slice(0, i).trim();
-    buf = buf.slice(i + 1);
-    if (!line) continue;
-    let msg;
-    try {
-      msg = JSON.parse(line);
-    } catch {
-      continue;
+let started = false;
+function start() {
+  if (started) return;
+  started = true;
+  ({ port: PORT, token: TOKEN, card: CARD } = loadSettings());
+  let buf = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => {
+    buf += chunk;
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (!line) continue;
+      let msg;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      handle(msg);
     }
-    handle(msg);
-  }
-});
-process.stdin.on('end', () => process.exit(0));
+  });
+  process.stdin.on('end', () => process.exit(0));
+}
+
+module.exports = { start, loadSettings };
+
+// claude から（ELECTRON_RUN_AS_NODE=1 か node で）直接起動されたとき
+if (require.main === module) start();

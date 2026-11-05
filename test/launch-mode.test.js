@@ -18,3 +18,21 @@ test('ふつうにアプリを起動したときは MCP サーバーとみなさ
   assert.strictEqual(isMcpLaunch(['C:\\app\\Agent Kanban.exe', 'C:\\docs\\permission-mcp.js.bak']), false);
   assert.strictEqual(isMcpLaunch(undefined), false);
 });
+
+const { nodeRelaunch, RELAUNCH_ENV } = require('../src/launch-mode');
+
+test('アプリとして起動してしまったら、ELECTRON_RUN_AS_NODE を付けて起動し直す（WSL から env が届かないとき）', () => {
+  const exe = 'C:\\Users\\me\\AppData\\Local\\Programs\\Agent Kanban\\Agent Kanban.exe';
+  const script = 'C:\\Users\\me\\AppData\\Local\\Programs\\Agent Kanban\\resources\\app.asar.unpacked\\src\\permission-mcp.js';
+  const conf = 'C:\\Users\\me\\AppData\\Roaming\\Agent Kanban\\mcp\\c1.json';
+  const re = nodeRelaunch(exe, [exe, '--some-chromium-flag', script, conf], { PATH: 'x' });
+  assert.strictEqual(re.file, exe);
+  assert.deepStrictEqual(re.args, [script, conf], 'スクリプトと設定ファイルだけを渡す');
+  assert.strictEqual(re.env.ELECTRON_RUN_AS_NODE, '1');
+  assert.strictEqual(re.env.PATH, 'x');
+  assert.strictEqual(re.cwd, 'C:\\Users\\me\\AppData\\Local\\Programs\\Agent Kanban', 'WSL のフォルダではなく exe のフォルダで動かす');
+  // 起動し直した子でも効かなかったときは、もう起動し直さない（その場で動く）
+  assert.strictEqual(nodeRelaunch(exe, [exe, script, conf], re.env), null);
+  assert.strictEqual(nodeRelaunch(exe, [exe], {}), null);
+  assert.ok(RELAUNCH_ENV);
+});
