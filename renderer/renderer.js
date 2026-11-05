@@ -896,7 +896,6 @@ async function selectNew(id) {
 }
 
 async function select(id) {
-  if (state.selected !== id) state.titleExpanded = false;
   state.selected = id;
   state.headSig = '';
   if (state.chatListOpen) closeModal();
@@ -1054,16 +1053,6 @@ function relayFlowHtml(c) {
   return `<div class="relay-flow"><div class="rf-title">${icon('pipeline')}Pipeline${r.pipeline && r.pipeline.name && r.pipeline.name !== 'Pipeline' ? `「${esc(r.pipeline.name)}」` : ''} <span class="muted small">${doneN}/${r.steps.length} 工程が完了${loopN ? `・ループ ${loopN} 回` : ''}${r.limitReached ? '・ループの上限で終了' : ''}</span></div>${relayWaitHtml(c)}<ol class="rf-list">${nodes.join('')}</ol></div>`;
 }
 
-// 詳細の上: Pipelineの進み具合を短く（工程のバーと、今の工程）。くわしくは「進捗」タブで見る
-function relayHeadHtml(c) {
-  if (!c.relay || isChat(c)) return '';
-  const r = c.relay;
-  const doneN = r.steps.filter((_, i) => relayStepState(c, i) === 'done').length;
-  const st = r.steps[r.index];
-  const now = r.waiting ? `並列「${esc((FlowModel.nodeOf(r.flow, r.waiting.node) || {}).label || '')}」の枝を待っています` : r.done ? 'すべての工程を終えました' : st ? `今: ${r.index + 1}. ${esc(st.label)}（${esc(RELAY_STATE[relayStepState(c, r.index)][1])}）` : '';
-  return `<div class="relay-head"><div class="rh-row">${icon('pipeline')}<b>Pipeline</b> <span class="muted small">${doneN}/${r.steps.length} 工程が完了${now ? ` ・ ${now}` : ''}</span>${state.tab !== 'progress' ? ' <button class="btn small ghost" data-act="showProgress" type="button">進捗を見る</button>' : ''}</div>${relayBarHtml(c)}${relayWaitHtml(c)}</div>`;
-}
-
 // ---------------- サブタスク ----------------
 // 親のタスクのブランチから分けて動かし、終わったものから親のブランチにマージする。サブタスクのカードはボードに出さず、親のカードにまとめて出す
 // サブタスクに分けられるタスクか（git のふつうのタスク。Pipeline・競争・会話・サブタスク自身は分けない）
@@ -1179,45 +1168,17 @@ function subtaskChipHtml(c) {
   const check = subKids(c).filter(subtaskNeedsCheck).length;
   return `<span class="orch-chip sub" title="サブタスクに分けて進めています（${esc(subPhaseText(c))}）">${icon('branch')}サブタスク ${n.done}/${n.total - n.skipped} 完了${check ? `・確認待ち ${check}` : ''}</span>`;
 }
-// 詳細: サブタスクの一覧（状態・担当・押すとサブタスクを開く・確かめてから取り込む）
-function subtaskListHtml(c, { detail = false } = {}) {
-  const st = c.subtasks;
-  const title = new Map(st.items.map((x) => [x.key, x.title]));
-  const rows = st.items.map((x, i) => {
-    const s = subItemState(c, x);
-    const [mark, label] = subStateInfo(s);
-    const k = x.cardId && x.state === 'running' ? card(x.cardId) : null;
-    const info = [];
-    if (x.issue) info.push(`<a class="issue-chip" data-url="${esc(x.issue.url)}">#${x.issue.number}</a>`);
-    if (x.after && x.after.length) info.push(`<span class="muted small" title="自動で進めるときの順番です。サブタスクだけ開始するときは、順番に関係なく始められます">${x.after.map((a) => `「${esc(title.get(a) || a)}」`).join('・')} のあと（目安）</span>`);
-    else if (st.phase !== 'plan') info.push('<span class="muted small">並列</span>');
-    if (k) info.push(`<span class="rf-agent">${personaIcon(k.persona, agentOf(k))}${esc(whoShort(agentOf(k), k.persona))}</span>`);
-    if (x.agent && !k) info.push(`<span class="rf-agent">${esc(agentShort(x.agent))}</span>`);
-    const cost = k ? k.costUsd : x.costUsd;
-    if (detail && cost) info.push(`<span class="muted small">$${cost.toFixed(3)}</span>`);
-    const name = k ? `<a href="#" data-open-card="${esc(k.id)}">${esc(x.title)}</a>` : esc(x.title);
-    const act = k && subtaskNeedsCheck(k) ? ` <button class="btn small primary" data-sact="approve" data-sid="${esc(k.id)}" title="差分を確かめたら、親のタスクのブランチに取り込みます">${icon('merge')}取り込む</button>` : '';
-    const msg = detail && k && k.lastMessage ? `<div class="rf-info">${esc(plainText(k.lastMessage))}</div>` : '';
-    const rkey = `${c.id}:sub:${x.key}`;
-    const report = detail && x.report && !k ? `<details class="rf-report" data-rkey="${esc(rkey)}" ${state.relayOpen.has(rkey) ? 'open' : ''}><summary>サブタスクの報告</summary><div class="rf-report-body">${esc(x.report)}</div></details>` : '';
-    return `<li class="rf-node rs-${s}"><span class="rf-dot" title="${esc(label)}">${mark}</span><div class="rf-body"><div class="rf-head"><b>${i + 1}. ${name}</b><span class="rf-state">${esc(label)}</span>${info.join('')}${act}</div>${msg}${report}</div></li>`;
-  });
-  return `<ol class="rf-list">${rows.join('')}</ol>`;
+// サブタスクのタスク: 親のタスクと、マージのしかた（進捗タブに出す）
+function subtaskChildHtml(c) {
+  const p = subtaskParent(c);
+  if (!p) return '';
+  return `<div class="sub-box"><div class="rh-row">${icon('branch')}<span>「<a href="#" data-open-card="${esc(p.id)}">${esc(p.title)}</a>」のサブタスクです。ブランチ ${esc(p.branch || '')} から分けて作業し、終わったら${subtaskChecked(c) ? '、確かめてから（「取り込む」を押してから）' : '自動で'}親のブランチにマージします。</span></div>
+    ${subtaskApproveHtml(c)}</div>`;
 }
-// 詳細の上: サブタスクの提案・進み具合・サブタスクなら親のタスク
-function subtaskHeadHtml(c) {
-  if (isChat(c)) return '';
-  if (c.subtaskOf) {
-    const p = subtaskParent(c);
-    if (!p) return '';
-    const check = subtaskNeedsCheck(c);
-    return `<div class="sub-box"><div class="rh-row">${icon('branch')}<span>「<a href="#" data-open-card="${esc(p.id)}">${esc(p.title)}</a>」のサブタスクです。ブランチ ${esc(p.branch || '')} から分けて作業し、終わったら${subtaskChecked(c) ? '、確かめてから（「取り込む」を押してから）' : '自動で'}親のブランチにマージします。</span></div>
-      ${check ? `<div class="d-actions"><button class="btn primary" data-sact="approve" data-sid="${esc(c.id)}">${icon('merge')}親のタスクに取り込む</button><small class="muted">差分タブで変更を確かめてから取り込んでください。直してほしいときは、下の欄から追加の指示を送れます。</small></div>` : ''}</div>`;
-  }
-  if (hasSubtaskProposal(c)) return `<div class="sub-box"><div class="rh-row">${icon('branch')}<b>サブタスクの提案</b> <span class="muted small">${esc(agentShort(agentOf(c)))} が ${c.subtaskProposal.items.length} 個のサブタスクに分けることを提案しています。「チャット」タブの最後で、サブタスクでやるか、分けずに進めるかを選んでください</span>${state.tab !== 'chat' ? ' <button class="btn small ghost" data-act="showChat" type="button">選ぶ</button>' : ''}</div></div>`;
-  if (!c.subtasks) return '';
-  const n = subCounts(c);
-  return `<div class="sub-box"><div class="rh-row">${icon('branch')}<b>サブタスク</b> <span class="muted small">${n.done}/${n.total - n.skipped} 完了 ・ ${esc(subPhaseText(c))} ・ ${c.subtasks.merge === 'review' ? '確かめてからマージ' : '自動でマージ'}</span>${state.tab !== 'progress' ? ' <button class="btn small ghost" data-act="showProgress" type="button">進捗を見る</button>' : ''}</div>${subtaskBarHtml(c)}${state.tab !== 'progress' ? subtaskListHtml(c) : ''}</div>`;
+// サブタスクのタスク: 確かめてから取り込むときの「親のタスクに取り込む」（チャットの最後と進捗タブに出す）
+function subtaskApproveHtml(c) {
+  if (!subtaskNeedsCheck(c)) return '';
+  return `<div class="d-actions"><button class="btn primary" data-sact="approve" data-sid="${esc(c.id)}">${icon('merge')}親のタスクに取り込む</button><small class="muted">差分タブで変更を確かめてから取り込んでください。直してほしいときは、下の欄から追加の指示を送れます。</small></div>`;
 }
 // サブタスクの一覧を編集する欄（提案を直す・開始前に決める）
 function subRowHtml(x, title = new Map(), showAfter = false) {
@@ -1266,7 +1227,7 @@ function subtaskProposalHtml(c) {
 function subtaskProgressHtml(c) {
   if (c.subtaskOf) {
     const p = subtaskParent(c);
-    return p ? `<section class="pg-sec"><div class="rf-wait">${icon('branch')}「<a href="#" data-open-card="${esc(p.id)}">${esc(p.title)}</a>」のサブタスクです。</div></section>` : '';
+    return p ? `<section class="pg-sec">${subtaskChildHtml(c)}</section>` : '';
   }
   if (!c.subtasks) return '';
   const n = subCounts(c);
@@ -1511,6 +1472,9 @@ function progressHtml(c) {
   if (!isChat(c) || c.persona) rows.push(`<dt>エージェント</dt><dd>${personaIcon(c.persona, agentOf(c))}${esc(whoLabel(agentOf(c), c.persona))}</dd>`);
   if (c.costUsd) rows.push(`<dt>コスト</dt><dd>$${c.costUsd.toFixed(3)}</dd>`);
   const parts = [`<section class="pg-sec"><dl class="d-meta pg-summary">${rows.join('')}</dl></section>`];
+  // 競争の候補（採用・比べてもらう）
+  const compete = competeBoxHtml(c);
+  if (compete) parts.push(`<section class="pg-sec">${compete}</section>`);
   if (s === 'todo') parts.push(`<p class="muted small pg-note">まだ開始していません。開始すると、ここで進み具合を見られます。</p>`);
   parts.push(subtaskProgressHtml(c));
   if (c.relay && !isChat(c)) {
@@ -1585,6 +1549,9 @@ function renderProgress(c, { force = false } = {}) {
   view.querySelectorAll('[data-open-card]').forEach((a) => (a.onclick = (e) => (e.preventDefault(), card(a.dataset.openCard) && select(a.dataset.openCard))));
   view.querySelectorAll('[data-sact]').forEach((b) => (b.onclick = () => subtaskAction(c, b)));
   bindSubBoard(c, view);
+  view.onclick = (e) => {
+    if (e.target.closest('[data-act], [data-goto], [data-cact]')) detailAction(e);
+  };
   view.querySelectorAll('.issue-chip').forEach((a) => (a.onclick = () => run(() => api.openExternal(a.dataset.url))));
 }
 // ログが届くたびに描き直すと重いので、まとめて描き直す
@@ -1653,7 +1620,7 @@ function competeBoxHtml(c) {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetail();
-  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch]), relayKidsSig(c), c.subtasks, c.subtaskProposal, c.subtaskOf, subKidsSig(c), state.tab === 'progress']);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch]), relayKidsSig(c), c.subtasks, c.subtaskProposal, c.subtaskOf, subKidsSig(c)]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -1686,25 +1653,10 @@ function renderDetailHead() {
       <h2 class="d-title" id="detailTitleText" title="${esc(c.title)}">${esc(c.title)}</h2>
       <button class="icon" id="closeDetail" title="閉じる">✕</button>
     </div>`;
-  $('detailHead').innerHTML = `
-    ${isInterrupted(c) ? interruptedBoxHtml(c) : c.error ? `<div class="d-error">${esc(c.error)}</div>` : ''}
-    ${relayHeadHtml(c)}
-    ${subtaskHeadHtml(c)}
-    ${competeBoxHtml(c)}
-    ${conflictBoxHtml(c)}
-    <div class="d-actions">${btns.join('')}</div>`;
+  // 上の段はボタンだけ（1行・高さは固定）。Pipeline・サブタスクの進み具合と競争は「進捗」タブ、
+  // 中断・エラー・コンフリクト・サブタスクの提案は「チャット」タブの最後に出す
+  $('detailHead').innerHTML = `<div class="d-actions">${btns.join('')}</div>`;
   $('closeDetail').onclick = closeDetail;
-  // 長いタイトルは2行までにして、クリックで全文を開いたり閉じたりする
-  const tt = $('detailTitleText');
-  tt.classList.toggle('expanded', !!state.titleExpanded);
-  tt.onclick = () => {
-    if (!state.titleExpanded && tt.scrollHeight <= tt.clientHeight + 1) return;
-    state.titleExpanded = !state.titleExpanded;
-    tt.classList.toggle('expanded', state.titleExpanded);
-  };
-  $('detailHead').querySelectorAll('details[data-rkey]').forEach((d) => (d.ontoggle = () => (d.open ? state.relayOpen.add(d.dataset.rkey) : state.relayOpen.delete(d.dataset.rkey))));
-  // Pipelineの並列: 枝のタスク・元のタスクを開く
-  $('detailHead').querySelectorAll('[data-open-card]').forEach((a) => (a.onclick = (e) => (e.preventDefault(), card(a.dataset.openCard) && select(a.dataset.openCard))));
   if (state.tab === 'info') renderInfo(c);
   drawLogActions(c);
   const canFollow = canSendFollow(c);
@@ -1832,8 +1784,18 @@ function logActionClick(e) {
     answer(p.dataset.card, p.dataset.req, dec.dataset.decision, p.querySelector('.deny-reason')?.value || '');
     return;
   }
+  // 中断・コンフリクトのボタン、サブタスクの親を開くリンク
+  const oc = e.target.closest('[data-open-card]');
+  if (oc) {
+    e.preventDefault();
+    if (card(oc.dataset.openCard)) select(oc.dataset.openCard);
+    return;
+  }
+  if (e.target.closest('[data-act], [data-goto], [data-cact]')) detailAction(e);
 }
-$('detailHead').addEventListener('click', async (e) => {
+$('detailHead').addEventListener('click', (e) => detailAction(e));
+// 詳細のボタン（上の段・チャットの最後・進捗タブ）
+async function detailAction(e) {
   const sa = e.target.closest('[data-sact]');
   if (sa) {
     const c = card(state.selected);
@@ -1857,16 +1819,6 @@ $('detailHead').addEventListener('click', async (e) => {
   if (act === 'resume') runBusy('再開しています…', () => api.resume(c.id), '再開しました');
   if (act === 'dismissInterrupted') run(() => api.dismissInterrupted(c.id));
   if (act === 'stop') runBusy('停止しています…', () => api.stop(c.id));
-  if (act === 'showChat') {
-    setTab('chat');
-    renderDetailHead();
-    renderDetailBody();
-  }
-  if (act === 'showProgress') {
-    setTab('progress');
-    renderDetailHead();
-    renderDetailBody();
-  }
   if (act === 'open') run(() => api.open(c.id));
   if (act === 'merge') openMerge(c);
   if (act === 'complete') {
@@ -1911,12 +1863,12 @@ $('detailHead').addEventListener('click', async (e) => {
       closeDetail();
     }
   }
-});
+}
 
 document.querySelectorAll('#tabs .tab').forEach((t) =>
   t.addEventListener('click', () => {
     setTab(t.dataset.tab);
-    renderDetailHead(); // Pipelineの「進捗を見る」は、進捗タブでは出さない
+    renderDetailHead();
     renderDetailBody();
   }),
 );
@@ -1977,7 +1929,7 @@ function renderChatLog(body, c, logs) {
 // ログの最後に出す、あなたの操作が必要なもの（承認）。質問への回答はチャットタブに出す
 function logActionsHtml(c) {
   const parts = [permissionBlock(c, false)];
-  if (hasChatActions(c)) parts.push(`<div class="d-awaiting"><b>${icon('question')}${esc(agentShort(agentOf(c)))} が質問しています</b><small>「チャット」タブで答えてください。</small></div>`);
+  if (hasChatActions(c)) parts.push(chatPending(c) ? `<div class="d-awaiting"><b>${icon('question')}${esc(agentShort(agentOf(c)))} が質問しています</b><small>「チャット」タブで答えてください。</small></div>` : `<div class="d-awaiting"><b>${icon('alert')}あなたの操作を待っています</b><small>「チャット」タブの最後で確かめてください。</small></div>`);
   parts.push(completeBoxHtml(c));
   return parts.join('');
 }
@@ -1994,6 +1946,9 @@ function chatActionsHtml(c) {
   const who = esc(agentShort(agentOf(c)));
   const spec = isSpecPending(c);
   const parts = [
+    isInterrupted(c) ? interruptedBoxHtml(c) : c.error ? `<div class="d-error">${esc(c.error)}</div>` : '',
+    conflictBoxHtml(c),
+    subtaskApproveHtml(c),
     questionFormHtml(c),
     spec
       ? `<div class="d-awaiting d-spec"><b>${icon('note')}内容が詰まっていないので、開発を開始できません</b><small>${specQuestions(c) ? 'このすぐ下のフォーム（または下の欄）' : '下の欄'}で、上の ${who} の質問に答えて仕様を詰めてください。仕様が詰まると、決まった仕様をまとめてから開発を始めます。</small></div>${specFormHtml(c)}`
@@ -2009,8 +1964,12 @@ function chatActionsHtml(c) {
 function hasLogActions(c) {
   return !!(c && (c.permissions || []).length);
 }
-function hasChatActions(c) {
+// エージェントからの質問・提案（答えを待っている）
+function chatPending(c) {
   return !!(c && ((c.questions || []).length || isSpecPending(c) || hasSubtaskProposal(c) || (c.awaitingReply && (c.status === 'review' || c.status === 'failed'))));
+}
+function hasChatActions(c) {
+  return !!(c && (chatPending(c) || isInterrupted(c) || conflictBoxHtml(c) || subtaskNeedsCheck(c)));
 }
 // 中身が変わったときだけ描き直す（選びかけのラジオや入力中の文字を消さない）
 function drawLogActions(c, force) {
@@ -2021,7 +1980,7 @@ function drawLogActions(c, force) {
   const ctab = $('chatTab');
   const cattn = hasChatActions(c);
   ctab.classList.toggle('attn', cattn);
-  ctab.title = cattn ? 'チャットの最後に、答えてほしい質問があります' : CHAT_TAB_TITLE;
+  ctab.title = cattn ? (chatPending(c) ? 'チャットの最後に、答えてほしい質問があります' : 'チャットの最後に、あなたの操作を待っているものがあります') : CHAT_TAB_TITLE;
   if (state.tab === 'chat') updateChatTab(c);
   if (state.tab !== 'log' && state.tab !== 'chat') return;
   const box = $('logActions');
@@ -5054,21 +5013,21 @@ api.appInfo().then(
   });
 })();
 
-// 詳細パネルの3つの段（上: タスクの情報 / 中: タブの中身 / 下: 追加の指示）は、境目をドラッグして高さを変えられる。
-// どの段も「ログ・worktree などのタブ」の高さより低くはできない。高さは保存し、ダブルクリックで元に戻す
+// 詳細パネルの上の2行（タイトル・ボタン）は高さを固定し、下の段（追加の指示）は境目をドラッグして高さを変えられる。
+// 下の段は「ログ・worktree などのタブ」の高さより低くはできず、中のタブの中身もタブの高さより潰さない。高さは保存し、ダブルクリックで元に戻す
 (function setupDetailSplit() {
   const panel = $('detail');
   const head = $('detailHead');
   const foot = $('detailFoot');
   const tabs = $('tabs');
-  const KEYS = { head: 'detailHeadHeight', foot: 'detailFootHeight' };
-  const els = { head, foot };
   const body = $('detailBody');
-  // pref: ユーザーが決めた（保存した）高さ / h: いま実際に使っている高さ（入りきらないときは pref より縮める）
-  const pref = { head: Number(localStorage.getItem(KEYS.head)) || 0, foot: Number(localStorage.getItem(KEYS.foot)) || 0 };
-  const h = { ...pref };
   const title = $('detailTitle');
   const input = $('followInput');
+  const KEY = 'detailFootHeight';
+  localStorage.removeItem('detailHeadHeight'); // 上の段の高さは固定にしたので、前に保存した高さは使わない
+  // pref: ユーザーが決めた（保存した）高さ / h: いま実際に使っている高さ（入りきらないときは pref より縮める）
+  let pref = Number(localStorage.getItem(KEY)) || 0;
+  let h = pref;
   const minH = () => Math.max(24, tabs.offsetHeight);
   // 下の段の入力欄は、いちばん上のタイトルと同じ高さより低くしない
   const syncInputMin = () => {
@@ -5080,87 +5039,58 @@ api.appInfo().then(
     const chrome = foot.offsetHeight - foot.clientHeight + foot.scrollHeight - input.offsetHeight;
     return Math.max(minH(), chrome + title.offsetHeight);
   };
-  const minFor = (k) => (k === 'foot' ? footMin() : minH());
-  // 上下の段とタブを除いた、3つの段で分け合える高さ
-  const avail = () => panel.clientHeight - tabs.offsetHeight - title.offsetHeight;
-  const cur = (k) => (h[k] > 0 ? h[k] : els[k].offsetHeight);
-  const apply = (k) => {
-    const el = els[k];
-    el.classList.toggle('sized', h[k] > 0);
-    el.style.height = h[k] > 0 ? `${Math.round(h[k])}px` : '';
+  // 中のタブの中身と下の段で分け合える高さ
+  const avail = () => panel.clientHeight - tabs.offsetHeight - title.offsetHeight - head.offsetHeight;
+  const apply = () => {
+    foot.classList.toggle('sized', h > 0);
+    foot.style.height = h > 0 ? `${Math.round(h)}px` : '';
   };
-  // k の段を v にしたいとき、ほかの2つの段がタブの高さ以上を保てる範囲に収める
-  const clampFor = (k, v) => {
-    const other = k === 'head' ? 'foot' : 'head';
-    const max = avail() - cur(other) - minH();
-    return Math.max(minFor(k), Math.min(v, max));
-  };
+  const clamp = (v) => Math.max(footMin(), Math.min(v, avail() - minH()));
   // パネルの高さが変わったら（ウィンドウの大きさ・モーダルとの切り替え）、はみ出さないように縮める
   const fit = () => {
     if (panel.classList.contains('hidden') || !panel.clientHeight) return;
     syncInputMin();
-    const min = minH();
-    // 上の段の中身が長いタスクに切り替えても、上・中の段がタブの高さより潰れないようにする
-    head.style.minHeight = body.style.minHeight = `${min}px`;
+    body.style.minHeight = `${minH()}px`;
     // 毎回ユーザーが決めた高さから計算し直す（モーダルを閉じた・ウィンドウを戻したときは元の高さに戻る）
-    h.head = pref.head;
-    h.foot = pref.foot;
-    apply('head');
-    apply('foot');
-    // 前に保存した高さが低すぎて入力欄がタイトルより低くなるときは、そこまで高くする
-    if (h.foot > 0 && h.foot < footMin()) {
-      h.foot = footMin();
-      apply('foot');
-    }
-    let over = cur('head') + cur('foot') + min - avail();
-    for (const k of ['foot', 'head']) {
-      if (over <= 0 || !(h[k] > 0)) continue;
-      const cut = Math.min(over, h[k] - minFor(k));
-      if (cut > 0) {
-        h[k] -= cut;
-        over -= cut;
-        apply(k);
-      }
+    h = pref;
+    apply();
+    if (h > 0) {
+      h = clamp(h);
+      apply();
     }
   };
-  const setup = (handleId, k, dir) => {
-    const handle = $(handleId);
-    handle.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      handle.setPointerCapture(e.pointerId);
-      handle.classList.add('dragging');
-      document.body.classList.add('resizing-row');
-      const startY = e.clientY;
-      const start = els[k].offsetHeight;
-      const move = (ev) => {
-        h[k] = clampFor(k, start + dir * (ev.clientY - startY));
-        apply(k);
-      };
-      const up = () => {
-        handle.removeEventListener('pointermove', move);
-        handle.removeEventListener('pointerup', up);
-        handle.removeEventListener('pointercancel', up);
-        handle.classList.remove('dragging');
-        document.body.classList.remove('resizing-row');
-        pref[k] = h[k] > 0 ? Math.round(h[k]) : pref[k];
-        if (pref[k] > 0) localStorage.setItem(KEYS[k], String(pref[k]));
-      };
-      handle.addEventListener('pointermove', move);
-      handle.addEventListener('pointerup', up);
-      handle.addEventListener('pointercancel', up);
-    });
-    handle.addEventListener('dblclick', () => {
-      h[k] = pref[k] = 0;
-      apply(k);
-      localStorage.removeItem(KEYS[k]);
-    });
-  };
-  setup('splitHead', 'head', 1); // 下へ動かすと上の段が高くなる
-  setup('splitFoot', 'foot', -1); // 上へ動かすと下の段が高くなる
-  apply('head');
-  apply('foot');
-  // タイトルの行数が変わった（タスクの切り替え・全文の表示）ときも、入力欄の最小の高さを合わせ直す
+  const handle = $('splitFoot');
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add('dragging');
+    document.body.classList.add('resizing-row');
+    const startY = e.clientY;
+    const start = foot.offsetHeight;
+    const move = (ev) => {
+      h = clamp(start - (ev.clientY - startY)); // 上へ動かすと下の段が高くなる
+      apply();
+    };
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      handle.classList.remove('dragging');
+      document.body.classList.remove('resizing-row');
+      pref = h > 0 ? Math.round(h) : pref;
+      if (pref > 0) localStorage.setItem(KEY, String(pref));
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+  handle.addEventListener('dblclick', () => {
+    h = pref = 0;
+    apply();
+    localStorage.removeItem(KEY);
+  });
+  apply();
   const ro = new ResizeObserver(fit);
   ro.observe(panel);
   ro.observe(title);
