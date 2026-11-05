@@ -14,6 +14,52 @@ function cleanRelayFlow(f) {
   return FlowModel.cleanFlow(f, { isAgent }) || cloneFlow(DEFAULT_RELAY_FLOW);
 }
 
+// ---------- Pipeline（プロジェクトごとに複数） ----------
+// relayFlows: [{ id, name, flow }]（1つ以上）。relayFlowId: 既定の Pipeline の ID。
+// relayFlow は既定の Pipeline のフロー（前の版と同じ名前で、いつも既定の Pipeline の flow と同じ中身にそろえる）
+const MAX_RELAY_FLOWS = 30;
+const RELAY_FLOW_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
+const DEFAULT_PIPELINE_NAME = 'Pipeline';
+function cleanPipelineName(v, fallback = DEFAULT_PIPELINE_NAME) {
+  const s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, 40);
+  return s || fallback;
+}
+// Pipeline の一覧を整える。flow を渡したら、それを既定の Pipeline のフローにする（前の版の relayFlow だけの設定・relayFlow だけを変えたとき）
+function cleanRelayFlows(list, id, flow) {
+  const out = [];
+  const ids = new Set();
+  for (const x of Array.isArray(list) ? list : []) {
+    if (!x || typeof x !== 'object' || out.length >= MAX_RELAY_FLOWS) continue;
+    let pid = String(x.id || '').trim();
+    if (!RELAY_FLOW_ID_RE.test(pid) || ids.has(pid)) {
+      let n = out.length + 1;
+      while (ids.has(`p${n}`)) n++;
+      pid = `p${n}`;
+    }
+    ids.add(pid);
+    out.push({ id: pid, name: cleanPipelineName(x.name, `${DEFAULT_PIPELINE_NAME} ${out.length + 1}`), flow: cleanRelayFlow(x.flow) });
+  }
+  if (!out.length) out.push({ id: 'default', name: DEFAULT_PIPELINE_NAME, flow: cleanRelayFlow(flow) });
+  const def = out.find((x) => x.id === String(id || '')) || out[0];
+  if (flow !== undefined && flow !== null) def.flow = cleanRelayFlow(flow);
+  return { relayFlows: out, relayFlowId: def.id, relayFlow: def.flow };
+}
+// Pipeline の ID から、その Pipeline（なければ既定の Pipeline。id が空のときも既定）
+function pipelineOf(settings, id) {
+  const list = (settings && settings.relayFlows) || [];
+  const want = String(id || '') || (settings && settings.relayFlowId);
+  return list.find((x) => x.id === want) || (id ? null : list[0] || null);
+}
+// 設定の変更のうち Pipeline の分を、今の値と合わせて { relayFlows, relayFlowId, relayFlow } にそろえる
+function relayPatchOf(cur, patch) {
+  if (!patch || !['relayFlows', 'relayFlowId', 'relayFlow'].some((k) => k in patch)) return null;
+  const list = 'relayFlows' in patch ? patch.relayFlows : (cur && cur.relayFlows) || [];
+  const id = 'relayFlowId' in patch ? patch.relayFlowId : cur && cur.relayFlowId;
+  // 一覧を変えたときは、一覧の中身を使う（relayFlow は一覧の既定の分から作り直す）
+  const flow = 'relayFlow' in patch && !('relayFlows' in patch) ? patch.relayFlow : undefined;
+  return cleanRelayFlows(list, id, flow);
+}
+
 const MAX_RECENT_REPOS = 10; // 最近開いたリポジトリを覚えておく件数
 
 // 最近開いたリポジトリ一覧を整える（新しいものが先頭・重複なし・空は捨てる）
@@ -145,7 +191,9 @@ const DEFAULT_SETTINGS = {
   statusMapping: { inProgress: '', inReview: '', done: '' }, // 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空なら名前から自動で探す
   customAgents: [], // カスタムエージェント（元にする CLI・モデルと、プロフィール: 名前・アイコンと色・説明・振る舞いの指示）。タスク・会話・Pipeline・競争で選べる
   competeCustomAgents: [], // 競争に加えるカスタムエージェントの ID（competeAgents のふつうのエージェントと一緒に競争させる）
-  relayFlow: DEFAULT_RELAY_FLOW, // Pipelineのフローチャート（工程・分岐・並列・合流・ループ）。設定の「フローチャートを編集」で決める
+  relayFlow: DEFAULT_RELAY_FLOW, // 既定の Pipelineのフローチャート（工程・分岐・並列・合流・ループ）。relayFlows の既定の分と同じ中身
+  relayFlows: [], // Pipeline の一覧 [{ id, name, flow }]（プロジェクトごと。空なら relayFlow から1つ作る）
+  relayFlowId: '', // 既定の Pipeline の ID（タスクを作るときに最初から選んでおく）
   pushAfterMerge: true, // マージしたあと origin にも push する（マージのダイアログで最後に選んだもの）
   suggestSkillsOnDone: true, // タスクが完了したとき、前に完了したタスクと似た作業なら「スキルにしませんか？」と通知する
   deleteSessionsOnMerge: true, // マージして完了したら、そのタスクが作業に使った Claude Code の会話を消す
@@ -208,7 +256,7 @@ const MAX_NOTIFICATIONS = 200;
 
 // ---------- プロジェクト（リポジトリ）ごとの設定 ----------
 // リポジトリに関わる設定だけをプロジェクトごとに持つ。コマンドのパス・モデル・同時に動かす数・自動更新などはアプリ全体で1つ
-const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'pushAfterMerge', 'relayFlow', 'customAgents', 'competeCustomAgents'];
+const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'pushAfterMerge', 'relayFlow', 'relayFlows', 'relayFlowId', 'customAgents', 'competeCustomAgents'];
 const MAX_REPO_SETTINGS = 200;
 
 // 初めて開いたプロジェクトの設定（初期値。取り込み方は PR を作成。GitHub でないリポジトリは開いたときに直接マージにする）
@@ -224,7 +272,8 @@ function pickRepoSettings(src) {
   if (!src || typeof src !== 'object') return out;
   for (const k of REPO_SETTING_KEYS) if (src[k] !== undefined) out[k] = k === 'statusMapping' ? { ...out.statusMapping, ...(src[k] || {}) } : src[k];
   if (!['merge', 'pr'].includes(out.integration)) out.integration = DEFAULT_SETTINGS.integration;
-  out.relayFlow = cleanRelayFlow(out.relayFlow);
+  // 既定の Pipeline のフローは relayFlow を正とする（前の版の設定・relayFlow を直接変えたときも、一覧の既定の分に入る）
+  Object.assign(out, cleanRelayFlows(out.relayFlows, out.relayFlowId, src.relayFlow !== undefined ? src.relayFlow : undefined));
   out.customAgents = cleanCustomAgents(out.customAgents);
   out.competeCustomAgents = cleanCompeteCustomAgents(out.competeCustomAgents, out.customAgents);
   return out;
@@ -286,10 +335,12 @@ function switchRepoSettings(settings, dir) {
 function setRepoSettings(settings, dir, patch) {
   const d = String(dir || '').trim();
   if (!settings || !d || !patch) return;
-  const keys = Object.keys(patch).filter((k) => REPO_SETTING_KEYS.includes(k));
-  if (d === settings.repoPath) for (const k of keys) settings[k] = patch[k];
   const map = settings.repoSettings && typeof settings.repoSettings === 'object' && !Array.isArray(settings.repoSettings) ? { ...settings.repoSettings } : {};
   const cur = pickRepoSettings(d === settings.repoPath ? settings : map[d]);
+  const relay = relayPatchOf(cur, patch);
+  if (relay) patch = { ...patch, ...relay };
+  const keys = Object.keys(patch).filter((k) => REPO_SETTING_KEYS.includes(k));
+  if (d === settings.repoPath) for (const k of keys) settings[k] = patch[k];
   for (const k of keys) cur[k] = patch[k];
   map[d] = pickRepoSettings(cur);
   settings.repoSettings = map;
@@ -360,7 +411,7 @@ function migrateSettings(settings, raw, cards) {
   // タブがなかったころの設定: 今のリポジトリだけのタブにする
   settings.repoTabs = cleanRepoTabs(settings.repoTabs, settings.repoPath);
   migrateRepoSettings(settings, raw, cards);
-  settings.relayFlow = cleanRelayFlow(settings.relayFlow);
+  Object.assign(settings, cleanRelayFlows(settings.relayFlows, settings.relayFlowId, settings.relayFlow));
 }
 
 class Store {
@@ -500,6 +551,11 @@ class Store {
 module.exports = {
   migrateSettings,
   cleanRelayFlow,
+  cleanRelayFlows,
+  cleanPipelineName,
+  relayPatchOf,
+  pipelineOf,
+  MAX_RELAY_FLOWS,
   DEFAULT_RELAY_FLOW,
   REPO_SETTING_KEYS,
   defaultRepoSettings,

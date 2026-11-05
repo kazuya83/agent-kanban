@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld('api', {
   createRepo: (p) => call('repo:create', p),
   repoInfo: () => call('repo:info'),
   updateSettings: (patch) => call('settings:update', patch),
+  // Pipeline のエクスポート・インポート: { name, data(base64), ext: 'json' | 'zip' } を保存する / ファイルを選んで { name, data(base64) } を返す
+  saveFile: (p) => call('file:save', p),
+  openFile: () => call('file:open'),
   createCard: (p) => call('card:create', p),
   updateCard: (p) => call('card:update', p),
   createFromIssues: (p) => call('card:createFromIssues', p),
