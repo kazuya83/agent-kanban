@@ -838,6 +838,15 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .topbar:has(#remoteInfo:not(.hidden)) .btn:not(.primary) .btn-label { display: none; }
 
 /* ---------- Pipeline: 設定の要約・詳細の並列 ---------- */
+/* 設定: Pipeline の一覧（複数） */
+.pl-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
+.pl-item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 2px; }
+.pl-item.is-default { border-color: var(--accent, #6366f1); }
+.pl-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.pl-head .ic { width: 14px; height: 14px; margin: 0 4px -2px 0; }
+.pl-badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--accent, #6366f1); color: #fff; }
+.pl-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
+.pl-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
 .relay-summary { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); margin-bottom: 6px; }
 .relay-sum-list { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .relay-sum-list li { display: block; }

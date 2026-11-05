@@ -15,7 +15,7 @@ const attachments = require('./attachments');
 const { findSimilarTasks } = require('./similar');
 const os = require('os');
 const { agentLabel, agentShort } = providers;
-const { isNoGitRepo, cleanRelayFlow } = require('./store');
+const { isNoGitRepo, cleanRelayFlow, pipelineOf } = require('./store');
 const FlowModel = require('../renderer/flow-model');
 
 const MAX_LOGS = 2000;
@@ -984,6 +984,12 @@ class AgentManager extends EventEmitter {
     // 添付は先に確かめておく（カードごとに保存する）
     const parsed = attachments.parseAttachments(files);
     let mode = agent || providers.defaultAgentOf(s);
+    // Pipeline は「relay」（既定の Pipeline）か「relay:<ID>」（そのプロジェクトの Pipeline の1つ）
+    let pipelineId = '';
+    if (typeof mode === 'string' && mode.startsWith('relay:')) {
+      pipelineId = mode.slice('relay:'.length);
+      mode = 'relay';
+    }
     // カスタムエージェント: その CLI・モデル・プロフィールで動かす
     const custom = providers.isCustomRef(mode) ? this.customAgent(mode) : null;
     if (custom) mode = custom.agent;
@@ -1000,10 +1006,12 @@ class AgentManager extends EventEmitter {
     }
     if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from, parsed });
     if (mode === 'relay') {
-      // Pipelineのフローチャートは、プロジェクトごとの設定
-      const flow = cleanRelayFlow(this.store.repoSettings(s.repoPath).relayFlow);
+      // Pipelineのフローチャートは、プロジェクトごとの設定（複数あれば、選んだもの。選んでいなければ既定の Pipeline）
+      const pipe = pipelineOf(this.store.repoSettings(s.repoPath), pipelineId);
+      if (!pipe) throw new Error('選んだ Pipeline が見つかりません（消されたかもしれません）。選び直してください');
+      const flow = cleanRelayFlow(pipe.flow);
       const errs = FlowModel.validateFlow(flow);
-      if (errs.length) throw new Error(`Pipelineのフローチャートを直してください（設定の「フローチャートを編集」）: ${errs[0]}`);
+      if (errs.length) throw new Error(`Pipeline「${pipe.name}」のフローチャートを直してください（設定の「フローチャートを編集」）: ${errs[0]}`);
       const steps = relayStepsOf(flow, this.customAgents());
       const lost = steps.find((st) => st.missing);
       if (lost) throw new Error(`Pipelineの工程「${lost.label}」のカスタムエージェントが見つかりません（消されたかもしれません）。「設定」のフローチャートで、工程のエージェントを選び直してください`);
@@ -1013,7 +1021,7 @@ class AgentManager extends EventEmitter {
       const first = FlowModel.route(flow, FlowModel.startNode(flow).id, {});
       const index = relayStepIndex({ relay: { steps } }, first.node.id);
       const st = steps[index];
-      const c = this.createCard({ title, prompt, issue, session, skill, agent: st.agent, relay: { flow, steps, index, history: [], counts: {} }, fromChat: from, parsed });
+      const c = this.createCard({ title, prompt, issue, session, skill, agent: st.agent, relay: { flow, steps, index, history: [], counts: {}, pipeline: { id: pipe.id, name: pipe.name } }, fromChat: from, parsed });
       if (st.model) c.model = st.model;
       if (st.persona) c.persona = st.persona;
       return [c];

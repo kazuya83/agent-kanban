@@ -85,6 +85,23 @@ function stepWho(n, list = customAgents()) {
   return { agent: (n && n.agent) || 'claude', persona: (n && n.persona) || null, model: (n && n.model) || '' };
 }
 
+// ---------------- Pipeline（プロジェクトごとに複数） ----------------
+// 設定の relayFlows: [{ id, name, flow }]、relayFlowId: 既定の Pipeline。タスクを作るときの値は「relay:<ID>」（「relay」だけなら既定の Pipeline）
+const RELAY_PREFIX = 'relay:';
+const isRelayRef = (v) => v === 'relay' || (typeof v === 'string' && v.startsWith(RELAY_PREFIX));
+function pipelines(s = state.board.settings || {}) {
+  if (Array.isArray(s.relayFlows) && s.relayFlows.length) return s.relayFlows;
+  return s.relayFlow ? [{ id: 'default', name: 'Pipeline', flow: s.relayFlow }] : [];
+}
+function defaultPipeline(s = state.board.settings || {}) {
+  const list = pipelines(s);
+  return list.find((p) => p.id === s.relayFlowId) || list[0] || null;
+}
+function pipelineOfRef(v, s = state.board.settings || {}) {
+  if (v === 'relay') return defaultPipeline(s);
+  return isRelayRef(v) ? pipelines(s).find((p) => p.id === v.slice(RELAY_PREFIX.length)) || null : null;
+}
+
 const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'chat', logs: new Map(), headSig: '', relayOpen: new Set() };
 const $ = (id) => document.getElementById(id);
 // index.html の data-icon="名前" の場所に、モノクロの SVG アイコンを入れる（icons.js）
@@ -987,7 +1004,7 @@ function relayFlowHtml(c) {
       </div>
     </li>`;
   });
-  return `<div class="relay-flow"><div class="rf-title">${icon('pipeline')}Pipeline <span class="muted small">${doneN}/${r.steps.length} 工程が完了${loopN ? `・ループ ${loopN} 回` : ''}${r.limitReached ? '・ループの上限で終了' : ''}</span></div>${relayWaitHtml(c)}<ol class="rf-list">${nodes.join('')}</ol></div>`;
+  return `<div class="relay-flow"><div class="rf-title">${icon('pipeline')}Pipeline${r.pipeline && r.pipeline.name && r.pipeline.name !== 'Pipeline' ? `「${esc(r.pipeline.name)}」` : ''} <span class="muted small">${doneN}/${r.steps.length} 工程が完了${loopN ? `・ループ ${loopN} 回` : ''}${r.limitReached ? '・ループの上限で終了' : ''}</span></div>${relayWaitHtml(c)}<ol class="rf-list">${nodes.join('')}</ol></div>`;
 }
 
 // 詳細の上: Pipelineの進み具合を短く（工程のバーと、今の工程）。くわしくは「進捗」タブで見る
@@ -2321,13 +2338,18 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
   const s = state.board.settings;
   const on = enabledAgents(s);
   const orch = orchestration ? orchestrationOf(s) : 'none';
-  const info = relayFlowInfo(s.relayFlow);
-  const steps = info.steps;
-  const relayOff = !steps.length || info.errors.length > 0 || steps.some((x) => stepWho(x).missing || !on.includes(stepWho(x).agent));
+  // Pipeline はいくつでも作れる。それぞれ使えるか（フローに直すところがない・工程のエージェントを使える）を見る
+  const pipes = pipelines(s).map((p) => {
+    const info = relayFlowInfo(p.flow);
+    const off = !info.steps.length || info.errors.length > 0 || info.steps.some((x) => stepWho(x).missing || !on.includes(stepWho(x).agent));
+    return { p, info, off };
+  });
   const comp = competeNames(s);
-  // 設定でPipeline・競争を選んでいれば、それを最初から選んでおく（使えない状態なら、最初から選んでおくエージェント）
-  const orchUsable = (orch === 'relay' && !relayOff) || (orch === 'compete' && comp.length >= 2);
-  const v = value || (orchUsable ? orch : defaultAgent(s));
+  // 設定でPipeline・競争を選んでいれば、それを最初から選んでおく（Pipeline は既定のもの。使えない状態なら、最初から選んでおくエージェント）
+  const def = defaultPipeline(s);
+  const defPipe = pipes.find((x) => def && x.p.id === def.id);
+  const orchUsable = (orch === 'relay' && defPipe && !defPipe.off) || (orch === 'compete' && comp.length >= 2);
+  const v = (value === 'relay' && def ? RELAY_PREFIX + def.id : value) || (orchUsable ? (orch === 'relay' ? RELAY_PREFIX + def.id : orch) : defaultAgent(s));
   const opt = (val, label, disabled) => `<option value="${val}" ${val === v && !disabled ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(label)}</option>`;
   const plain = AGENTS.filter(([a]) => on.includes(a)).map(([a, l]) => opt(a, l)).join('');
   const cas = customAgents(s);
@@ -2336,13 +2358,15 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
     : '';
   const single = custom ? `<optgroup label="1つのエージェントで動かす">${plain}</optgroup>${custom}` : plain;
   if (orch === 'none') return `<label class="field"><span>エージェント</span><select id="${idp}Agent">${single}</select><small id="${idp}AgentHint" class="muted"></small></label>`;
-  const stepsLabel = relayFlowLabel(info);
+  const relayOpts = pipes
+    .map(({ p, info, off }) => opt(RELAY_PREFIX + p.id, `${pipes.length > 1 ? p.name : 'Pipeline'}: ${relayFlowLabel(info)}${info.errors.length ? '（設定のフローチャートを直してください）' : off ? '（設定で工程のエージェントを使う設定にしてください）' : ''}`, off))
+    .join('');
   return `<label class="field"><span>エージェント</span>
     <select id="${idp}Agent">
       ${custom ? single : `<optgroup label="1つのエージェントで動かす">${single}</optgroup>`}
-      <optgroup label="オーケストレーション">
+      <optgroup label="${orch === 'relay' && pipes.length > 1 ? 'Pipeline' : 'オーケストレーション'}">
         ${orch === 'relay'
-          ? opt('relay', `Pipeline: ${stepsLabel}${info.errors.length ? '（設定のフローチャートを直してください）' : relayOff ? '（設定で工程のエージェントを使う設定にしてください）' : ''}`, relayOff)
+          ? relayOpts
           : opt('compete', comp.length >= 2 ? `競争: ${comp.join('・')} で同じタスクを解いて比べる` : '競争（設定で使うエージェントを2つ以上選んでください）', comp.length < 2)}
       </optgroup>
     </select>
@@ -2354,7 +2378,7 @@ function bindAgentField(idp, onChange) {
   const hint = () => {
     const v = sel.value;
     $(`${idp}AgentHint`).textContent =
-      v === 'relay' ? '設定のフローチャートに沿って、工程ごとにエージェントが作業を引き継ぎます（前の工程の報告を次に渡します。分岐・ループ・並列もフローのとおりに動きます）。フローチャートは「設定」で変えられます。'
+      isRelayRef(v) ? (pipelines().length > 1 ? `Pipeline「${(pipelineOfRef(v) || {}).name || ''}」で動かします。` : '') + '設定のフローチャートに沿って、工程ごとにエージェントが作業を引き継ぎます（前の工程の報告を次に渡します。分岐・ループ・並列もフローのとおりに動きます）。フローチャートは「設定」で変えられます。'
       : v === 'compete' ? 'エージェントごとにカードと worktree を作って並列に解きます。終わったら差分を見比べ、よい案を採用してマージします。'
       : isCustomRef(v) ? customHint(findCustomAgent(v))
       : agentLimitHint(v);
@@ -2382,8 +2406,8 @@ function competeNames(s = state.board.settings || {}) {
 // 既存の会話（Claude Code の会話）を選べるのは、最初に動くのが Claude Code のときだけ
 function firstAgentOf(v) {
   const s = state.board.settings;
-  if (v === 'relay') {
-    const first = relayFlowInfo(s.relayFlow).first;
+  if (isRelayRef(v)) {
+    const first = relayFlowInfo((pipelineOfRef(v, s) || {}).flow).first;
     return first ? stepWho(first).agent : 'claude';
   }
   if (v === 'compete') return (s.competeAgents || []).includes('claude') ? 'claude' : '';
@@ -2413,7 +2437,7 @@ function updateModelField(idp, agent) {
   const input = $(`${idp}Model`);
   if (!input) return;
   // カスタムエージェントは、そのエージェントのモデルを使う
-  const multi = agent === 'relay' || agent === 'compete' || isCustomRef(agent);
+  const multi = isRelayRef(agent) || agent === 'compete' || isCustomRef(agent);
   input.closest('.field').classList.toggle('hidden', multi);
   if (multi) return;
   const def = settingsModel(agent);
@@ -2423,7 +2447,7 @@ function updateModelField(idp, agent) {
 }
 // 送るモデル（Pipeline・競争のときは送らない）
 function readModelField(idp, agent) {
-  if (agent === 'relay' || agent === 'compete' || isCustomRef(agent)) return undefined;
+  if (isRelayRef(agent) || agent === 'compete' || isCustomRef(agent)) return undefined;
   return ($(`${idp}Model`)?.value || '').trim() || undefined;
 }
 
@@ -3374,17 +3398,25 @@ async function openSettings() {
          <label class="check"><input type="radio" name="sOrch" value="none" ${orchestrationOf(s) === 'none' ? 'checked' : ''} /> なし</label>
        </div>
        <small>選んだ方だけ、タスクを作るときに「エージェント」の欄で選べます。「なし」なら、いつも1つのエージェントで動かします（Pipeline・競争の設定は消えずに残ります）。</small></div>
-     <div class="field" id="sRelayField"><span>${icon('pipeline')}Pipelineのフローチャート（このプロジェクトの設定）</span>
-       <div id="sRelay" class="relay-summary"></div>
-       <button class="btn small" id="sRelayEdit" type="button">${icon('pipeline')}フローチャートを編集</button>
-       <small>工程（エージェントと担当の説明）を線でつなぎ、分岐（if）・ループ・並列を組めます。工程が終わるたびに変更をコミットし、最後の報告と一緒に次の工程へ渡します。フローチャートの画面の「保存」で、すぐに保存します。</small></div>
+     <div class="field" id="sRelayField"><span>${icon('pipeline')}Pipeline（このプロジェクトの設定。いくつでも作れます）</span>
+       <div id="sRelayList" class="pl-list"></div>
+       <div id="sRelayExport" class="ca-form" hidden></div>
+       <div class="pl-tools">
+         <button class="btn small" id="sRelayAdd" type="button">＋ Pipelineを追加</button>
+         <button class="btn small" id="sRelayImport" type="button">インポート（.json / .zip）</button>
+         <button class="btn small" id="sRelayBundle" type="button">まとめてエクスポート（zip）</button>
+       </div>
+       <small>工程（エージェントと担当の説明）を線でつなぎ、分岐（if）・ループ・並列を組めます。工程が終わるたびに変更をコミットし、最後の報告と一緒に次の工程へ渡します。タスクを作るときに、どの Pipeline で動かすかを選べます（「既定」のものを最初から選んでおきます）。<br />
+       「エクスポート」は Pipeline 1つを .json に、「まとめてエクスポート」は選んだ Pipeline とカスタムエージェントを zip にします。インポートは .json か zip を選びます（同じ中身のカスタムエージェントがあればそれを使い、なければ足します）。Pipeline の一覧の変更は、すぐに保存します。</small></div>
      <div class="field" id="sCompeteField"><span>${icon('flag')}競争させるエージェント（2つ以上）</span>
        <div class="check-row" id="sCompeteBox"></div>
        <small>使うエージェントにチェックを付けたものと、このプロジェクトのカスタムエージェントから選べます（カスタムエージェントの選択は、プロジェクトごとに覚えます）。</small></div>
 
      <div class="modal-actions"><button class="btn ghost" id="sCancel">キャンセル</button><button class="btn primary" id="sOk">保存</button></div>`,
     () => {
-      let relayFlow = s.relayFlow || null;
+      // Pipeline の一覧（追加・編集・削除・インポートは、その場で保存する）
+      let flows = JSON.parse(JSON.stringify(pipelines(s)));
+      let flowDefId = (defaultPipeline(s) || {}).id || '';
       // 画面でチェックを付けている「使うエージェント」
       const using = () => AGENTS.map((x) => x[0]).filter((a) => document.querySelector(`.sUse[value="${a}"]`)?.checked);
       let competeSel = new Set(s.competeAgents || []);
@@ -3433,7 +3465,7 @@ async function openSettings() {
         $('sCustomList').querySelectorAll('[data-ca-del]').forEach((b) => {
           b.onclick = () => {
             const ca = cas[Number(b.dataset.caDel)];
-            const used = relayFlow && (relayFlow.nodes || []).some((n) => n.type === 'step' && n.custom === ca.id);
+            const used = flows.some((p) => PipelinePack.usedCustomIds(p.flow).includes(ca.id));
             if (!confirm(`カスタムエージェント「${ca.name}」を削除しますか？${used ? '\nPipelineの工程で使っています。削除すると、その工程を選び直すまでPipelineを始められません。' : ''}\n（作ってあるタスクは、そのまま動きます）`)) return;
             cas.splice(Number(b.dataset.caDel), 1);
             competeCustomSel.delete(ca.id);
@@ -3498,10 +3530,215 @@ async function openSettings() {
         };
       };
       $('sCustomAdd').onclick = () => openCustomForm(null);
-      // Pipelineのフローの要約（工程の並びと、分岐・並列・ループの数）
-      const drawRelay = () => {
-        $('sRelay').innerHTML = relayFlowSummaryHtml(relayFlow, using(), cas);
+      // ---- Pipeline の一覧 ----
+      const saveFlows = async (msg, extra = {}) => {
+        const r = await runBusy(msg, () => api.updateSettings({ relayFlows: flows, relayFlowId: flowDefId, customAgents: cas, ...extra }), '保存しました');
+        if (!r) return false;
+        flows = JSON.parse(JSON.stringify(r.relayFlows || flows));
+        flowDefId = r.relayFlowId || flowDefId;
+        if (Array.isArray(r.customAgents)) cas = JSON.parse(JSON.stringify(r.customAgents));
+        return true;
       };
+      // 名前を入れてもらう（Electron では prompt() が使えないので、一覧の下に入力欄を出す）。やめたら null
+      const askName = (title, initial, okLabel) =>
+        new Promise((resolve) => {
+          const box = $('sRelayExport');
+          box.hidden = false;
+          box.innerHTML = `<h4>${esc(title)}</h4>
+            <label class="field"><span>名前</span><input id="plName" maxlength="40" value="${esc(initial)}" /></label>
+            <div class="modal-actions"><button class="btn ghost small" id="plCancel" type="button">やめる</button><button class="btn primary small" id="plOk" type="button">${esc(okLabel)}</button></div>`;
+          const done = (v) => {
+            box.hidden = true;
+            resolve(v);
+          };
+          $('plName').focus();
+          $('plName').select();
+          $('plName').onkeydown = (e) => {
+            if (e.key === 'Enter' && !e.isComposing) (e.preventDefault(), $('plOk').click());
+          };
+          $('plCancel').onclick = () => done(null);
+          $('plOk').onclick = () => {
+            const v = $('plName').value.trim();
+            if (!v) return toast('名前を入れてください');
+            done(v);
+          };
+        });
+      const newFlowName = (base) => PipelinePack.uniqueName(base, new Set(flows.map((p) => p.name)), 40);
+      const newFlowId = () => {
+        let id;
+        do id = `p${Math.random().toString(16).slice(2, 10)}`;
+        while (flows.some((x) => x.id === id));
+        return id;
+      };
+      const editFlow = (i) =>
+        FlowEditor.open({
+          flow: flows[i].flow || { nodes: [], edges: [] },
+          agents: AGENTS,
+          enabled: using(),
+          customAgents: cas,
+          modelSuggest: MODEL_SUGGEST,
+          defaultAgent: $('sDefaultAgent').value || 'claude',
+          onSave: async (flow) => {
+            // 工程で選んだカスタムエージェントも一緒に保存する（この画面で追加したばかりのものを使えるように）
+            const id = flows[i].id;
+            const prev = flows[i].flow;
+            flows[i].flow = flow;
+            if (!(await saveFlows('フローチャートを保存しています…'))) {
+              const j = flows.findIndex((p) => p.id === id);
+              if (j >= 0) flows[j].flow = prev;
+              return false;
+            }
+            drawRelay();
+            return true;
+          },
+        });
+      // Pipeline 1つを .json に書き出す
+      const exportOne = async (p) => {
+        const data = PipelinePack.toBase64(new TextEncoder().encode(PipelinePack.exportPipelineJson(p)));
+        const used = PipelinePack.usedCustomIds(p.flow).filter((id) => cas.some((x) => x.id === id));
+        const r = await run(() => api.saveFile({ name: `${PipelinePack.safeFileName(p.name)}.pipeline`, data, ext: 'json' }));
+        if (r) toast(`エクスポートしました${used.length ? '（カスタムエージェントの工程があります。ほかのプロジェクトで使うときは「まとめてエクスポート」で一緒に書き出してください）' : ''}`, 'ok');
+      };
+      // まとめてエクスポート: 書き出す Pipeline とカスタムエージェントを選んで zip にする
+      const openBundle = (preset) => {
+        const box = $('sRelayExport');
+        const selP = new Set(preset ? [preset] : flows.map((p) => p.id));
+        const usedBy = () => new Set(flows.filter((p) => selP.has(p.id)).flatMap((p) => PipelinePack.usedCustomIds(p.flow)));
+        const selC = new Set([...usedBy()].filter((id) => cas.some((x) => x.id === id)));
+        box.hidden = false;
+        const draw = () => {
+          const used = usedBy();
+          box.innerHTML = `<h4>まとめてエクスポート（zip）</h4>
+            <div class="field"><span>Pipeline</span><div class="check-row">${flows.map((p) => `<label class="check"><input type="checkbox" class="bxP" value="${esc(p.id)}" ${selP.has(p.id) ? 'checked' : ''} /> ${esc(p.name)}</label>`).join('')}</div></div>
+            <div class="field"><span>カスタムエージェント</span><div class="check-row">${cas.length ? cas.map((ca) => `<label class="check"><input type="checkbox" class="bxC" value="${esc(ca.id)}" ${selC.has(ca.id) ? 'checked' : ''} /> ${personaIcon(ca, ca.agent)}${esc(ca.name)}${used.has(ca.id) ? ' <span class="muted small">（工程で使用）</span>' : ''}</label>`).join('') : '<span class="muted small">まだありません</span>'}</div>
+            ${[...used].some((id) => cas.some((x) => x.id === id) && !selC.has(id)) ? `<small class="relay-sum-err">${icon('alert')}工程で使っているカスタムエージェントを外すと、取り込んだ先でその工程のエージェントを選び直すことになります</small>` : ''}</div>
+            <div class="modal-actions"><button class="btn ghost small" id="bxCancel" type="button">やめる</button><button class="btn primary small" id="bxOk" type="button">zip でエクスポート</button></div>`;
+          box.querySelectorAll('.bxP').forEach((cb) => (cb.onchange = () => {
+            if (cb.checked) {
+              selP.add(cb.value);
+              // 選んだ Pipeline の工程が使うカスタムエージェントにも、チェックを付ける
+              for (const id of PipelinePack.usedCustomIds((flows.find((p) => p.id === cb.value) || {}).flow)) if (cas.some((x) => x.id === id)) selC.add(id);
+            } else selP.delete(cb.value);
+            draw();
+          }));
+          box.querySelectorAll('.bxC').forEach((cb) => (cb.onchange = () => ((cb.checked ? selC.add(cb.value) : selC.delete(cb.value)), draw())));
+          $('bxCancel').onclick = () => (box.hidden = true);
+          $('bxOk').onclick = async () => {
+            const ps = flows.filter((p) => selP.has(p.id));
+            const cs = cas.filter((ca) => selC.has(ca.id));
+            if (!ps.length && !cs.length) return toast('エクスポートするものを選んでください');
+            const data = PipelinePack.toBase64(PipelinePack.exportBundleZip({ pipelines: ps, customAgents: cs }));
+            const name = ps.length === 1 ? PipelinePack.safeFileName(ps[0].name) : 'pipelines';
+            const r = await run(() => api.saveFile({ name, data, ext: 'zip' }));
+            if (r) {
+              box.hidden = true;
+              toast(`Pipeline ${ps.length} 個・カスタムエージェント ${cs.length} 個をエクスポートしました`, 'ok');
+            }
+          };
+        };
+        draw();
+      };
+      // インポート: .json（Pipeline 1つ）か zip（Pipeline とカスタムエージェント）を読んで、一覧に足す
+      const importFlows = async () => {
+        const f = await run(() => api.openFile());
+        if (!f) return;
+        let parsed;
+        try {
+          parsed = await PipelinePack.parseImport(f.name, PipelinePack.fromBase64(f.data));
+        } catch (e) {
+          return toast(e.message || String(e));
+        }
+        let m;
+        try {
+          m = PipelinePack.mergeImport({ relayFlows: flows, customAgents: cas }, parsed);
+        } catch (e) {
+          return toast(e.message || String(e));
+        }
+        const lines = [`「${f.name}」から取り込みます。`];
+        if (m.addedPipelines.length) lines.push(`Pipeline: ${m.addedPipelines.join('、')}`);
+        if (m.addedAgents.length) lines.push(`カスタムエージェント（追加）: ${m.addedAgents.join('、')}`);
+        if (m.reusedAgents.length) lines.push(`カスタムエージェント（同じものがあるので、それを使う）: ${m.reusedAgents.join('、')}`);
+        if (m.missing.length) lines.push(`\nカスタムエージェントが見つからない工程があります（取り込んだあと、フローチャートで選び直してください）: ${m.missing.join('、')}`);
+        if (parsed.skipped.length) lines.push(`\n読めなかったファイル: ${parsed.skipped.join('、')}`);
+        if (!m.addedPipelines.length && !m.addedAgents.length) return toast(`取り込むものはありません（同じカスタムエージェントがもうあります）`);
+        if (!confirm(lines.join('\n'))) return;
+        const before = { flows, cas };
+        flows = m.relayFlows;
+        cas = m.customAgents;
+        if (!(await saveFlows('取り込んでいます…'))) {
+          flows = before.flows;
+          cas = before.cas;
+        }
+        redrawCustom();
+      };
+      // Pipelineのフローの要約（工程の並びと、分岐・並列・ループの数）と、Pipeline ごとの操作
+      const drawRelay = () => {
+        $('sRelayList').innerHTML = flows
+          .map(
+            (p, i) => `<div class="pl-item ${p.id === flowDefId ? 'is-default' : ''}">
+              <div class="pl-head"><b>${icon('pipeline')}${esc(p.name)}</b>${p.id === flowDefId ? ' <span class="pl-badge">既定</span>' : ''}
+                <div class="pl-acts">
+                  <button class="btn small" type="button" data-pl-edit="${i}">フローチャートを編集</button>
+                  <button class="btn small ghost" type="button" data-pl-rename="${i}">名前</button>
+                  <button class="btn small ghost" type="button" data-pl-copy="${i}">複製</button>
+                  ${p.id === flowDefId ? '' : `<button class="btn small ghost" type="button" data-pl-def="${i}">既定にする</button>`}
+                  <button class="btn small ghost" type="button" data-pl-export="${i}">エクスポート</button>
+                  <button class="btn small ghost" type="button" data-pl-bundle="${i}" title="この Pipeline と、工程で使うカスタムエージェントを zip にします">zip</button>
+                  ${flows.length > 1 ? `<button class="btn small danger" type="button" data-pl-del="${i}">削除</button>` : ''}
+                </div></div>
+              <div class="relay-summary">${relayFlowSummaryHtml(p.flow, using(), cas)}</div>
+            </div>`,
+          )
+          .join('');
+        const on = (attr, fn) => $('sRelayList').querySelectorAll(`[data-${attr}]`).forEach((b) => (b.onclick = () => fn(Number(b.getAttribute(`data-${attr}`)))));
+        on('pl-edit', editFlow);
+        on('pl-export', (i) => exportOne(flows[i]));
+        on('pl-bundle', (i) => openBundle(flows[i].id));
+        on('pl-rename', async (i) => {
+          const v = await askName(`「${flows[i].name}」の名前を変える`, flows[i].name, '決定');
+          if (v == null) return;
+          const name = v.slice(0, 40);
+          if (flows.some((p, j) => j !== i && p.name === name)) return toast(`「${name}」という名前の Pipeline はもうあります`);
+          const prev = flows[i].name;
+          flows[i].name = name;
+          if (!(await saveFlows('名前を変えています…'))) flows[i].name = prev;
+          drawRelay();
+        });
+        on('pl-copy', async (i) => {
+          flows.push({ id: newFlowId(), name: newFlowName(`${flows[i].name} のコピー`), flow: JSON.parse(JSON.stringify(flows[i].flow)) });
+          if (!(await saveFlows('複製しています…'))) flows.pop();
+          drawRelay();
+        });
+        on('pl-def', async (i) => {
+          const prev = flowDefId;
+          flowDefId = flows[i].id;
+          if (!(await saveFlows('既定の Pipeline を変えています…'))) flowDefId = prev;
+          drawRelay();
+        });
+        on('pl-del', async (i) => {
+          const p = flows[i];
+          if (!confirm(`Pipeline「${p.name}」を削除しますか？\n（作ってあるタスクは、そのまま動きます）`)) return;
+          const before = { flows: [...flows], flowDefId };
+          flows.splice(i, 1);
+          if (flowDefId === p.id) flowDefId = flows[0].id;
+          if (!(await saveFlows('削除しています…'))) ({ flows, flowDefId } = before);
+          drawRelay();
+        });
+      };
+      $('sRelayAdd').onclick = async () => {
+        const v = await askName('Pipelineを追加', newFlowName('Pipeline'), '追加してフローチャートを編集');
+        if (v == null) return;
+        const name = v.slice(0, 40);
+        if (flows.some((p) => p.name === name)) return toast(`「${name}」という名前の Pipeline はもうあります`);
+        // 新しい Pipeline は「実装 → レビュー」から始める（既定の Pipeline の形をまねず、初めの形にする）
+        flows.push({ id: newFlowId(), name, flow: null });
+        if (!(await saveFlows('Pipeline を追加しています…'))) flows.pop();
+        drawRelay();
+        const i = flows.findIndex((p) => p.name === name);
+        if (i >= 0) editFlow(i);
+      };
+      $('sRelayImport').onclick = importFlows;
+      $('sRelayBundle').onclick = () => openBundle(null);
       drawCustomList();
       drawRelay();
       drawAgents();
@@ -3522,23 +3759,6 @@ async function openSettings() {
           redrawCustom();
         };
       });
-      $('sRelayEdit').onclick = () =>
-        FlowEditor.open({
-          flow: relayFlow || { nodes: [], edges: [] },
-          agents: AGENTS,
-          enabled: using(),
-          customAgents: cas,
-          modelSuggest: MODEL_SUGGEST,
-          defaultAgent: $('sDefaultAgent').value || 'claude',
-          onSave: async (flow) => {
-            // 工程で選んだカスタムエージェントも一緒に保存する（この画面で追加したばかりのものを使えるように）
-            const r = await runBusy('フローチャートを保存しています…', () => api.updateSettings({ relayFlow: flow, customAgents: cas }), '保存しました');
-            if (!r) return false;
-            relayFlow = r.relayFlow || flow;
-            drawRelay();
-            return true;
-          },
-        });
       let defSkill = s.defaultSkill || null;
       const drawDef = () => renderSkillSlot('sSkill', defSkill, (v) => ((defSkill = v), drawDef()));
       drawDef();
@@ -3562,7 +3782,7 @@ async function openSettings() {
         const on = using();
         if (!on.length) return toast('使うエージェントを1つ以上選んでください');
         if (!$('sCustomForm').hidden && !confirm('カスタムエージェントの編集を決定していません。編集中の内容を捨てて保存しますか？')) return;
-        const steps = relayFlow ? FlowModel.orderSteps(relayFlow) : [];
+        const steps = flows.flatMap((p) => FlowModel.orderSteps(p.flow || { nodes: [], edges: [] }).map((st) => ({ ...st, label: flows.length > 1 ? `${p.name}: ${st.label || '（名前なし）'}` : st.label })));
         const lostStep = steps.find((st) => stepWho(st, cas).missing);
         if (lostStep && orch() === 'relay' && !confirm(`Pipelineの工程「${lostStep.label || '（名前なし）'}」のカスタムエージェントがありません。このままだとPipelineを始められません。保存しますか？`)) return;
         const offStep = steps.find((st) => !on.includes(stepWho(st, cas).agent));

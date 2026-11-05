@@ -137,7 +137,7 @@ const PROXY_CHANNELS = new Set([
 
 // 遠隔に接続中でも、操作側のマシンで動かすチャンネル（それ以外の非転送チャンネルは接続中は使えない）
 function isLocalChannel(channel) {
-  return channel === 'app:info' || channel === 'open:external' || String(channel).startsWith('remote:') || String(channel).startsWith('update:');
+  return channel === 'app:info' || channel === 'open:external' || String(channel).startsWith('file:') || String(channel).startsWith('remote:') || String(channel).startsWith('update:');
 }
 
 function isProxyChannel(channel) {
@@ -609,7 +609,7 @@ function publicConnectionHistory(list) {
 
 // 保存を頼んだ設定のうち、保存先（ホスト）が受け取らなかった項目
 // 古い版のホストは知らない設定を黙って捨てるので、返ってきた設定に無い項目を探す
-const SETTING_LABELS = { customAgents: 'カスタムエージェント', relayFlow: 'Pipelineのフローチャート', competeCustomAgents: '競争させるカスタムエージェント', enabledAgents: '使うエージェント', orchestration: 'オーケストレーション' };
+const SETTING_LABELS = { customAgents: 'カスタムエージェント', relayFlow: 'Pipelineのフローチャート', relayFlows: 'Pipelineの一覧', relayFlowId: '既定のPipeline', competeCustomAgents: '競争させるカスタムエージェント', enabledAgents: '使うエージェント', orchestration: 'オーケストレーション' };
 function droppedSettingKeys(patch, result) {
   if (!patch || typeof patch !== 'object' || !result || typeof result !== 'object') return [];
   return Object.keys(patch).filter((k) => patch[k] !== undefined && result[k] === undefined);

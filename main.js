@@ -864,7 +864,7 @@ app.whenReady().then(async () => {
     return { branches, current, hasOrigin };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'deleteSessionsOnMerge', 'specCheck', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'relayFlow', 'competeAgents', 'competeCustomAgents', 'customAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'deleteSessionsOnMerge', 'specCheck', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'relayFlow', 'relayFlows', 'relayFlowId', 'competeAgents', 'competeCustomAgents', 'customAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
     if (patch && 'branchNamingRule' in patch) patch = { ...patch, branchNamingRule: String(patch.branchNamingRule || '').trim() };
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     if (patch && 'suggestSkillsOnDone' in patch) patch = { ...patch, suggestSkillsOnDone: !!patch.suggestSkillsOnDone };
@@ -882,7 +882,9 @@ app.whenReady().then(async () => {
     if (patch && 'defaultAgent' in patch && !providers.isAgent(patch.defaultAgent)) patch = { ...patch, defaultAgent: 'claude' };
     for (const k of ['codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel']) if (patch && k in patch) patch = { ...patch, [k]: String(patch[k] || '').trim() };
     if (patch && 'relaySteps' in patch) patch = { ...patch, relaySteps: providers.cleanRelaySteps(patch.relaySteps) };
-    if (patch && 'relayFlow' in patch) patch = { ...patch, relayFlow: require('./src/store').cleanRelayFlow(patch.relayFlow) };
+    // Pipeline（複数）: 一覧・既定の Pipeline・既定のフローを、そろえて保存する
+    const relay = patch && require('./src/store').relayPatchOf(store.settings, patch);
+    if (relay) patch = { ...patch, ...relay };
     if (patch && 'orchestration' in patch) patch = { ...patch, orchestration: providers.cleanOrchestration(patch.orchestration) };
     if (patch && 'competeAgents' in patch) patch = { ...patch, competeAgents: providers.cleanCompeteAgents(patch.competeAgents) };
     if (patch && 'customAgents' in patch) patch = { ...patch, customAgents: providers.cleanCustomAgents(patch.customAgents) };
@@ -904,6 +906,34 @@ app.whenReady().then(async () => {
     agents.pump();
     notifyBoard();
     return store.settings;
+  });
+  // Pipeline・カスタムエージェントのエクスポート・インポート（このマシンのファイル。遠隔操作中も、操作している側のマシンに保存する・から読む）
+  // 中身（JSON・zip）を作る・読むのは画面（renderer/pipeline-pack.js）。ここはファイルを選んで書く・読むだけ
+  const PACK_EXTS = ['json', 'zip'];
+  handle('file:save', async ({ name, data, ext } = {}) => {
+    const e = PACK_EXTS.includes(ext) ? ext : 'json';
+    const base = String(name || 'pipeline').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').slice(0, 80) || 'pipeline';
+    const r = await dialog.showSaveDialog(win, {
+      title: e === 'zip' ? 'Pipelineとカスタムエージェントをまとめてエクスポート' : 'Pipelineをエクスポート',
+      defaultPath: path.join(app.getPath('downloads'), base.endsWith(`.${e}`) ? base : `${base}.${e}`),
+      filters: [e === 'zip' ? { name: 'zip', extensions: ['zip'] } : { name: 'Pipeline（JSON）', extensions: ['json'] }],
+    });
+    if (r.canceled || !r.filePath) return null;
+    const buf = Buffer.from(String(data || ''), 'base64');
+    if (buf.length > 20 * 1024 * 1024) throw new Error('エクスポートするファイルが大きすぎます');
+    fs.writeFileSync(r.filePath, buf);
+    return { path: r.filePath };
+  });
+  handle('file:open', async () => {
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Pipeline（.json）か、Pipelineとカスタムエージェントをまとめた zip を選択',
+      properties: ['openFile'],
+      filters: [{ name: 'Pipeline（.json / .zip）', extensions: PACK_EXTS }, { name: 'すべてのファイル', extensions: ['*'] }],
+    });
+    if (r.canceled || !r.filePaths[0]) return null;
+    const file = r.filePaths[0];
+    if (fs.statSync(file).size > 20 * 1024 * 1024) throw new Error('ファイルが大きすぎます（20MB まで）');
+    return { name: path.basename(file), data: fs.readFileSync(file).toString('base64') };
   });
   // agent: claude / codex / gemini / cursor / relay（Pipeline） / compete（競争。カードが複数できる）。返すのは最初のカードの ID
   // fromChat: 会話の続きとしてタスクを作るときの、元の会話のカードの ID
