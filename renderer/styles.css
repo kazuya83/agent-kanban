@@ -753,9 +753,6 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .compete-item:hover { border-color: var(--accent); }
 .compete-item .muted { overflow: hidden; text-overflow: ellipsis; }
 .s-section { margin: 18px 0 8px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; }
-.relay-edit { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
-.relay-edit-row { display: grid; grid-template-columns: 22px 140px 1fr auto auto; gap: 6px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
-.relay-edit-row .rInst { grid-column: 2 / -1; }
 .relay-no { font-weight: 700; color: var(--run); text-align: center; }
 .check-row { display: flex; flex-wrap: wrap; gap: 6px 18px; }
 .s-note { display: block; margin: -4px 0 12px; }
@@ -774,8 +771,6 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .rf-verdict { font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 999px; }
 .rf-verdict.v-pass { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
 .rf-verdict.v-fail { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
-.relay-branch { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); }
-.relay-branch label { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
 .relay-branch .rLoops { width: 52px; }
 .relay-branch [hidden] { display: none; }
 
@@ -841,3 +836,68 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 
 /* 遠隔操作中は上部に「遠隔操作中」のピルが増えて、リポジトリのタブが潰れるので、ほかのボタンはアイコンだけにする（名前はツールチップに出る） */
 .topbar:has(#remoteInfo:not(.hidden)) .btn:not(.primary) .btn-label { display: none; }
+
+/* ---------- Pipeline: 設定の要約・詳細の並列 ---------- */
+.relay-summary { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); margin-bottom: 6px; }
+.relay-sum-list { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.relay-sum-list li { display: block; }
+.relay-sum-list .ic { width: 13px; height: 13px; margin: 0 3px -2px 0; }
+.relay-sum-list .rs-inst { margin-left: 26px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.relay-sum-err { color: var(--warn); margin-top: 4px; }
+.rf-verdict.v-other { color: var(--run); background: color-mix(in srgb, var(--run) 16%, transparent); }
+.rf-branch { font-size: 11px; padding: 0 6px; border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.rf-wait { font-size: 12px; color: var(--muted); margin: 0 0 10px; padding: 6px 8px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); }
+.rf-wait ul { margin: 4px 0 0; padding-left: 18px; }
+.rf-wait a { color: var(--accent); }
+
+/* ---------- Pipeline: フローチャートの編集 ---------- */
+.modal.flow { z-index: 16; }
+.modal-box.flow-box { width: 1180px; max-width: calc(100vw - 24px); height: calc(100vh - 40px); display: flex; flex-direction: column; overflow: hidden; padding: 16px 18px; }
+.fe-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.fe-head h2 { margin: 0; }
+.fe-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.fe-help { margin: 6px 0 8px; }
+.fe-main { flex: 1; min-height: 0; display: flex; gap: 10px; }
+.fe-canvas { flex: 1; min-width: 0; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background-color: var(--bg); background-image: radial-gradient(color-mix(in srgb, var(--muted) 28%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
+.fe-inner { position: relative; user-select: none; }
+.fe-svg { position: absolute; left: 0; top: 0; overflow: visible; }
+.fe-edge { cursor: pointer; }
+.fe-edge .fe-hit { fill: none; stroke: transparent; stroke-width: 14; }
+.fe-edge .fe-line { fill: none; stroke: var(--muted); stroke-width: 2; }
+.fe-edge.back .fe-line { stroke: var(--warn); stroke-dasharray: 6 4; }
+.fe-edge:hover .fe-line { stroke: var(--accent-2); }
+.fe-edge.sel .fe-line { stroke: var(--accent); stroke-width: 3; }
+.fe-arrow { fill: var(--muted); }
+.fe-arrow.sel { fill: var(--accent); }
+.fe-elabel { font-size: 11px; fill: var(--text); paint-order: stroke; stroke: var(--bg); stroke-width: 4px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+.fe-temp { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 4; pointer-events: none; }
+.fe-node { position: absolute; display: flex; flex-direction: column; justify-content: center; padding: 4px 10px; border: 2px solid var(--line); border-radius: 10px; background: var(--panel); cursor: grab; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18); overflow: visible; }
+.fe-node:active { cursor: grabbing; }
+.fe-node.sel { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+.fe-node.drop { border-color: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 30%, transparent); }
+.fe-node.off { border-style: dashed; }
+.fe-node .fe-kind { position: absolute; top: -9px; left: 8px; font-size: 10px; line-height: 14px; padding: 0 5px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
+.fe-node .fe-title { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fe-node .fe-sub { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fe-node.t-start, .fe-node.t-end { border-radius: 999px; align-items: center; text-align: center; }
+.fe-node.t-start { border-color: color-mix(in srgb, var(--ok) 70%, var(--line)); }
+.fe-node.t-end { border-color: color-mix(in srgb, var(--muted) 70%, var(--line)); }
+.fe-node.t-step { border-left: 5px solid var(--run); }
+.fe-node.t-if { border-color: color-mix(in srgb, var(--warn) 70%, var(--line)); border-radius: 4px 22px 4px 22px; align-items: center; text-align: center; }
+.fe-node.t-parallel, .fe-node.t-join { border-color: color-mix(in srgb, var(--accent) 70%, var(--line)); border-top-width: 5px; border-bottom-width: 5px; border-radius: 4px; align-items: center; text-align: center; }
+.fe-port { position: absolute; left: 50%; bottom: -8px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); cursor: crosshair; }
+.fe-port:hover { background: var(--accent); transform: scale(1.2); }
+.fe-side { width: 290px; flex: none; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
+.fe-side h4 { margin: 0 0 8px; }
+.fe-side .field { margin-bottom: 8px; }
+.fe-side textarea { width: 100%; }
+.fe-side .check { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; margin: 4px 0 8px; }
+.fe-side-actions { margin-top: 10px; }
+.fe-legend { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; color: var(--muted); }
+.fe-branches { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.fe-branch { text-align: left; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; font-size: 12px; }
+.fe-branch:hover { border-color: var(--accent); }
+.fe-errors { margin-top: 8px; font-size: 12px; max-height: 96px; overflow-y: auto; color: var(--warn); }
+.fe-errors ul { margin: 2px 0 0; padding-left: 18px; }
+.fe-ok { color: var(--ok); }
+.fe-canvas, .fe-side, .fe-errors { scrollbar-color: var(--line) transparent; }

@@ -39,8 +39,10 @@ process.stdin.on('end', async () => {
     out({ type: 'result', subtype: 'success', is_error: false, result: 'feature/fake-cursor-branch' });
     process.exit(0);
   }
-  const file = `${kind}-${Date.now()}-${process.pid}.txt`;
-  const fail = prompt.startsWith('[fail]'); // 先頭にあるときだけ（Pipelineの次の工程の指示には元の指示が入るので）
+  // [same-file] なら、どの工程も同じファイルに書く（並列の枝のマージでコンフリクトさせる）
+  const file = prompt.includes('[same-file]') ? 'same.txt' : `${kind}-${Date.now()}-${process.pid}.txt`;
+  // 先頭にあるときだけ（Pipelineの次の工程の指示には元の指示が入るので）。[fail-step] は工程の担当の説明に書いて、その工程だけ失敗させる
+  const fail = prompt.startsWith('[fail]') || prompt.includes('[fail-step]');
   const ask = prompt.includes('[q]');
   if (kind === 'codex') {
     // codex exec [resume] --json ... [SESSION_ID] -
@@ -59,9 +61,13 @@ process.stdin.on('end', async () => {
     }
     // Pipelineの判定する工程（指示に判定の印の説明があるとき）: [judge-always-fail] ならいつも差し戻し、
     // [judge] なら1回目は差し戻し・2回目以降（見出しに「回目」がある）は合格
+    // [result=値] なら、その値をいつも書く
     let verdict = '';
-    if (prompt.includes('[[FAIL]]') && prompt.includes('[judge-always-fail]')) verdict = '\n[[FAIL]]';
-    else if (prompt.includes('[[FAIL]]') && prompt.includes('[judge]')) verdict = prompt.split('\n')[0].includes('回目') ? '\n[[PASS]]' : '\n直してください\n[[FAIL]]';
+    const judging = prompt.includes('[[RESULT:');
+    const fixed = /\[result=([^\]]+)\]/.exec(prompt);
+    if (judging && fixed) verdict = `\n[[RESULT:${fixed[1]}]]`;
+    else if (judging && prompt.includes('[judge-always-fail]')) verdict = '\n[[RESULT:fail]]';
+    else if (judging && prompt.includes('[judge]')) verdict = prompt.split('\n')[0].includes('回目') ? '\n[[RESULT:pass]]' : '\n直してください\n[[RESULT:fail]]';
     out({ type: 'item.completed', item: { id: 'item_2', type: 'agent_message', text: ask ? 'どちらにしますか？' : `codex done: ${prompt.split('\n')[0]}${verdict}` } });
     out({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } });
     process.exit(0);
