@@ -161,3 +161,20 @@ test('取り込むとき: 同じ中身のカスタムエージェントは使い
   const m2 = Pack.mergeImport({ relayFlows: [], customAgents: [] }, { pipelines: [{ name: 'X', flow }], customAgents: [] });
   assert.strictEqual(m2.missing.length, 2);
 });
+
+test('Pipeline の名前は15文字まで（前の版の長い名前も切り、重なったら番号を付ける）', () => {
+  const { PIPELINE_NAME_MAX } = require('../src/store');
+  assert.strictEqual(PIPELINE_NAME_MAX, 15);
+  assert.strictEqual(Pack.PIPELINE_NAME_MAX, PIPELINE_NAME_MAX);
+  const long = 'とても長い名前のパイプラインでプルダウンが見切れる';
+  const r = cleanRelayFlows([
+    { id: 'a', name: long, flow: twoSteps('claude', 'claude') },
+    { id: 'b', name: long + 'その2', flow: twoSteps('claude', 'claude') },
+  ], 'a');
+  assert.strictEqual(r.relayFlows[0].name, [...long].slice(0, 15).join(''));
+  assert.ok([...r.relayFlows[1].name].length <= 15);
+  assert.ok(r.relayFlows[1].name.endsWith(' (2)'));
+  // インポートでも15文字まで
+  const m = Pack.mergeImport({ relayFlows: [], customAgents: [] }, { pipelines: [{ name: long, flow: twoSteps('claude', 'claude') }], customAgents: [] });
+  assert.strictEqual(m.addedPipelines[0], [...long].slice(0, 15).join(''));
+});

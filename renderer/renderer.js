@@ -2743,6 +2743,11 @@ function relayFlowInfo(flow) {
   const count = (t) => flow.nodes.filter((n) => n.type === t).length;
   return { steps: FlowModel.orderSteps(flow), errors: FlowModel.validateFlow(flow), first: e ? FlowModel.nodeOf(flow, e.to) : null, ifs: count('if'), pars: count('parallel'), loops: FlowModel.backEdges(flow).size };
 }
+// プルダウンに出す Pipeline の名前（上限の長さで切る。名前がなければ「Pipeline」）
+function pipelineShortName(p) {
+  const n = [...String((p && p.name) || '').replace(/\s+/g, ' ').trim()];
+  return n.length ? n.slice(0, PipelinePack.PIPELINE_NAME_MAX).join('').trim() : 'Pipeline';
+}
 function relayFlowLabel(info) {
   const extra = [info.ifs && `分岐${info.ifs}`, info.pars && `並列${info.pars}`, info.loops && `ループ${info.loops}`].filter(Boolean).join('・');
   return (info.steps.map((x) => `${x.label}(${whoShort(stepWho(x).agent, stepWho(x).persona)})`).join(' → ') || '未設定') + (extra ? `（${extra}）` : '');
@@ -2785,7 +2790,7 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
   const defPipe = pipes.find((x) => def && x.p.id === def.id);
   const orchUsable = (orch === 'relay' && defPipe && !defPipe.off) || (orch === 'compete' && comp.length >= 2);
   const v = (value === 'relay' && def ? RELAY_PREFIX + def.id : value) || (orchUsable ? (orch === 'relay' ? RELAY_PREFIX + def.id : orch) : defaultAgent(s));
-  const opt = (val, label, disabled) => `<option value="${val}" ${val === v && !disabled ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(label)}</option>`;
+  const opt = (val, label, disabled, title) => `<option value="${val}" ${val === v && !disabled ? 'selected' : ''} ${disabled ? 'disabled' : ''}${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</option>`;
   const plain = AGENTS.filter(([a]) => on.includes(a)).map(([a, l]) => opt(a, l)).join('');
   const cas = customAgents(s);
   const custom = cas.length
@@ -2794,7 +2799,8 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
   const single = custom ? `<optgroup label="1つのエージェントで動かす">${plain}</optgroup>${custom}` : plain;
   if (orch === 'none') return `<label class="field"><span>エージェント</span><select id="${idp}Agent">${single}</select><small id="${idp}AgentHint" class="muted"></small></label>`;
   const relayOpts = pipes
-    .map(({ p, info, off }) => opt(RELAY_PREFIX + p.id, `${pipes.length > 1 ? p.name : 'Pipeline'}: ${relayFlowLabel(info)}${info.errors.length ? '（設定のフローチャートを直してください）' : off ? '（設定で工程のエージェントを使う設定にしてください）' : ''}`, off))
+    // 長いと他の欄が見切れるので、名前（15文字まで）だけを出す。工程の並びは選んだときに下の説明に出す
+    .map(({ p, info, off }) => opt(RELAY_PREFIX + p.id, `${pipelineShortName(p)}${info.errors.length ? '（要修正）' : off ? '（使えません）' : ''}`, off, `${p.name}: ${relayFlowLabel(info)}${info.errors.length ? '（設定のフローチャートを直してください）' : off ? '（設定で工程のエージェントを使う設定にしてください）' : ''}`))
     .join('');
   return `<label class="field"><span>エージェント</span>
     <select id="${idp}Agent">
@@ -2807,13 +2813,20 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
     </select>
     <small id="${idp}AgentHint" class="muted"></small></label>`;
 }
+// 選んだ Pipeline の説明（名前と工程の並び。プルダウンには名前だけを出すので、ここで中身を見せる）
+function relayHint(p) {
+  if (!p) return '選んだ Pipeline が見つかりません。選び直してください。';
+  const info = relayFlowInfo(p.flow);
+  const why = info.errors.length ? '（設定のフローチャートを直してください）' : '';
+  return `Pipeline「${p.name || 'Pipeline'}」: ${relayFlowLabel(info)}${why}。`;
+}
 // onChange(agent): 選び直したときに呼ぶ（会話の欄の出し分けなど）
 function bindAgentField(idp, onChange) {
   const sel = $(`${idp}Agent`);
   const hint = () => {
     const v = sel.value;
     $(`${idp}AgentHint`).textContent =
-      isRelayRef(v) ? (pipelines().length > 1 ? `Pipeline「${(pipelineOfRef(v) || {}).name || ''}」で動かします。` : '') + '設定のフローチャートに沿って、工程ごとにエージェントが作業を引き継ぎます（前の工程の報告を次に渡します。分岐・ループ・並列もフローのとおりに動きます）。フローチャートは「設定」で変えられます。'
+      isRelayRef(v) ? relayHint(pipelineOfRef(v)) + '設定のフローチャートに沿って、工程ごとにエージェントが作業を引き継ぎます（前の工程の報告を次に渡します。分岐・ループ・並列もフローのとおりに動きます）。フローチャートは「設定」で変えられます。'
       : v === 'compete' ? 'エージェントごとにカードと worktree を作って並列に解きます。終わったら差分を見比べ、よい案を採用してマージします。'
       : isCustomRef(v) ? customHint(findCustomAgent(v))
       : agentLimitHint(v);
@@ -3982,7 +3995,7 @@ async function openSettings() {
           const box = $('sRelayExport');
           box.hidden = false;
           box.innerHTML = `<h4>${esc(title)}</h4>
-            <label class="field"><span>名前</span><input id="plName" maxlength="40" value="${esc(initial)}" /></label>
+            <label class="field"><span>名前（${PipelinePack.PIPELINE_NAME_MAX}文字まで）</span><input id="plName" maxlength="${PipelinePack.PIPELINE_NAME_MAX}" value="${esc(initial)}" /></label>
             <div class="modal-actions"><button class="btn ghost small" id="plCancel" type="button">やめる</button><button class="btn primary small" id="plOk" type="button">${esc(okLabel)}</button></div>`;
           const done = (v) => {
             box.hidden = true;
@@ -4000,7 +4013,7 @@ async function openSettings() {
             done(v);
           };
         });
-      const newFlowName = (base) => PipelinePack.uniqueName(base, new Set(flows.map((p) => p.name)), 40);
+      const newFlowName = (base) => PipelinePack.uniqueName(base, new Set(flows.map((p) => p.name)), PipelinePack.PIPELINE_NAME_MAX);
       const newFlowId = () => {
         let id;
         do id = `p${Math.random().toString(16).slice(2, 10)}`;
@@ -4134,7 +4147,7 @@ async function openSettings() {
         on('pl-rename', async (i) => {
           const v = await askName(`「${flows[i].name}」の名前を変える`, flows[i].name, '決定');
           if (v == null) return;
-          const name = v.slice(0, 40);
+          const name = [...v].slice(0, PipelinePack.PIPELINE_NAME_MAX).join('').trim();
           if (flows.some((p, j) => j !== i && p.name === name)) return toast(`「${name}」という名前の Pipeline はもうあります`);
           const prev = flows[i].name;
           flows[i].name = name;
@@ -4165,7 +4178,7 @@ async function openSettings() {
       $('sRelayAdd').onclick = async () => {
         const v = await askName('Pipelineを追加', newFlowName('Pipeline'), '追加してフローチャートを編集');
         if (v == null) return;
-        const name = v.slice(0, 40);
+        const name = [...v].slice(0, PipelinePack.PIPELINE_NAME_MAX).join('').trim();
         if (flows.some((p) => p.name === name)) return toast(`「${name}」という名前の Pipeline はもうあります`);
         // 新しい Pipeline は「実装 → レビュー」から始める（既定の Pipeline の形をまねず、初めの形にする）
         flows.push({ id: newFlowId(), name, flow: null });

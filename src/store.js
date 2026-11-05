@@ -20,14 +20,26 @@ function cleanRelayFlow(f) {
 const MAX_RELAY_FLOWS = 30;
 const RELAY_FLOW_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 const DEFAULT_PIPELINE_NAME = 'Pipeline';
+// Pipeline の名前の長さの上限（タスクを作るときの「エージェント」のプルダウンで見切れないように）
+const PIPELINE_NAME_MAX = 15;
 function cleanPipelineName(v, fallback = DEFAULT_PIPELINE_NAME) {
-  const s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, 40);
+  const s = [...String(v == null ? '' : v).replace(/\s+/g, ' ').trim()].slice(0, PIPELINE_NAME_MAX).join('').trim();
   return s || fallback;
+}
+// 名前が重ならないようにする（重なったら「 (2)」などを付ける。上限の長さに収める）
+function uniquePipelineName(name, taken) {
+  if (!taken.has(name)) return name;
+  for (let i = 2; ; i++) {
+    const sfx = ` (${i})`;
+    const n = [...name].slice(0, PIPELINE_NAME_MAX - sfx.length).join('').trim() + sfx;
+    if (!taken.has(n)) return n;
+  }
 }
 // Pipeline の一覧を整える。flow を渡したら、それを既定の Pipeline のフローにする（前の版の relayFlow だけの設定・relayFlow だけを変えたとき）
 function cleanRelayFlows(list, id, flow) {
   const out = [];
   const ids = new Set();
+  const names = new Set();
   for (const x of Array.isArray(list) ? list : []) {
     if (!x || typeof x !== 'object' || out.length >= MAX_RELAY_FLOWS) continue;
     let pid = String(x.id || '').trim();
@@ -37,7 +49,10 @@ function cleanRelayFlows(list, id, flow) {
       pid = `p${n}`;
     }
     ids.add(pid);
-    out.push({ id: pid, name: cleanPipelineName(x.name, `${DEFAULT_PIPELINE_NAME} ${out.length + 1}`), flow: cleanRelayFlow(x.flow) });
+    // 前の版の長い名前も上限で切る（切って重なったら番号を付ける）
+    const name = uniquePipelineName(cleanPipelineName(x.name, `${DEFAULT_PIPELINE_NAME} ${out.length + 1}`), names);
+    names.add(name);
+    out.push({ id: pid, name, flow: cleanRelayFlow(x.flow) });
   }
   if (!out.length) out.push({ id: 'default', name: DEFAULT_PIPELINE_NAME, flow: cleanRelayFlow(flow) });
   const def = out.find((x) => x.id === String(id || '')) || out[0];
@@ -555,6 +570,7 @@ module.exports = {
   cleanRelayFlow,
   cleanRelayFlows,
   cleanPipelineName,
+  PIPELINE_NAME_MAX,
   relayPatchOf,
   pipelineOf,
   MAX_RELAY_FLOWS,
