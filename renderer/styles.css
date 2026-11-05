@@ -1010,6 +1010,28 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .rs-merging { --rs: var(--run); }
 .rs-skipped { --rs: var(--muted); }
 .rb-seg.rs-merging { background: color-mix(in srgb, var(--run) 45%, transparent); }
+.rs-mergedWait { --rs: var(--ok); }
+.rs-closed { --rs: var(--muted); }
+.rb-seg.rs-mergedWait { background: color-mix(in srgb, var(--ok) 55%, transparent); }
+.rb-seg.rs-closed { background: color-mix(in srgb, var(--muted) 55%, transparent); }
+/* 進捗タブ: サブタスクのかんばん（ドラッグ&ドロップで状態を変える） */
+.sub-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 8px 0 6px; }
+.sb-col { border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--panel) 70%, transparent); padding: 6px; min-height: 64px; display: flex; flex-direction: column; gap: 6px; }
+.sb-col.drop { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+.sb-col-head { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--muted); }
+.sb-items { display: flex; flex-direction: column; gap: 6px; }
+.sb-items .col-empty { padding: 8px 0; }
+.sb-item { border: 1px solid var(--line); border-left: 3px solid var(--rs, var(--line)); border-radius: 6px; background: var(--panel); padding: 6px 8px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+.sb-item[draggable="true"] { cursor: grab; }
+.sb-item.rs-done .rf-dot { background: var(--ok); color: #06210f; }
+.sb-item.rs-running .rf-dot { animation: rf-pulse 1.4s ease-in-out infinite; }
+.sb-item.rs-skipped, .sb-item.rs-closed { opacity: 0.7; }
+.sb-head { display: flex; align-items: center; gap: 6px; }
+.sb-head .rf-dot { width: 18px; height: 18px; font-size: 10px; }
+.sb-head a { color: var(--accent); }
+.sb-info { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.sb-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 760px) { .sub-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .sub-box { margin-top: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); background: color-mix(in srgb, var(--accent) 5%, var(--panel)); font-size: 13px; }
 .sub-box .rh-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
 .sub-box .rh-row .ic { width: 14px; height: 14px; }

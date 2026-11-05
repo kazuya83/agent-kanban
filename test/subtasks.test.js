@@ -99,7 +99,7 @@ test('サブタスク: 手動で決めたサブタスクを、順番どおりに
   const log = g('log', '--oneline', p.branch);
   assert.match(log, /Merge subtask: 下準備/);
   assert.match(log, /Merge subtask: 本体/);
-  assert.ok((p.logs || []).some((l) => l.kind === 'user' && /すべて、このタスクのブランチにマージしました/.test(l.text)));
+  assert.ok((p.logs || []).some((l) => l.kind === 'user' && /このタスクのブランチにマージしました/.test(l.text)));
   // 仕上げが終わったので、親はマージできる
   const r = await agents.merge(p.id, { target: 'main' });
   assert.ok(r.merged);
@@ -183,4 +183,98 @@ test('サブタスク: 提案に「分けずに進める」と答えると、こ
   assert.ok((p.logs || []).some((l) => l.kind === 'user' && /サブタスクに分けずに/.test(l.text)));
   // Pipeline・競争・サブタスク自身は分けない
   assert.throws(() => agents.setSubtasks(p.id, { items: [{ title: 'x' }] }), /開始前/);
+});
+
+test('サブタスク: サブタスクだけ開始すると、親は動かさずにそのサブタスクだけ動き、レビューで止まる。状態はドラッグで変える', async () => {
+  const { agents, store, g } = setup();
+  const [p] = agents.createTask({ title: '手で進める作業', prompt: '全体の作業 [manual]', agent: 'claude' });
+  agents.setSubtasks(p.id, { items: [{ title: 'ひとつめ', prompt: 'ひとつめを作る' }, { title: 'ふたつめ', prompt: 'ふたつめを作る' }, { title: 'みっつめ', prompt: 'みっつめを作る' }] });
+  // 開始前の親では、開始以外の移動はできない
+  await assert.rejects(() => agents.moveSubtask(p.id, 's1', 'done'), /開始する前/);
+  await agents.startSubtaskOnly(p.id, 's2');
+  assert.ok(p.worktreePath && p.branch, '親のブランチだけ作る');
+  assert.strictEqual(p.status, 'review');
+  assert.strictEqual(p.subtasks.phase, 'run');
+  assert.strictEqual(p.subtasks.auto, false);
+  const item = p.subtasks.items[1];
+  assert.strictEqual(item.state, 'running');
+  assert.ok(item.manual);
+  const k = store.card(item.cardId);
+  await waitFor(() => k.status === 'review');
+  await new Promise((r) => setTimeout(r, 200));
+  // ほかのサブタスクは始めない・自動でマージしない・親のエージェントは動かない
+  assert.deepStrictEqual(p.subtasks.items.map((x) => x.state), ['pending', 'running', 'pending']);
+  assert.ok(!p.sessionId);
+  assert.ok(!/Merge subtask/.test(g('log', '--oneline', p.branch)));
+  // 取り込むと親のブランチにマージするが、状態はレビューのまま（完了へはドラッグで動かす）
+  await agents.approveSubtask(k.id);
+  await waitFor(() => item.state === 'review');
+  assert.ok(item.merged);
+  assert.ok(!store.card(k.id));
+  assert.match(g('log', '--oneline', p.branch), /Merge subtask: ふたつめ/);
+  await agents.moveSubtask(p.id, 's2', 'done');
+  assert.strictEqual(item.state, 'merged');
+  // 完了から戻せる・戻したものはもう一度完了にできる
+  await agents.moveSubtask(p.id, 's2', 'review');
+  assert.strictEqual(item.state, 'review');
+  await agents.moveSubtask(p.id, 's2', 'done');
+  // 親は、サブタスクが残っているあいだは完了にできない
+  assert.throws(() => agents.moveCard(p.id, 'done'), /サブタスクが残っています/);
+  // 3つめは取り込まずに完了にする（カードは片付ける）
+  await agents.startSubtaskOnly(p.id, 's3');
+  const k3 = store.card(p.subtasks.items[2].cardId);
+  await waitFor(() => k3.status === 'review');
+  await agents.moveSubtask(p.id, 's3', 'done');
+  assert.strictEqual(p.subtasks.items[2].state, 'done');
+  assert.ok(!store.card(k3.id));
+  // 1つめは始めずに完了にする → すべて完了したので、親が（全体の指示つきで）仕上げてからレビューへ
+  await agents.moveSubtask(p.id, 's1', 'done');
+  assert.strictEqual(p.subtasks.phase, 'done');
+  await waitFor(() => p.status === 'review' && p.sessionId);
+  const fin = (p.logs || []).find((l) => l.kind === 'user' && /このタスクのブランチにマージしました/.test(l.text));
+  assert.ok(fin && /全体の作業 \[manual\]/.test(fin.text));
+});
+
+test('サブタスク: 自動で進めているときも、まだのサブタスクだけ先に開始できる', async () => {
+  const { agents, store } = setup();
+  const [p] = agents.createTask({ title: '大きな作業 [serial]', prompt: '大きな作業をする [serial]', agent: 'claude' });
+  agents.setSubtasks(p.id, { items: [{ title: '下準備', prompt: '下準備をする' }, { title: '本体', prompt: '本体を作る' }], merge: 'review' });
+  agents.start(p.id);
+  await waitFor(() => p.subtasks.phase === 'run' && p.status === 'review' && p.subtasks.items[0].cardId);
+  assert.strictEqual(p.subtasks.items[1].state, 'pending');
+  // 順番（after）は目安: 先のものが終わっていなくても開始できる
+  await agents.startSubtaskOnly(p.id, 's2');
+  assert.strictEqual(p.subtasks.items[1].state, 'running');
+  const k2 = store.card(p.subtasks.items[1].cardId);
+  await waitFor(() => k2.status === 'review');
+  await agents.approveSubtask(k2.id);
+  await waitFor(() => p.subtasks.items[1].state === 'review');
+  const k1 = store.card(p.subtasks.items[0].cardId);
+  await waitFor(() => k1.status === 'review');
+  await agents.approveSubtask(k1.id);
+  // 自動で始めたものは、取り込んだら完了になる
+  await waitFor(() => p.subtasks.items[0].state === 'merged');
+  assert.strictEqual(p.subtasks.phase, 'run', '個別に開始したものが完了になるまでは、仕上げない');
+  await agents.moveSubtask(p.id, 's2', 'done');
+  await waitFor(() => p.subtasks.phase === 'done' && p.status === 'review');
+});
+
+test('ボード: レビューと完了のあいだをドラッグで動かす（マージせずに完了にする・戻す）', async () => {
+  const { agents, store } = setup();
+  const [c] = agents.createTask({ title: 'ふつうの作業', prompt: '作業する', agent: 'claude' });
+  assert.throws(() => agents.moveCard(c.id, 'done'), /開始していない/);
+  agents.moveCard(c.id, 'running');
+  await waitFor(() => c.status === 'review');
+  assert.throws(() => agents.moveCard(c.id, 'todo'), /Todo に戻せません/);
+  agents.moveCard(c.id, 'done');
+  assert.strictEqual(c.status, 'done');
+  assert.ok(c.worktreePath && fs.existsSync(c.worktreePath), 'マージしていないので worktree は残す');
+  assert.strictEqual(agents.issueStatusKey(c), 'done');
+  assert.ok(store.notifications.some((n) => n.cardId === c.id && /完了/.test(n.title)));
+  agents.moveCard(c.id, 'review');
+  assert.strictEqual(c.status, 'review');
+  // マージで片付けたものは、もう戻せない
+  await agents.merge(c.id, { target: 'main' });
+  assert.strictEqual(c.status, 'done');
+  assert.throws(() => agents.moveCard(c.id, 'review'), /戻せません/);
 });
