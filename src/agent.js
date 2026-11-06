@@ -1680,7 +1680,7 @@ class AgentManager extends EventEmitter {
         p.startedAt = Date.now();
         p.specState = null;
         st.auto = false;
-        this.log(p, 'system', `サブタスク「${item.title}」だけを開始します。ほかのサブタスクは、進捗タブから1つずつ開始するか「残りを自動で進める」で動かします`);
+        this.log(p, 'system', `サブタスク「${item.title}」だけを開始します。ほかのサブタスクは、サブタスクタブから1つずつ開始するか「残りを自動で進める」で動かします`);
       }
       if (st.phase !== 'run') st.phase = 'run';
       if (item.state !== 'pending') return;
@@ -1728,7 +1728,7 @@ class AgentManager extends EventEmitter {
   }
 
   /**
-   * サブタスクの状態を変える（進捗タブのドラッグ&ドロップ）。マージとは切り離して、状態だけを変える
+   * サブタスクの状態を変える（サブタスクタブのドラッグ&ドロップ）。マージとは切り離して、状態だけを変える
    * @param {'todo'|'running'|'review'|'done'} to  todo: 未着手 / running: 作業中（開始する） / review: レビュー / done: 完了
    */
   async moveSubtask(id, key, to) {
@@ -1796,7 +1796,7 @@ class AgentManager extends EventEmitter {
   moveCard(id, to) {
     const c = this.must(id);
     if (isChat(c)) throw new Error('会話は列を動かせません');
-    if (this.subtaskParentOf(c)) throw new Error('サブタスクの状態は、親のタスクの「進捗」タブで変えてください');
+    if (this.subtaskParentOf(c)) throw new Error('サブタスクの状態は、親のタスクの「サブタスク」タブで変えてください');
     if (c.afterDone) throw new Error('完了したタスクについて話しているあいだは動かせません');
     const from = c.status;
     const shown = c.subtasks && c.subtasks.phase === 'run' && (from === 'review' || from === 'failed') ? 'running' : from;
@@ -1810,7 +1810,7 @@ class AgentManager extends EventEmitter {
     if (to === 'done') {
       if (from === 'todo') throw new Error('開始していないタスクは完了にできません');
       if (isNoGit(c)) return this.complete(id);
-      if (c.subtasks && c.subtasks.phase === 'run') throw new Error('サブタスクが残っています。進捗タブでサブタスクをすべて完了にしてから動かしてください');
+      if (c.subtasks && c.subtasks.phase === 'run') throw new Error('サブタスクが残っています。サブタスクタブでサブタスクをすべて完了にしてから動かしてください');
       if (c.conflict) throw new Error('コンフリクトを解消するか、取り込みを中止してから完了にしてください');
       if (c.relay && c.relay.waiting) throw new Error('Pipelineの並列の枝が終わるのを待っています');
       c.status = 'done';
