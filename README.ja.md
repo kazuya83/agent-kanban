@@ -4,14 +4,14 @@
 
 # Worktree Kanban
 
-<strong>AI コーディングエージェントを並列に動かし、別の PC から操作する。</strong><br />
-Mac と Windows を相互に遠隔操作できます。
+<strong>複数の AI エージェントをフローチャートで組み、要所は人が決めるボード。</strong><br />
+Codex で実装して Claude でレビューし、直すところがあれば差し戻す。マージするかは人が決めます。
 
 [紹介ページ](https://kazuya83.github.io/worktree-kanban/) · [ダウンロード](https://github.com/kazuya83/worktree-kanban/releases/latest)
 
 [![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
-[![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
+[![Pipeline](https://img.shields.io/badge/pipeline-Codex%20%E2%86%92%20Claude%20%E2%86%92%20you-0891B2)](docs/images/en/feature-pipeline.gif)
 [![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Antigravity%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
 
@@ -21,7 +21,7 @@ Mac と Windows を相互に遠隔操作できます。
 
 <div align="center">
 
-![デモ: タスクを作り、カードが並列に動き、承認し、差分を確かめてマージし、ボードを遠隔操作する](docs/images/ja/demo.gif)
+![デモ: 文章でフローを組み、Codex の実装を Claude がレビューして差し戻し、人がコマンドを承認し、差分を確かめてマージする](docs/images/ja/demo.gif)
 
 </div>
 
@@ -31,11 +31,12 @@ AI コーディングエージェントの CLI（Claude Code / Codex CLI / Antig
 
 ## Worktree Kanban を選ぶ理由
 
-- **Mac と Windows を相互に遠隔操作** — エージェントを動かす PC のボードを、別の PC からそのまま操作できます。承認、質問への回答、追加の指示、マージもできます。
+- **エージェントをフローチャートで組む** — 文章で書くか手で描いたフローのとおりに、分岐・ループ・並列をたどりながら、工程ごとにエージェントが作業を引き継ぎます。
+- **最後は人が決める** — マージや PR の前に差分を確かめられます。Claude Code なら、操作の承認もカードで行えます。
 - **1 タスクに 1 つの worktree** — タスクごとに別々の git worktree とブランチで動くので、タスク同士や手元の作業ツリーとぶつかりません。
 - **複数のリポジトリを同時に** — 最大 3 つのリポジトリをタブで開けます。タブを切り替えても、ほかのタスクは止まりません。
 - **いつもの CLI をそのまま** — Claude Code、Codex CLI、Antigravity CLI、Gemini CLI、Cursor CLI を、今のログインや設定のまま使えます。
-- **最後は人が決める** — マージや PR の前に差分を確かめられます。Claude Code なら、操作の承認もカードで行えます。
+- **Mac と Windows を相互に遠隔操作** — エージェントを動かす PC のボードを、別の PC からそのまま操作できます。承認、質問への回答、追加の指示、マージもできます。
 - **手元で完結** — ボードの状態はこの PC に保存します。外部のサーバーは使いません。
 
 ## しくみ

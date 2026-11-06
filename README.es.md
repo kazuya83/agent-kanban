@@ -4,14 +4,14 @@
 
 # Worktree Kanban
 
-<strong>Ejecuta agentes de programación con IA en paralelo y contrólalos desde otro PC.</strong><br />
-Mac y Windows pueden manejarse el uno al otro a distancia.
+<strong>Un tablero para combinar agentes de programación con IA en diagramas de flujo, donde las decisiones clave las toman las personas.</strong><br />
+Implementa con Codex, revisa con Claude y devuelve el trabajo si hace falta. Tú decides si se fusiona.
 
 [Sitio web](https://kazuya83.github.io/worktree-kanban/) · [Descargar](https://github.com/kazuya83/worktree-kanban/releases/latest)
 
 [![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
-[![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
+[![Pipeline](https://img.shields.io/badge/pipeline-Codex%20%E2%86%92%20Claude%20%E2%86%92%20you-0891B2)](docs/images/en/feature-pipeline.gif)
 [![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Antigravity%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
 
@@ -21,7 +21,7 @@ Mac y Windows pueden manejarse el uno al otro a distancia.
 
 <div align="center">
 
-![Demostración: crear una tarea, ver las tarjetas en paralelo, aprobar, revisar el diff, fusionar y manejar el tablero a distancia](docs/images/es/demo.gif)
+![Demostración: describir un flujo en lenguaje natural, ver cómo Codex implementa y Claude revisa y devuelve el trabajo, aprobar un comando, revisar el diff y fusionar](docs/images/es/demo.gif)
 
 </div>
 
@@ -31,11 +31,12 @@ Aplicación de escritorio (Electron, Mac / Windows / Linux) que ejecuta en paral
 
 ## ¿Por qué Worktree Kanban?
 
-- **Control remoto Mac ⇄ Windows** — ejecuta los agentes en un PC y maneja el mismo tablero desde el otro: aprueba, responde preguntas, envía instrucciones y fusiona.
+- **Agentes en un diagrama de flujo** — describe un flujo en lenguaje natural o dibújalo, y los agentes se pasan el trabajo paso a paso, siguiendo ramas, bucles y pasos en paralelo.
+- **Tú decides** — revisa el diff antes de fusionar o abrir un PR. Con Claude Code, también apruebas las acciones en la tarjeta.
 - **Una tarea, un worktree** — cada tarea tiene su propio worktree de git y su rama, así que no chocan entre sí ni con tu árbol de trabajo.
 - **Varios repositorios a la vez** — abre hasta 3 repositorios en pestañas; cambiar de pestaña no detiene nada.
 - **Las CLI que ya usas** — Claude Code, Codex CLI, Antigravity CLI, Gemini CLI y Cursor CLI, con tu sesión y tu configuración actuales.
-- **Tú decides** — revisa el diff antes de fusionar o abrir un PR. Con Claude Code, también apruebas las acciones en la tarjeta.
+- **Control remoto Mac ⇄ Windows** — ejecuta los agentes en un PC y maneja el mismo tablero desde el otro: aprueba, responde preguntas, envía instrucciones y fusiona.
 - **Todo en local** — el estado del tablero se queda en tu máquina. No hay un servidor externo.
 
 ## Cómo funciona

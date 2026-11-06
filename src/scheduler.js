@@ -2,10 +2,11 @@
 // - アプリの起動中だけ、アプリの中のタイマーで動く（遠隔操作のときはホスト側で動く）
 // - タブを開いていないリポジトリのスケジュールも動かす
 // - カードを作ったあとは通常のタスクと同じ（承認・同時実行数・レビュー）。ただし仕様の確認はしない（人が見ていないところで止まるため）
+// - Issue の監視（s.issues）は、時刻になったら GitHub の Issue を読み、新しい Issue 1件につきカードを1枚作る
 const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const fs = require('fs');
-const { LATE_MS, MAX_RUNS, cleanRule, cleanSchedule, nextRun, scheduleError } = require('../renderer/schedule-model');
+const { ISSUE_BATCH, LATE_MS, MAX_RUNS, SEEN_MAX, cleanRule, cleanSchedule, nextRun, parseLabels, scheduleError } = require('../renderer/schedule-model');
 const { tr } = require('../renderer/i18n');
 const providers = require('./providers');
 
@@ -18,11 +19,18 @@ function isBusy(c) {
   return ['todo', 'queued', 'running'].includes(c.status) || !!(c.relay && c.relay.waiting) || (!!c.subtasks && c.subtasks.phase === 'run');
 }
 
+// 画面から受け取る Issue の監視の設定。after（監視を始めた日時）と seen は、ここからは変えられない
+function issueForm(input, prev, now) {
+  if (!input) return null;
+  const { labels, author, autoStart } = input;
+  return { ...(prev || { after: now }), labels: parseLabels(labels), author, autoStart };
+}
+
 class Scheduler extends EventEmitter {
   /**
    * @param {object} deps
    * @param {object} deps.store src/store.js の Store
-   * @param {object} deps.agents AgentManager（createTask / start / notify / shuttingDown を使う）
+   * @param {object} deps.agents AgentManager（createTask / createFromWatchedIssue / listIssues / start / notify / shuttingDown を使う）
    * @param {() => number} [deps.now] 今の時刻
    * @param {(dir: string) => boolean} [deps.exists] フォルダがあるか
    */
@@ -35,6 +43,7 @@ class Scheduler extends EventEmitter {
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
     this.timer = null;
+    this.polling = new Map(); // Issue を確認している最中のスケジュール（ID → 確認の Promise）
   }
 
   start() {
@@ -65,6 +74,7 @@ class Scheduler extends EventEmitter {
     const now = this.now();
     const form = { repoPath: input.repoPath || this.store.settings.repoPath, sourceCardId: input.sourceCardId };
     for (const k of EDIT_KEYS) form[k] = input[k];
+    form.issues = issueForm(input.issues, null, now);
     const err = scheduleError(form);
     if (err) throw new Error(err);
     if (form.enabled !== false && nextRun(form.rule, now) === null) throw new Error(tr('実行する日時が過ぎています。これからの日時を入力してください'));
@@ -80,6 +90,7 @@ class Scheduler extends EventEmitter {
     const now = this.now();
     const next = { ...s };
     for (const k of EDIT_KEYS) if (patch[k] !== undefined) next[k] = patch[k];
+    if (patch.issues !== undefined) next.issues = issueForm(patch.issues, s.issues, now);
     const err = scheduleError(next);
     if (err) throw new Error(err);
     const sameRule = JSON.stringify(cleanRule(next.rule)) === JSON.stringify(s.rule);
@@ -115,14 +126,33 @@ class Scheduler extends EventEmitter {
     return res.cards;
   }
 
-  /** 時刻になったスケジュールを動かす（タイマーから呼ぶ） */
+  /**
+   * Issue の監視を今すぐ確認する（「今すぐ確認」）。次回の予定はそのまま
+   * @returns {Promise<string[]>} 作ったカードの ID
+   */
+  async runIssues(id) {
+    const s = this.must(id);
+    if (this.agents.shuttingDown) throw new Error(tr('アプリを終了しています'));
+    const res = await this.checkIssues(s);
+    this.changed(s.id);
+    if (res.error) throw new Error(res.error);
+    return res.cards.map((c) => c.id);
+  }
+
+  /**
+   * 時刻になったスケジュールを動かす（タイマーから呼ぶ）
+   * @returns {Promise} Issue の確認がすべて終わったら解決する（タイマーは待たない）
+   */
   tick() {
     const now = this.now();
+    const checks = [];
     for (const s of [...this.store.schedules]) {
       if (this.agents.shuttingDown) return;
       if (!s.enabled || s.nextRunAt === null || s.nextRunAt > now) continue;
       try {
-        this.runDue(s, now);
+        // 確認は時間がかかるので待たずに進む。読み終わる前に次の tick が来ないよう、次回の日時は先に進める
+        if (s.issues) checks.push(this.checkDue(s));
+        else this.runDue(s, now);
       } catch (e) {
         // 1つのスケジュールの問題で、ほかを止めない
         console.error(`スケジュール ${s.id} の実行に失敗しました`, e);
@@ -130,6 +160,131 @@ class Scheduler extends EventEmitter {
       this.advance(s, now);
       this.changed(s.id);
     }
+    return Promise.all(checks);
+  }
+
+  // 時刻になった Issue の監視を確認する。アプリを閉じていたあいだの Issue も拾いたいので、遅れていても見送らない。
+  // 何度も確認するものなので、続けて失敗しているあいだは通知を繰り返さない
+  async checkDue(s) {
+    if (this.polling.has(s.id)) return;
+    const failing = s.lastStatus === 'failed';
+    try {
+      const { error } = await this.checkIssues(s);
+      if (!this.alive(s)) return;
+      if (error) {
+        const gone = !this.exists(s.repoPath);
+        if (gone) {
+          s.enabled = false;
+          s.nextRunAt = null;
+        }
+        if (gone) this.alert(s, tr('{error}\nスケジュールを停止しました', { error }));
+        else if (!failing) this.alert(s, error);
+      }
+      this.changed(s.id);
+    } catch (e) {
+      console.error(`スケジュール ${s.id} の確認に失敗しました`, e);
+    }
+  }
+
+  // 消されたスケジュールや、終了中のアプリでは、続けない
+  alive(s) {
+    return !this.agents.shuttingDown && this.store.schedule(s.id) === s;
+  }
+
+  // 同じスケジュールの確認を重ねない（時刻の確認と「今すぐ確認」が重なると、同じ Issue のカードが2枚できる）
+  checkIssues(s) {
+    if (!this.polling.has(s.id)) {
+      this.polling.set(s.id, this.readIssues(s).finally(() => this.polling.delete(s.id)));
+    }
+    return this.polling.get(s.id);
+  }
+
+  // Issue を読んで、新しいものをカードにする。{ cards, error } を返す（例外は出さない）
+  async readIssues(s) {
+    const failed = (error) => {
+      this.record(s, { at: this.now(), status: 'failed', message: error });
+      return { cards: [], error };
+    };
+    if (!this.exists(s.repoPath)) return failed(tr('リポジトリが見つかりません: {path}', { path: s.repoPath }));
+    let list;
+    try {
+      list = await this.agents.listIssues(s.repoPath, { labels: s.issues.labels, author: s.issues.author });
+    } catch (e) {
+      return failed(tr('Issue を読めませんでした: {message}', { message: e.message }));
+    }
+    if (!this.alive(s) || !s.issues) return { cards: [], error: '' };
+    s.issues.lastCheckedAt = this.now();
+    const fresh = list
+      .filter((x) => x.createdAt > s.issues.after && !s.issues.seen.includes(x.number))
+      .sort((a, b) => a.number - b.number); // 古い順に。上限を超えた分は次回に回る
+    const cards = [];
+    const errors = [];
+    for (const issue of fresh.slice(0, ISSUE_BATCH)) {
+      if (!this.alive(s) || !s.issues) break;
+      if (s.issues.seen.includes(issue.number)) continue; // 親の Issue のサブタスクになった
+      const res = await this.fireIssue(s, issue);
+      cards.push(...res.cards);
+      if (res.error) errors.push(res.error);
+    }
+    if (!errors.length && s.lastStatus === 'failed') {
+      s.lastStatus = 'ok'; // 確認が通ったら、前回の失敗の表示を消す。新しい Issue がないときは履歴には残さない
+      s.lastError = '';
+    }
+    return { cards, error: errors.join('\n') };
+  }
+
+  // 番号を覚える（同じ Issue のカードを、もう作らない）
+  markSeen(s, ...numbers) {
+    if (s.issues) s.issues.seen = [...new Set([...s.issues.seen, ...numbers])].slice(-SEEN_MAX);
+  }
+
+  // Issue 1件をカードにして結果を記録する。{ cards, error } を返す（例外は出さない）
+  async fireIssue(s, issue) {
+    const at = this.now();
+    const { number } = issue;
+    // 手で作ったカードがあるときや、カードを消したあとの Issue は作らない
+    if (this.store.cards.some((c) => c.repoPath === s.repoPath && c.issue && c.issue.number === number)) {
+      this.markSeen(s, number);
+      return { cards: [], error: '' };
+    }
+    const start = s.issues.autoStart;
+    let cards;
+    try {
+      cards = await this.agents.createFromWatchedIssue(s.repoPath, number, s.prompt, {
+        ...this.agentOf(s),
+        skill: s.skill,
+        readOnly: s.readOnly,
+        skipSpecCheck: start, // Todo に置くなら、人が開始するので、ふつうのタスクと同じく仕様を確認する
+        scheduleId: s.id,
+        scheduleTitle: s.title,
+      });
+      if (!cards || !cards.length) throw new Error(tr('タスクを作れませんでした'));
+    } catch (e) {
+      const error = `#${number}: ${e.message}`;
+      this.record(s, { at, status: 'failed', message: error });
+      return { cards: [], error }; // 覚えないので、次回もう一度試す
+    }
+    // サブタスクになったサブIssue は、別のカードにしない
+    const subs = cards.flatMap((c) => ((c.subtasks && c.subtasks.items) || []).map((x) => x.issue && x.issue.number));
+    this.markSeen(s, number, ...subs.filter(Boolean));
+    const cardId = cards[0].id;
+    s.lastRunAt = at;
+    s.lastCardId = cardId;
+    try {
+      if (start) for (const c of cards) this.agents.start(c.id);
+    } catch (e) {
+      const error = tr('タスクは作りましたが、開始できませんでした: {message}', { message: e.message });
+      this.record(s, { at, status: 'failed', cardId, message: error });
+      return { cards, error };
+    }
+    this.record(s, { at, status: 'ok', cardId, message: start ? tr('#{number} のタスクを作って開始しました', { number }) : tr('#{number} のタスクを作りました', { number }) });
+    return { cards, error: '' };
+  }
+
+  // 使うエージェント。登録したあとで使わない設定にしたものなら、今使えるエージェント（最初から選んでおくもの）で動かす
+  agentOf(s) {
+    const off = providers.isAgent(s.agent) && !providers.isEnabled(this.store.settings, s.agent);
+    return off ? { agent: undefined, model: undefined } : { agent: s.agent, model: s.model };
   }
 
   // 時刻になったスケジュールを、状況に応じて実行するか見送る
@@ -166,16 +321,13 @@ class Scheduler extends EventEmitter {
       this.record(s, { at, status: 'failed', message: error });
       return { cards: [], error };
     }
-    // 登録したあとで使わない設定にしたエージェントなら、今使えるエージェント（最初から選んでおくもの）で動かす
-    const agentOff = providers.isAgent(s.agent) && !providers.isEnabled(this.store.settings, s.agent);
     let cards;
     try {
       cards = this.agents.createTask({
         title: s.title,
         prompt: s.prompt,
         skill: s.skill,
-        agent: agentOff ? undefined : s.agent,
-        model: agentOff ? undefined : s.model,
+        ...this.agentOf(s),
         readOnly: s.readOnly,
         repoPath: s.repoPath,
         skipSpecCheck: true,

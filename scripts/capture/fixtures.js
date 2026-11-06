@@ -98,6 +98,42 @@ function buildFixtures(lang, tr, now = Date.now()) {
     csv: [{ kind: 'user', text: t.tCsv, t: T }, ...start('97cc633a', 'agent/issue-18-97cc633a', T)],
   };
 
+  // Pipeline のデモのタスク（在庫の引き当てを決済のあとにする）の差分
+  const stockDiff = `diff --git a/src/api/orders.js b/src/api/orders.js
+index 7c41e0a..b93d2f6 100644
+--- a/src/api/orders.js
++++ b/src/api/orders.js
+@@ -11,8 +11,15 @@ export async function placeOrder(cart, payment) {
+   const order = await createOrder(cart);
+-  await reserveStock(order.items);
+-  const charge = await payments.capture(payment);
++  const hold = await holdStock(order.items);
++  let charge;
++  try {
++    charge = await payments.capture(payment);
++  } catch (err) {
++    await hold.release();
++    throw err;
++  }
++  await hold.commit();
+   await markPaid(order, charge);
+   return order;
+ }
+diff --git a/tests/orders.test.js b/tests/orders.test.js
+index 2e8fa11..c07b5d3 100644
+--- a/tests/orders.test.js
++++ b/tests/orders.test.js
+@@ -40,3 +40,9 @@ test('places an order', async () => {
+   expect(order.status).toBe('paid');
+ });
++
++test('releases held stock when capture fails', async () => {
++  payments.capture.mockRejectedValue(new Error('declined'));
++  await expect(placeOrder(cart, payment)).rejects.toThrow('declined');
++  expect(stock.held(cart.items)).toBe(0);
++});
+`;
+
   const diff = `diff --git a/src/components/LoginForm.jsx b/src/components/LoginForm.jsx
 index 3f1a9c2..8d2e7b4 100644
 --- a/src/components/LoginForm.jsx
@@ -252,7 +288,7 @@ index 0000000..55ee66f
   };
 
   return {
-    t, pipeline, pipelineStart, cards, adminCards, logs, diff, worktree, notifications, keyStatus, remote, remoteClient, tabs,
+    t, pipeline, pipelineStart, stockDiff, cards, adminCards, logs, diff, worktree, notifications, keyStatus, remote, remoteClient, tabs,
     paths: { SHOP, ADMIN, API, MOBILE },
     skills: [
       { name: 'db-migration', source: 'project', description: t.skDb },

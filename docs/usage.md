@@ -111,7 +111,7 @@ Task scheduler shows the schedules of the repository you have open as cards. Eac
 - Register a new one from "New schedule" in Task scheduler
 - From "Add to schedule" in a kanban task's detail panel, register by copying that task's contents (title, instructions, skill, agent, model). Pipeline, competition, and custom agent choices carry over too. Attachments are not copied. If the original Pipeline or the like no longer exists and cannot be chosen, the edit screen shows a warning
 
-**Repeat** can be once, hourly, daily, weekly (several weekdays can be chosen), or monthly. Times are local to the PC running the app. If you choose a day that does not exist in a month, such as the 31st with monthly, it runs on the last day of that month.
+**Repeat** can be once, every N minutes (1–1440), hourly, daily, weekly (several weekdays can be chosen), or monthly. Times are local to the PC running the app. If you choose a day that does not exist in a month, such as the 31st with monthly, it runs on the last day of that month.
 
 **What you can do from an open card:**
 
@@ -135,6 +135,27 @@ Because they run unattended, they do not run in the following cases. The outcome
 | The previous card is still in Todo, queued, or running | Skips this run (the same task does not pile up) |
 | It cannot run, for example because its Pipeline was deleted | Recorded as a failure with a notification, and moves to the next run. Pressing the notification opens Task scheduler |
 | The repository folder is gone | Recorded as a failure with a notification, and the schedule is paused. When the folder is back, open that repository and "Resume" |
+
+### Create a card for each new Issue (Issue watch)
+
+Choose "Issue watch" under "Type" in a schedule, and at each repeat it checks the open GitHub Issues and creates one card per new Issue. "Repeat" sets how often it checks ("Every N minutes", or hourly, daily, and so on). This uses `gh`. Without `gh`, it reads through the GitHub API (public repositories only).
+
+| Setting | What it does |
+|---|---|
+| Labels | Comma-separated. Only Issues with all of them are included. Leave empty for no filter |
+| Author | Only Issues created by this person are included. `@me` is the user signed in to `gh`. Leave empty for no filter |
+| What to do with created cards | Choose "Just place them in Todo" or "Start automatically" |
+| Additional instructions | Optional. Sent to the agent along with the Issue |
+
+- **Which Issues count**: Issues that already exist at registration are not included. Only Issues created afterward become cards (including ones that receive the target label later)
+- **One card per Issue**: an Issue that already became a card, or that already has a card, does not get another. Deleting a card does not recreate it
+- **Cards per check**: up to 10 cards per check. The rest are created next time, oldest first
+- **Spec check**: cards placed in Todo get the usual spec check when started. Cards started automatically do not
+- **When a check is late**: Issues created while the app was closed or the schedule was paused are picked up at the next check
+- **Run history**: only card creation and failures are kept. A check with no new Issues only updates "Last checked" in the detail view. If reading keeps failing, you are notified only the first time
+- **Check now**: "Check now" in the detail view checks without waiting. Cards are handled according to the schedule's setting
+
+> The Issue body and comments become instructions to the agent as they are. Anyone can write them in a public repository, so narrow the target by label or author when you choose "Start automatically". Only people with write access can add labels.
 
 ## Split work into subtasks
 A large task can be split into several subtasks that separate agents work on in parallel or in order.
@@ -196,11 +217,52 @@ The "Progress" tab in the detail panel shows how far a task has come.
 
 - State, start time and elapsed time, agent, and cost
 - TODOs written by the agent (TodoWrite on Claude Code, TODO lists on Codex, Gemini, and Cursor; Antigravity does not report TODOs, so the list stays empty), grouped into done, in progress, and upcoming, with a bar showing the share done. A Pipeline shows the current step's TODOs, and shows each branch's TODOs while waiting for parallel branches
-- For a Pipeline, the flowchart from Settings is drawn as is, with steps colored as finished (green), running (blue), stopped (orange), and upcoming. Lines already passed are green, and the line toward the current step animates in blue. Zoom the flowchart with the buttons at the top right, or with ⌘ (Ctrl) + scroll or a pinch ("Fit" fits it to the frame's width). Below it are each step's time, cost, judgment, and the report passed to the next step
+- For a Pipeline, the flowchart from Settings is drawn as is, with steps colored as finished (green), running (blue), stopped (orange), and upcoming. Lines already passed are green, and the line toward the current step animates in blue. Zoom the flowchart with the buttons at the top right, or with ⌘ (Ctrl) + scroll or a pinch ("Fit" fits it to the frame's width). Below it are each step's time, cost, judgment, and the report passed to the next step. When the task is stopped in review or has failed, "Restart from here" on a step returns to just before that step's first run ([Restore an earlier point](#restore-an-earlier-point))
 - Recent work (tool calls and replies), newest first. See "Log" for details
 - For a task that has not started, you can edit the title and first instruction here (after it starts, the instruction can be seen at the top of "Chat")
 
 For a competition task, the list of candidates, "Adopt", and "Compare" also appear here. For a subtask, the parent task and how it merges appear. For a task split into subtasks, overall progress appears, and each subtask's state and actions are on the "Subtasks" tab.
+
+## Restore an earlier point
+This is separate from moving a card between columns ("Move back", from Done to Review). Here, the work itself returns to a recorded point.
+
+You can restore both a **Pipeline step** and a **run of the agent**, with the same action. The point is just before that run started. "Restart from here" on a step returns to just before that step's first run. After restoring, the instruction from that point is sent again and the task starts right away.
+
+What returns is the **files**, the **Pipeline progress**, and the **conversation**. Changes after that point are discarded and not kept. The restore cannot be undone. Money already spent is not refunded. Logs after that point disappear, and the history from that point onward disappears too (it is recorded again once work starts). Files git ignores, such as `node_modules`, stay. Uncommitted changes you made by hand are included in the point taken just before the agent next starts.
+
+A point is recorded each time, just before the agent starts (up to 100, oldest first; older ones are dropped past that). The following runs are not recorded:
+
+- A conversation after the task is done
+- A run that resolves a conflict
+- Resuming an interrupted task
+- A task in a folder not managed by git
+
+### Where to restore from
+- In the workflow in the detail panel, "Restart from here" appears when that step has a first run
+- The "History" on the Progress tab lists each run newest first, and "Return here" goes back to just before that run
+- The confirmation dialog says that later changes are discarded and cannot be undone, and that work starts right away
+- When you cannot restore, the button is disabled and the reason is shown
+
+### When you cannot restore
+You cannot restore in the following cases. If restoring the files fails partway, the card stays as it is and an error is shown (the same happens when the recorded point has no files to restore).
+
+- Any state other than review or failed (running, queued, done, and so on)
+- Waiting for parallel branches to finish, or a conflict is present
+- The task has subtasks that have started
+- The task is done, already merged, or has no worktree
+- A PR has been created
+- On a parallel branch, the parent task has already merged it
+- A folder not managed by git (the files cannot be restored)
+
+Steps on a parallel branch cannot be restored from the parent task after the join (the branch card has been cleaned up). Only the parent's points are shown.
+
+### How the conversation is handled
+How the conversation is restored differs by agent.
+
+- When that point has no conversation: a new conversation starts. The first run of a Pipeline step is always this
+- When the run was about to continue another conversation: the source conversation is left unchanged. Only which conversation is used returns to that point
+- Claude Code: if no other card is using that conversation, the conversation file is at least as large as it was at that point, and the boundary is a line break, the file is truncated to that size and the same conversation continues. If those conditions are not met, a new conversation starts, as in the next case
+- Codex / Antigravity / Gemini / Cursor (and Claude Code when the conditions are not met): a new conversation starts, and a handoff built from the instructions and replies in the log (up to 8,000 characters) is placed before the instruction
 
 ## btw (send a message while running)
 From the "btw" tab of a running card, you can send a message to Claude without stopping its work. Once received, it shows "Delivered".

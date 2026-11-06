@@ -1,6 +1,7 @@
 // 機能ごとの短い GIF（README の節に載せる）。ファイル名は docs/images/<言語>/feature-<name>.gif
 const path = require('path');
 const { createRecorder } = require('./recorder');
+const pipelineStory = require('./pipeline-story');
 
 // 文字が読めるように、デモより画面を狭くして撮る
 const FEATURE_SIZE = { width: 1360, height: 840 };
@@ -8,7 +9,8 @@ const GIF_WIDTH = 960;
 
 function features(ctx) {
   const { page, fx, show, settle, mock } = ctx;
-  const { cards: c, adminCards, paths, t, pipeline } = fx;
+  const { cards: c, adminCards, paths, t } = fx;
+  const story = pipelineStory(ctx);
   const now = () => Date.now();
   const list = (over = {}) => Object.values({ ...c, ...over }).filter(Boolean);
   const onlyCards = (cards) => Object.values(cards).filter(Boolean);
@@ -27,76 +29,20 @@ function features(ctx) {
 
   return {
     // 文章で Pipeline を組み、それを選んでタスクを動かす
-    pipeline: (outFile) => record(outFile, async ({ snap, moveTo, typeInto }) => {
-      const def = { id: 'default', name: pipeline.name, flow: fx.pipelineStart };
-      const made = { id: pipeline.id, name: pipeline.name, flow: pipeline.flow };
-      const settings = { enabledAgents: ['claude', 'codex'], orchestration: 'relay' };
-      const before = { ...settings, relayFlows: [def], relayFlowId: def.id, relayFlow: def.flow };
-      const after = { ...settings, relayFlows: [made], relayFlowId: made.id, relayFlow: made.flow };
-      await mock({ 'flow:generate': pipeline.flow, 'settings:update': after, __delay: { 'flow:generate': 700 } });
-      const base = { logs: c.logs, paging: c.paging, csv: c.csv, speed: c.speed };
-      await show({ cards: onlyCards(base), settings: before });
+    pipeline: (outFile) => record(outFile, async (rec) => {
+      const { snap, moveTo } = rec;
+      await story.draw(rec);
+      await story.createTask(rec);
 
-      // 1. 文章で書いて、フローチャートに反映する
-      await page.evaluate(() => openSettings('orchestration'));
-      await page.waitForSelector('[data-pl-edit]');
-      await settle(400);
-      await snap(0.4);
-      await moveTo('[data-pl-edit]', { n: 4 });
-      await page.click('[data-pl-edit]');
-      await page.waitForSelector('#feAiText');
-      await settle();
-      await snap(0.5);
-      await moveTo('#feAiText', { n: 4 });
-      await typeInto('#feAiText', t.plRequest, 1.8);
-      await snap(0.3);
-      await moveTo('#feAiRun', { n: 4 });
-      await page.click('#feAiRun');
-      await snap(1.2);
-      await page.waitForFunction(() => document.querySelectorAll('.fe-node').length >= 5);
-      await settle(300);
-      await snap(2.4);
-      await moveTo('#feSave', { n: 4 });
-      await page.click('#feSave');
-      await page.waitForFunction(() => !document.querySelector('#feSave'));
-      await settle();
-
-      // 2. その Pipeline を選んで、タスクを作る
-      await show({ cards: onlyCards(base), settings: after });
-      await page.evaluate(() => setView('kanban'));
-      await settle();
-      await snap(0.2);
-      await moveTo('#newBtn', { n: 4 });
-      await page.evaluate(() => newTask());
-      await page.waitForSelector('#nPrompt');
-      await settle();
-      await snap(0.3);
-      await typeInto('#nTitle', t.tStock, 0.5);
-      await typeInto('#nPrompt', t.pStock, 0.6);
-      await page.selectOption('#nAgent', `relay:${made.id}`);
-      await settle();
-      await moveTo('#nAgent', { n: 3 });
-      await snap(0.9);
-      await moveTo('#nOk', { n: 3 });
-      await snap(0.3);
-      await page.evaluate(() => closeModal());
-
-      // 3. 工程が進む（レビューの指摘で実装へ戻り、次のレビューで終わる）
-      const at = now();
-      const hist = (index, run, agent, report, more = {}) => ({ index, run, agent, report, startedAt: at - 300000 + run * 90000, at: at - 220000 + run * 90000, costUsd: 0.03 * (index + 1), ...more });
-      const relay = { flow: made.flow, steps: pipeline.steps, counts: {}, pipeline: { id: made.id, name: made.name }, stepStartedAt: at - 8000 };
-      const task = { ...c.csv, id: 'stock', title: t.tStock, issue: undefined, btw: [], branch: 'agent/task-a41f07c2', worktreePath: `${paths.SHOP}.worktrees/a41f07c2`, createdAt: at, startedAt: at - 8000, logs: [] };
-      const stage = async (patch, sec) => {
-        await show({ cards: onlyCards({ ...base, stock: { ...task, ...patch } }), settings: after });
+      // 工程が進む（レビューの指摘で実装へ戻り、次のレビューで終わる）
+      const { task, patch } = story.run();
+      const stage = async (more, sec) => {
+        await show({ cards: story.cardsWith({ stock: { ...task, ...more } }), settings: story.after });
         await redetail();
         await settle();
         await snap(sec);
       };
-      const h1 = hist(0, 1, 'codex', t.plRep1);
-      const h2 = hist(1, 1, 'claude', t.plRep2, { result: 'fail' });
-      const h3 = hist(0, 2, 'codex', t.plRep3);
-      const h4 = hist(1, 2, 'claude', t.plRep4, { result: 'pass' });
-      await show({ cards: onlyCards({ ...base, stock: { ...task, agent: 'codex', lastMessage: 'Edit src/api/orders.js', relay: { ...relay, index: 0, history: [] } } }), settings: after });
+      await show({ cards: story.cardsWith({ stock: { ...task, ...patch.implement } }), settings: story.after });
       await settle();
       await snap(0.5);
       await moveTo('.card:has(.relay-bar)', { n: 4 });
@@ -104,11 +50,10 @@ function features(ctx) {
       await tab('progress');
       await settle(400);
       await snap(1.4);
-      await stage({ agent: 'claude', lastMessage: 'Read src/api/orders.js', relay: { ...relay, index: 1, history: [h1] } }, 1.4);
-      await stage({ agent: 'codex', lastMessage: 'Edit src/api/orders.js', relay: { ...relay, index: 0, history: [h1, h2], lastResult: 'fail', counts: { e5: 1 } } }, 1.4);
-      await stage({ agent: 'claude', lastMessage: 'Bash npm test', relay: { ...relay, index: 1, history: [h1, h2, h3], counts: { e5: 1 } } }, 1.4);
-      await stage({ agent: 'claude', status: 'review', lastMessage: t.plRep4, costUsd: 0.18, relay: { ...relay, index: 1, done: true, history: [h1, h2, h3, h4], lastResult: 'pass', counts: { e5: 1 } } }, 3.0);
-      await mock({ __delay: {} });
+      await stage(patch.review, 1.4);
+      await stage(patch.sentBack, 1.4);
+      await stage(patch.reviewAgain, 1.4);
+      await stage(patch.finished, 3.0);
     }),
 
     // 大きなタスクをサブタスクに分けて、並列に進める

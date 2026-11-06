@@ -85,3 +85,51 @@ test('worktreeStatus: 日本語のファイル名がそのまま読める', asyn
 
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test('resetHardClean: 指定のコミットへ戻し、未追跡は消し、ignore されたファイルは残す', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-reset-'));
+  const repo = path.join(tmp, 'repo');
+  fs.mkdirSync(repo);
+  const g = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo });
+  g('init', '-q', '-b', 'main');
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n');
+  fs.writeFileSync(path.join(repo, 'keep.txt'), 'base\n');
+  g('add', '.');
+  g('commit', '-qm', 'init');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo }).toString().trim();
+
+  fs.writeFileSync(path.join(repo, 'keep.txt'), 'changed\n');
+  fs.writeFileSync(path.join(repo, 'new.txt'), 'new\n');
+  g('add', '.');
+  g('commit', '-qm', 'second');
+  fs.writeFileSync(path.join(repo, 'dirty.txt'), 'dirty\n');
+  fs.mkdirSync(path.join(repo, 'node_modules'));
+  fs.writeFileSync(path.join(repo, 'node_modules', 'left.js'), 'stay\n');
+
+  await git.resetHardClean(repo, base);
+  assert.strictEqual(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo }).toString().trim(), base);
+  assert.strictEqual(fs.readFileSync(path.join(repo, 'keep.txt'), 'utf8'), 'base\n');
+  assert.ok(!fs.existsSync(path.join(repo, 'new.txt')));
+  assert.ok(!fs.existsSync(path.join(repo, 'dirty.txt')));
+  assert.strictEqual(fs.readFileSync(path.join(repo, 'node_modules', 'left.js'), 'utf8'), 'stay\n');
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('commitExists / resetHardClean: 40桁の16進数以外は拒否する', async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-sha-'));
+  const g = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo });
+  g('init', '-q', '-b', 'main');
+  fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n');
+  g('add', '.');
+  g('commit', '-qm', 'init');
+  const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo }).toString().trim();
+  assert.strictEqual(await git.commitExists(repo, sha), true);
+  assert.strictEqual(await git.commitExists(repo, 'a'.repeat(40)), false);
+  for (const bad of ['HEAD', 'main', sha.slice(0, 7), sha.toUpperCase(), `${sha}\n`, ` ${sha}`, `${sha} --hard`, '', null, undefined, `../${sha.slice(0, 37)}`]) {
+    await assert.rejects(() => git.commitExists(repo, bad), /コミットの指定が正しくありません/);
+    await assert.rejects(() => git.resetHardClean(repo, bad), /コミットの指定が正しくありません/);
+  }
+  assert.strictEqual(fs.readFileSync(path.join(repo, 'a.txt'), 'utf8'), 'a\n', '拒否したときはファイルを変えない');
+  fs.rmSync(repo, { recursive: true, force: true });
+});

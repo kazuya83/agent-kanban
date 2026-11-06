@@ -88,6 +88,8 @@ test('git なしのフォルダ: worktree を作らずにフォルダで直接�
     const outs = fs.readdirSync(folder).filter((f) => f.startsWith('out-'));
     assert.strictEqual(outs.length, 2);
     assert.ok(!a.logs.some((l) => /コミット/.test(l.text)));
+    assert.ok(!a.checkpoints, 'git なしのフォルダではチェックポイントを記録しない');
+    await assert.rejects(() => agents.rewind(a.id, 'x'), /git で管理していないフォルダ/);
 
     assert.strictEqual(await agents.diff(a.id), '');
     assert.deepStrictEqual(await agents.worktree(a.id), { exists: false, status: null, worktrees: [] });

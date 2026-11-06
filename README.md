@@ -4,14 +4,14 @@
 
 # Worktree Kanban
 
-<strong>Run AI coding agents in parallel, then control them from another PC.</strong><br />
-Mac and Windows can each remotely operate the other.
+<strong>A board for chaining AI coding agents into flowcharts, where people make the key decisions.</strong><br />
+Implement with Codex, review with Claude, and send it back if needed. Whether it merges is your call.
 
 [Website](https://kazuya83.github.io/worktree-kanban/) · [Download](https://github.com/kazuya83/worktree-kanban/releases/latest)
 
 [![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
-[![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
+[![Pipeline](https://img.shields.io/badge/pipeline-Codex%20%E2%86%92%20Claude%20%E2%86%92%20you-0891B2)](docs/images/en/feature-pipeline.gif)
 [![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Antigravity%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
 
@@ -21,7 +21,7 @@ Mac and Windows can each remotely operate the other.
 
 <div align="center">
 
-![Demo: create a task, watch cards run in parallel, approve, review the diff, merge, then operate the board remotely](docs/images/en/demo.gif)
+![Demo: describe a flow in plain language, watch Codex implement and Claude review and send it back, approve a command, check the diff, and merge](docs/images/en/demo.gif)
 
 </div>
 
@@ -31,11 +31,12 @@ A desktop app (Electron, Mac / Windows / Linux) that runs AI coding-agent CLIs (
 
 ## Why Worktree Kanban?
 
-- **Mac ⇄ Windows remote control** — run agents on one PC and operate the same board from the other: approve, answer questions, send instructions, and merge.
+- **Agents in a flowchart** — describe a flow in plain language or draw it, and agents hand the work over step by step, following branches, loops, and parallel steps.
+- **You stay in charge** — check the diff before you merge or open a PR. With Claude Code, you also approve actions on the card.
 - **One task, one worktree** — each task gets its own git worktree and branch, so tasks never collide with each other or with your working tree.
 - **Several repositories at once** — keep up to 3 repositories open as tabs; switching tabs does not stop anything.
 - **The CLIs you already use** — Claude Code, Codex CLI, Antigravity CLI, Gemini CLI, and Cursor CLI, with the sign-in and settings you have today.
-- **You stay in charge** — check the diff before you merge or open a PR. With Claude Code, you also approve actions on the card.
+- **Mac ⇄ Windows remote control** — run agents on one PC and operate the same board from the other: approve, answer questions, send instructions, and merge.
 - **Local by design** — board state stays on your machine. There is no external server.
 
 ## How it works
