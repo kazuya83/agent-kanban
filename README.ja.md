@@ -275,6 +275,12 @@ irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 
 | [Vibe Kanban から移る方法](https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.ja.html) | Vibe Kanban に起きたこと・引き継げるもの・移行の手順 |
 | [Conductor から移る方法](https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.ja.html) | Conductor に起きていること・Cloud のデータの書き出し・引き継げるもの・移行の手順 |
 
+## 連絡先
+
+- **GitHub**: [@kazuya83](https://github.com/kazuya83)
+- **メール**: [kzy83ishi15@gmail.com](mailto:kzy83ishi15@gmail.com)
+- **Issues**: [worktree-kanban/issues](https://github.com/kazuya83/worktree-kanban/issues)（不具合・機能のご要望）
+
 ## ライセンス
 
 [Functional Source License 1.1（FSL-1.1-ALv2）](LICENSE) で公開しています。競合する商用の製品・サービスにする場合を除いて、利用・改変・再配布ができます。各版は、公開から2年後に Apache License 2.0 でも使えるようになります。

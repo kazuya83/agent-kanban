@@ -284,6 +284,12 @@ irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 
 | [从 Vibe Kanban 迁移](https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.html) (English) | Vibe Kanban 发生了什么、可以保留什么，以及迁移步骤 |
 | [从 Conductor 迁移](https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.html) (English) | Conductor 正在发生什么、如何导出 Cloud 数据、可以保留什么，以及迁移步骤 |
 
+## 联系
+
+- **GitHub**：[@kazuya83](https://github.com/kazuya83)
+- **邮箱**：[kzy83ishi15@gmail.com](mailto:kzy83ishi15@gmail.com)
+- **Issues**：[worktree-kanban/issues](https://github.com/kazuya83/worktree-kanban/issues)（缺陷报告与功能建议）
+
 ## 许可证
 
 基于 [Functional Source License 1.1（FSL-1.1-ALv2）](LICENSE) 发布。除用于竞争性的商业产品或服务外，可以使用、修改和再分发。每个版本在发布两年后也可按 Apache License 2.0 使用。

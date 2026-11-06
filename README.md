@@ -284,6 +284,12 @@ The same commands update to the latest version. You can also update from the app
 | [Migrate from Vibe Kanban](https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.html) | What changed at Vibe Kanban, what carries over, and the migration steps |
 | [Migrate from Conductor](https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.html) | What is changing at Conductor, how to export Cloud data, what carries over, and the migration steps |
 
+## Contact
+
+- **Author on GitHub**: [@kazuya83](https://github.com/kazuya83)
+- **Email**: [kzy83ishi15@gmail.com](mailto:kzy83ishi15@gmail.com)
+- **Issues**: [worktree-kanban/issues](https://github.com/kazuya83/worktree-kanban/issues) — bug reports and feature requests
+
 ## License
 
 Released under the [Functional Source License 1.1 (FSL-1.1-ALv2)](LICENSE). You can use, modify, and redistribute it for any purpose except a competing commercial product or service. Each version becomes available under the Apache License 2.0 two years after its release.
