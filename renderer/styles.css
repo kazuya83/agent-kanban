@@ -755,6 +755,7 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .orch-chip.agent { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
 .orch-chip.relay { background: color-mix(in srgb, var(--run) 16%, transparent); color: var(--run); }
 .orch-chip.compete { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.orch-chip.slack { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .orch-chip.schedule { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .relay-bar { display: flex; gap: 3px; margin: 2px 0 4px; }
 .rb-seg { flex: 1; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--muted) 25%, transparent); }

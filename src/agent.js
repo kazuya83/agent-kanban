@@ -1126,10 +1126,11 @@ class AgentManager extends EventEmitter {
   // repoPath: カードを作るリポジトリ（省くと今開いているリポジトリ）。Pipeline・カスタムエージェント・プロジェクトごとの設定は、そのリポジトリのものを使う
   // skipSpecCheck: 仕様の確認をしない（誰も見ていないスケジュール実行で、確認のまま止まらないように）
   // scheduleId / scheduleTitle: このタスクを作ったスケジュール
-  createTask({ title, prompt, issue, session, skill, agent, model, fromChat, attachments: files, readOnly, repoPath, skipSpecCheck, scheduleId, scheduleTitle }) {
+  // slack: Slack から頼まれたタスクの記録 { channel, user, ts, threadTs, userName?, channelName? }（誰がどこから頼んだか）
+  createTask({ title, prompt, issue, session, skill, agent, model, fromChat, attachments: files, readOnly, repoPath, skipSpecCheck, scheduleId, scheduleTitle, slack }) {
     const s = this.store.settings;
     const repo = this.targetRepo(repoPath);
-    const extra = { repoPath: repo, skipSpecCheck, scheduleId, scheduleTitle };
+    const extra = { repoPath: repo, skipSpecCheck, scheduleId, scheduleTitle, slack };
     // 添付は先に確かめておく（カードごとに保存する）
     const parsed = attachments.parseAttachments(files);
     let mode = agent || providers.defaultAgentOf(s);
@@ -1181,7 +1182,7 @@ class AgentManager extends EventEmitter {
   }
 
   // 競争: 同じタスクを、設定のエージェントそれぞれのカードにする（使わない設定のエージェントは外す）
-  createCompetition({ title, prompt, issue, session, skill, fromChat, parsed, repoPath, skipSpecCheck, scheduleId, scheduleTitle }) {
+  createCompetition({ title, prompt, issue, session, skill, fromChat, parsed, repoPath, skipSpecCheck, scheduleId, scheduleTitle, slack }) {
     const s = this.store.settings;
     const repo = this.targetRepo(repoPath);
     if (isNoGitRepo(s, repo)) throw new Error(tr('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください'));
@@ -1190,7 +1191,7 @@ class AgentManager extends EventEmitter {
     const group = crypto.randomBytes(4).toString('hex');
     const base = (title && title.trim()) || truncate(String(prompt || '').trim().split('\n')[0], 40);
     return list.map((x, index) =>
-      this.createCard({ title: `${base} [${whoShort(x.agent, x.persona)}]`, prompt, issue, session, skill, agent: x.agent, model: x.model, persona: x.persona, compete: { group, index, total: list.length, title: base }, fromChat, parsed, repoPath: repo, skipSpecCheck, scheduleId, scheduleTitle: scheduleTitle || base }),
+      this.createCard({ title: `${base} [${whoShort(x.agent, x.persona)}]`, prompt, issue, session, skill, agent: x.agent, model: x.model, persona: x.persona, compete: { group, index, total: list.length, title: base }, fromChat, parsed, repoPath: repo, skipSpecCheck, scheduleId, scheduleTitle: scheduleTitle || base, slack }),
     );
   }
 
@@ -1241,7 +1242,7 @@ class AgentManager extends EventEmitter {
     return a && providers.isEnabled(s, a) ? a : providers.defaultAgentOf(s);
   }
 
-  createCard({ title, prompt, issue, session, skill, agent, model, persona, relay, compete, fromChat, parsed, readOnly, repoPath, skipSpecCheck, scheduleId, scheduleTitle }) {
+  createCard({ title, prompt, issue, session, skill, agent, model, persona, relay, compete, fromChat, parsed, readOnly, repoPath, skipSpecCheck, scheduleId, scheduleTitle, slack }) {
     const s = this.store.settings;
     const repo = this.targetRepo(repoPath);
     if (!repo) throw new Error(tr('先にリポジトリを選んでください'));
@@ -1265,6 +1266,7 @@ class AgentManager extends EventEmitter {
       card.scheduleId = scheduleId;
       card.scheduleTitle = String(scheduleTitle || '').trim() || card.title;
     }
+    if (slack) card.slack = slack;
     if (noGit) card.noGit = true;
     // ソースを変更しないタスク: git なしのフォルダと同じく、worktree・ブランチ・コミット・マージを使わず、
     // リポジトリのフォルダでそのまま動かす。終わったら確かめて「完了にする」で完了にする
