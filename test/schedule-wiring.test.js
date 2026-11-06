@@ -179,7 +179,7 @@ test('main.js: 通知のクリックはカードがあるときだけ card:focus
   assert.ok(click.indexOf("send('board:changed'") < click.indexOf("send('card:focus'"));
 });
 
-test('preload: 4つの操作を公開し、スケジューラ画面の呼び方のままハンドラへ渡す', () => {
+test('preload: 4つの操作を公開し、2引数でも { id, ... } の1引数でも同じ形でハンドラへ渡す', () => {
   const src = read('preload.js');
   for (const name of ['createSchedule', 'updateSchedule', 'deleteSchedule', 'runSchedule']) assert.ok(src.includes(`${name}:`), name);
   // preload を読み込んで実際に呼ぶ（electron は差し替える）
@@ -203,15 +203,43 @@ test('preload: 4つの操作を公開し、スケジューラ画面の呼び方�
     Module._load = load;
   }
   api.createSchedule({ title: 't' });
-  api.updateSchedule({ id: 's1', enabled: false });
   api.deleteSchedule('s1');
+  // (id, 内容) の呼び方
+  api.updateSchedule('s1', { enabled: false });
+  api.runSchedule('s1', { start: true });
+  api.runSchedule('s1', { start: false });
+  // { id, ... } の呼び方
+  api.updateSchedule({ id: 's1', enabled: false });
   api.runSchedule({ id: 's1', start: true });
   api.runSchedule({ id: 's1', start: false });
+  // 境界: 内容なし、内容の id は第1引数を優先する、id なし
+  api.runSchedule('s1');
+  api.updateSchedule('s1', { id: 'other', enabled: true });
+  api.updateSchedule(undefined, { enabled: true });
   assert.deepStrictEqual(invoked, [
     ['schedules:create', { title: 't' }],
-    ['schedules:update', { id: 's1', enabled: false }],
     ['schedules:delete', { id: 's1' }],
+    ['schedules:update', { id: 's1', enabled: false }],
     ['schedules:run', { id: 's1', start: true }],
     ['schedules:run', { id: 's1', start: false }],
+    ['schedules:update', { id: 's1', enabled: false }],
+    ['schedules:run', { id: 's1', start: true }],
+    ['schedules:run', { id: 's1', start: false }],
+    ['schedules:run', { id: 's1' }],
+    ['schedules:update', { id: 's1', enabled: true }],
+    ['schedules:update', { enabled: true, id: undefined }],
   ]);
+  // preload から届いた形をハンドラの中身に通すと、「今すぐ実行」が本当に開始になる
+  const { api: wired, scheduler } = apiFor();
+  const arg = (i) => invoked[i][1];
+  wired.update(arg(2));
+  wired.run(arg(3));
+  wired.run(arg(4));
+  assert.deepStrictEqual(scheduler.calls, [
+    ['update', 's1', { enabled: false }],
+    ['run', { id: 's1', start: true }],
+    ['run', { id: 's1', start: false }],
+  ]);
+  // id がなければハンドラがエラーにする
+  assert.throws(() => wired.update(invoked.at(-1)[1]), /スケジュールが指定されていません/);
 });
