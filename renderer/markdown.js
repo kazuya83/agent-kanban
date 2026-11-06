@@ -7,6 +7,10 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.Markdown = api;
 })(typeof self !== 'undefined' ? self : this, function () {
+  function tr(key, vars) {
+    const api = typeof module === 'object' && module.exports ? require('./i18n.js') : typeof I18n !== 'undefined' ? I18n : null;
+    return api ? api.tr(key, vars) : key;
+  }
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   }
@@ -99,7 +103,7 @@
         i++; // 閉じの ``` を飛ばす（無ければ最後まで）
         // コピーボタンは pre の外に置く（pre は横にスクロールするので、中に置くと一緒に流れてしまう）
         out.push(
-          `<div class="md-code-wrap"><button class="md-copy" type="button" title="このコードをコピー">コピー</button><pre class="md-code"${lang ? ` data-lang="${esc(lang)}"` : ''}><code>${esc(body.join('\n'))}</code></pre></div>`,
+          tr('<div class="md-code-wrap"><button class="md-copy" type="button" title="このコードをコピー">コピー</button><pre class="md-code"{v}><code>{v2}</code></pre></div>', { v: (lang ? ` data-lang="${esc(lang)}"` : ''), v2: (esc(body.join('\n'))) }),
         );
         continue;
       }
