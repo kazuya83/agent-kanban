@@ -20,7 +20,7 @@ function fakeScheduler() {
 }
 const apiFor = (repoPath = '/repo') => {
   const scheduler = fakeScheduler();
-  return { scheduler, api: createScheduleApi({ scheduler, store: { settings: { repoPath } } }) };
+  return { scheduler, api: createScheduleApi({ scheduler, store: { settings: { repoPath }, schedule: () => undefined } }) };
 };
 
 test('create: 今のリポジトリのスケジュールになる（指定されたリポジトリは使わない）', () => {
@@ -69,6 +69,12 @@ test('run: start: true のときだけ開始する。指定がなければカー
 
 test('run: card:create と同じく、作ったカードの ID だけを返す', () => {
   assert.strictEqual(apiFor().api.run({ id: 's1', start: true }), 'card1');
+});
+
+test('run: Issue の監視は確認だけして、作ったカードの ID の一覧を返す', async () => {
+  const scheduler = { runIssues: async (id) => [`card-of-${id}`] };
+  const api = createScheduleApi({ scheduler, store: { schedule: () => ({ issues: {} }) } });
+  assert.deepStrictEqual(await api.run({ id: 's1', start: true }), ['card-of-s1']);
 });
 
 test('id がない操作はエラーになり、スケジューラを呼ばない', () => {

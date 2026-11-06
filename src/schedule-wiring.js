@@ -26,8 +26,12 @@ function createScheduleApi({ scheduler, store }) {
     },
     // start は「今すぐ実行」のときだけ true。指定がなければカードを作るだけにする（意図せずエージェントを動かさない）
     // card:create と同じく、作ったカードの ID を返す（カード全体はログも含むので、画面や遠隔へ流さない）
+    // Issue の監視は Issue を確認するだけで、開始するかはスケジュールの設定による。作ったカードの ID の一覧を返す
     run(p) {
-      const cards = scheduler.run({ id: needId(p), start: !!p && p.start === true });
+      const id = needId(p);
+      const s = store.schedule(id);
+      if (s && s.issues) return scheduler.runIssues(id);
+      const cards = scheduler.run({ id, start: !!p && p.start === true });
       return cards[0].id;
     },
   };

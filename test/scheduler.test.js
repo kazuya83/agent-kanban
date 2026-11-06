@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { Scheduler, TICK_MS } = require('../src/scheduler');
 const { Store } = require('../src/store');
-const { LATE_MS, MAX_RUNS, nextRun } = require('../renderer/schedule-model');
+const { ISSUE_BATCH, LATE_MS, MAX_RUNS, nextRun } = require('../renderer/schedule-model');
 
 const MIN = 60 * 1000;
 const T0 = new Date(2026, 10, 6, 9, 0).getTime(); // 2026-11-06 09:00（ローカル）
@@ -683,4 +683,175 @@ test('Store: removeSchedule は指定した分だけ消す', (t) => {
   assert.deepStrictEqual(store.schedules.map((s) => s.id), ['b']);
   store.removeSchedule('none');
   assert.strictEqual(store.schedules.length, 1);
+});
+
+// ---------- Issue の監視 ----------
+
+function watchSetup(t, { issues = {}, ...over } = {}) {
+  const ctx = setup(t);
+  const { agents, sch, store } = ctx;
+  let n = 100;
+  agents.remote = [];
+  agents.listError = null;
+  agents.fetchError = null;
+  agents.listed = [];
+  agents.listIssues = async (repo, filter) => {
+    agents.listed.push({ repo, filter });
+    if (agents.listError) throw new Error(agents.listError);
+    return agents.remote;
+  };
+  agents.createFromWatchedIssue = async (repoPath, number, extra, opts) => {
+    if (agents.fetchError) throw new Error(agents.fetchError);
+    agents.created.push({ repoPath, number, extra, ...opts });
+    const card = { id: `card${++n}`, status: 'todo', repoPath, scheduleId: opts.scheduleId, issue: { number }, subtasks: agents.subtasks };
+    store.cards.push(card);
+    return [card];
+  };
+  ctx.clock.now = T0;
+  const s = sch.create({ title: '監視', prompt: '', rule: { kind: 'interval', minutes: 5 }, issues: { labels: 'agent, bug', author: '@alice', autoStart: false, ...issues }, ...over });
+  const issue = (number, afterMs = MIN) => ({ number, title: `i${number}`, url: `u${number}`, createdAt: T0 + afterMs });
+  const due = async () => {
+    ctx.clock.now = store.schedule(s.id).nextRunAt;
+    await sch.tick();
+  };
+  return { ...ctx, s, issue, due };
+}
+
+test('Issue の監視: 登録するとフィルタと開始時刻を覚え、指示は空でもよい', (t) => {
+  const { s } = watchSetup(t);
+  assert.deepStrictEqual(s.issues, { labels: ['agent', 'bug'], author: 'alice', autoStart: false, after: T0, seen: [], lastCheckedAt: null });
+  assert.strictEqual(s.title, '監視');
+  assert.strictEqual(s.nextRunAt, T0 + 5 * MIN);
+});
+
+test('Issue の監視: 登録の前からある Issue は対象にせず、新しい Issue ごとにカードを作る', async (t) => {
+  const { agents, s, issue, due, clock } = watchSetup(t);
+  agents.remote = [issue(3, -MIN), issue(8), issue(7)];
+  await due();
+  assert.deepStrictEqual(agents.created.map((c) => c.number), [7, 8]);
+  assert.deepStrictEqual(agents.listed[0], { repo: '/repo', filter: { labels: ['agent', 'bug'], author: 'alice' } });
+  assert.deepStrictEqual(agents.started, []);
+  assert.deepStrictEqual(s.issues.seen, [7, 8]);
+  assert.strictEqual(s.issues.lastCheckedAt, clock.now);
+  assert.deepStrictEqual(s.runs.map((r) => r.message), ['#8 のタスクを作りました', '#7 のタスクを作りました']);
+  assert.strictEqual(s.nextRunAt, clock.now + 5 * MIN);
+  // 2回目は同じ Issue を作らず、履歴も増やさない
+  await due();
+  assert.strictEqual(agents.created.length, 2);
+  assert.strictEqual(s.runs.length, 2);
+});
+
+test('Issue の監視: Todo に置くときは仕様を確認し、自動で開始するときは確認を飛ばす', async (t) => {
+  const a = watchSetup(t);
+  a.agents.remote = [a.issue(1)];
+  await a.due();
+  assert.strictEqual(a.agents.created[0].skipSpecCheck, false);
+  const b = watchSetup(t, { issues: { autoStart: true } });
+  b.agents.remote = [b.issue(1)];
+  await b.due();
+  assert.strictEqual(b.agents.created[0].skipSpecCheck, true);
+  assert.deepStrictEqual(b.agents.started, [b.s.lastCardId]);
+  assert.strictEqual(b.s.runs[0].message, '#1 のタスクを作って開始しました');
+});
+
+test('Issue の監視: 前のカードが動いていても、新しい Issue のカードは作る', async (t) => {
+  const { agents, issue, due } = watchSetup(t, { issues: { autoStart: true } });
+  agents.remote = [issue(1)];
+  await due();
+  agents.remote = [issue(1), issue(2)];
+  await due();
+  assert.deepStrictEqual(agents.created.map((c) => c.number), [1, 2]);
+});
+
+test('Issue の監視: 1回に作るカードには上限があり、残りは古い順に次回作る', async (t) => {
+  const { agents, issue, due } = watchSetup(t);
+  agents.remote = Array.from({ length: ISSUE_BATCH + 3 }, (_, i) => issue(i + 1));
+  await due();
+  assert.strictEqual(agents.created.length, ISSUE_BATCH);
+  await due();
+  assert.deepStrictEqual(agents.created.slice(ISSUE_BATCH).map((c) => c.number), [11, 12, 13]);
+});
+
+test('Issue の監視: すでにカードのある Issue は作らない。サブタスクにしたサブIssue も別のカードにしない', async (t) => {
+  const { agents, store, s, issue, due } = watchSetup(t);
+  store.cards.push({ id: 'hand', status: 'done', repoPath: '/repo', issue: { number: 1 } });
+  agents.subtasks = { items: [{ issue: { number: 3 } }] };
+  agents.remote = [issue(1), issue(2), issue(3)];
+  await due();
+  assert.deepStrictEqual(agents.created.map((c) => c.number), [2]);
+  assert.deepStrictEqual(s.issues.seen, [1, 2, 3]);
+});
+
+test('Issue の監視: アプリを閉じていて大きく遅れても見送らない', async (t) => {
+  const { agents, clock, sch, s, issue } = watchSetup(t);
+  agents.remote = [issue(1)];
+  clock.now = s.nextRunAt + LATE_MS + MIN;
+  await sch.tick();
+  assert.strictEqual(agents.created.length, 1);
+});
+
+test('Issue の監視: 読めないときは失敗を記録し、続く失敗は通知を繰り返さず、直れば表示を消す', async (t) => {
+  const { agents, s, issue, due } = watchSetup(t);
+  agents.listError = 'rate limit';
+  await due();
+  await due();
+  assert.strictEqual(s.lastStatus, 'failed');
+  assert.strictEqual(s.lastError, 'Issue を読めませんでした: rate limit');
+  assert.strictEqual(agents.notified.length, 1);
+  assert.strictEqual(s.enabled, true);
+  agents.listError = null;
+  await due();
+  assert.strictEqual(s.lastStatus, 'ok');
+  assert.strictEqual(s.lastError, '');
+  // 1件のカードが作れないときは覚えず、次回もう一度試す
+  agents.fetchError = 'boom';
+  agents.remote = [issue(1)];
+  await due();
+  assert.strictEqual(s.lastError, '#1: boom');
+  assert.deepStrictEqual(s.issues.seen, []);
+  agents.fetchError = null;
+  await due();
+  assert.deepStrictEqual(s.issues.seen, [1]);
+});
+
+test('Issue の監視: リポジトリが消えたら止める', async (t) => {
+  const { agents, missing, s, due } = watchSetup(t);
+  missing.add('/repo');
+  await due();
+  assert.strictEqual(s.enabled, false);
+  assert.strictEqual(s.nextRunAt, null);
+  assert.match(agents.notified[0].body, /スケジュールを停止しました/);
+});
+
+test('Issue の監視: 確認が重なっても同じ Issue のカードは1枚。読んでいるあいだに消されたら作らない', async (t) => {
+  const { agents, sch, s, issue } = watchSetup(t);
+  agents.remote = [issue(1)];
+  const [a, b] = await Promise.all([sch.runIssues(s.id), sch.runIssues(s.id)]);
+  assert.deepStrictEqual(a, b);
+  assert.strictEqual(agents.created.length, 1);
+  agents.remote = [issue(2)];
+  const p = sch.runIssues(s.id);
+  sch.remove(s.id);
+  await p;
+  assert.strictEqual(agents.created.length, 1);
+});
+
+test('Issue の監視: 編集しても開始時刻と覚えた番号は残り、外からは変えられない', async (t) => {
+  const { agents, sch, s, issue, due, store } = watchSetup(t);
+  agents.remote = [issue(1)];
+  await due();
+  sch.update(s.id, { issues: { labels: 'x', author: '', autoStart: true, after: 1, seen: [] } });
+  const now = store.schedule(s.id).issues;
+  assert.deepStrictEqual([now.labels, now.autoStart, now.after, now.seen], [['x'], true, T0, [1]]);
+  sch.update(s.id, { enabled: false });
+  assert.deepStrictEqual(store.schedule(s.id).issues.seen, [1]);
+  assert.throws(() => sch.update(s.id, { issues: null }), /指示を入力してください/);
+});
+
+test('Issue の監視: 保存して読み直しても設定が残る', async (t) => {
+  const { store, s } = watchSetup(t);
+  store.flush();
+  const again = new Store(store.file);
+  assert.deepStrictEqual(again.schedule(s.id).issues, s.issues);
+  clearTimeout(again.timer);
 });
