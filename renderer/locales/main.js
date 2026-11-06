@@ -553,6 +553,7 @@
   "破棄されました": {"en":"It was discarded","es":"Se descartó","fr":"Abandonné","zh":"已丢弃"},
   "Worktree Kanban のタスクから作成しました。": {"en":"Created from an Worktree Kanban task.","es":"Creado a partir de una tarea de Worktree Kanban.","fr":"Créé à partir d'une tâche Worktree Kanban.","zh":"由 Worktree Kanban 的任务创建。"},
   "Worktree Kanban のサブタスクとして作成しました（親: #{number}）。": {"en":"Created as an Worktree Kanban subtask (parent: #{number}).","es":"Creado como subtarea de Worktree Kanban (padre: #{number}).","fr":"Créé comme sous-tâche Worktree Kanban (parent : #{number}).","zh":"作为 Worktree Kanban 的子任务创建（父：#{number}）。"},
+  "開発サーバーのポートに空きがないので、PORT を渡さずに動かします": {"en": "No free ports are left for dev servers, so PORT will not be set", "es": "No quedan puertos libres para servidores de desarrollo, así que no se definirá PORT", "fr": "Plus aucun port libre pour les serveurs de développement : PORT ne sera pas défini", "zh": "开发服务器已没有空闲端口，因此不会设置 PORT"},
   "止めました": {"en": "stopped", "es": "detenido", "fr": "arrêté", "zh": "已停止"},
   "時間切れ": {"en": "timed out", "es": "tiempo agotado", "fr": "délai dépassé", "zh": "超时"},
   "シグナル {signal}": {"en": "signal {signal}", "es": "señal {signal}", "fr": "signal {signal}", "zh": "信号 {signal}"},

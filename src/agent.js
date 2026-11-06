@@ -18,7 +18,7 @@ const { agentLabel, agentShort } = providers;
 const { isNoGitRepo, cleanRelayFlow, pipelineOf } = require('./store');
 const FlowModel = require('../renderer/flow-model');
 const Subtasks = require('./subtasks');
-const { SCRIPT_KINDS, SCRIPT_SETTINGS, cleanScript, appendOutput, startScript } = require('./worktree-scripts');
+const { SCRIPT_KINDS, SCRIPT_SETTINGS, PORT_START, PORT_END, PORT_COUNT, portsFree, cleanScript, appendOutput, startScript } = require('./worktree-scripts');
 const I18n = require('../renderer/i18n');
 const { tr } = I18n;
 
@@ -2491,6 +2491,7 @@ class AgentManager extends EventEmitter {
       delete c.reopenFrom;
     }
     this.log(c, 'system',tr('worktree を作成しました: {wt}（ブランチ {branch} / ベース {base}）', { wt, branch, base }));
+    await this.ensureDevPort(c);
     c.setupPending = !!this.scriptOf(c, 'setup');
     this.changed(c);
     await this.ensureSetup(c);
@@ -2510,7 +2511,26 @@ class AgentManager extends EventEmitter {
       WORKTREE_KANBAN_BRANCH: c.branch || '',
       WORKTREE_KANBAN_BASE_BRANCH: c.baseBranch || '',
       WORKTREE_KANBAN_TASK_ID: c.id,
+      ...this.portEnv(c),
     };
+  }
+
+  // ---------- タスクごとのポート（worktree はファイルしか分けないので、開発サーバーがぶつからないように分ける） ----------
+
+  portEnv(c) {
+    if (!c.devPort) return {};
+    return { WORKTREE_KANBAN_PORT: String(c.devPort), PORT: String(c.devPort) };
+  }
+
+  // 空いているポートの組をタスクに割り当てる。一度決めたら、worktree を消すまで変えない
+  async ensureDevPort(c) {
+    const taken = (port) => this.store.cards.some((o) => o.devPort === port);
+    for (let port = PORT_START; port + PORT_COUNT <= PORT_END && !c.devPort; port += PORT_COUNT) {
+      if (taken(port) || !(await portsFree(port))) continue;
+      // 確かめているあいだに、同じ番号を別のタスクが取っていることがある
+      if (!c.devPort && !taken(port)) c.devPort = port;
+    }
+    if (!c.devPort) this.log(c, 'error', tr('開発サーバーのポートに空きがないので、PORT を渡さずに動かします'));
   }
 
   // 1つのタスクで同時に動かすスクリプトは1つだけ（出力の表示も1つ）
@@ -2538,6 +2558,7 @@ class AgentManager extends EventEmitter {
       return;
     }
     await this.stopRunningScript(c.id);
+    await this.ensureDevPort(c);
     this.log(c, 'system', tr('セットアップスクリプトを実行します'));
     this.changed(c);
     const run = await this.execScript(c, 'setup', script, { auto: true });
@@ -2559,6 +2580,7 @@ class AgentManager extends EventEmitter {
     }
     await git.removeWorktree(top, c.worktreePath);
     this.scriptRuns.delete(c.id);
+    delete c.devPort; // 次のタスクが使えるように返す
   }
 
   scriptState(id) {
@@ -2566,18 +2588,19 @@ class AgentManager extends EventEmitter {
     const scripts = Object.fromEntries(SCRIPT_KINDS.map((k) => [k, !!this.scriptOf(c, k)]));
     const r = this.scriptRuns.get(id);
     const run = r ? { kind: r.kind, auto: r.auto, running: r.running, output: r.output, startedAt: r.startedAt, endedAt: r.endedAt, code: r.code, stopped: r.stopped, timedOut: r.timedOut, error: r.error } : null;
-    return { scripts, run };
+    return { scripts, run, port: c.devPort || null, portCount: PORT_COUNT };
   }
 
   // 画面のボタンから動かす。終わるのは待たない（出力と結果は scriptState で見る）
-  startScriptNow(id, kind) {
+  async startScriptNow(id, kind) {
     const c = this.must(id);
     if (!SCRIPT_KINDS.includes(kind)) throw new Error(tr('スクリプトの種類が正しくありません'));
     if (isChat(c) || isNoGit(c) || !c.worktreePath || !fs.existsSync(c.worktreePath)) throw new Error(tr('worktree がありません'));
-    if (this.merging?.has(id)) throw new Error(tr('処理中です'));
-    if (this.scriptRuns.get(id)?.running) throw new Error(tr('ほかのスクリプトが動いています'));
     const script = this.scriptOf(c, kind);
     if (!script) throw new Error(tr('スクリプトが設定されていません'));
+    await this.ensureDevPort(c); // この機能より前に作った worktree には、まだ割り当てがない
+    if (this.merging?.has(id)) throw new Error(tr('処理中です'));
+    if (this.scriptRuns.get(id)?.running) throw new Error(tr('ほかのスクリプトが動いています'));
     this.execScript(c, kind, script).then((run) => {
       if (kind !== 'setup' || !scriptPassed(run) || !this.store.card(id)) return;
       // 手で直してセットアップが通ったら、再開したときにもう一度は動かさない
@@ -2778,7 +2801,10 @@ class AgentManager extends EventEmitter {
     if (inFolder) {
       if (!c.repoPath || !fs.existsSync(c.repoPath)) throw new Error(isNoGit(c) ? tr('フォルダが見つかりません: {path}', { path: c.repoPath }) : tr('リポジトリのフォルダが見つかりません: {path}', { path: c.repoPath }));
     } else if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
-    else await this.ensureSetup(c); // 前回セットアップが失敗したタスクをやり直すとき
+    else {
+      await this.ensureDevPort(c); // この機能より前に作った worktree には、まだ割り当てがない
+      await this.ensureSetup(c); // 前回セットアップが失敗したタスクをやり直すとき
+    }
     const cwd = inFolder ? c.repoPath : c.worktreePath;
     const s = this.store.settings;
     const rs = this.store.repoSettings(c.repoPath); // 権限モード・許可しておくツールは、そのタスクのプロジェクトの設定
@@ -2825,7 +2851,7 @@ class AgentManager extends EventEmitter {
     for (const m of c.btw || []) if (m.state === 'queued') m.state = 'delivered';
     if (agent !== 'claude') this.log(c, 'system', c.sessionId ? tr('{label} で動かします（会話 {id} の続き）', { label, id: c.sessionId.slice(0, 8) }) : tr('{label} で動かします', { label }));
     // 承認待ちの MCP ツール呼び出しがタイムアウトしないようにする
-    const child = await this.spawnAgent(agent, cwd, args, { MCP_TOOL_TIMEOUT: '86400000' });
+    const child = await this.spawnAgent(agent, cwd, args, { MCP_TOOL_TIMEOUT: '86400000', ...this.portEnv(c) });
     const cmd = child.agentCmd;
     this.procs.set(c.id, child);
     // sent: stdin に書いたメッセージ（acked = claude が受け取ったことをリプレイで確認済み）

@@ -7,7 +7,8 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { Store, repoSettingsOf, switchRepoSettings, REPO_SETTING_KEYS } = require('../src/store');
 const { AgentManager } = require('../src/agent');
-const { cleanScript, appendOutput, commandFor, startScript } = require('../src/worktree-scripts');
+const net = require('net');
+const { PORT_START, PORT_END, PORT_COUNT, portsFree, cleanScript, appendOutput, commandFor, startScript } = require('../src/worktree-scripts');
 const { isProxyChannel } = require('../src/remote');
 
 const FAKE = path.join(__dirname, 'fake-claude.js');
@@ -171,7 +172,7 @@ test('マージで worktree を消す前に、実行中のスクリプトを止�
   const ctx = setup({ runScript: 'sleep 30', teardownScript: `echo cleaned > '${marker}'`, integration: 'merge' });
   const c = start(ctx);
   await waitFor(() => c.status === 'review');
-  ctx.agents.startScriptNow(c.id, 'run');
+  await ctx.agents.startScriptNow(c.id, 'run');
   await ctx.agents.merge(c.id, {});
   assert.strictEqual(c.status, 'done');
   assert.strictEqual(fs.readFileSync(marker, 'utf8').trim(), 'cleaned');
@@ -192,10 +193,10 @@ test('ボタンから動かす・止める・二重に動かさない・未設�
   const c = start(ctx);
   await waitFor(() => c.status === 'review');
   assert.deepStrictEqual(ctx.agents.scriptState(c.id).scripts, { setup: false, teardown: false, run: true });
-  assert.throws(() => ctx.agents.startScriptNow(c.id, 'setup'), /設定されていません/);
-  assert.throws(() => ctx.agents.startScriptNow(c.id, 'rm'), /種類/);
-  ctx.agents.startScriptNow(c.id, 'run');
-  assert.throws(() => ctx.agents.startScriptNow(c.id, 'run'), /ほかのスクリプト/);
+  await assert.rejects(ctx.agents.startScriptNow(c.id, 'setup'), /設定されていません/);
+  await assert.rejects(ctx.agents.startScriptNow(c.id, 'rm'), /種類/);
+  await ctx.agents.startScriptNow(c.id, 'run');
+  await assert.rejects(ctx.agents.startScriptNow(c.id, 'run'), /ほかのスクリプト/);
   await waitFor(() => /started/.test(ctx.agents.scriptState(c.id).run.output));
   const st = await ctx.agents.stopScriptNow(c.id);
   assert.strictEqual(st.run.running, false);
@@ -208,7 +209,7 @@ test('手で動かしたセットアップが通ると、やり直しでは動�
   const c = start(ctx);
   await waitFor(() => c.status === 'failed');
   fs.writeFileSync(path.join(c.worktreePath, 'ok'), '');
-  ctx.agents.startScriptNow(c.id, 'setup');
+  await ctx.agents.startScriptNow(c.id, 'setup');
   await waitFor(() => !c.setupPending);
   assert.strictEqual(fs.readFileSync(path.join(c.worktreePath, 'count'), 'utf8'), 'run\n');
 });
@@ -217,7 +218,79 @@ test('終了するときは、動いているスクリプトも止める', posix
   const ctx = setup({ runScript: 'sleep 30' });
   const c = start(ctx);
   await waitFor(() => c.status === 'review');
-  ctx.agents.startScriptNow(c.id, 'run');
+  await ctx.agents.startScriptNow(c.id, 'run');
   await ctx.agents.shutdown(5000);
   assert.strictEqual(ctx.agents.scriptState(c.id).run.running, false);
+});
+
+// ---------- タスクごとのポート ----------
+
+test('portsFree: 組の中に使われているポートが1つでもあれば空いていない', async () => {
+  for (const host of ['127.0.0.1', '0.0.0.0', '::1', '::']) {
+    const server = net.createServer();
+    const listening = await new Promise((r) => {
+      server.once('error', () => r(false));
+      server.listen(0, host, () => r(true));
+    });
+    if (!listening) continue; // IPv6 が使えない環境
+    const { port } = server.address();
+    assert.strictEqual(await portsFree(port - 2, 5), false, host);
+    await new Promise((r) => server.close(r));
+    assert.strictEqual(await portsFree(port, 1), true, host);
+  }
+});
+
+test('並列のタスクには、重ならないポートの組を割り当てて、スクリプトとエージェントに渡す', posixOnly, async () => {
+  const ctx = setup({ runScript: 'echo "port=$PORT/$WORKTREE_KANBAN_PORT"' });
+  ctx.store.settings.maxParallel = 2;
+  const seen = [];
+  const spawnAgent = ctx.agents.spawnAgent.bind(ctx.agents);
+  ctx.agents.spawnAgent = (agent, cwd, args, env) => {
+    if (env?.PORT) seen.push(env);
+    return spawnAgent(agent, cwd, args, env);
+  };
+  const a = start(ctx, 'a');
+  const b = start(ctx, 'b');
+  await waitFor(() => a.status === 'review' && b.status === 'review', 20000);
+  assert.ok(a.devPort >= PORT_START && a.devPort + PORT_COUNT <= PORT_END, String(a.devPort));
+  assert.ok(Math.abs(a.devPort - b.devPort) >= PORT_COUNT, `${a.devPort} ${b.devPort}`);
+  assert.deepStrictEqual(seen.map((e) => e.PORT).sort(), [String(a.devPort), String(b.devPort)].sort());
+  assert.ok(seen.every((e) => e.WORKTREE_KANBAN_PORT === e.PORT));
+
+  await ctx.agents.startScriptNow(a.id, 'run');
+  await waitFor(() => !ctx.agents.scriptState(a.id).run.running);
+  const state = ctx.agents.scriptState(a.id);
+  assert.match(state.run.output, new RegExp(`port=${a.devPort}/${a.devPort}`));
+  assert.strictEqual(state.port, a.devPort);
+  assert.strictEqual(state.portCount, PORT_COUNT);
+});
+
+test('ほかのアプリが使っているポートの組は避ける', async () => {
+  const ctx = setup();
+  const c = ctx.agents.createCard({ title: 't', prompt: 'hello', repoPath: ctx.repo });
+  // 先頭の組はほかのタスクが持っているものとして、次の組の途中のポートをふさぐ
+  const held = ctx.agents.createCard({ title: 'held', prompt: 'hello', repoPath: ctx.repo });
+  await ctx.agents.ensureDevPort(held);
+  const server = net.createServer();
+  const blocked = held.devPort + PORT_COUNT + 3;
+  const listening = await new Promise((r) => {
+    server.once('error', () => r(false));
+    server.listen(blocked, '127.0.0.1', () => r(true));
+  });
+  await ctx.agents.ensureDevPort(c);
+  if (listening) await new Promise((r) => server.close(r));
+  assert.notStrictEqual(c.devPort, held.devPort);
+  assert.ok(blocked < c.devPort || blocked >= c.devPort + PORT_COUNT, String(c.devPort));
+  const first = c.devPort;
+  await ctx.agents.ensureDevPort(c);
+  assert.strictEqual(c.devPort, first, '一度決めたら変えない');
+});
+
+test('worktree を消すとポートを返す', async () => {
+  const ctx = setup();
+  const c = start(ctx);
+  await waitFor(() => c.status === 'review');
+  assert.ok(c.devPort);
+  await ctx.agents.removeWorktreeOf(c, ctx.repo);
+  assert.strictEqual(c.devPort, undefined);
 });
