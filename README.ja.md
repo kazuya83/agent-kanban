@@ -37,7 +37,7 @@ AI コーディングエージェントの CLI（Claude Code / Codex CLI / Antig
 - **複数のリポジトリを同時に** — 最大 3 つのリポジトリをタブで開けます。タブを切り替えても、ほかのタスクは止まりません。
 - **いつもの CLI をそのまま** — Claude Code、Codex CLI、Antigravity CLI、Gemini CLI、Cursor CLI を、今のログインや設定のまま使えます。
 - **Mac と Windows を相互に遠隔操作** — エージェントを動かす PC のボードを、別の PC からそのまま操作できます。承認、質問への回答、追加の指示、マージもできます。
-- **手元で完結** — ボードの状態はこの PC に保存します。外部のサーバーは使いません。
+- **手元で完結** — ボードの状態はこの PC に保存します。外部のサーバーは使いません。連携を設定したサービスとは、この PC から直接やりとりします。
 
 ## しくみ
 
@@ -56,7 +56,7 @@ flowchart LR
 - **1 タスク = 1 worktree = 1 ブランチ**。リポジトリの隣の `<repo>.worktrees/<id>` に worktree を作り、`agent/<内容>-<id>` のブランチで作業させます。作業中のタスク同士や、手元の作業ツリーとはぶつかりません
 - **エージェントは CLI をそのまま起動します**。Claude Code は `claude -p --input-format stream-json --output-format stream-json` で動かし、出力をログとしてカードに表示します。ログイン・モデル・`CLAUDE.md`・スキルは、ターミナルで使うときと同じものが使われます
 - **承認は Claude Code の `--permission-prompt-tool` で受けます**。権限モードや `--allowedTools` で自動で許可されない操作だけが、カードに「承認待ち」として出ます
-- **終わったら、マージ（`--no-ff`）か PR の作成（`gh`）で取り込みます**。マージ先のブランチは選べ、マージしたあとに origin へ push することもできます
+- **終わったら、マージ（`--no-ff`）か PR / MR の作成（GitHub は `gh`、GitLab は API）で取り込みます**。マージ先のブランチは選べ、マージしたあとに origin へ push することもできます
 - ボードの状態は Electron の userData フォルダの `board.json` に保存します。外部のサーバーは使いません
 
 Codex / Antigravity / Gemini / Cursor では、CLI の制約から、カードでの承認・選択肢の質問・btw・金額の表示が使えません（詳しくは [docs/agents.ja.md](docs/agents.ja.md)）。
@@ -88,7 +88,7 @@ Codex / Antigravity / Gemini / Cursor では、CLI の制約から、カード�
 くわしくは [docs/agents.ja.md](docs/agents.ja.md) を見てください。
 
 ### サブタスク
-大きなタスクは、エージェントがサブタスクに分けることを提案します。親のブランチから分けて並列・順番に進め、終わったものから親のブランチにマージします。
+大きなタスクは、エージェントがサブタスクに分けることを提案します。親のブランチから分けて並列・順番に進め、終わったものから親のブランチにマージします。サブタスクだけ開始することもできます。GitHub・GitLab・Linear・Jira のサブIssue にも対応しています。
 
 ![分ける提案を受け入れ、サブタスクが動いてマージされていく](docs/images/ja/feature-subtasks.gif)
 
@@ -117,8 +117,30 @@ git で管理していないフォルダ（動画づくりなど、コード以�
 
 </details>
 
-### GitHub Issue からタスクを作る
-「新しいタスク」の「GitHub Issue から作成」タブに番号（`21, 22, 24` など）を入れると、Issue のタイトル・本文・コメントから指示を作り、1 Issue につき 1 枚のカードを作ります。ブランチ名は `agent/issue-21-…` になり、PR の本文には `Closes #21` が入ります。`gh` を使います。
+### 外部サービスとの連携（GitHub・GitLab・Linear・Jira・Slack）
+
+Issue からタスクを作り、状態を同期できます。Slack には通知を投稿でき、Slack からタスクを始めることもできます。
+
+| サービス | タスクの元にする入力 | PR / MR の本文 | 状態の同期 | 接続に必要なもの |
+| --- | --- | --- | --- | --- |
+| GitHub | `21, 22, 24` | `Closes #21` | GitHub Projects の Status | `gh` |
+| GitLab | `12`、`group/project#12`、URL | `Closes #12` | ラベルと Issue の開閉 | 接続先の URL、Personal Access Token（`api`） |
+| Linear | `ENG-123`、URL | `Ref ENG-123 <URL>` | ワークフローの状態 | API キー |
+| Jira | `ABC-123`、URL | `ABC-123 <URL>` | トランジション | 接続先の URL、API トークンとメールアドレス（Cloud）か Personal Access Token（Data Center） |
+
+Issue のタイトル・本文・コメントから指示を作り、1 Issue につき 1 枚のカードを作ります。ブランチ名は `agent/issue-21-…` のようになります。サブIssue は 4 つのサービスすべてで、Issue へのコメントの書き戻しは GitLab・Linear・Jira で使えます。
+
+- **GitLab**: gitlab.com とセルフホストに対応します。origin が接続先の GitLab のものなら、`gh` の代わりに API で MR を作り、マージ・コンフリクト・パイプラインの結果を確かめます
+- **Linear・Jira**: 扱うのは課題だけです。PR / MR はリポジトリのホストで作ります。Jira は Cloud と Data Center に対応します
+- **Slack**: 完了・失敗・確認待ちを通知します。許可した Slack ユーザーが、対応を書いたチャンネルでメンションか /コマンドを使うと、タスクを始められます。初期状態では誰も始められません。Socket Mode を使うのでポートの開放は要りませんが、動くのはアプリを開いている間だけです。承認と質問への回答はアプリの画面で行います
+
+設定のしかた:
+
+1. 「設定」→「連携」で接続先とトークンを入れて保存します。トークンは OS の安全な保存先の鍵で暗号化します
+2. 「設定」→「Issue 連携」の「使う課題管理サービス」で、プロジェクトごとに選びます
+3. 「新しいタスク」の Issue のタブに、番号や URL を入れます
+
+Slack アプリの作り方と、サービスごとのくわしい動きは [docs/integrations.ja.md](docs/integrations.ja.md) にあります。
 
 ![Issue の番号を入れて、Issue ごとのカードを作る](docs/images/ja/feature-issue.gif)
 
@@ -168,7 +190,7 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 </details>
 
 ### 通知
-承認待ち・質問・回答待ち・レビュー待ち・完了は、右上のベルのアイコンに通知が溜まり、デスクトップ通知も出ます。通知を押すと、そのタスクが開きます。
+承認待ち・質問・回答待ち・レビュー待ち・完了は、右上のベルのアイコンに通知が溜まり、デスクトップ通知も出ます。通知を押すと、そのタスクが開きます。Slack に投稿することもできます（上の「外部サービスとの連携」）。
 
 ![通知から、対応が必要なカードを開く](docs/images/ja/feature-notifications.gif)
 
@@ -214,6 +236,7 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 - git
 - 使うエージェントの CLI（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI のどれか）。ログインを済ませておきます
 - GitHub の Issue・PR の機能を使うときは `gh`（アプリから入れることもできます）
+- GitLab・Linear・Jira・Slack の連携を使うときは、それぞれのトークン。保存には OS の安全な保存先が必要です（Linux では GNOME Keyring や KWallet など）。GitLab のリポジトリの Issue・MR に `gh` は要りません
 
 ## インストール
 
@@ -245,6 +268,7 @@ irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 
 | [画面と使い方](docs/usage.ja.md) | 承認・質問・仕様の確認・タスクスケジューラ・スキル・会話・btw・マージ / PR・Issue のステータス・通知・コンフリクトなど、機能ごとの使い方 |
 | [エージェントとオーケストレーション](docs/agents.ja.md) | Claude Code / Codex / Antigravity / Gemini / Cursor の違い、Pipeline・競争 |
 | [設定](docs/settings.ja.md) | トップバーのメニューから開く設定の画面と項目 |
+| [連携](docs/integrations.ja.md) | GitLab・Linear・Jira・Slack の設定、できることとできないこと |
 | [遠隔操作](docs/remote.ja.md) | 別の PC から SSH トンネルでボードを操作する手順と、つながらないときの直し方 |
 | [インストール](docs/install.ja.md) | インストール・アップデート・アンインストール、Windows で WSL のリポジトリを使う |
 | [開発者向け](docs/development.ja.md) | ソースから動かす・ビルド・リリース・アプリのしくみ・テスト |

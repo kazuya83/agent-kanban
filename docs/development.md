@@ -113,6 +113,16 @@ Electron main process
 - When an agent finishes, the changes in its worktree are committed to its branch automatically
 - Board data is stored in `board.json` in Electron's userData folder
 
+### Integrations
+
+The guide for users is [integrations.md](integrations.md).
+
+- `src/trackers/index.js`: registers providers and holds the shared logic. The shape of a provider is described in the comment at the top of this file. To add a service, write `src/trackers/<id>.js` and add it to `BUILTIN` at the end. Leave out the features it does not have
+- `src/trackers/github.js`, `gitlab.js`, `linear.js`, `jira.js`: issue tracker providers. GitHub uses the existing `gh` code, and the others call their APIs through `src/trackers/http.js`. A provider with `createMergeRequest` and `mergeRequestState` (GitLab) replaces `gh` for repositories whose origin matches
+- `src/slack.js`: the Slack settings, posting notifications, and receiving through Socket Mode. It is not an issue tracker, so it sits outside `src/trackers`
+- `src/secrets.js`: token storage. Tokens are encrypted with Electron's `safeStorage` and saved in `secrets.json` in userData. They are read only in the main process, right before they are sent to their service, and are never passed to the renderer, remote clients, logs, or agent environment variables
+- `src/trackers/http.js`: API calls. It is https by default, does not follow redirects (3xx), and removes tokens from error messages
+
 ## Development
 
 ```bash

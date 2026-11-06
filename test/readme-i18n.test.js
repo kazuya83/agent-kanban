@@ -333,7 +333,7 @@ test('英語・西・仏の README は本文が翻訳され、docs の言語の�
   assert.deepEqual(docNoteProblems(read('README.zh-CN.md'), true), []);
 });
 
-for (const name of ['agents', 'development', 'install', 'remote', 'settings', 'usage']) {
+for (const name of ['agents', 'development', 'install', 'integrations', 'remote', 'settings', 'usage']) {
   test(`docs/${name}: 英語と日本語が対で、見出しの段が同じで、たがいにリンクしている`, () => {
     const en = read(`docs/${name}.md`);
     const ja = read(`docs/${name}.ja.md`);
@@ -348,7 +348,7 @@ for (const name of ['agents', 'development', 'install', 'remote', 'settings', 'u
     assert.ok(en.endsWith('[← Back to README](../README.md)\n'));
     assert.ok(ja.endsWith('[← README に戻る](../README.ja.md)\n'));
     // 日本語版から文書へのリンクは、日本語版へ向ける
-    assert.doesNotMatch(ja.split('\n').slice(1).join('\n'), /\]\((?:agents|development|install|remote|settings|usage)\.md[#)]/);
+    assert.doesNotMatch(ja.split('\n').slice(1).join('\n'), /\]\((?:agents|development|install|integrations|remote|settings|usage)\.md[#)]/);
   });
 }
 

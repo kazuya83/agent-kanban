@@ -1,5 +1,5 @@
 // Electron メインプロセス
-const { app, BrowserWindow, ipcMain, dialog, shell, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Notification, safeStorage, powerMonitor } = require('electron');
 const path = require('path');
 
 // 承認用の MCP サーバーとして呼ばれたのに ELECTRON_RUN_AS_NODE が効かなかったとき
@@ -40,6 +40,9 @@ const sshKey = require('./src/ssh-key');
 const dirBrowse = require('./src/dir-browse');
 const { Updater } = require('./src/updater');
 const { Scheduler } = require('./src/scheduler');
+const trackersRegistry = require('./src/trackers');
+const { SecretStore } = require('./src/secrets');
+const { SlackBridge } = require('./src/slack');
 const { createScheduleApi, notificationClickPlan } = require('./src/schedule-wiring');
 const fs = require('fs');
 
@@ -75,6 +78,8 @@ let win = null;
 let quitState = 'idle'; // 終了の流れ: idle → confirming → stopping → done
 let store;
 let agents;
+let trackers; // 課題管理・チャットサービスとの連携（src/trackers）
+let slack; // Slack への通知と、Slack からの開始（src/slack.js）
 let permServer;
 let remoteHost = null;
 let remoteClient = null;
@@ -131,7 +136,7 @@ function send(channel, payload) {
 function boardState() {
   const { cleanRepoTabs, repoTabSummary } = require('./src/store');
   const repoTabs = repoTabSummary(cleanRepoTabs(store.settings.repoTabs, store.settings.repoPath), store.cards, store.settings);
-  return { settings: store.settings, repoTabs, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath), schedules: store.schedulesOf(store.settings.repoPath) };
+  return { settings: store.settings, repoTabs, issueProviders: trackersRegistry.issueProviderMeta(), trackerStatus: trackers.statusMap(), cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath), schedules: store.schedulesOf(store.settings.repoPath) };
 }
 
 // 画面に渡すボード。クライアントとして接続中は、見ている側（ホスト / このマシン）のボードに、両方のタブを並べて載せる
@@ -473,6 +478,8 @@ app.whenReady().then(async () => {
   store = new Store(boardFile);
   // 初めて起動したときは、インストールされているエージェントを使う設定にする
   store.adoptAgents(providers.AGENT_IDS.filter((a) => resolveCommand(providers.agentCommand(store.settings, a))));
+  trackers = new trackersRegistry.Trackers({ store, secrets: new SecretStore({ file: path.join(userData, 'secrets.json'), safeStorage }) });
+  trackers.on('changed', notifyBoard);
   agents = new AgentManager(store, {
     // パッケージ後は asar の外に出した MCP スクリプトを使う
     mcpScript: path.join(__dirname, 'src', 'permission-mcp.js').replace('app.asar', 'app.asar.unpacked'),
@@ -480,6 +487,7 @@ app.whenReady().then(async () => {
     attachDir: path.join(userData, 'attachments'), // 指示に添付したファイル（作業フォルダの外に置く）
     nodeBin: process.execPath, // ELECTRON_RUN_AS_NODE=1 で Node として動かす
     claudeConfigFor, // 会話を消すときの Claude Code の設定フォルダ（WSL のリポジトリなら WSL の中）
+    trackers,
   });
 
   permServer = new PermissionServer((payload, signal) => agents.requestPermission(payload, signal));
@@ -519,6 +527,12 @@ app.whenReady().then(async () => {
     }
     if (win && !win.isFocused()) win.flashFrame(true);
   });
+
+  slack = new SlackBridge({ trackers, agents, store });
+  trackers.setStatusSource('slack', () => slack.status());
+  slack.on('status', notifyBoard);
+  slack.start();
+  powerMonitor.on('resume', () => slack.reconnect()); // スリープの間に切れた接続には、自分では気づけない
 
   remoteClient = new RemoteClient();
   remoteClient.on('event', (channel, payload) => {
@@ -802,14 +816,32 @@ app.whenReady().then(async () => {
     switchRepoSettings(s, dir);
     s.repoTabs = tabs;
   };
-  // 初めて開いたプロジェクトは初期値から始める。取り込み方は PR を作成。ただし origin が GitHub でない・git なしなら直接マージ
+  // 初めて開いたプロジェクトは初期値から始める。取り込み方は PR を作成。ただし origin が GitHub でも GitLab でもない・git なしなら直接マージ。
+  // 使う課題管理サービスは origin から推定する（分からなければ GitHub のまま）
   const initRepoSettings = async (dir) => {
-    const gh = isNoGitRepo(store.settings, dir) ? false : await git.isGitHubRemote(dir).catch(() => false);
-    if (gh) return;
-    store.setRepoSettings(dir, { integration: 'merge' });
+    const noGit = isNoGitRepo(store.settings, dir);
+    const gh = noGit ? false : await git.isGitHubRemote(dir).catch(() => false);
+    const url = noGit ? '' : await git.git(dir, ['remote', 'get-url', 'origin']).catch(() => '');
+    const issueProvider = url ? trackers.guessFromRemote(url.trim()) : 'github';
+    const canReview = gh || (!!url && !!trackers.codeHostOf(url.trim()));
+    const patch = { ...(canReview ? {} : { integration: 'merge' }), ...(issueProvider === 'github' ? {} : { issueProvider }) };
+    if (!Object.keys(patch).length) return;
+    store.setRepoSettings(dir, patch);
     store.save();
     notifyBoard();
   };
+  // origin のコードのホストを覚える（画面の PR / MR の文言に使う。origin や接続先は変わることがあるので、開くたびに確かめる）
+  const refreshCodeHost = async (dir) => {
+    if (!dir || isNoGitRepo(store.settings, dir)) return;
+    const url = await git.git(dir, ['remote', 'get-url', 'origin']).catch(() => '');
+    const codeHost = url ? trackers.codeHostOf(url.trim()) : '';
+    if ((store.repoSettings(dir).codeHost || '') === codeHost) return;
+    store.setRepoSettings(dir, { codeHost });
+    store.save();
+    notifyBoard();
+  };
+  trackers.on('changed', () => refreshCodeHost(store.settings.repoPath).catch(() => {}));
+  refreshCodeHost(store.settings.repoPath).catch(() => {});
   const openRepo = (dir, { tab } = {}) => {
     const s = store.settings;
     const fresh = !!dir && !hasRepoSettings(s, dir);
@@ -817,7 +849,7 @@ app.whenReady().then(async () => {
     s.recentRepoPaths = touchRecentRepo(s.recentRepoPaths, dir);
     store.save();
     notifyBoard();
-    if (fresh) initRepoSettings(dir).catch(() => {});
+    (fresh ? initRepoSettings(dir).catch(() => {}) : Promise.resolve()).then(() => refreshCodeHost(dir)).catch(() => {});
     return dir;
   };
   // タブを切り替える（タブにあるリポジトリだけ）
@@ -897,7 +929,7 @@ app.whenReady().then(async () => {
     return { branches, current, hasOrigin };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'deleteSessionsOnMerge', 'specCheck', 'ciAutoFix', 'subtaskMerge', 'branchNamingRule', 'setupScript', 'teardownScript', 'runScript', 'defaultAgent', 'codexPath', 'codexModel', 'antigravityPath', 'antigravityModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'relayFlow', 'relayFlows', 'relayFlowId', 'competeAgents', 'competeCustomAgents', 'customAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueProvider', 'issueComments', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'deleteSessionsOnMerge', 'specCheck', 'ciAutoFix', 'subtaskMerge', 'branchNamingRule', 'setupScript', 'teardownScript', 'runScript', 'defaultAgent', 'codexPath', 'codexModel', 'antigravityPath', 'antigravityModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'relayFlow', 'relayFlows', 'relayFlowId', 'competeAgents', 'competeCustomAgents', 'customAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
     if (patch && 'branchNamingRule' in patch) patch = { ...patch, branchNamingRule: String(patch.branchNamingRule || '').trim() };
     for (const k of ['setupScript', 'teardownScript', 'runScript']) if (patch && k in patch) patch = { ...patch, [k]: cleanScript(patch[k]) };
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
@@ -908,6 +940,8 @@ app.whenReady().then(async () => {
     if (patch && 'weeklyResetDay' in patch) patch = { ...patch, weeklyResetDay: /^[0-6]$/.test(String(patch.weeklyResetDay)) ? String(patch.weeklyResetDay) : '' };
     if (patch && 'weeklyResetTime' in patch) patch = { ...patch, weeklyResetTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(String(patch.weeklyResetTime)) ? String(patch.weeklyResetTime) : '00:00' };
     if (patch && 'issueStatusSync' in patch) patch = { ...patch, issueStatusSync: !!patch.issueStatusSync };
+    if (patch && 'issueComments' in patch) patch = { ...patch, issueComments: !!patch.issueComments };
+    if (patch && 'issueProvider' in patch && !trackersRegistry.isIssueProvider(patch.issueProvider)) throw new Error(tr('連携先「{id}」は使えません', { id: String(patch.issueProvider) }));
     if (patch && 'baseBranch' in patch) {
       const b = String(patch.baseBranch || '').trim();
       if (b) git.assertSafeRef(b, tr('ベースブランチ名'));
@@ -1003,6 +1037,11 @@ app.whenReady().then(async () => {
     const slug = await repoSlug(repo).catch(() => null);
     return { slug, gh: !!resolveCommand('gh') };
   });
+  // 連携: 設定の「連携」の欄。トークンは受け取るだけで、値はどのチャンネルでも返さない（設定済みかどうかだけ返す）
+  handle('trackers:list', () => trackers.publicList());
+  handle('trackers:save', ({ id, config, secrets } = {}) => trackers.save(id, { config, secrets }));
+  handle('trackers:remove', ({ id } = {}) => trackers.remove(id));
+  handle('trackers:test', ({ id, config, secrets } = {}) => trackers.test(id, { config, secrets }));
   handle('open:external', async (url) => {
     const target = require('./src/external-url').externalUrl(url);
     if (!target) throw new Error(tr('開けない URL です'));
@@ -1227,6 +1266,7 @@ app.on('before-quit', (e) => {
   // 終了の確認中も含めて、ここからはスケジュールを発火させない（キャンセルされたら動かし直す）
   scheduler?.stop();
   if (quitState === 'done' || !agents) {
+    slack?.stop();
     store?.flush();
     permServer?.close();
     reconnector?.cancel();

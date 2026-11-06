@@ -4,6 +4,15 @@ Notable changes to Worktree Kanban (named Agent Kanban before 0.1.84). This file
 
 Each release that changes the app raises the last number of the version. There is no separate compatibility promise while the version is 0.x.
 
+## Unreleased
+
+### Added
+
+- Integrations with GitLab, Linear, and Jira, including self-hosted GitLab and Jira Data Center: create tasks from Issue numbers or URLs, link Issues in PRs and MRs, sync status with the card, write comments back, and handle sub-issues.
+- GitLab merge requests: create them, check conflicts and pipeline results, and detect merges.
+- Slack integration: notifications for completions, failures, and items waiting for you, and starting tasks from Slack for allowed users only. Nobody can start a task by default.
+- An "Integrations" section in Settings. Tokens are encrypted with a key from the OS secure storage.
+
 ## 0.1.88
 
 ### Added

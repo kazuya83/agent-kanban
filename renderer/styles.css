@@ -511,6 +511,7 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .field[hidden] { display: none; }
 .field > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .field small, .field-note { color: var(--muted); display: block; margin-top: 4px; }
+.field small[hidden] { display: none; }
 .field-note { margin: -4px 0 10px; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 /* 横並びの項目は、項目名が折り返して行数が違っても入力欄の下端をそろえる */
@@ -762,6 +763,7 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .orch-chip.agent { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
 .orch-chip.relay { background: color-mix(in srgb, var(--run) 16%, transparent); color: var(--run); }
 .orch-chip.compete { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.orch-chip.slack { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .orch-chip.schedule { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .relay-bar { display: flex; gap: 3px; margin: 2px 0 4px; }
 .rb-seg { flex: 1; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--muted) 25%, transparent); }

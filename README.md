@@ -37,7 +37,7 @@ A desktop app (Electron, Mac / Windows / Linux) that runs AI coding-agent CLIs (
 - **Several repositories at once** — keep up to 3 repositories open as tabs; switching tabs does not stop anything.
 - **The CLIs you already use** — Claude Code, Codex CLI, Antigravity CLI, Gemini CLI, and Cursor CLI, with the sign-in and settings you have today.
 - **Mac ⇄ Windows remote control** — run agents on one PC and operate the same board from the other: approve, answer questions, send instructions, and merge.
-- **Local by design** — board state stays on your machine. There is no external server.
+- **Local by design** — board state stays on your machine. There is no external server. Services you connect are reached directly from your machine.
 
 ## How it works
 
@@ -56,7 +56,7 @@ flowchart LR
 - **1 task = 1 worktree = 1 branch.** It creates a worktree at `<repo>.worktrees/<id>` next to the repository and works on a branch named `agent/<summary>-<id>`. Tasks do not collide with each other or with the working tree you have open
 - **The agent is the CLI, started as-is.** Claude Code runs as `claude -p --input-format stream-json --output-format stream-json`, and its output is shown on the card as the log. Sign-in, model, `CLAUDE.md`, and skills are the same ones you use in the terminal
 - **Approval goes through Claude Code's `--permission-prompt-tool`.** Only actions that the permission mode or `--allowedTools` does not auto-allow show up on the card as waiting for approval
-- **When it finishes, you bring the work in by merging (`--no-ff`) or opening a PR (`gh`).** You can choose the target branch, and you can push to origin after the merge
+- **When it finishes, you bring the work in by merging (`--no-ff`) or opening a PR / MR (`gh` for GitHub, the API for GitLab).** You can choose the target branch, and you can push to origin after the merge
 - Board state is stored in `board.json` in Electron's userData folder. There is no external server
 
 On Codex / Antigravity / Gemini / Cursor, in-card approval, multiple-choice questions, btw, and cost display are unavailable because of CLI limits (see [docs/agents.md](docs/agents.md)).
@@ -89,7 +89,7 @@ Write the flow you want in plain language, such as "implement with Codex, review
 See [docs/agents.md](docs/agents.md) for details.
 
 ### Subtasks
-When a task is large, the agent can propose splitting it into subtasks. They branch from the parent branch, run in parallel or in order, and are merged back as they finish.
+When a task is large, the agent can propose splitting it into subtasks. They branch from the parent branch, run in parallel or in order, and are merged back as they finish. You can also start a single subtask, and GitHub, GitLab, Linear, and Jira sub-issues are supported.
 
 ![Accepting a proposal to split a task, then watching the subtasks run and merge](docs/images/en/feature-subtasks.gif)
 
@@ -120,9 +120,30 @@ When an action needs permission, you can read the full command and input on the 
 
 </details>
 
-### Create tasks from GitHub Issues
+### Integrations (GitHub, GitLab, Linear, Jira, Slack)
 
-On the "Create from GitHub Issue" tab of "New task", enter numbers (`21, 22, 24`, and so on). It builds the instructions from the Issue title, body, and comments, and creates one card per Issue. The branch is named `agent/issue-21-…`, and the PR body includes `Closes #21`. This uses `gh`.
+Create tasks from Issues and keep their status in sync. You can also post notifications to Slack and start tasks from Slack.
+
+| Service | Input for a task | PR / MR body | Status sync | What you need to connect |
+| --- | --- | --- | --- | --- |
+| GitHub | `21, 22, 24` | `Closes #21` | Status in GitHub Projects | `gh` |
+| GitLab | `12`, `group/project#12`, URL | `Closes #12` | Labels and open / closed | URL, Personal Access Token (`api`) |
+| Linear | `ENG-123`, URL | `Ref ENG-123 <URL>` | Workflow state | API key |
+| Jira | `ABC-123`, URL | `ABC-123 <URL>` | Transition | URL, plus an API token and email (Cloud) or a Personal Access Token (Data Center) |
+
+It builds the instructions from the Issue title, body, and comments, and creates one card per Issue. Branches are named like `agent/issue-21-…`. Sub-issues work with all four services, and comments back to the Issue work with GitLab, Linear, and Jira.
+
+- **GitLab**: works with gitlab.com and self-hosted GitLab. If origin belongs to the connected GitLab, the app uses the API instead of `gh` to create MRs and to check merges, conflicts, and pipeline results
+- **Linear and Jira**: these only handle issues. PRs and MRs are created on the repository's host. Jira works with Cloud and Data Center
+- **Slack**: posts completions, failures, and items waiting for you. Allowed Slack users can start a task with a mention or a slash command in a listed channel. Nobody can start a task by default. It uses Socket Mode, so no port is opened, but it works only while the app is open. Approvals and answers to questions stay in the app
+
+To set up:
+
+1. In "Settings" → "Integrations", enter the address and token, then save. Tokens are encrypted with a key from the OS secure storage
+2. In "Settings" → "Issue sync", choose "Issue tracker to use" for each project
+3. Enter numbers or URLs on the Issue tab of "New task"
+
+How to create the Slack app, and details for each service, are in [docs/integrations.md](docs/integrations.md).
 
 ![Entering Issue numbers to create one card per Issue](docs/images/en/feature-issue.gif)
 
@@ -176,7 +197,7 @@ In "Chat" you can ask the agent about the repository without creating a task (wo
 
 ### Notifications
 
-Waiting for approval, questions, waiting for an answer, waiting for review, and completion collect on the bell icon at the top right, and a desktop notification is shown. Clicking a notification opens that task.
+Waiting for approval, questions, waiting for an answer, waiting for review, and completion collect on the bell icon at the top right, and a desktop notification is shown. Clicking a notification opens that task. They can also go to Slack (see "Integrations" above).
 
 ![Opening a notification to go to the card that needs you](docs/images/en/feature-notifications.gif)
 
@@ -224,6 +245,7 @@ From the menu in the top bar, switch to "Task scheduler" to manage schedules tha
 - git
 - The CLI of the agent you use (one of Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI), already signed in
 - `gh`, if you use GitHub Issues and PRs (you can also install it from the app)
+- A token for each of GitLab, Linear, Jira, and Slack that you connect. Saving tokens needs OS secure storage (on Linux, GNOME Keyring, KWallet, or similar). Issues and MRs in a GitLab repository do not need `gh`
 
 ## Install
 
@@ -255,6 +277,7 @@ The same commands update to the latest version. You can also update from the app
 | [Screen and usage](docs/usage.md) | How to use each feature: approval, questions, spec check, task scheduler, skills, chat, btw, merge / PR, Issue status, notifications, conflicts, and more |
 | [Agents and orchestration](docs/agents.md) | Differences between Claude Code / Codex / Antigravity / Gemini / Cursor, Pipeline and competition |
 | [Settings](docs/settings.md) | The settings screen opened from the top-bar menu, and its items |
+| [Integrations](docs/integrations.md) | Setting up GitLab, Linear, Jira, and Slack, and what they can and cannot do |
 | [Remote control](docs/remote.md) | How to operate the board from another PC over an SSH tunnel, and how to fix a connection that fails |
 | [Install](docs/install.md) | Install, update, uninstall, and using a WSL repository on Windows |
 | [For developers](docs/development.md) | Run from source, build, release, how the app is built, and tests |

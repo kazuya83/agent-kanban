@@ -37,7 +37,7 @@
 - **同时处理多个仓库** — 最多可用标签页打开 3 个仓库，切换标签页不会中断任何任务。
 - **沿用你现有的 CLI** — Claude Code、Codex CLI、Antigravity CLI、Gemini CLI、Cursor CLI，登录和设置保持不变。
 - **Mac ⇄ Windows 互相远程控制** — 在一台电脑上运行代理，在另一台电脑上操作同一个看板：批准、回答问题、发送指示、合并。
-- **完全本地** — 看板状态保存在你的电脑上，不使用外部服务器。
+- **完全本地** — 看板状态保存在你的电脑上，不使用外部服务器。已连接的服务由你的电脑直接通信。
 
 ## 工作方式
 
@@ -56,7 +56,7 @@ flowchart LR
 - **1 个任务 = 1 个 worktree = 1 个分支。** 在仓库旁边的 `<repo>.worktrees/<id>` 创建 worktree，并在名为 `agent/<概要>-<id>` 的分支上工作。进行中的任务彼此不会冲突，也不会和你手头的工作树冲突
 - **智能体就是原样启动的 CLI。** Claude Code 以 `claude -p --input-format stream-json --output-format stream-json` 运行，输出作为日志显示在卡片上。登录、模型、`CLAUDE.md` 和技能，与你在终端里使用的是同一套
 - **批准通过 Claude Code 的 `--permission-prompt-tool` 接收。** 只有权限模式或 `--allowedTools` 不会自动允许的操作，才会在卡片上显示为等待批准
-- **结束后，用合并（`--no-ff`）或创建 PR（`gh`）把结果收进来。** 可以选择合并到哪条分支，合并之后也可以 push 到 origin
+- **结束后，用合并（`--no-ff`）或创建 PR / MR（GitHub 用 `gh`，GitLab 用 API）把结果收进来。** 可以选择合并到哪条分支，合并之后也可以 push 到 origin
 - 看板状态保存在 Electron 的 userData 文件夹里的 `board.json`。不使用外部服务器
 
 在 Codex / Antigravity / Gemini / Cursor 上，由于 CLI 的限制，不能使用卡片上的批准、选择题提问、btw 和金额显示（详见 [docs/agents.md](docs/agents.md) (English)）。
@@ -89,7 +89,7 @@ flowchart LR
 详情见 [docs/agents.md](docs/agents.md) (English)。
 
 ### 子任务
-任务较大时，智能体可以提议把它拆成子任务。子任务从父分支分出，并行或按顺序推进，完成后合并回父分支。
+任务较大时，智能体可以提议把它拆成子任务。子任务从父分支分出，并行或按顺序推进，完成后合并回父分支。也可以只启动某一个子任务，并支持 GitHub、GitLab、Linear、Jira 的子 Issue。
 
 ![接受拆分提议，然后看着子任务运行并合并](docs/images/zh/feature-subtasks.gif)
 
@@ -120,9 +120,30 @@ flowchart LR
 
 </details>
 
-### 从 GitHub Issue 创建任务
+### 外部服务集成（GitHub、GitLab、Linear、Jira、Slack）
 
-在「新建任务」的「从 GitHub Issue 创建」标签里填入编号（如 `21, 22, 24`）。它会根据 Issue 的标题、正文和评论生成指示，每个 Issue 一张卡片。分支名为 `agent/issue-21-…`，PR 正文里会写入 `Closes #21`。使用 `gh`。
+可以从 Issue 创建任务并同步状态，也可以把通知发到 Slack，或从 Slack 启动任务。
+
+| 服务 | 创建任务时的输入 | PR / MR 正文 | 状态同步 | 连接所需 |
+| --- | --- | --- | --- | --- |
+| GitHub | `21, 22, 24` | `Closes #21` | GitHub Projects 的 Status | `gh` |
+| GitLab | `12`、`group/project#12`、URL | `Closes #12` | 标签和开启 / 关闭 | URL、Personal Access Token（`api`） |
+| Linear | `ENG-123`、URL | `Ref ENG-123 <URL>` | 工作流状态 | API 密钥 |
+| Jira | `ABC-123`、URL | `ABC-123 <URL>` | 转换（transition） | URL，以及 API 令牌和邮箱（Cloud）或 Personal Access Token（Data Center） |
+
+它会根据 Issue 的标题、正文和评论生成指示，每个 Issue 一张卡片。分支名类似 `agent/issue-21-…`。子 Issue 四个服务都支持，向 Issue 写回评论支持 GitLab、Linear 和 Jira。
+
+- **GitLab**：支持 gitlab.com 和自托管实例。如果 origin 属于已连接的 GitLab，就用 API 代替 `gh` 创建 MR，并检查合并、冲突和流水线结果
+- **Linear 和 Jira**：只处理 Issue。PR 和 MR 在仓库所在的托管服务上创建。Jira 支持 Cloud 和 Data Center
+- **Slack**：发送完成、失败和等待确认的通知。被允许的 Slack 用户可以在已配置的频道里通过提及或斜杠命令启动任务。默认情况下谁都不能启动。使用 Socket Mode，不需要开放端口，但只在应用打开时工作。批准和回答问题要在应用里进行
+
+设置方法：
+
+1. 在「设置」→「集成」中填入地址和令牌并保存。令牌用操作系统安全存储的密钥加密
+2. 在「设置」→「Issue 联动」中，为每个项目选择「使用的问题跟踪服务」
+3. 在「新任务」的 Issue 标签里填入编号或 URL
+
+Slack 应用的创建方法和各服务的详情见 [docs/integrations.md](docs/integrations.md) (English)。
 
 ![输入 Issue 编号，为每个 Issue 创建一张卡片](docs/images/zh/feature-issue.gif)
 
@@ -176,7 +197,7 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 
 ### 通知
 
-等待批准、提问、等待回答、等待评审和完成，会积在右上角的铃铛图标里，同时也会发出桌面通知。按下通知就会打开那个任务。
+等待批准、提问、等待回答、等待评审和完成，会积在右上角的铃铛图标里，同时也会发出桌面通知。按下通知就会打开那个任务。通知也可以发到 Slack（见上面的「外部服务集成」）。
 
 ![打开通知，前往需要你处理的卡片](docs/images/zh/feature-notifications.gif)
 
@@ -224,6 +245,7 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 - git
 - 要使用的智能体 CLI（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI 之一），并已登录
 - 使用 GitHub 的 Issue 和 PR 时需要 `gh`（也可以从应用里安装）
+- 连接 GitLab、Linear、Jira、Slack 时需要各自的令牌。保存令牌需要操作系统的安全存储（Linux 上是 GNOME Keyring、KWallet 等）。GitLab 仓库的 Issue 和 MR 不需要 `gh`
 
 ## 安装
 
@@ -255,6 +277,7 @@ irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 
 | [画面与用法](docs/usage.md) (English) | 各项功能的用法：批准、提问、规格确认、任务调度、技能、对话、btw、合并 / PR、Issue 状态、通知、冲突等 |
 | [智能体与编排](docs/agents.md) (English) | Claude Code / Codex / Antigravity / Gemini / Cursor 的差异，Pipeline 与竞争 |
 | [设置](docs/settings.md) (English) | 从顶栏菜单打开的设置画面和各个项目 |
+| [集成](docs/integrations.md) (English) | 设置 GitLab、Linear、Jira 和 Slack，以及能做和不能做的事 |
 | [远程操作](docs/remote.md) (English) | 通过 SSH 隧道从另一台电脑操作看板的步骤，以及连不上时的处理方法 |
 | [安装](docs/install.md) (English) | 安装、更新、卸载，以及在 Windows 上使用 WSL 仓库 |
 | [面向开发者](docs/development.md) (English) | 从源码运行、构建、发布、应用的结构，以及测试 |

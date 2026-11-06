@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const I18n = require('../renderer/i18n');
 const { tr } = I18n;
+const IssueRef = require('../renderer/issue-ref');
 
 const MAX_CHECKPOINTS = 100;
 const HANDOFF_LIMIT = 8000;
@@ -111,7 +112,7 @@ function blockReason(card, ctx) {
   // 読み取り専用は git のリポジトリでも noGit が立つ。worktree が無いので、その理由にする
   if (c.noGit && !c.readOnly) return tr('git で管理していないフォルダは戻せません');
   if (c.kind === 'chat' || !c.worktreePath || x.worktreeMissing) return tr('worktree がありません');
-  if (c.prUrl) return tr('PR があるので戻せません');
+  if (c.prUrl) return I18n.forHost(tr('PR があるので戻せません'), IssueRef.reviewHostOf(c.prUrl));
   if (x.parentMerged) return tr('親のタスクがこの枝をすでにマージしたので戻せません');
   return null;
 }

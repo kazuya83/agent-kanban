@@ -37,7 +37,7 @@ Aplicación de escritorio (Electron, Mac / Windows / Linux) que ejecuta en paral
 - **Varios repositorios a la vez** — abre hasta 3 repositorios en pestañas; cambiar de pestaña no detiene nada.
 - **Las CLI que ya usas** — Claude Code, Codex CLI, Antigravity CLI, Gemini CLI y Cursor CLI, con tu sesión y tu configuración actuales.
 - **Control remoto Mac ⇄ Windows** — ejecuta los agentes en un PC y maneja el mismo tablero desde el otro: aprueba, responde preguntas, envía instrucciones y fusiona.
-- **Todo en local** — el estado del tablero se queda en tu máquina. No hay un servidor externo.
+- **Todo en local** — el estado del tablero se queda en tu máquina. No hay un servidor externo. Con los servicios que conectes, tu máquina se comunica directamente.
 
 ## Cómo funciona
 
@@ -56,7 +56,7 @@ flowchart LR
 - **1 tarea = 1 worktree = 1 rama.** Crea un worktree en `<repo>.worktrees/<id>`, junto al repositorio, y trabaja en una rama `agent/<resumen>-<id>`. Las tareas no chocan entre sí ni con el árbol de trabajo que tienes abierto
 - **El agente es la CLI, arrancada tal cual.** Claude Code se ejecuta con `claude -p --input-format stream-json --output-format stream-json`, y su salida se muestra en la tarjeta como registro. El inicio de sesión, el modelo, `CLAUDE.md` y las skills son los mismos que usas en la terminal
 - **La aprobación pasa por `--permission-prompt-tool` de Claude Code.** Solo las acciones que el modo de permisos o `--allowedTools` no autoriza automáticamente aparecen en la tarjeta como espera de aprobación
-- **Al terminar, incorporas el trabajo con un merge (`--no-ff`) o creando un PR (`gh`).** Puedes elegir la rama de destino y, después del merge, hacer push a origin
+- **Al terminar, incorporas el trabajo con un merge (`--no-ff`) o creando un PR / MR (`gh` en GitHub, la API en GitLab).** Puedes elegir la rama de destino y, después del merge, hacer push a origin
 - El estado del tablero se guarda en `board.json`, en la carpeta userData de Electron. No hay un servidor externo
 
 En Codex / Antigravity / Gemini / Cursor, por los límites de la CLI, no están disponibles la aprobación en la tarjeta, las preguntas de opción múltiple, btw ni el coste (más detalles en [docs/agents.md](docs/agents.md) (English)).
@@ -89,7 +89,7 @@ Escribe el flujo que quieres en lenguaje natural, por ejemplo «implementar con 
 Los detalles están en [docs/agents.md](docs/agents.md) (English).
 
 ### Subtareas
-Cuando una tarea es grande, el agente puede proponer dividirla en subtareas. Salen de la rama padre, avanzan en paralelo o en orden y se fusionan a medida que terminan.
+Cuando una tarea es grande, el agente puede proponer dividirla en subtareas. Salen de la rama padre, avanzan en paralelo o en orden y se fusionan a medida que terminan. También se puede iniciar una sola subtarea, y se admiten los sub-issues de GitHub, GitLab, Linear y Jira.
 
 ![Aceptar la propuesta de dividir una tarea y ver cómo las subtareas avanzan y se fusionan](docs/images/es/feature-subtasks.gif)
 
@@ -120,9 +120,30 @@ Cuando una acción necesita permiso, puedes leer el comando y la entrada complet
 
 </details>
 
-### Crear tareas desde GitHub Issues
+### Integraciones (GitHub, GitLab, Linear, Jira, Slack)
 
-En la pestaña «Crear desde un GitHub Issue» de «Nueva tarea», escribe números (`21, 22, 24`, etc.). Construye las instrucciones a partir del título, el cuerpo y los comentarios del Issue, y crea una tarjeta por Issue. La rama se llama `agent/issue-21-…`, y el cuerpo del PR incluye `Closes #21`. Usa `gh`.
+Crea tareas desde Issues y mantén su estado sincronizado. También puedes publicar notificaciones en Slack e iniciar tareas desde Slack.
+
+| Servicio | Entrada para la tarea | Cuerpo del PR / MR | Sincronización de estado | Qué necesitas para conectar |
+| --- | --- | --- | --- | --- |
+| GitHub | `21, 22, 24` | `Closes #21` | Status de GitHub Projects | `gh` |
+| GitLab | `12`, `group/project#12`, URL | `Closes #12` | Etiquetas y abierto / cerrado | URL, Personal Access Token (`api`) |
+| Linear | `ENG-123`, URL | `Ref ENG-123 <URL>` | Estado del flujo de trabajo | Clave de API |
+| Jira | `ABC-123`, URL | `ABC-123 <URL>` | Transición | URL, y un token de API con correo (Cloud) o un Personal Access Token (Data Center) |
+
+Construye las instrucciones a partir del título, el cuerpo y los comentarios del Issue, y crea una tarjeta por Issue. Las ramas se llaman como `agent/issue-21-…`. Los sub-issues funcionan con los cuatro servicios, y los comentarios de vuelta en el Issue, con GitLab, Linear y Jira.
+
+- **GitLab**: funciona con gitlab.com y con instalaciones propias. Si origin pertenece al GitLab conectado, usa la API en lugar de `gh` para crear MR y comprobar fusiones, conflictos y resultados de pipeline
+- **Linear y Jira**: solo gestionan issues. Los PR y MR se crean en el host del repositorio. Jira funciona con Cloud y Data Center
+- **Slack**: publica finalizaciones, fallos y lo que espera tu confirmación. Los usuarios de Slack permitidos pueden iniciar una tarea con una mención o un comando de barra en un canal configurado. De entrada, nadie puede iniciar tareas. Usa Socket Mode, así que no abre puertos, pero solo funciona con la aplicación abierta. Las aprobaciones y las respuestas a preguntas se hacen en la aplicación
+
+Cómo configurarlo:
+
+1. En «Ajustes» → «Integraciones», escribe la dirección y el token, y guarda. Los tokens se cifran con una clave del almacén seguro del sistema operativo
+2. En «Ajustes» → «Enlace con Issues», elige «Gestor de issues que se usa» para cada proyecto
+3. Escribe números o URL en la pestaña de Issue de «Nueva tarea»
+
+Cómo crear la aplicación de Slack y los detalles de cada servicio están en [docs/integrations.md](docs/integrations.md) (English).
 
 ![Introducir números de Issue para crear una tarjeta por Issue](docs/images/es/feature-issue.gif)
 
@@ -176,7 +197,7 @@ En «Conversación» puedes preguntar al agente sobre el repositorio sin crear u
 
 ### Notificaciones
 
-La espera de aprobación, las preguntas, la espera de respuesta, la espera de revisión y la finalización se acumulan en el icono de la campana, arriba a la derecha, y también sale una notificación de escritorio. Al pulsar una notificación se abre esa tarea.
+La espera de aprobación, las preguntas, la espera de respuesta, la espera de revisión y la finalización se acumulan en el icono de la campana, arriba a la derecha, y también sale una notificación de escritorio. Al pulsar una notificación se abre esa tarea. También pueden ir a Slack (consulta «Integraciones» más arriba).
 
 ![Abrir una notificación para ir a la tarjeta que te necesita](docs/images/es/feature-notifications.gif)
 
@@ -224,6 +245,7 @@ Desde el menú de la barra superior, cambia a «Programador de tareas» para ges
 - git
 - La CLI del agente que uses (una de Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI), con la sesión ya iniciada
 - `gh`, si usas Issues y PRs de GitHub (también se puede instalar desde la aplicación)
+- Un token por cada servicio que conectes (GitLab, Linear, Jira, Slack). Para guardarlos hace falta el almacén seguro del sistema operativo (en Linux, GNOME Keyring, KWallet o similar). Los Issues y MR de un repositorio de GitLab no necesitan `gh`
 
 ## Instalación
 
@@ -255,6 +277,7 @@ Los mismos comandos actualizan a la última versión. También se puede actualiz
 | [Pantalla y uso](docs/usage.md) (English) | Uso de cada función: aprobación, preguntas, comprobación de la especificación, programador de tareas, skills, conversación, btw, merge / PR, estado de los Issues, notificaciones, conflictos y más |
 | [Agentes y orquestación](docs/agents.md) (English) | Diferencias entre Claude Code / Codex / Antigravity / Gemini / Cursor, Pipeline y competición |
 | [Ajustes](docs/settings.md) (English) | La pantalla de ajustes que se abre desde el menú de la barra superior, y sus apartados |
+| [Integraciones](docs/integrations.md) (English) | Configurar GitLab, Linear, Jira y Slack, y qué pueden y no pueden hacer |
 | [Control remoto](docs/remote.md) (English) | Cómo manejar el tablero desde otro PC por un túnel SSH, y cómo arreglar una conexión que falla |
 | [Instalación](docs/install.md) (English) | Instalación, actualización, desinstalación y uso de un repositorio de WSL en Windows |
 | [Para desarrolladores](docs/development.md) (English) | Ejecutar desde el código, compilar, publicar, cómo está hecha la aplicación y las pruebas |

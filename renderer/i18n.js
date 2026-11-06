@@ -35,6 +35,12 @@
     const s = (current !== 'ja' && table[key] && table[key][current]) || key;
     return vars ? s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : s;
   }
+  // PR・GitHub の文言を、コードのホストに合わせて読み替える。tr() の結果（{…} を埋める前）を渡す。
+  // 埋めたあとに置き換えると、タスクの題名や URL の中の PR まで変わってしまう
+  function forHost(template, host, vars) {
+    const s = host === 'gitlab' ? String(template).replace(/\bPR\b/g, 'MR').replace(/\bGitHub\b/g, 'GitLab') : String(template);
+    return vars ? s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : s;
+  }
   // 固定の HTML（index.html）の文字と title などを、原文から訳へ置き換える
   function localizeDom(doc) {
     const walk = doc.createTreeWalker(doc.body, 4);
@@ -46,5 +52,5 @@
       for (const a of ['title', 'aria-label', 'placeholder']) if (el.hasAttribute(a)) el.setAttribute(a, tr(el.getAttribute(a)));
     });
   }
-  return { LANGUAGES, DEFAULT_LANGUAGE, LEGACY_LANGUAGE, isLanguage, setLanguage, getLanguage, locale, add, has, tr, localizeDom };
+  return { LANGUAGES, DEFAULT_LANGUAGE, LEGACY_LANGUAGE, isLanguage, setLanguage, getLanguage, locale, add, has, tr, forHost, localizeDom };
 });

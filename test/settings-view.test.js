@@ -15,7 +15,7 @@ function fnSource(name) {
   return m[0];
 }
 
-const SECTIONS = ['general', 'update', 'branch', 'issue', 'permission', 'task', 'agents', 'custom', 'orchestration'];
+const SECTIONS = ['general', 'update', 'integrations', 'branch', 'issue', 'permission', 'task', 'agents', 'custom', 'orchestration'];
 
 test('上部の設定ボタンとモーダルへの依存が残っていない', () => {
   assert.doesNotMatch(src, /settingsBtn/);
@@ -24,7 +24,7 @@ test('上部の設定ボタンとモーダルへの依存が残っていない',
   }
 });
 
-test('設定画面に9つの節の中身があり、入力欄の ID は1つずつ', () => {
+test('設定画面に10の節の中身があり、入力欄の ID は1つずつ', () => {
   const body = fnSource('renderSettingsView');
   const block = body.slice(body.indexOf('const sections = {'), body.indexOf('// 描き直しても'));
   assert.deepStrictEqual([...block.matchAll(/^ {4}(\w+): `/gm)].map((m) => m[1]), SECTIONS);
@@ -42,7 +42,7 @@ test('節の分け方: 欄が決めた節にある', () => {
   const block = body.slice(body.indexOf('const sections = {'), body.indexOf('// 描き直しても'));
   const parts = block.split(/^ {4}(?=\w+: `)/m).slice(1);
   const of = (id) => parts.find((p) => p.includes(`id="${id}"`))?.split(':')[0];
-  const want = { sMax: 'general', updPanel: 'update', sBase: 'branch', sBranchRule: 'branch', sSetupScript: 'branch', sTeardownScript: 'branch', sRunScript: 'branch', sIssueSync: 'issue', ghPanel: 'issue', sMode: 'permission', sAllowed: 'permission', sSkill: 'task', sSubtaskMerge: 'task', sDefaultAgent: 'agents', sClaude: 'agents', sCustomList: 'custom', sRelayList: 'orchestration', sCompeteBox: 'orchestration' };
+  const want = { sMax: 'general', updPanel: 'update', sBase: 'branch', sBranchRule: 'branch', sSetupScript: 'branch', sTeardownScript: 'branch', sRunScript: 'branch', sIssueSync: 'issue', sIssueComments: 'issue', ghPanel: 'issue', sMode: 'permission', sAllowed: 'permission', sSkill: 'task', sSubtaskMerge: 'task', sDefaultAgent: 'agents', sClaude: 'agents', sCustomList: 'custom', sRelayList: 'orchestration', sCompeteBox: 'orchestration' };
   for (const [id, section] of Object.entries(want)) assert.strictEqual(of(id), section, id);
   assert.doesNotMatch(block, /class="s-section/, '節の見出しに置き換えた');
 });

@@ -164,7 +164,7 @@ test('gh: 未ログイン → ログイン（確認コードを受け取る）�
     assert.strictEqual(r.cards.length, 2);
     const [c12] = r.cards;
     assert.strictEqual(c12.title, '#12 ログインできない 12');
-    assert.deepStrictEqual(c12.issue, { number: 12, title: 'ログインできない 12', url: 'https://github.com/acme/app/issues/12' });
+    assert.deepStrictEqual(c12.issue, { provider: 'github', key: '#12', number: 12, title: 'ログインできない 12', url: 'https://github.com/acme/app/issues/12' });
     assert.match(c12.prompt, /Safari でも起きます/);
     assert.match(c12.prompt, /小さく直して/);
     assert.ok(r.errors.some((e) => /#9 はクローズ済み/.test(e)));

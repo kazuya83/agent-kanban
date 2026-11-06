@@ -6,6 +6,7 @@ const { execFile } = require('child_process');
 const { git } = require('./git');
 const { resolveCommand } = require('./env');
 const { tr } = require('../renderer/i18n');
+const { buildIssuePrompt } = require('./trackers/prompt');
 
 function execFileP(cmd, args, opts) {
   return new Promise((resolve, reject) => {
@@ -170,37 +171,6 @@ async function listIssues(repoPath, { labels = [], author = '' } = {}) {
 async function fetchIssue(repoPath, number, opts = {}) {
   const slug = await repoSlug(repoPath);
   return viaGhOrApi(async (gh) => ({ ...(await viaGh(gh, repoPath, slug, number)), slug }), async (token) => ({ ...(await viaApi(slug, number, token)), slug }));
-}
-
-function clip(s, n) {
-  s = String(s || '').trim();
-  return s.length > n ? `${s.slice(0, n)}\n…（長いので省略）` : s;
-}
-
-// Issue からエージェントへの指示を作る
-function buildIssuePrompt(issue, extra) {
-  const lines = [
-    `GitHub の Issue #${issue.number} を解決してください。`,
-    '',
-    `タイトル: ${issue.title}`,
-    `URL: ${issue.url}`,
-  ];
-  if (issue.labels && issue.labels.length) lines.push(`ラベル: ${issue.labels.join(', ')}`);
-  lines.push('', '## 本文', clip(issue.body, 20000) || '（本文なし）');
-  const comments = (issue.comments || []).slice(-20);
-  if (comments.length) {
-    lines.push('', '## コメント');
-    for (const c of comments) lines.push('', `### @${c.author}`, clip(c.body, 3000));
-  }
-  if (extra && extra.trim()) lines.push('', '## 追加の指示', extra.trim());
-  lines.push(
-    '',
-    '## 進め方',
-    '- まずリポジトリのコードを読んで、Issue の内容と原因を理解してください',
-    '- 必要な変更を行い、テストがあれば実行して確かめてください',
-    '- 最後に、何をどう変えたかを短くまとめてください',
-  );
-  return lines.join('\n');
 }
 
 // ---------- GitHub Projects のステータス ----------
@@ -411,9 +381,19 @@ async function createSubIssue(repoPath, parentNumber, { title, body }) {
   return { number: issue.number, title: issue.title || title, url: issue.html_url || '' };
 }
 
+// Issue にコメントを書く（gh が必要）
+async function addComment(repoPath, number, body) {
+  const gh = resolveCommand('gh');
+  if (!gh) throw new Error(tr('コメントを書くには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます'));
+  const slug = await repoSlug(repoPath);
+  const out = await execFileP(gh, ['issue', 'comment', String(Number(number)), '--repo', `${slug.owner}/${slug.repo}`, '--body', String(body || '')], { cwd: repoPath, timeout: 30000 });
+  return { url: String(out || '').trim() };
+}
+
 module.exports = {
   fetchSubIssues,
   createSubIssue,
+  addComment,
   parseGithubRemote,
   parseIssueNumbers,
   repoSlug,

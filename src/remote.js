@@ -127,6 +127,11 @@ const PROXY_CHANNELS = new Set([
   'chat:create',
   'card:createFromIssues',
   'repo:github',
+  // 連携の設定はホストの分（Issue を読むのはホスト）。ホストのトークンの値はどのチャンネルでも返さない
+  'trackers:list',
+  'trackers:save',
+  'trackers:remove',
+  'trackers:test',
   'gh:status',
   'gh:install',
   'gh:login',
@@ -670,6 +675,8 @@ function publicConnectionHistory(list) {
 // 古い版のホストは知らない設定を黙って捨てるので、返ってきた設定に無い項目を探す
 function settingLabel(k) {
   if (k === 'customAgents') return tr('カスタムエージェント');
+  if (k === 'issueProvider') return tr('使う課題管理サービス');
+  if (k === 'issueComments') return tr('タスクの開始・PR の作成・完了を Issue にコメントする');
   if (k === 'relayFlow') return tr('Pipelineのフローチャート');
   if (k === 'relayFlows') return tr('Pipelineの一覧');
   if (k === 'relayFlowId') return tr('既定のPipeline');

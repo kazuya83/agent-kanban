@@ -37,7 +37,7 @@ Application de bureau (Electron, Mac / Windows / Linux) qui lance en parallèle 
 - **Plusieurs dépôts à la fois** — ouvrez jusqu'à 3 dépôts en onglets ; changer d'onglet n'arrête rien.
 - **Les CLI que vous utilisez déjà** — Claude Code, Codex CLI, Antigravity CLI, Gemini CLI et Cursor CLI, avec votre connexion et vos réglages actuels.
 - **Contrôle à distance Mac ⇄ Windows** — faites tourner les agents sur un PC et pilotez le même tableau depuis l'autre : approuvez, répondez aux questions, envoyez des instructions et fusionnez.
-- **Tout en local** — l'état du tableau reste sur votre machine. Il n'y a pas de serveur externe.
+- **Tout en local** — l'état du tableau reste sur votre machine. Il n'y a pas de serveur externe. Votre machine communique directement avec les services que vous connectez.
 
 ## Fonctionnement
 
@@ -56,7 +56,7 @@ flowchart LR
 - **1 tâche = 1 worktree = 1 branche.** Elle crée un worktree dans `<repo>.worktrees/<id>`, à côté du dépôt, et travaille sur une branche `agent/<résumé>-<id>`. Les tâches ne se gênent pas entre elles, ni avec l'arbre de travail que vous avez ouvert
 - **L'agent est la CLI, lancée telle quelle.** Claude Code s'exécute avec `claude -p --input-format stream-json --output-format stream-json`, et sa sortie s'affiche sur la carte comme journal. La connexion, le modèle, `CLAUDE.md` et les skills sont ceux que vous utilisez dans le terminal
 - **L'approbation passe par `--permission-prompt-tool` de Claude Code.** Seules les actions que le mode de permission ou `--allowedTools` n'autorise pas tout seul apparaissent sur la carte comme attente d'approbation
-- **Une fois terminé, vous intégrez le travail par un merge (`--no-ff`) ou en ouvrant un PR (`gh`).** Vous choisissez la branche cible, et vous pouvez pousser vers origin après le merge
+- **Une fois terminé, vous intégrez le travail par un merge (`--no-ff`) ou en ouvrant une PR / MR (`gh` pour GitHub, l'API pour GitLab).** Vous choisissez la branche cible, et vous pouvez pousser vers origin après le merge
 - L'état du tableau est enregistré dans `board.json`, dans le dossier userData d'Electron. Il n'y a pas de serveur externe
 
 Avec Codex / Antigravity / Gemini / Cursor, à cause des limites de la CLI, l'approbation sur la carte, les questions à choix, btw et l'affichage du coût ne sont pas disponibles (détails dans [docs/agents.md](docs/agents.md) (English)).
@@ -89,7 +89,7 @@ La procédure, et comment réparer une connexion qui échoue, se trouve dans [do
 Les détails sont dans [docs/agents.md](docs/agents.md) (English).
 
 ### Sous-tâches
-Quand une tâche est grande, l’agent peut proposer de la découper en sous-tâches. Elles partent de la branche parente, avancent en parallèle ou dans l’ordre, et y sont fusionnées une fois terminées.
+Quand une tâche est grande, l’agent peut proposer de la découper en sous-tâches. Elles partent de la branche parente, avancent en parallèle ou dans l’ordre, et y sont fusionnées une fois terminées. Une seule sous-tâche peut aussi être démarrée, et les sous-issues GitHub, GitLab, Linear et Jira sont prises en charge.
 
 ![Accepter la proposition de découpage, puis voir les sous-tâches avancer et être fusionnées](docs/images/fr/feature-subtasks.gif)
 
@@ -120,9 +120,30 @@ Quand une action a besoin d'une permission, vous lisez la commande et l'entrée 
 
 </details>
 
-### Créer des tâches depuis des GitHub Issues
+### Intégrations (GitHub, GitLab, Linear, Jira, Slack)
 
-Dans l'onglet « Créer depuis une GitHub Issue » de « Nouvelle tâche », saisissez des numéros (`21, 22, 24`, etc.). Les instructions sont construites à partir du titre, du corps et des commentaires de l'Issue, et une carte est créée par Issue. La branche s'appelle `agent/issue-21-…`, et le corps du PR contient `Closes #21`. Cela utilise `gh`.
+Créez des tâches depuis des Issues et gardez leur statut synchronisé. Vous pouvez aussi publier des notifications dans Slack et lancer des tâches depuis Slack.
+
+| Service | Saisie pour la tâche | Corps de la PR / MR | Synchronisation du statut | Ce qu'il faut pour se connecter |
+| --- | --- | --- | --- | --- |
+| GitHub | `21, 22, 24` | `Closes #21` | Status de GitHub Projects | `gh` |
+| GitLab | `12`, `group/project#12`, URL | `Closes #12` | Labels et ouvert / fermé | URL, Personal Access Token (`api`) |
+| Linear | `ENG-123`, URL | `Ref ENG-123 <URL>` | État du workflow | Clé d'API |
+| Jira | `ABC-123`, URL | `ABC-123 <URL>` | Transition | URL, et un jeton d'API avec e-mail (Cloud) ou un Personal Access Token (Data Center) |
+
+Les instructions sont construites à partir du titre, du corps et des commentaires de l'Issue, et une carte est créée par Issue. Les branches s'appellent par exemple `agent/issue-21-…`. Les sous-issues fonctionnent avec les quatre services, et les commentaires renvoyés sur l'Issue avec GitLab, Linear et Jira.
+
+- **GitLab** : fonctionne avec gitlab.com et les instances auto-hébergées. Si origin appartient au GitLab connecté, l'application utilise l'API au lieu de `gh` pour créer les MR et vérifier les fusions, les conflits et les résultats de pipeline
+- **Linear et Jira** : ils ne gèrent que les issues. Les PR et MR sont créées sur l'hébergeur du dépôt. Jira fonctionne avec Cloud et Data Center
+- **Slack** : publie les fins de tâche, les échecs et ce qui attend votre confirmation. Les utilisateurs Slack autorisés peuvent lancer une tâche par une mention ou une commande slash dans un canal configuré. Par défaut, personne ne peut en lancer. Socket Mode évite d'ouvrir un port, mais cela ne fonctionne que pendant que l'application est ouverte. Les approbations et les réponses aux questions se font dans l'application
+
+Pour configurer :
+
+1. Dans « Réglages » → « Intégrations », saisissez l'adresse et le jeton, puis enregistrez. Les jetons sont chiffrés avec une clé du stockage sécurisé du système
+2. Dans « Réglages » → « Lien avec les Issues », choisissez « Gestionnaire d’issues à utiliser » pour chaque projet
+3. Saisissez des numéros ou des URL dans l'onglet Issue de « Nouvelle tâche »
+
+La création de l'application Slack et les détails de chaque service sont dans [docs/integrations.md](docs/integrations.md) (English).
 
 ![Saisir des numéros d’Issue pour créer une carte par Issue](docs/images/fr/feature-issue.gif)
 
@@ -176,7 +197,7 @@ Dans « Conversation », vous pouvez interroger l'agent sur le dépôt sans cré
 
 ### Notifications
 
-L'attente d'approbation, les questions, l'attente d'une réponse, l'attente de revue et la fin de tâche s'accumulent sur l'icône de cloche en haut à droite, et une notification de bureau s'affiche aussi. Un clic sur une notification ouvre cette tâche.
+L'attente d'approbation, les questions, l'attente d'une réponse, l'attente de revue et la fin de tâche s'accumulent sur l'icône de cloche en haut à droite, et une notification de bureau s'affiche aussi. Un clic sur une notification ouvre cette tâche. Elles peuvent aussi aller dans Slack (voir « Intégrations » plus haut).
 
 ![Ouvrir une notification pour aller à la carte qui vous attend](docs/images/fr/feature-notifications.gif)
 
@@ -224,6 +245,7 @@ Depuis le menu de la barre du haut, passez au « Planificateur de tâches » pou
 - git
 - La CLI de l'agent que vous utilisez (l'un de Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI), déjà connectée
 - `gh`, si vous utilisez les Issues et les PR GitHub (vous pouvez aussi l'installer depuis l'application)
+- Un jeton pour chaque service connecté (GitLab, Linear, Jira, Slack). Pour les enregistrer, il faut le stockage sécurisé du système (sous Linux, GNOME Keyring, KWallet ou équivalent). Les Issues et MR d'un dépôt GitLab n'ont pas besoin de `gh`
 
 ## Installation
 
@@ -255,6 +277,7 @@ Les mêmes commandes mettent à jour vers la dernière version. Vous pouvez auss
 | [Écran et utilisation](docs/usage.md) (English) | Utilisation de chaque fonction : approbation, questions, vérification de la spécification, planificateur de tâches, skills, conversation, btw, merge / PR, état des Issues, notifications, conflits, et le reste |
 | [Agents et orchestration](docs/agents.md) (English) | Différences entre Claude Code / Codex / Antigravity / Gemini / Cursor, Pipeline et compétition |
 | [Réglages](docs/settings.md) (English) | L'écran des réglages ouvert depuis le menu de la barre du haut, et ses rubriques |
+| [Intégrations](docs/integrations.md) (English) | Configurer GitLab, Linear, Jira et Slack, et ce qu'ils peuvent ou non faire |
 | [Contrôle à distance](docs/remote.md) (English) | Comment piloter le tableau depuis un autre PC par un tunnel SSH, et comment réparer une connexion qui échoue |
 | [Installation](docs/install.md) (English) | Installation, mise à jour, désinstallation, et utilisation d'un dépôt WSL sous Windows |
 | [Pour les développeurs](docs/development.md) (English) | Lancer depuis les sources, compiler, publier, comment l'application est faite, et les tests |

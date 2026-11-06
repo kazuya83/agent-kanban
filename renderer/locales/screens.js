@@ -1085,11 +1085,11 @@
     "fr": "Créer en langage naturel",
     "zh": "用自然语言创建"
   },
-  "GitHub Issue から作成": {
-    "en": "Create from a GitHub Issue",
-    "es": "Crear desde un Issue de GitHub",
-    "fr": "Créer depuis un Issue GitHub",
-    "zh": "从 GitHub Issue 创建"
+  "{label} Issue から作成": {
+    "en": "Create from a {label} Issue",
+    "es": "Crear desde un Issue de {label}",
+    "fr": "Créer depuis un Issue {label}",
+    "zh": "从 {label} Issue 创建"
   },
   "タスクを作らずに、このリポジトリについてエージェントと話した会話です。選ぶと開きます。": {
     "en": "Conversations about this repository with an agent, without creating a task. Choose one to open it.",

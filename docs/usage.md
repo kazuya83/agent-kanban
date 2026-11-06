@@ -168,9 +168,9 @@ A large task can be split into several subtasks that separate agents work on in 
   - Review → Done: one already merged in becomes done. One not yet merged in is marked done without merging (that subtask's worktree and branch are removed)
   - Done or merged in → Not started: redo it (changes merged earlier stay on the parent branch) / Done → Review: bring back a merged one
   - A subtask that is working cannot be moved, and none can be moved while the parent is running
-- **Proposals from the agent**: during the spec check (above), if the agent decides a task is large enough to split, the card becomes "**Subtask proposal**". At the end of the "Chat" tab, edit the subtasks' names and instructions, then choose to use subtasks or to continue without splitting. A task created from an Issue can also choose to create sub-issues on GitHub under the parent Issue (after a confirmation)
+- **Proposals from the agent**: during the spec check (above), if the agent decides a task is large enough to split, the card becomes "**Subtask proposal**". At the end of the "Chat" tab, edit the subtasks' names and instructions, then choose to use subtasks or to continue without splitting. A task created from an Issue can also choose to create sub-issues under the parent Issue in its service (after a confirmation)
 - **Decide by hand**: on the "Progress" tab of a task that has not started, add subtasks with "Edit subtasks". After that, edit them on the "Subtasks" tab (the agent decides the order when the task starts)
-- **GitHub sub-issues**: when you create a task from an Issue that has open sub-issues, each becomes a subtask. The PR body includes the parent Issue and `Closes #…` for the merged sub-issues
+- **Sub-issues**: when you create a task from an Issue that has open sub-issues, each becomes a subtask. The PR or MR body includes a line for the parent Issue and for each merged sub-issue (`Closes #…` on GitHub). This works with GitHub, GitLab, Linear, and Jira ([integrations.md](integrations.md))
 - **How to merge**: before starting (in the subtask editor or the proposal form), choose "Merge into the parent branch automatically" or "Merge after I check it". If you choose to check, a finished subtask becomes "Waiting for review", so look at the diff and press "Merge in". The default can be changed under "Task defaults" in Settings
 - **Conflicts**: if subtasks' changes collide, the parent agent resolves them automatically and moves on (if it cannot, ask again from the "Conflict" area or fix it yourself, as with an ordinary conflict)
 - **Progress**: only the parent card appears on the board, showing something like "Subtasks 2/4 done" and a bar divided by the number of subtasks. While subtasks are running, the parent appears in the "Running" column. The "Progress" tab in the detail panel shows overall progress (the share done; the numbers done, working, and not started; the subtasks running now; and the cost of the parent and subtasks combined). A task with subtasks gets a "Subtasks" tab showing each subtask's state, assignee, cost, and the report for merged ones. Click a card on the "Subtasks" tab to open that subtask's details in a modal. A running subtask (Working or Review) shows the same contents as a task's detail panel (chat, log, diff, progress and TODO, answering questions, follow-up instructions), and closing it returns you to the parent's "Subtasks" tab. A subtask that has not started or has finished shows what to do, the report, and whether it was merged (one not started can also be started from there, and "Edit" changes its name and contents; the subtask then runs with those contents)
@@ -193,8 +193,8 @@ The input boxes for "New task" and "Conversation" (both when starting and for la
 - Files attached from a remote control client are sent to the host and saved there
 - The names of attached images and files appear in the log under your instruction. For a task that has not started, they also appear in the editor on the "Progress" tab. Discarding a task also deletes its attachments
 
-## Create from a GitHub Issue
-Press "+ New task", choose "Create from a GitHub Issue" in the tabs at the top, and choose an Issue number and a conversation (session). If you enter several numbers, each becomes a card and they run in parallel.
+## Create from an Issue
+Press "+ New task", choose "Create from a GitHub Issue" in the tabs at the top, and choose an Issue number and a conversation (session). If you enter several numbers, each becomes a card and they run in parallel. The tab shows the service chosen under "Issue sync" (for GitLab, Linear, and Jira, see [integrations.md](integrations.md)).
 
 ## Resolve conflicts
 When a merge conflicts, you can ask the agent to resolve it or fix it yourself. If the merge target moves on after a PR is created and the PR conflicts, you can resolve it the same way in the app and update the PR.
@@ -275,12 +275,12 @@ Press "Merge…" to choose the target branch. You can also create a new branch, 
 ![Dialog for choosing the merge target branch](images/en/merge-dialog.png)
 
 ## Choose a direct merge or a PR
-Under "How to land after review" in Settings, choose per project between **Create a PR** (push to origin and `gh pr create`; the default) and **Merge directly** (local `git merge`). A project opened for the first time starts with "Create a PR" (repositories with no origin or not on GitHub, and folders not managed by git, start with "Merge directly"). With PRs, the button on a card in review becomes "Create PR…", where you set the base branch, title, and body (a task created from an Issue gets `Closes #number`). If you press it again after changes from a follow-up instruction, it pushes to the same PR and updates it. Creating a PR requires gh to be installed and signed in.
+Under "How to land after review" in Settings, choose per project between **Create a PR** (push to origin and `gh pr create`; the default) and **Merge directly** (local `git merge`). A project opened for the first time starts with "Create a PR" (repositories with no origin or not on GitHub or a connected GitLab, and folders not managed by git, start with "Merge directly"). With PRs, the button on a card in review becomes "Create PR…", where you set the base branch, title, and body (a task created from an Issue gets `Closes #number`). If you press it again after changes from a follow-up instruction, it pushes to the same PR and updates it. Creating a PR requires gh to be installed and signed in. If origin belongs to a connected GitLab, the app creates an MR with the API instead of `gh` ([integrations.md](integrations.md#gitlab)).
 
 The app checks the state of created PRs on GitHub every minute. **When a PR is merged, the task becomes "Done" automatically** (the worktree and local branch are also cleaned up). However, if the worktree has changes not in the PR (uncommitted changes or unpushed commits), nothing is removed and the task stays in review.
 
 ## Update Issue status automatically
-A task created from an Issue automatically changes the **Status in GitHub Projects** for that Issue to match the card's column.
+A task created from an Issue automatically changes the **Status in GitHub Projects** for that Issue to match the card's column. Issues in GitLab, Linear, and Jira follow the same columns, though what changes differs by service ([integrations.md](integrations.md)). The rest of this section is about GitHub.
 
 | Card | Status |
 | --- | --- |
@@ -296,7 +296,7 @@ A task created from an Issue automatically changes the **Status in GitHub Projec
 
 ## Notifications (🔔 at the top right)
 
-Events such as waiting for approval, questions, waiting for an answer, waiting for review, failures, and completions collect in the bell at the top right (desktop notifications also appear). The bell shows the unread count, and pressing a notification opens that task's detail panel. "Mark all read" and "Clear all" are available too.
+Events such as waiting for approval, questions, waiting for an answer, waiting for review, failures, and completions collect in the bell at the top right (desktop notifications also appear). The bell shows the unread count, and pressing a notification opens that task's detail panel. "Mark all read" and "Clear all" are available too. Completions, failures, and items waiting for you can also be posted to Slack ([integrations.md](integrations.md#slack)).
 
 ## Keep talking after a task is done, and get skill suggestions
 You can send a message from the box below to a task that is "Done" after a merge (or PR creation) and talk about it (questions, lookups, advice, and so on). The task **stays Done**: it does not go back to the Review column and no merge button appears. Without recreating the worktree, the agent answers in the repository folder in **plan mode**, which does not change files (a new conversation starts with the task's instructions and exchange passed to it, and later messages continue that conversation).
@@ -316,6 +316,7 @@ When a task enters "Done", if there are **tasks with similar work** among earlie
   - The same screen also lets you choose a conversation (session) and additional instructions
   - Issues are read with **gh (GitHub CLI)**. If gh is not installed, you can install it with "Install gh" on the same screen (Homebrew on Mac, winget on Windows). If you are not signed in, press "Sign in to GitHub"; a browser opens and shows a verification code, which is all you need to enter
   - Public repositories can be read without gh
+  - Issues in GitLab, Linear, and Jira work the same way. Choose the service under "Issue sync". They are read with the token you entered under "Integrations", not with `gh` ([integrations.md](integrations.md))
 - **Answer questions from the agent**:
   - When a multiple-choice question arrives (AskUserQuestion on Claude Code), the card turns purple with "Question" and an answer form appears. Single-choice questions use radio buttons and multiple-choice ones use checkboxes, and both have a free-text "Other". A single question can be answered by pressing a button on the board's card. "Continue without answering" lets Claude proceed in a reasonable way
   - When Claude ends its reply with a question in text, the card becomes "Waiting for an answer" and the question appears in the detail panel. Write your answer in the box below and it continues the same conversation

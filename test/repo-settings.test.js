@@ -15,7 +15,7 @@ test('取り込み方の初期値は「PR を作成」', () => {
 });
 
 test('リポジトリに関わる設定だけをプロジェクトごとに持つ', () => {
-  for (const k of ['baseBranch', 'integration', 'branchNamingRule', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck']) assert.ok(REPO_SETTING_KEYS.includes(k), k);
+  for (const k of ['baseBranch', 'integration', 'branchNamingRule', 'issueComments', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck']) assert.ok(REPO_SETTING_KEYS.includes(k), k);
   for (const k of ['claudePath', 'model', 'maxParallel', 'autoUpdate', 'enabledAgents', 'weeklyResetDay', 'deleteSessionsOnMerge']) assert.ok(!REPO_SETTING_KEYS.includes(k), k);
 });
 
