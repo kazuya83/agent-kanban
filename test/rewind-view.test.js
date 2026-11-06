@@ -653,6 +653,8 @@ test('工程と履歴と、ログの読み直しが画面に繋がっている',
   assert.doesNotMatch(fnSource('select'), /\brun\s*\(/);
   const onBoard = src.slice(src.indexOf('api.onBoard'));
   assert.match(onBoard, /ensureLogsFresh\(c\)/);
+  const onLog = src.slice(src.indexOf('api.onLog'), src.indexOf('api.onFocus'));
+  assert.match(onLog, /state\.logsVersion\.get\(id\) !== current\.logsVersion/);
   assert.match(fnSource('afterLogsReloaded'), /state\.tab === 'log' \|\| state\.tab === 'chat'/);
   assert.match(fnSource('afterLogsReloaded'), /scheduleProgress\(\)/);
   assert.match(css, /\.pg-rewind/);

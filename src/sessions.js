@@ -273,6 +273,14 @@ function discardSideAfter(jsonlFile, id, size) {
 // 条件に合わなければ何もせず false（行の途中・小さすぎる・ID が不正）
 // 切り詰めるときは、その時点よりあとの付属フォルダの記録も捨てる
 function truncateSession(id, size, opts = {}) {
+  try {
+    return truncateSessionAt(id, size, opts);
+  } catch {
+    return false;
+  }
+}
+
+function truncateSessionAt(id, size, opts = {}) {
   if (!isValidId(id)) return false;
   if (!Number.isInteger(size) || size <= 0) return false;
   const files = sessionFiles(id, opts);

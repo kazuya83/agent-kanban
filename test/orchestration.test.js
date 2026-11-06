@@ -607,7 +607,12 @@ test('チェックポイント: 2回動かして1回目の前へ戻すと、あ�
   assert.strictEqual(show, 'hand\n', '起動前の手直しは、その回のチェックポイントに入る');
   const first = c.checkpoints[0];
   const spent = c.costUsd;
+  c.lastMessage = '捨てる返事';
+  c.rewindPrompt = '画面に出さない指示';
+  assert.strictEqual(agents.publicCards().find((x) => x.id === c.id).rewindPrompt, undefined);
+  delete c.rewindPrompt;
   await agents.rewind(c.id, first.id);
+  assert.notStrictEqual(c.lastMessage, '捨てる返事');
   assert.ok(c.costUsd >= spent, '使った金額は戻さない');
   assert.ok(!c.checkpoints.some((x) => x.id === first.id));
   assert.ok(!fs.existsSync(path.join(wt, 'manual.txt')));
@@ -667,6 +672,28 @@ test('チェックポイント: Codex は引き継ぎ文を付けて新しい会
   assert.doesNotMatch(handoff, /二度目の指示/, '送り直す指示は引き継ぎ文に入れない');
   const last = calls().filter((x) => x.kind === 'codex').at(-1);
   assert.notStrictEqual(last.args[1], 'resume');
+});
+
+test('チェックポイント: 戻したあとの記録は引き継ぎ文を含まず、もう一度戻しても引き継ぎは一つ', async () => {
+  const { agents } = setup();
+  const [c] = agents.createTask({ title: 'cx-rw2', prompt: '最初の指示', agent: 'codex' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  agents.send(c.id, '二度目の指示');
+  await waitFor(() => c.status === 'review' && c.checkpoints.length === 2);
+  await agents.rewind(c.id, c.checkpoints[1].id);
+  await waitFor(() => c.status === 'review' && c.checkpoints.some((x) => x.prompt === '二度目の指示'));
+  const again = c.checkpoints.find((x) => x.prompt === '二度目の指示');
+  assert.ok(again);
+  assert.strictEqual(again.label, '二度目の指示');
+  assert.ok(!again.prompt.includes('ここまでのやりとり'));
+  assert.strictEqual(agents.publicCards().find((x) => x.id === c.id).rewindPrompt, undefined);
+  await agents.rewind(c.id, again.id);
+  await waitFor(() => c.status === 'review' && !c.checkpoints.some((x) => x.id === again.id) && c.checkpoints.some((x) => x.prompt === '二度目の指示'));
+  const sent = c.lastPromptSent;
+  assert.strictEqual((sent.match(/## ここまでのやりとり/g) || []).length, 1);
+  assert.ok(sent.startsWith('## ここまでのやりとり\n'));
+  assert.ok(sent.endsWith('二度目の指示'));
 });
 
 test('チェックポイント: forkNext のときは元の会話ファイルを切り詰めない', async () => {
@@ -745,6 +772,41 @@ test('チェックポイント: Claude の会話は size まで切り詰めて�
   assert.ok(c.lastPromptSent.startsWith('## ここまでのやりとり\n'));
   const handoff = c.lastPromptSent.slice(0, -String(again.prompt || '').length);
   assert.doesNotMatch(handoff, /【ユーザー】 二度目/);
+  assert.notStrictEqual(c.sessionId, sid);
+});
+
+test('チェックポイント: 会話を切り詰められなくても、戻したカードは新しい会話でやり直す', async () => {
+  const { agents, tmp } = setup();
+  const configDir = path.join(tmp, 'claude-config');
+  agents.opts.claudeConfigFor = async () => configDir;
+  const [c] = agents.createTask({ title: 'trunc-fail', prompt: '一度目' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review' && c.sessionId);
+  const sid = c.sessionId;
+  const proj = path.join(configDir, 'projects', 'repo');
+  fs.mkdirSync(proj, { recursive: true });
+  const file = path.join(proj, `${sid}.jsonl`);
+  const body = '{"a":1}\n';
+  fs.writeFileSync(file, body);
+  agents.send(c.id, '二度目');
+  await waitFor(() => c.status === 'review' && c.checkpoints.length === 2 && c.checkpoints[1].session && c.checkpoints[1].session.size);
+  const cp = c.checkpoints[1];
+  const sessions = require('../src/sessions');
+  const orig = sessions.truncateSession;
+  let calls = 0;
+  sessions.truncateSession = () => {
+    calls += 1;
+    throw new Error('disk');
+  };
+  try {
+    await agents.rewind(c.id, cp.id);
+  } finally {
+    sessions.truncateSession = orig;
+  }
+  assert.strictEqual(calls, 1);
+  assert.ok(!c.checkpoints.some((x) => x.id === cp.id));
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), body);
+  await waitFor(() => c.status === 'review' && /ここまでのやりとり/.test(c.lastPromptSent || ''));
   assert.notStrictEqual(c.sessionId, sid);
 });
 

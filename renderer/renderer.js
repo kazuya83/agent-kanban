@@ -5226,6 +5226,9 @@ document.addEventListener('click', (e) => {
 
 api.onLog(({ id, entry }) => {
   if (!state.logs.has(id)) return;
+  const current = card(id);
+  // 戻したあとは版が進んでいる。読み直す前に足すと、捨てたログの末尾に新しい行が残る
+  if (current && state.logsVersion.get(id) !== current.logsVersion) return;
   state.logs.get(id).push(entry);
   if (state.selected === id && state.tab === 'log') {
     const body = $('detailBody');

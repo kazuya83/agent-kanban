@@ -850,8 +850,8 @@ class AgentManager extends EventEmitter {
     return this.store.cards
       .filter((c) => !repoPath || c.repoPath === repoPath)
       .map((c) => {
-        // checkpoints はそのまま渡さない（指示文が入っている）。画面は rewind だけを見る
-        const { logs, finalDiff, checkpoints, ...rest } = c;
+        // checkpoints と、戻すときに一時的に持つ元の指示は渡さない（指示文が入っている）。画面は rewind だけを見る
+        const { logs, finalDiff, checkpoints, rewindPrompt, rewindHandoff, ...rest } = c;
         return { ...rest, rewind: Checkpoints.publicView(c, this.rewindContext(c)) };
       });
   }
@@ -2120,7 +2120,8 @@ class AgentManager extends EventEmitter {
       const from = c.sessions.find((x) => x.origin === 'imported' && !x.forkedTo);
       if (from) from.forkedTo = id;
       // Pipelineでは工程ごとにエージェントが変わるので、どのエージェントの会話かを残す
-      c.sessions.push({ id, at: Date.now(), origin: 'task', agent: agentOf(c), label: truncate(String(c.lastPromptSent || c.prompt).split('\n')[0], 60), from: from ? from.id : undefined });
+      const shown = Checkpoints.visiblePrompt(c.lastPromptSent || c.prompt);
+      c.sessions.push({ id, at: Date.now(), origin: 'task', agent: agentOf(c), label: truncate(shown.split('\n').find((l) => l.trim()) || '', 60), from: from ? from.id : undefined });
     }
   }
 
@@ -2659,8 +2660,10 @@ class AgentManager extends EventEmitter {
   }
 
   // エージェントを起動する直前の状態を1件記録する。戻すときの時点になる
-  async recordCheckpoint(c) {
-    const prompt = c.pendingPrompt || '';
+  async recordCheckpoint(c, recorded) {
+    // recorded があるときは、引き継ぎ文を付けた送信文ではなく、戻した時点の指示を記録する
+    const prompt = recorded ? recorded.prompt : (c.pendingPrompt || '');
+    const handoffRun = !!(recorded && recorded.handoff);
     if (prompt === RESUME_PROMPT || prompt === CHAT_RESUME_PROMPT || prompt === FOLDER_RESUME_PROMPT) return;
     if (!Checkpoints.shouldRecord(c)) return;
     let commit = null;
@@ -2681,6 +2684,7 @@ class AgentManager extends EventEmitter {
       commit,
       session,
       forkNext: !!c.forkNext,
+      handoff: handoffRun,
       agent: agentOf(c),
       model: c.model || null,
       persona: c.persona,
@@ -2726,7 +2730,13 @@ class AgentManager extends EventEmitter {
     let applied = false;
     try {
       await this.restoreFiles(c, cp);
-      const plan = await this.planConversation(c, cp);
+      let plan;
+      try {
+        plan = await this.planConversation(c, cp);
+      } catch {
+        // ファイルは戻し済み。会話の準備に失敗しても、カードを古い状態のまま残さない
+        plan = { sessionId: null, forkNext: false, handoff: true };
+      }
       let prompt = cp.prompt || '';
       if (plan.handoff) {
         const text = Checkpoints.handoffText(c.logs, { before: cp.at, omitLatestUser: true });
@@ -2734,6 +2744,9 @@ class AgentManager extends EventEmitter {
       }
       this.applyRewind(c, cp, idx, plan);
       applied = true;
+      // 次のチェックポイントには、引き継ぎ文を除いた元の指示を残す
+      c.rewindPrompt = cp.prompt || '';
+      c.rewindHandoff = !!plan.handoff;
       this.enqueue(c, prompt, cp.attachments || undefined);
     } finally {
       this.rewinding.delete(id);
@@ -2757,7 +2770,8 @@ class AgentManager extends EventEmitter {
   // 会話の戻し方。ファイルを切り詰めるのは、条件がすべて揃った Claude の会話だけ
   async planConversation(c, cp) {
     const sess = cp.session;
-    if (!sess || !sess.id) return { sessionId: null, forkNext: false, handoff: false };
+    // 会話が無いときは、新しく始める。直前の実行が引き継ぎ文で始まっていたときだけ、ログから作り直す
+    if (!sess || !sess.id) return { sessionId: null, forkNext: false, handoff: !!cp.handoff };
     if (cp.forkNext) return { sessionId: sess.id, forkNext: true, handoff: false };
     if ((cp.agent || 'claude') === 'claude' && typeof sess.size === 'number' && !this.sessionUsedByOther(c, sess.id)) {
       const sessions = require('./sessions');
@@ -2778,6 +2792,7 @@ class AgentManager extends EventEmitter {
     delete c.todos;
     delete c.subtaskProposal;
     delete c.btw;
+    delete c.lastMessage;
     c.sessionId = plan.sessionId;
     c.forkNext = !!plan.forkNext;
     c.stopRequested = false;
@@ -2790,6 +2805,14 @@ class AgentManager extends EventEmitter {
   }
 
   async launch(c) {
+    // 起動が worktree 作成で失敗しても、戻す用の指示を次の実行へ持ち越さない
+    const recorded = c && Object.prototype.hasOwnProperty.call(c, 'rewindPrompt')
+      ? { prompt: c.rewindPrompt || '', handoff: !!c.rewindHandoff }
+      : null;
+    if (c) {
+      delete c.rewindPrompt;
+      delete c.rewindHandoff;
+    }
     const chat = isChat(c);
     // 完了したタスクについての会話: worktree は作らずリポジトリのフォルダで、ファイルを変えない計画モードで動かす
     const afterDone = !chat && !!c.afterDone;
@@ -2800,7 +2823,7 @@ class AgentManager extends EventEmitter {
     } else if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
     const cwd = inFolder ? c.repoPath : c.worktreePath;
     // 起動直前の状態を記録する。pendingPrompt を消す前、会話の引き継ぎを変える前
-    await this.recordCheckpoint(c);
+    await this.recordCheckpoint(c, recorded);
     const s = this.store.settings;
     const rs = this.store.repoSettings(c.repoPath); // 権限モード・許可しておくツールは、そのタスクのプロジェクトの設定
     const agent = agentOf(c);

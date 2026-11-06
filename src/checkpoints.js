@@ -26,6 +26,7 @@ function create(fields) {
     specState: f.specState || null,
     relay: f.relay || null,
     stepStart: !!f.stepStart,
+    handoff: !!f.handoff,
   };
 }
 
@@ -129,6 +130,14 @@ function publicView(card, ctx) {
   return { blocked: blockReason(card, ctx), points };
 }
 
+// 引き継ぎ文を付けた送信文から、元の指示だけを取り出す。付いていなければそのまま
+function visiblePrompt(prompt) {
+  const s = String(prompt || '');
+  if (!s.startsWith(HANDOFF_HEAD)) return s;
+  const cut = s.indexOf('\n\n', HANDOFF_HEAD.length);
+  return cut < 0 ? s : s.slice(cut + 2);
+}
+
 // 会話を続けられないエージェント向けに、その時点より前の指示と返事を 8,000 字までまとめる
 // omitLatestUser: 今から送り直す指示（直前のユーザーログ）は含めない。prompt 側に付く
 function handoffText(logs, opts) {
@@ -180,4 +189,5 @@ module.exports = {
   blockReason,
   publicView,
   handoffText,
+  visiblePrompt,
 };

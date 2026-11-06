@@ -206,6 +206,18 @@ test('handoffText: 指示と返事だけ、時点より前、8000字まで', () 
   assert.doesNotMatch(eaten, /残したい指示/);
 });
 
+test('visiblePrompt: 引き継ぎ文が付いているときだけ、元の指示を返す', () => {
+  assert.strictEqual(Checkpoints.visiblePrompt('二度目の指示'), '二度目の指示');
+  assert.strictEqual(Checkpoints.visiblePrompt(''), '');
+  assert.strictEqual(Checkpoints.visiblePrompt(null), '');
+  const wrapped = Checkpoints.handoffText([
+    { t: 1, kind: 'user', text: '最初' },
+    { t: 2, kind: 'text', text: '返事' },
+  ], { before: 3 });
+  assert.strictEqual(Checkpoints.visiblePrompt(`${wrapped}二度目の指示`), '二度目の指示');
+  assert.strictEqual(Checkpoints.visiblePrompt('## ここまでのやりとり\n本文だけ'), '## ここまでのやりとり\n本文だけ');
+});
+
 test('handoffText: 上限ぎりぎりでも見出しを残す', () => {
   const head = '## ここまでのやりとり\n';
   const max = Checkpoints.HANDOFF_LIMIT;
