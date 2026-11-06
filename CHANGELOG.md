@@ -10,6 +10,10 @@ Each release that changes the app raises the last number of the version. There i
 
 - A guide for moving from Conductor, with the steps to export Conductor Cloud data first (English and Japanese).
 
+### Security
+
+- Tasks created from Issues and tasks requested from Slack, including their subtasks and relay branches, never run with "Allow everything automatically". They run with `acceptEdits` (file edits automatic, commands need approval) even when the project's permission mode is `bypassPermissions`, so a malicious Issue cannot run commands without approval. The card log says so when this applies.
+
 ## 0.1.96
 
 ### Changed

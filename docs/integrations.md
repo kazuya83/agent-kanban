@@ -106,7 +106,7 @@ The steps to create the Slack app also appear under "How to set up" in the Slack
 
 - **Kinds of notification**: failures include failed schedules. Waiting covers spec checks, permission checks, questions, waiting for an answer, waiting for review, and conflicts
 - **Starting a task**: in a listed channel, mention the bot or use the slash command and write the instructions. Only allowed users are accepted, and anyone else gets a refusal
-- **After it starts**: it behaves like any other task. If the instructions are not detailed enough, it stops at the spec check. The project's permission settings apply
+- **After it starts**: it behaves like any other task. If the instructions are not detailed enough, it stops at the spec check. The project's permission settings apply, except that even with "Allow everything automatically", tasks requested from Slack run with file edits automatic and commands needing approval (`acceptEdits`), so instructions from outside never run commands without approval
 - **Updates**: updates on a task requested from Slack go to its thread, whatever the notification settings are
 - **Approving**: permission notifications show the tool input with Allow and Deny buttons. If the input is too long to show in full, only Deny appears. "Always allow" stays in the app
 - **Answering**: notifications for agent questions, spec checks, and waiting for an answer have an Answer button that opens a form. Spec questions you leave blank are sent as "decide for me"

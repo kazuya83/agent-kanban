@@ -64,7 +64,7 @@ See [usage.md](usage.md#update-issue-status-automatically) and [integrations.md]
 
 | Item | Description |
 | --- | --- |
-| Permission mode | `acceptEdits` (file edits are automatic, commands need approval) is recommended. With `default`, every action is approved on the card |
+| Permission mode | `acceptEdits` (file edits are automatic, commands need approval) is recommended. With `default`, every action is approved on the card. Even with `bypassPermissions` (allow everything), tasks created from Issues and tasks requested from Slack (and their subtasks) run with `acceptEdits`. Issue bodies and Slack messages can be written by outsiders, so they never run commands without approval |
 | Tools to allow Claude Code from the start | Passed to `--allowedTools`. Example: `Bash(npm test:*), WebSearch` |
 
 ## Task defaults

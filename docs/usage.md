@@ -155,7 +155,7 @@ Choose "Issue watch" under "Type" in a schedule, and at each repeat it checks th
 - **Run history**: only card creation and failures are kept. A check with no new Issues only updates "Last checked" in the detail view. If reading keeps failing, you are notified only the first time
 - **Check now**: "Check now" in the detail view checks without waiting. Cards are handled according to the schedule's setting
 
-> The Issue body and comments become instructions to the agent as they are. Anyone can write them in a public repository, so narrow the target by label or author when you choose "Start automatically". Only people with write access can add labels.
+> The Issue body and comments become instructions to the agent as they are. Anyone can write them in a public repository, so narrow the target by label or author when you choose "Start automatically". Only people with write access can add labels. Also, even when the project's permission mode is "Allow everything automatically", tasks created from Issues run with file edits automatic and commands needing approval (`acceptEdits`). A malicious Issue can never run commands without approval.
 
 ## Split work into subtasks
 A large task can be split into several subtasks that separate agents work on in parallel or in order.
