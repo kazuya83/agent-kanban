@@ -36,6 +36,8 @@ const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
 const sshKey = require('./src/ssh-key');
 const dirBrowse = require('./src/dir-browse');
 const { Updater } = require('./src/updater');
+const { Scheduler } = require('./src/scheduler');
+const { createScheduleApi, notificationClickPlan } = require('./src/schedule-wiring');
 const fs = require('fs');
 
 // Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
@@ -76,6 +78,7 @@ let reconnector = null; // 前回の接続を再開する（起動時・切れ�
 // 'local' のあいだは、ボードの操作をこのマシンで行う（ホストとこのマシンのエージェントを並べて動かせる）
 let clientView = 'host';
 let hostBoardCache = null; // ホストから最後に届いたボード（このマシンのタブを見ているあいだも、ホストのタブを出すため）
+let scheduler = null; // スケジュールの実行（アプリの起動中だけ動く）
 let updater = null; // アプリの更新（新しい版を調べて、入れ替えて起動し直す）
 let updateResult = null; // 前回の起動で更新したときの結果（{ ok, from, to, log }）。画面に一度だけ知らせる
 let quittingForUpdate = false; // 更新のために終了するところ（実行中のタスクの確認は画面で済ませている）
@@ -122,7 +125,7 @@ function send(channel, payload) {
 function boardState() {
   const { cleanRepoTabs, repoTabSummary } = require('./src/store');
   const repoTabs = repoTabSummary(cleanRepoTabs(store.settings.repoTabs, store.settings.repoPath), store.cards, store.settings);
-  return { settings: store.settings, repoTabs, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath) };
+  return { settings: store.settings, repoTabs, cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath), schedules: store.schedulesOf(store.settings.repoPath) };
 }
 
 // 画面に渡すボード。クライアントとして接続中は、見ている側（ホスト / このマシン）のボードに、両方のタブを並べて載せる
@@ -468,6 +471,8 @@ app.whenReady().then(async () => {
   agents.setPermissionEndpoint(permServer.port, permServer.token);
 
   agents.on('changed', notifyBoard);
+  scheduler = new Scheduler({ store, agents });
+  scheduler.on('changed', notifyBoard);
   // 作った PR がマージされたら、タスクを完了にする（1分ごとに GitHub で確かめる）
   agents.watchPullRequests(60000);
   agents.on('log', (id, entry) => {
@@ -484,14 +489,15 @@ app.whenReady().then(async () => {
         if (!win) return;
         win.show();
         win.focus();
-        // ホストのタブを見ているときは、このマシンのタブに移ってから開く
-        if (remoteClient?.connected && clientView === 'host') {
-          const c = store.cards.find((x) => x.id === n.cardId);
-          clientView = 'local';
-          if (c && c.repoPath && c.repoPath !== store.settings.repoPath) await dispatch('repo:open', { path: c.repoPath, target: 'local' }).catch(() => {});
-          send('board:changed', viewBoard());
-        }
-        send('card:focus', n.cardId);
+        const card = n.cardId ? store.cards.find((x) => x.id === n.cardId) : null;
+        const plan = notificationClickPlan(n, { card, currentRepo: store.settings.repoPath, viewingHost: remoteClient?.connected && clientView === 'host' });
+        if (plan.toLocal) clientView = 'local';
+        // フォルダがなくなっていたら開かない（repo:open は「最近開いたリポジトリ」から外してしまう）
+        const openRepo = plan.openRepo && fs.existsSync(plan.openRepo) ? plan.openRepo : '';
+        if (openRepo) await dispatch('repo:open', { path: openRepo, target: 'local' }).catch(() => {});
+        // カードが画面に届いてから開く（notifyBoard は少し遅れる）
+        if (plan.toLocal || openRepo) send('board:changed', viewBoard());
+        if (plan.focusId) send('card:focus', plan.focusId);
       });
       dn.show();
     }
@@ -1016,6 +1022,11 @@ app.whenReady().then(async () => {
   handle('notifications:read', ({ ids } = {}) => agents.readNotifications(store.settings.repoPath, ids));
   handle('notifications:clear', ({ ids } = {}) => agents.clearNotifications(store.settings.repoPath, ids));
   handle('notifications:act', ({ id }) => agents.actNotification(id));
+  const scheduleApi = createScheduleApi({ scheduler, store });
+  handle('schedules:create', (p) => scheduleApi.create(p));
+  handle('schedules:update', (p) => scheduleApi.update(p));
+  handle('schedules:delete', (p) => scheduleApi.delete(p));
+  handle('schedules:run', (p) => scheduleApi.run(p));
   handle('skills:list', async () => require('./src/skills').listSkills(store.settings.repoPath, { configDir: await claudeConfigFor(store.settings.repoPath) }));
   handle('card:btw', ({ id, text }) => agents.btw(id, text));
   handle('card:setSession', ({ id, session }) => agents.setSession(id, session));
@@ -1074,6 +1085,7 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+  scheduler.start();
   // 前回クライアントとして接続したまま終えていたら、その接続を裏で再開する（自分で切断していたらしない）
   if (store.settings.remoteClientResume && !remoteHost?.listening()) resumeRemote();
   app.on('activate', () => {
@@ -1099,6 +1111,7 @@ function installUpdate() {
   store.settings.updatePending = { from: app.getVersion(), to: st.latestVersion, at: Date.now() };
   store.save();
   quittingForUpdate = true;
+  scheduler?.stop();
   send('update:changed', updateStatus());
   // 画面に「更新しています」を出してから終了する
   setTimeout(() => app.quit(), 800);
@@ -1174,6 +1187,8 @@ app.on('second-instance', () => {
 // 実行中・待機中のタスクがあるときは、終了してよいか確かめる。
 // 終了するときは claude を止めて作業内容をブランチにコミットしてから終わる（次の起動で「再開」できる）
 app.on('before-quit', (e) => {
+  // 終了の確認中も含めて、ここからはスケジュールを発火させない（キャンセルされたら動かし直す）
+  scheduler?.stop();
   if (quitState === 'done' || !agents) {
     store?.flush();
     permServer?.close();
@@ -1221,6 +1236,7 @@ app.on('before-quit', (e) => {
     ({ response }) => {
       if (response === 0) return finish();
       quitState = 'idle';
+      scheduler?.start();
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     },
     () => finish(),
