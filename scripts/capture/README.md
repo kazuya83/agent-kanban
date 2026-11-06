@@ -14,6 +14,7 @@ node scripts/capture/capture.js --lang=en,ja            # 言語を選ぶ
 node scripts/capture/capture.js --only=board,diff       # 画面を選ぶ（GIF は作らない）
 node scripts/capture/capture.js --no-gif                # 画面だけ
 node scripts/capture/capture.js --gif-only              # GIF だけ（ffmpeg が必要）
+node scripts/capture/capture.js --demo                  # デモ GIF だけ（ffmpeg が必要）
 node scripts/capture/capture.js --feature=pipeline,issue # 機能ごとの GIF を選ぶ（画面とデモ GIF は作らない）
 ```
 
@@ -23,7 +24,8 @@ node scripts/capture/capture.js --feature=pipeline,issue # 機能ごとの GIF �
 | `content.js` | カードやログの文言（言語ごと） |
 | `fixtures.js` | ボード・ログ・差分などの架空のデータ |
 | `scenes.js` | 画面ごとの作り方 |
-| `demo.js` | デモ GIF の流れ |
+| `demo.js` | デモ GIF の流れ（Codex で実装 → Claude でレビュー → 差し戻し → 人が承認・マージ） |
+| `pipeline-story.js` | デモ GIF と `pipeline` の GIF で共通の場面（フローチャートを組む・タスクを作る・工程の中身） |
 | `features.js` | 機能ごとの GIF の流れ（pipeline / subtasks / repos / approval / question / issue / merge / remote / chat / notifications / conflict / skills / scheduler） |
 | `feature-content.js` | 機能ごとの GIF で使う文言（言語ごと） |
 | `recorder.js` | GIF の録画（マウスの矢印、コマの撮影、ffmpeg でつなぐ） |

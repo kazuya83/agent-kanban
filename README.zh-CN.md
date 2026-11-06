@@ -4,14 +4,14 @@
 
 # Worktree Kanban
 
-<strong>并行运行 AI 编程代理，并从另一台电脑操作。</strong><br />
-Mac 和 Windows 可以互相远程控制。
+<strong>用流程图编排多个 AI 编程代理、关键决定由人来做的看板。</strong><br />
+用 Codex 实现，用 Claude 审查，需要修改时退回。是否合并由你决定。
 
 [官网](https://kazuya83.github.io/worktree-kanban/) · [下载](https://github.com/kazuya83/worktree-kanban/releases/latest)
 
 [![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
-[![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
+[![Pipeline](https://img.shields.io/badge/pipeline-Codex%20%E2%86%92%20Claude%20%E2%86%92%20you-0891B2)](docs/images/en/feature-pipeline.gif)
 [![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
 
@@ -21,7 +21,7 @@ Mac 和 Windows 可以互相远程控制。
 
 <div align="center">
 
-![演示：创建任务、卡片并行运行、批准、查看差异并合并，然后远程操作看板](docs/images/zh/demo.gif)
+![演示：用自然语言描述流程，Codex 实现后由 Claude 审查并退回，人工批准命令，查看差异并合并](docs/images/zh/demo.gif)
 
 </div>
 
@@ -31,11 +31,12 @@ Mac 和 Windows 可以互相远程控制。
 
 ## 为什么选择 Worktree Kanban
 
-- **Mac ⇄ Windows 互相远程控制** — 在一台电脑上运行代理，在另一台电脑上操作同一个看板：批准、回答问题、发送指示、合并。
+- **用流程图编排代理** — 用自然语言描述或手动绘制流程，代理会沿着分支、循环和并行步骤逐步交接工作。
+- **最终由你决定** — 合并或创建 PR 前可以查看差异。使用 Claude Code 时，还可以在卡片上批准操作。
 - **一个任务，一个 worktree** — 每个任务都有自己的 git worktree 和分支，任务之间、任务与你的工作区都不会冲突。
 - **同时处理多个仓库** — 最多可用标签页打开 3 个仓库，切换标签页不会中断任何任务。
 - **沿用你现有的 CLI** — Claude Code、Codex CLI、Gemini CLI、Cursor CLI，登录和设置保持不变。
-- **最终由你决定** — 合并或创建 PR 前可以查看差异。使用 Claude Code 时，还可以在卡片上批准操作。
+- **Mac ⇄ Windows 互相远程控制** — 在一台电脑上运行代理，在另一台电脑上操作同一个看板：批准、回答问题、发送指示、合并。
 - **完全本地** — 看板状态保存在你的电脑上，不使用外部服务器。
 
 ## 工作方式
