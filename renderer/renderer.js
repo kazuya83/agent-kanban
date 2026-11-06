@@ -940,11 +940,11 @@ async function select(id, { subFrom = null } = {}) {
   // サブタスクを親の「サブタスク」タブから開いたときは、閉じると親に戻る
   state.subFrom = subFrom && card(subFrom) ? subFrom : null;
   if (state.chatListOpen) closeModal();
-  // 会話と、親の「サブタスク」タブから開いたサブタスクは、ボードの横ではなく、画面の中央にモーダルで開く
+  // 会話と、親の「サブタスク」タブから開いたサブタスクは、右からのスライドではなく、画面の中央にモーダルで開く
   const chatModal = isChat(card(id)) || !!state.subFrom;
   $('detail').classList.toggle('as-modal', chatModal);
   $('detailBackdrop').classList.toggle('hidden', !chatModal);
-  $('detail').classList.remove('hidden');
+  $('detail').classList.remove('hidden', 'closing');
   $('followInput').value = '';
   followAttach.clear();
   state.followSkill = null;
@@ -984,8 +984,11 @@ function setTab(tab) {
 function closeDetail() {
   state.selected = null;
   state.subFrom = null;
-  $('detail').classList.add('hidden');
-  $('detail').classList.remove('as-modal');
+  const panel = $('detail');
+  // スライドで開いているパネルは右へ抜けてから隠す（animationend で hidden にする）。モーダルはすぐ閉じる
+  if (panel.classList.contains('as-modal')) panel.classList.add('hidden');
+  else if (!panel.classList.contains('hidden')) panel.classList.add('closing');
+  panel.classList.remove('as-modal');
   $('detailBackdrop').classList.add('hidden');
   renderBoard();
 }
@@ -5014,6 +5017,11 @@ async function repoSetupModal(mode, distros = []) {
 $('newBtn').onclick = () => newTask();
 $('chatBtn').onclick = openChats;
 $('detailBackdrop').addEventListener('mousedown', closeDetailOrBack);
+$('detail').addEventListener('animationend', (e) => {
+  if (e.target !== e.currentTarget || e.animationName !== 'detail-slide-out') return;
+  e.currentTarget.classList.add('hidden');
+  e.currentTarget.classList.remove('closing');
+});
 $('sessionsBtn').onclick = openSessionManager;
 $('rcBtn').onclick = openRemoteSettings;
 
