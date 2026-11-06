@@ -129,7 +129,7 @@ Agent Kanban から Worktree Kanban へ改名しても、今のユーザーが�
 - Release の前の名前のファイル（`agent-kanban-<版>-…`）。改名前の版は、このファイルがないと自分を更新できません（`scripts/legacy-assets.sh`）
 - インストーラの `AGENT_KANBAN_VERSION` の指定と、Linux の `~/.local/bin/agent-kanban`（改名前の版が更新のあとに起動するため）
 
-画面の画像とデモ GIF の撮り直しは [scripts/capture/README.md](../scripts/capture/README.md) を見てください。
+画面の画像と GIF の撮り直しは [scripts/capture/README.md](../scripts/capture/README.md) を見てください。
 
 ---
 

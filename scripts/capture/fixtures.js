@@ -1,5 +1,7 @@
 // 撮影用の架空のボード・ログ・差分。すべて作りものの値で、実在のリポジトリや人の情報は入れない
 const content = require('./content');
+const featureContent = require('./feature-content');
+const FlowModel = require('../../renderer/flow-model');
 
 const ROOT = '/Users/dev/work';
 const SHOP = `${ROOT}/shop-app`;
@@ -12,7 +14,7 @@ const SHA = { base: '530cb3e', head: '1e4a41c' };
 const wt = (repo, id) => `${repo}.worktrees/${id}`;
 
 function buildFixtures(lang, tr, now = Date.now()) {
-  const t = content[lang];
+  const t = { ...content[lang], ...featureContent[lang] };
   const ago = (s) => now - s * 1000;
   const base = { agent: 'claude', baseBranch: 'main', repoPath: SHOP, createdAt: ago(300), logs: [] };
   const issue = (number) => ({ number, url: `https://github.com/acme/shop-app/issues/${number}` });
@@ -220,8 +222,37 @@ index 0000000..55ee66f
     { path: API, attention: 1, running: 2 },
   ];
 
+  // 文章から組み立てた形の Pipeline: 実装 → レビュー → 直すところがあれば実装へ戻る
+  const pipelineFlow = FlowModel.autoLayout({
+    nodes: [
+      { id: 'start', type: 'start' },
+      { id: 'impl', type: 'step', agent: 'codex', label: t.plImpl, instruction: t.plImplDo },
+      { id: 'review', type: 'step', agent: 'claude', label: t.plReview, instruction: t.plReviewDo },
+      { id: 'judge', type: 'if', label: t.plJudge, question: t.plJudgeQ },
+      { id: 'end', type: 'end' },
+    ],
+    edges: [
+      { id: 'e1', from: 'start', to: 'impl' },
+      { id: 'e2', from: 'impl', to: 'review' },
+      { id: 'e3', from: 'review', to: 'judge' },
+      { id: 'e4', from: 'judge', to: 'end', value: 'pass', when: t.plPass },
+      { id: 'e5', from: 'judge', to: 'impl', value: 'fail', when: t.plFail, maxLoops: 3 },
+    ],
+  });
+  const flowErrors = FlowModel.validateFlow(pipelineFlow);
+  if (flowErrors.length) throw new Error(`撮影用の Pipeline に直すところがあります: ${flowErrors.join(' / ')}`);
+  // 文章で組み立てる前のフロー（工程が1つだけ）
+  const pipelineStart = FlowModel.autoLayout({
+    nodes: [{ id: 'start', type: 'start' }, { id: 'impl', type: 'step', agent: 'claude', label: t.plImpl, instruction: t.plImplDo }, { id: 'end', type: 'end' }],
+    edges: [{ id: 'e1', from: 'start', to: 'impl' }, { id: 'e2', from: 'impl', to: 'end' }],
+  });
+  const pipeline = {
+    id: 'implement-review', name: t.plName, flow: pipelineFlow,
+    steps: pipelineFlow.nodes.filter((n) => n.type === 'step').map(({ id, agent, label, instruction }) => ({ id, agent, label, instruction })),
+  };
+
   return {
-    t, cards, adminCards, logs, diff, worktree, notifications, keyStatus, remote, remoteClient, tabs,
+    t, pipeline, pipelineStart, cards, adminCards, logs, diff, worktree, notifications, keyStatus, remote, remoteClient, tabs,
     paths: { SHOP, ADMIN, API, MOBILE },
     skills: [
       { name: 'db-migration', source: 'project', description: t.skDb },

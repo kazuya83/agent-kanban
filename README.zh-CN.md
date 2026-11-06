@@ -66,6 +66,8 @@ flowchart LR
 
 可以在另一台电脑（客户端）的 Worktree Kanban 上，操作正在运行智能体的那台电脑（主机）的看板。Mac 和 Windows 都可以做主机，也都可以做客户端。在客户端上，批准、回答提问、追加指示、合并等，都可以像主机画面一样使用。
 
+![从另一台电脑连接，并在主机的看板上批准](docs/images/zh/feature-remote.gif)
+
 - 主机上的应用只在 `127.0.0.1` 上等待连接。客户端应用用 `ssh -N -L` 建立隧道来连接，所以主机上只需要 SSH 服务器。从外面连接时使用 Tailscale 等
 - SSH 使用密钥登录。在客户端的「RC 设置」里创建 ed25519 密钥（`~/.ssh/agent-kanban_ed25519`），再把公钥登记到主机的「RC 设置」
 - 第一次用主机上显示的 6 位代码配对。之后用保存的令牌重新连上一次的目标
@@ -76,11 +78,25 @@ flowchart LR
 
 步骤，以及连不上时的处理方法，写在 [docs/remote.md](docs/remote.md) (English)。
 
-此外还支持：把大任务拆成子任务，并行或按顺序推进（从父分支分出去，完成后合并回父分支；也可以只启动某一个子任务；支持 GitHub 的子 Issue）、用拖放改变卡片的状态（列）、给正在运行的智能体发消息（btw）、附加图片和文件、Pipeline 与竞争（多个智能体的组合），以及在 Windows 上使用 WSL 的仓库。用法汇总在 [docs/usage.md](docs/usage.md) (English)。
+此外还支持：用拖放改变卡片的状态（列）、给正在运行的智能体发消息（btw）、附加图片和文件、竞争（多个智能体解决同一任务），以及在 Windows 上使用 WSL 的仓库。用法汇总在 [docs/usage.md](docs/usage.md) (English)。
+
+### Pipeline：用自然语言描述流程，并按流程运行任务
+用自然语言写下想要的流程，例如“用 Codex 实现，用 Claude 审查，如有需要修改的地方就回到实现”，智能体就会组建流程图。创建任务时选择这个 Pipeline，智能体就会按照其中的分支和循环逐步交接工作。流程图也可以手动修改。
+
+![用自然语言编写流程，在新任务中选择它，然后看着各步骤运行，并在审查后返回实现](docs/images/zh/feature-pipeline.gif)
+
+详情见 [docs/agents.md](docs/agents.md) (English)。
+
+### 子任务
+任务较大时，智能体可以提议把它拆成子任务。子任务从父分支分出，并行或按顺序推进，完成后合并回父分支。
+
+![接受拆分提议，然后看着子任务运行并合并](docs/images/zh/feature-subtasks.gif)
 
 ### 并行运行多个仓库
 
 仓库以标签页打开（最多 3 个）。切换标签页不会让其他仓库的任务停下来。未选中的标签会显示**正在运行的任务数**（蓝色）和**正在等你处理的任务数**（批准、提问等，橙色），所以只看标签就能知道哪个仓库需要你动手。同时运行的任务数上限（设置里的「同时运行数量」）在所有仓库之间共享。
+
+![切换仓库标签页，其他标签页的任务继续运行](docs/images/zh/feature-repos.gif)
 
 ![用标签页打开三个仓库。未选中的标签会显示正在运行的任务数，以及等待你处理的任务数](docs/images/zh/repo-tabs.png)
 
@@ -94,6 +110,8 @@ flowchart LR
 
 需要许可的操作，可以在卡片和详情面板里看完将要执行的命令和全部输入，再选择允许、拒绝，或在这个任务里始终允许。拒绝时可以把理由返回给智能体。
 
+![查看完整命令后批准](docs/images/zh/feature-approval.gif)
+
 <details>
 <summary>查看截图</summary>
 
@@ -104,6 +122,8 @@ flowchart LR
 ### 从 GitHub Issue 创建任务
 
 在「新建任务」的「从 GitHub Issue 创建」标签里填入编号（如 `21, 22, 24`）。它会根据 Issue 的标题、正文和评论生成指示，每个 Issue 一张卡片。分支名为 `agent/issue-21-…`，PR 正文里会写入 `Closes #21`。使用 `gh`。
+
+![输入 Issue 编号，为每个 Issue 创建一张卡片](docs/images/zh/feature-issue.gif)
 
 <details>
 <summary>查看截图</summary>
@@ -116,6 +136,8 @@ flowchart LR
 
 Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现回答表单。支持多选和自由输入（其他）。
 
+![选择选项来回答智能体的提问](docs/images/zh/feature-question.gif)
+
 <details>
 <summary>查看截图</summary>
 
@@ -126,6 +148,8 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 ### worktree 与 diff
 
 「worktree」标签会显示分支的提交、未提交的更改、与基线的关系，以及同一仓库的其他 worktree。「diff」标签里，可以按文件夹树选择改过的文件，逐个查看差异。
+
+![查看差异后合并](docs/images/zh/feature-merge.gif)
 
 <details>
 <summary>查看截图</summary>

@@ -129,7 +129,7 @@ After the rename from Agent Kanban to Worktree Kanban, the following keep the pr
 - Release files under the previous name (`agent-kanban-<version>-…`). Versions from before the rename cannot update themselves without these files (`scripts/legacy-assets.sh`)
 - The installer's `AGENT_KANBAN_VERSION` setting and Linux's `~/.local/bin/agent-kanban` (versions from before the rename launch through it after updating)
 
-To retake the screenshots and demo GIFs, see [scripts/capture/README.md](../scripts/capture/README.md).
+To retake the screenshots and GIFss, see [scripts/capture/README.md](../scripts/capture/README.md).
 
 ---
 
