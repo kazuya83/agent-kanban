@@ -290,3 +290,111 @@ test('名前の列と箇条書きの区切りは、空や1件でも崩れない'
   assert.strictEqual(quoteNames(['设计']), '「设计」');
   I18n.setLanguage('ja');
 });
+
+// かな・漢字に加え、波ダッシュ。カタカナの範囲には中黒も含む
+const LEFTOVER = /[\u3040-\u309F\u30A0-\u30FF\u3400-\u9FFF\u301C]/;
+const TYPE_WORDS = ['分岐', '並列', '合流'];
+
+test('英西仏の訳にかな・漢字・波ダッシュが残らず、中国語の引用符は対になる', () => {
+  const keys = [...new Set([...ownKeys(), ...TYPE_WORDS])];
+  for (const lang of ['en', 'es', 'fr']) {
+    I18n.setLanguage(lang);
+    for (const key of keys) {
+      const t = I18n.tr(key);
+      assert.ok(!LEFTOVER.test(t), `${lang}: ${[...t].filter((ch) => LEFTOVER.test(ch)).join('')} ${key.slice(0, 60)}`);
+    }
+  }
+  I18n.setLanguage('zh');
+  for (const key of keys) {
+    const t = I18n.tr(key);
+    assert.strictEqual((t.match(/「/g) || []).length, (t.match(/」/g) || []).length, key.slice(0, 60));
+    assert.ok(!/[“”]/.test(t), key.slice(0, 60));
+  }
+
+  const img = keys.find((k) => k.includes('class="log-img"') && k.includes('alt="画像"'));
+  const conflict = keys.find((k) => k.includes('&lt;&lt;&lt;&lt;&lt;&lt;&lt;'));
+  const subs = keys.filter((k) => k.includes('のサブタスクです。ブランチ'));
+  assert.ok(img && conflict);
+  assert.strictEqual(subs.length, 2);
+
+  I18n.setLanguage('en');
+  assert.match(I18n.tr(img), /alt="Image"/);
+  assert.match(I18n.tr(conflict), /<\/code> to <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;<\/code>/);
+  I18n.setLanguage('es');
+  assert.match(I18n.tr(img), /alt="Imagen"/);
+  assert.match(I18n.tr(conflict), /<\/code> a <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;<\/code>/);
+  I18n.setLanguage('fr');
+  assert.match(I18n.tr(img), /alt="Image"/);
+  assert.match(I18n.tr(conflict), /<\/code> à <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;<\/code>/);
+  I18n.setLanguage('zh');
+  assert.match(I18n.tr(img), /alt="图像"/);
+  assert.ok(!I18n.tr(img).includes('画像'));
+  assert.match(I18n.tr(conflict), /<\/code> 到 <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;<\/code>/);
+  for (const key of subs) {
+    assert.match(I18n.tr(key), /「<a href="#" data-open-card="\{id\}">\{title\}<\/a>」是子任务/);
+    assert.strictEqual((I18n.tr(key).match(/「/g) || []).length, (I18n.tr(key).match(/」/g) || []).length);
+  }
+  // 引用符が無い文と、開きだけの文は対にならない。登録済みの文は対になっている
+  assert.strictEqual((I18n.tr('実行中').match(/「/g) || []).length, 0);
+  I18n.setLanguage('ja');
+  assert.match(I18n.tr(img), /alt="画像"/);
+  assert.ok(I18n.tr(conflict).includes('〜'));
+});
+
+test('分岐・並列・合流の行き先は種別名を訳し、付けた名前はそのまま残す', () => {
+  const FlowModel = require('../renderer/flow-model');
+  const src = boardSrc();
+  const { flowGoto } = new Function('tr', 'FlowModel', `${grab(src, 'flowGoto', 'relayFlowHtml')}\nreturn { flowGoto };`)(I18n.tr, FlowModel);
+  assert.match(src, /return flowGoto\(n\)/);
+  assert.match(src, /esc\(tgt\(e\)\)/);
+  const node = (type, label) => (label === undefined ? { type } : { type, label });
+
+  assert.strictEqual(flowGoto(null), '');
+  assert.strictEqual(flowGoto(undefined), '');
+  assert.strictEqual(flowGoto({}), '');
+  assert.strictEqual(flowGoto({ type: '', label: '分岐' }), '');
+
+  I18n.setLanguage('ja');
+  assert.strictEqual(flowGoto(node('if', '分岐')), '分岐「分岐」へ');
+  assert.strictEqual(flowGoto(node('parallel', '')), '並列「並列」へ');
+  assert.strictEqual(flowGoto(node('join')), '合流「合流」へ');
+  assert.strictEqual(flowGoto(node('if', 'レビュー判定')), '分岐「レビュー判定」へ');
+  assert.strictEqual(flowGoto(node('if', '0')), '分岐「0」へ');
+  assert.strictEqual(flowGoto(node('parallel', '分岐')), '並列「分岐」へ');
+
+  const enName = { if: 'Branch', parallel: 'Parallel', join: 'Join' };
+  I18n.setLanguage('en');
+  for (const type of ['if', 'parallel', 'join']) {
+    for (const label of [FlowModel.TYPE_LABEL[type], '', undefined]) {
+      const s = flowGoto(node(type, label));
+      assert.strictEqual(s, `To ${enName[type]} “${enName[type]}”`);
+      assert.ok(!/[分岐並列合流]/.test(s), s);
+      assert.ok(!LEFTOVER.test(s), s);
+    }
+  }
+  assert.strictEqual(flowGoto(node('if', 'レビュー判定')), 'To Branch “レビュー判定”');
+  assert.strictEqual(flowGoto(node('parallel', '分岐')), 'To Parallel “分岐”');
+  assert.strictEqual(flowGoto(node('join', '<b>')), 'To Join “<b>”');
+  assert.strictEqual(flowGoto(node('if', '  ')), 'To Branch “  ”');
+  assert.strictEqual(flowGoto(node('start', '開始')), 'To Start “Start”');
+  assert.strictEqual(flowGoto(node('end', '終了')), 'To End “End”');
+  assert.strictEqual(flowGoto(node('nope', 'Custom')), 'To  “Custom”');
+  assert.strictEqual(flowGoto(node('nope', '')), 'To  “”');
+  assert.strictEqual(I18n.setLanguage('EN'), 'en');
+  assert.strictEqual(flowGoto(node('if', '分岐')), 'To Branch “Branch”');
+
+  I18n.setLanguage('es');
+  assert.strictEqual(flowGoto(node('if', '分岐')), 'A Rama «Rama»');
+  assert.strictEqual(flowGoto(node('parallel', 'Mi rama')), 'A Paralelo «Mi rama»');
+  I18n.setLanguage('fr');
+  assert.strictEqual(flowGoto(node('join', '合流')), 'Vers Jonction « Jonction »');
+  assert.strictEqual(flowGoto(node('parallel', '')), 'Vers Parallèle « Parallèle »');
+  I18n.setLanguage('zh');
+  assert.strictEqual(flowGoto(node('if', '分岐')), '前往分支「分支」');
+  assert.strictEqual(flowGoto(node('parallel', '自定义')), '前往并行「自定义」');
+  assert.strictEqual(flowGoto(node('join')), '前往汇合「汇合」');
+  const z = flowGoto(node('if', '分岐'));
+  assert.strictEqual((z.match(/「/g) || []).length, (z.match(/」/g) || []).length);
+  assert.ok(!/[“”]/.test(z));
+  I18n.setLanguage('ja');
+});

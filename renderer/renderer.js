@@ -1046,6 +1046,14 @@ function relayBarHtml(c) {
   return `<div class="relay-bar">${segs.join('')}</div>`;
 }
 
+// 分岐・並列・合流などの行き先。種別名と、それと同じ既定の名前は訳す。付けた名前はそのまま
+function flowGoto(n) {
+  if (!n || !n.type) return '';
+  const typeName = FlowModel.TYPE_LABEL[n.type] || '';
+  const shown = FlowModel.labelOf(n) || '';
+  return tr('{v}「{v2}」へ', { v: tr(typeName), v2: shown === typeName ? tr(shown) : shown });
+}
+
 // 詳細: Pipelineの工程をワークフローの形で見せる（状態・エージェント・時間・金額・前の工程の報告）
 function relayFlowHtml(c) {
   if (!c.relay || isChat(c)) return '';
@@ -1082,7 +1090,7 @@ function relayFlowHtml(c) {
         const nstep = r.steps.findIndex((x) => x.id === n.id) + 1;
         return back.has(e.id) ? tr('工程{n}に戻る', { n: nstep }) : tr('工程{n}へ', { n: nstep });
       }
-      return tr('{v}「{v2}」へ', { v: (FlowModel.TYPE_LABEL[n.type]), v2: (FlowModel.labelOf(n)) });
+      return flowGoto(n);
     };
     const result = (i === r.index && r.lastResult) || (prev && prev.result);
     const judgeHtml = judge
