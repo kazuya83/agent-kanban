@@ -12,7 +12,7 @@ GitHub Actions ではビルド・リリースをしないので、手元の Mac 
 
 - macOS。Apple Silicon では **Rosetta 2** が必要（無いときは、ユーザーに `softwareupdate --install-rosetta --agree-to-license` を実行してもらう）
 - `gh` にログイン済みであること（`gh auth status`）
-- エージェントの CLI（`claude` / `codex` / `gemini` / `cursor-agent`）のどれかが PATH にあること（中でエージェントに `/build-apps review` を頼むため。見つかったものをこの順に使い、`AFTER_MERGE_AGENT` で選べる）
+- エージェントの CLI（`claude` / `codex` / `agy` / `gemini` / `cursor-agent`）のどれかが PATH にあること（中でエージェントに `/build-apps review` を頼むため。見つかったものをこの順に使い、`AFTER_MERGE_AGENT` で選べる）
 
 ## 手順
 

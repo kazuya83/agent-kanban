@@ -37,10 +37,11 @@ const PERMISSION_MODES = [
   ['bypassPermissions', tr('すべて自動で許可する（注意）')],
 ];
 
-// エージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）と、オーケストレーション（Pipeline・競争）
+// エージェント（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI）と、オーケストレーション（Pipeline・競争）
 const AGENTS = [
   ['claude', 'Claude Code', 'Claude'],
   ['codex', 'Codex CLI', 'Codex'],
+  ['antigravity', 'Antigravity CLI', 'Antigravity'],
   ['gemini', 'Gemini CLI', 'Gemini'],
   ['cursor', 'Cursor CLI', 'Cursor'],
 ];
@@ -704,7 +705,7 @@ function renderBoard() {
   if (!settings.repoPath) {
     $('board').innerHTML = viewingHost()
       ? tr('<div class="empty-state"><h2>接続先（{v}）でリポジトリを選んでください</h2><p>遠隔操作中は、ホストのリポジトリでエージェントが動きます。ホストの最近開いたリポジトリや、ホストのフォルダから選べます。</p><button class="btn primary" id="emptyRepo">ホストのリポジトリを選ぶ</button></div>', { v: (esc(remoteHostLabel())) })
-      : tr('<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、エージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ・クローン・新規作成</button></div>');
+      : tr('<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、エージェント（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI）を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ・クローン・新規作成</button></div>');
     $('emptyRepo').onclick = chooseRepo;
     return;
   }
@@ -2977,7 +2978,7 @@ function updateBtwTab(c) {
   $('btwTab').textContent = n ? `btw (${n})` : 'btw';
   const live = c && (c.status === 'running' || c.status === 'queued');
   $('btwTab').classList.toggle('live', !!live);
-  // Codex / Gemini / Cursor は実行中の stdin 追加に対応していない（終了後に追加指示／待機中は開始の指示に付け足す）
+  // Codex / Antigravity / Gemini / Cursor は実行中の stdin 追加に対応していない（終了後に追加指示／待機中は開始の指示に付け足す）
   $('btwTab').title = c && agentOf(c) !== 'claude'
     ? tr('{v} では、実行中に送ると今の作業のあと追加指示として送ります（待機中なら開始するときの指示に付け足します）', { v: (agentLabel(agentOf(c))) })
     : tr('実行中のエージェントに、作業を止めずにメッセージを送ります');
@@ -3361,11 +3362,12 @@ function firstAgentOf(v) {
 // ---------------- モデルを選ぶ欄（タスク・会話を作るとき） ----------------
 
 // 設定のエージェントごとの既定のモデルの名前（キー）と、入力欄に出す候補
-const MODEL_KEY = { claude: 'model', codex: 'codexModel', gemini: 'geminiModel', cursor: 'cursorModel' };
+const MODEL_KEY = { claude: 'model', codex: 'codexModel', antigravity: 'antigravityModel', gemini: 'geminiModel', cursor: 'cursorModel' };
 const MODEL_SUGGEST = {
   claude: ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
   codex: ['gpt-5-codex', 'gpt-5'],
-  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+  antigravity: ['gemini-4-argon-high', 'gemini-3.8-flash-high'],
+  gemini: ['gemini-2.5-pro', 'gemini-3.5-flash'],
   cursor: ['gpt-5', 'sonnet-4.5', 'opus-4.1'],
 };
 function settingsModel(agent, s = state.board.settings || {}) {
@@ -4353,7 +4355,13 @@ function renderSettingsView() {
           <label class="field">${tr('<span>codex コマンドのパス</span>')}<input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
           <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sCodexModel" placeholder="${tr('例: gpt-5-codex')}" value="${esc(s.codexModel || '')}" /></label>
         </div>`)}
+      ${agentConfigHtml('antigravity', s, `
+        <div class="row">
+          <label class="field">${tr('<span>agy コマンドのパス</span>')}<input id="sAntigravity" value="${esc(s.antigravityPath || 'agy')}" /></label>
+          <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sAntigravityModel" placeholder="${tr('例: gemini-4-argon-high')}" value="${esc(s.antigravityModel || '')}" /></label>
+        </div>`)}
       ${agentConfigHtml('gemini', s, `
+        <small class="muted s-note">${tr('Gemini CLI は、2026年6月18日で Google AI Pro / Ultra と無料の個人アカウントでは使えなくなりました。有料の API キーや Gemini Code Assist の Standard / Enterprise なら使えます。個人のアカウントでは Antigravity CLI を使ってください。')}</small>
         <div class="row">
           <label class="field">${tr('<span>gemini コマンドのパス</span>')}<input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
           <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sGeminiModel" placeholder="${tr('例: gemini-2.5-pro')}" value="${esc(s.geminiModel || '')}" /></label>
@@ -4363,7 +4371,7 @@ function renderSettingsView() {
           <label class="field">${tr('<span>cursor-agent コマンドのパス</span>')}<input id="sCursor" value="${esc(s.cursorPath || 'cursor-agent')}" /></label>
           <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sCursorModel" placeholder="${tr('例: gpt-5 / sonnet-4.5')}" value="${esc(s.cursorModel || '')}" /></label>
         </div>`)}
-      <small class="muted s-note">${tr('Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。')}</small>
+      <small class="muted s-note">${tr('Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Antigravity / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Antigravity と Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。')}</small>
       <label class="field">${tr('<span>新しいタスク・会話で最初から選んでおくエージェント</span>')}
         <select id="sDefaultAgent"></select>
         <small>${tr('オーケストレーションで Pipeline・競争を選んでいれば、タスクを作るときの「エージェント」の欄では、そちらを最初から選んでおきます（使えない状態のときや会話では、このエージェント）。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。')}</small></label>`,
@@ -4825,6 +4833,8 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
         claudePath: $('sClaude').value.trim() || 'claude',
         codexPath: $('sCodex').value.trim() || 'codex',
         codexModel: $('sCodexModel').value.trim(),
+        antigravityPath: $('sAntigravity').value.trim() || 'agy',
+        antigravityModel: $('sAntigravityModel').value.trim(),
         geminiPath: $('sGemini').value.trim() || 'gemini',
         geminiModel: $('sGeminiModel').value.trim(),
         cursorPath: $('sCursor').value.trim() || 'cursor-agent',
@@ -4959,7 +4969,7 @@ async function chooseRepo(opts) {
          : ''
      }
      ${tabNote}
-     ${distros.length ? `<p class="muted small">${tr('選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。')}</p>` : ''}
+     ${distros.length ? `<p class="muted small">${tr('選んだフォルダが WSL の中なら、git とエージェント（claude / codex / agy / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。')}</p>` : ''}
      ${recentHtml}
      <div class="repo-choices">
        ${

@@ -1655,11 +1655,11 @@
     "fr": "Choisissez un dossier sur cette machine. Les agents s'exécutent ici à côté des tâches de l'hôte. Les onglets de cette machine ne s'affichent pas sur l'hôte.",
     "zh": "选择此电脑上的文件夹。代理在此电脑上与主机的任务并排运行。此电脑的标签不会显示在主机上。"
   },
-  "選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。": {
-    "en": "If the folder is inside WSL, git and the agents (claude / codex / gemini / cursor-agent) also run inside WSL (git and the agents you use must be installed in WSL too).",
-    "es": "Si la carpeta está dentro de WSL, git y los agentes (claude / codex / gemini / cursor-agent) también se ejecutan dentro de WSL (git y los agentes que uses también deben estar en WSL).",
-    "fr": "Si le dossier est dans WSL, git et les agents (claude / codex / gemini / cursor-agent) s'exécutent aussi dans WSL (git et les agents utilisés doivent aussi être installés dans WSL).",
-    "zh": "如果所选文件夹在 WSL 中，git 和代理（claude / codex / gemini / cursor-agent）也会在 WSL 中运行（WSL 里也需要安装 git 和所用代理）。"
+  "選んだフォルダが WSL の中なら、git とエージェント（claude / codex / agy / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。": {
+    "en": "If the folder is inside WSL, git and the agents (claude / codex / agy / gemini / cursor-agent) also run inside WSL (git and the agents you use must be installed in WSL too).",
+    "es": "Si la carpeta está dentro de WSL, git y los agentes (claude / codex / agy / gemini / cursor-agent) también se ejecutan dentro de WSL (git y los agentes que uses también deben estar en WSL).",
+    "fr": "Si le dossier est dans WSL, git et les agents (claude / codex / agy / gemini / cursor-agent) s'exécutent aussi dans WSL (git et les agents utilisés doivent aussi être installés dans WSL).",
+    "zh": "如果所选文件夹在 WSL 中，git 和代理（claude / codex / agy / gemini / cursor-agent）也会在 WSL 中运行（WSL 里也需要安装 git 和所用代理）。"
   },
   "ホストのフォルダを開く": {
     "en": "Open a folder on the host",

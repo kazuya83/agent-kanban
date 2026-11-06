@@ -8,7 +8,7 @@
 
 - Node.js 22 以上（24 推奨）
 - git
-- 使うエージェントの CLI をインストールし、ログインしておく（[Claude Code](https://docs.claude.com/en/docs/claude-code) の `claude`、Codex CLI の `codex`、Gemini CLI の `gemini`、[Cursor CLI](https://cursor.com/cli) の `cursor-agent` のどれか）
+- 使うエージェントの CLI をインストールし、ログインしておく（[Claude Code](https://docs.claude.com/en/docs/claude-code) の `claude`、Codex CLI の `codex`、[Antigravity CLI](https://antigravity.google/docs/cli) の `agy`、Gemini CLI の `gemini`、[Cursor CLI](https://cursor.com/cli) の `cursor-agent` のどれか）
 
 ### 起動
 
@@ -79,7 +79,7 @@ git config core.hooksPath .githooks
 ```
 
 - `.githooks/post-merge` が `scripts/after-merge-build.sh` を裏で走らせます。マージ自体はすぐに終わります
-- マージしたあとの main から一時的な worktree（ブランチ `build-apps/<sha>`）を作り、エージェントに `/build-apps review` を頼んで、テストと3つの OS のビルドをします。落ちたときは、install.sh / install.ps1 などをエージェントが直します。エージェントは `claude` → `codex` → `gemini` → `cursor-agent` の順に、見つかったものを使います（`AFTER_MERGE_AGENT` で選べます。Claude Code 以外は権限の確認なしで動かします）
+- マージしたあとの main から一時的な worktree（ブランチ `build-apps/<sha>`）を作り、エージェントに `/build-apps review` を頼んで、テストと3つの OS のビルドをします。落ちたときは、install.sh / install.ps1 などをエージェントが直します。エージェントは `claude` → `codex` → `agy` → `gemini` → `cursor-agent` の順に、見つかったものを使います（`AFTER_MERGE_AGENT` で選べます。Claude Code 以外は権限の確認なしで動かします）
 - できたファイルは、main をチェックアウトしているフォルダの `dist/` に写して残します
 - 直したところがあれば、コミットしてからもう一度ビルドして確かめます。通れば main にマージして `origin/main` に push します。直したところがなければ、マージも push もしません
 - **ビルドが通ったら、そのまま GitHub Release を公開します。** できたファイルをそのまま使うので、もう一度ビルドはしません。版の番号とリリースするかどうかは `scripts/release-local.sh` と同じく `scripts/next-version.js` で決めます（README・docs・テストだけの変更では出しません）

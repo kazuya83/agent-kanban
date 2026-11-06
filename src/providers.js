@@ -1,4 +1,4 @@
-// エージェント CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）の一覧と、Claude Code 以外の起動のしかた・出力の読み取り
+// エージェント CLI（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI）の一覧と、Claude Code 以外の起動のしかた・出力の読み取り
 //
 // どの CLI も「作業フォルダで起動 → 指示を渡す → 1行1つの JSON（JSONL）でイベントを出す」形で動かす。
 // 指示は stdin で渡す（Cursor CLI だけは、ドキュメントどおり最後の引数で渡す。AGENTS の promptArg）。
@@ -19,6 +19,7 @@ const { tr } = require('../renderer/i18n');
 const AGENTS = {
   claude: { label: 'Claude Code', short: 'Claude', defaultCmd: 'claude', pathKey: 'claudePath', modelKey: 'model' },
   codex: { label: 'Codex CLI', short: 'Codex', defaultCmd: 'codex', pathKey: 'codexPath', modelKey: 'codexModel' },
+  antigravity: { label: 'Antigravity CLI', short: 'Antigravity', defaultCmd: 'agy', pathKey: 'antigravityPath', modelKey: 'antigravityModel' },
   gemini: { label: 'Gemini CLI', short: 'Gemini', defaultCmd: 'gemini', pathKey: 'geminiPath', modelKey: 'geminiModel' },
   cursor: { label: 'Cursor CLI', short: 'Cursor', defaultCmd: 'cursor-agent', pathKey: 'cursorPath', modelKey: 'cursorModel', promptArg: true },
 };
@@ -47,13 +48,22 @@ function agentModel(settings, a) {
 }
 
 // 権限モード（Claude Code の名前）を、それぞれの CLI のやり方に直す。
-// Codex / Gemini / Cursor はカードでの承認に対応していないので、自動で許可されない操作は CLI 側で止められる
+// Codex / Antigravity / Gemini / Cursor はカードでの承認に対応していないので、自動で許可されない操作は CLI 側で止められる
 function codexPolicy(mode) {
   if (mode === 'bypassPermissions') return { bypass: true };
   return { sandbox: mode === 'plan' ? 'read-only' : 'workspace-write' };
 }
 function geminiApproval(mode) {
   return { plan: 'plan', bypassPermissions: 'yolo', acceptEdits: 'auto_edit', default: 'default' }[mode] || 'auto_edit';
+}
+// Antigravity CLI はヘッドレスだと確認を出せないので、許可されない操作はその場で拒否される（待ち続けない）。
+// accept-edits なら worktree の中のファイルは書ける。コマンドは settings.json の permissions.allow に書いたものだけ動く。
+// default はファイルの変更も拒否されるので、Gemini の default と同じく、変更させたくない会話などで使う
+function antigravityPolicy(mode) {
+  if (mode === 'plan') return ['--mode', 'plan'];
+  if (mode === 'bypassPermissions') return ['--dangerously-skip-permissions'];
+  if (mode === 'default') return [];
+  return ['--mode', 'accept-edits'];
 }
 // Cursor CLI はヘッドレス（-p）だと、--force がないとファイルの変更を提案するだけで書かない。
 // 「計画だけ」は plan モード（読み取りのみ）、それ以外は --force で変更を書かせる（cli-config.json の deny は守られる）
@@ -65,7 +75,7 @@ function cursorPolicy(mode) {
 
 /**
  * 起動する引数（指示は stdin で渡す。Cursor だけは prompt を最後の引数に入れる）
- * @param {'codex'|'gemini'|'cursor'} a
+ * @param {'codex'|'antigravity'|'gemini'|'cursor'} a
  * @param {{ mode?: string, model?: string, sessionId?: string|null, prompt?: string, includeDirs?: string[] }} o
  */
 function buildArgs(a, { mode, model, sessionId, prompt, includeDirs = [] } = {}) {
@@ -80,6 +90,14 @@ function buildArgs(a, { mode, model, sessionId, prompt, includeDirs = [] } = {})
     if (model) args.push('-m', model);
     if (sessionId) args.push(sessionId);
     args.push('-'); // 指示は stdin から読む
+    return args;
+  }
+  if (a === 'antigravity') {
+    // stdin がパイプなら -p がなくても1回だけ動いて終わる。-p の空文字は「指示がない」エラーになるので付けない
+    const args = ['--output-format', 'stream-json', ...antigravityPolicy(mode)];
+    if (model) args.push('--model', model);
+    if (sessionId) args.push('--conversation', sessionId);
+    for (const d of includeDirs) args.push('--add-dir', d);
     return args;
   }
   if (a === 'gemini') {
@@ -270,6 +288,65 @@ function geminiParser({ summarize }) {
   };
 }
 
+// ---------- Antigravity CLI（agy --output-format stream-json） ----------
+// init / step_update / result。ほかの CLI と違い、種類は type ではなく event に入っている。
+// step_update は手順（step_index）ごとに ACTIVE → DONE / ERROR と進む。発言は text_delta を足していくと全文になる
+const ANTIGRAVITY_TOOL_NAMES = { run_command: 'Bash', read_file: 'Read', view_file: 'Read', write_file: 'Write', write_to_file: 'Write', edit_file: 'Edit', replace_file_content: 'Edit', multi_replace_file_content: 'Edit', grep_search: 'Grep', find_by_name: 'Glob', list_dir: 'LS', search_web: 'WebSearch', read_url_content: 'WebFetch' };
+function antigravityParser({ summarize }) {
+  let text = '';
+  const flush = () => {
+    const t = text;
+    text = '';
+    return t.trim() ? [{ type: 'text', text: t }] : [];
+  };
+  const started = new Set();
+  const ended = new Set();
+  const toolOf = (u, info) => {
+    const raw = String(u.tool_name || info.name || 'tool');
+    const p = info.parameters;
+    const target = p && typeof p === 'object' ? p.CommandLine ?? p.Path : null;
+    return { name: ANTIGRAVITY_TOOL_NAMES[raw] || raw, summary: typeof target === 'string' ? trunc(target, 300) : summarize(p) };
+  };
+  return {
+    onEvent(ev) {
+      switch (ev.event) {
+        case 'init':
+          return ev.conversation_id ? [{ type: 'session', id: String(ev.conversation_id), model: ev.init && ev.init.model }] : [];
+        case 'step_update': {
+          const u = ev.step_update || {};
+          if (u.step_type === 'agent_response') {
+            if (typeof u.text_delta === 'string') text += u.text_delta;
+            return [];
+          }
+          if (u.step_type !== 'tool') return [];
+          const info = u.tool_info || {};
+          const id = `${u.conversation_id || ''}:${u.step_index}`;
+          if (ended.has(id)) return [];
+          const out = [];
+          if (!started.has(id)) {
+            started.add(id);
+            out.push(...flush(), { type: 'tool', ...toolOf(u, info) });
+          }
+          if (u.state === 'ACTIVE') return out;
+          ended.add(id);
+          const failed = u.state !== 'DONE' || !!info.error;
+          const body = (info.error && info.error.message) || info.output || '';
+          out.push({ type: 'tool_result', text: trunc(body || (failed ? tr('エラー') : 'ok'), 1500), error: failed });
+          return out;
+        }
+        case 'result': {
+          const r = ev.result || {};
+          if (r.status && r.status !== 'SUCCESS') return [...flush(), { type: 'result', error: String(r.error || tr('エラー（{subtype}）', { subtype: r.status })) }];
+          return [...flush(), { type: 'result' }];
+        }
+        default:
+          return [];
+      }
+    },
+    flush,
+  };
+}
+
 // ---------- Cursor CLI（cursor-agent -p --output-format stream-json） ----------
 // system(init) / user / assistant / tool_call(started・completed) / result
 // tool_call は { shellToolCall: { args, result } } のように、ツールの種類ごとのキーに中身が入っている
@@ -376,6 +453,7 @@ function cursorParser({ summarize }) {
 function createParser(a, opts = {}) {
   const o = { summarize: opts.summarize || ((x) => trunc(JSON.stringify(x ?? ''), 300)) };
   if (a === 'codex') return codexParser(o);
+  if (a === 'antigravity') return antigravityParser(o);
   if (a === 'gemini') return geminiParser(o);
   if (a === 'cursor') return cursorParser(o);
   throw new Error(tr('このエージェントには対応していません: {a}', { a }));
@@ -579,6 +657,7 @@ module.exports = {
   todoItems,
   todosFromTool,
   codexPolicy,
+  antigravityPolicy,
   geminiApproval,
   cursorPolicy,
   defaultRelaySteps,

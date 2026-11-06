@@ -92,7 +92,7 @@ const MUST = [
   ['truncate', /切り詰めて/],
   ['resume', /同じ会話の続き/],
   ['fallback', /条件に合わなければ/],
-  ['others', /Codex \/ Gemini \/ Cursor/],
+  ['others', /Codex \/ Antigravity \/ Gemini \/ Cursor/],
 ];
 
 // 説明が仕様の逆を言うとき。正常な文（「取り消せません」など）には一致しない
@@ -171,7 +171,7 @@ const MINIMAL = [
   'エージェントで違います。その時点の会話がないとき: 新しい会話で始めます。工程の最初の回は、いつもこれです。',
   '引き継いだ元の会話は変えません。',
   'Claude Code。ほかのカード。大きさ以上。行の境目。切り詰めて。同じ会話の続き。条件に合わなければ。',
-  'Codex / Gemini / Cursor。引き継ぎ文（8,000字まで）。',
+  'Codex / Antigravity / Gemini / Cursor。引き継ぎ文（8,000字まで）。',
 ].join('\n');
 
 test('節は ## の次から次の ## の前までで、空や見出しのゆれは空', () => {

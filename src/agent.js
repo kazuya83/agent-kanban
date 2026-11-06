@@ -1,4 +1,4 @@
-// カード（タスク）ごとに worktree を作り、エージェントの CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を並列に動かす
+// カード（タスク）ごとに worktree を作り、エージェントの CLI（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI）を並列に動かす
 const { spawn, execFile } = require('child_process');
 const { EventEmitter } = require('events');
 const fs = require('fs');
@@ -1121,7 +1121,7 @@ class AgentManager extends EventEmitter {
 
   /**
    * タスクを作る。エージェントの選び方（mode）で作るカードが変わる
-   * - claude / codex / gemini / cursor: そのエージェントで1枚
+   * - claude / codex / antigravity / gemini / cursor: そのエージェントで1枚
    * - relay: 設定のPipelineの工程で1枚（同じ worktree で、工程ごとに別のエージェントへ順番に引き継ぐ）
    * - compete: 設定の競争のエージェントの数だけ（同じタスクを、それぞれ別の worktree で並列に解く）
    * @returns {object[]} 作ったカード
@@ -2795,7 +2795,7 @@ class AgentManager extends EventEmitter {
     return this.spawnAgent('claude', cwd, args, extraEnv);
   }
 
-  // エージェントの CLI を起動する（Claude Code / Codex / Gemini / Cursor）。child.agentCmd に起動したコマンドの名前を入れる
+  // エージェントの CLI を起動する（Claude Code / Codex / Antigravity / Gemini / Cursor）。child.agentCmd に起動したコマンドの名前を入れる
   async spawnAgent(agent, cwd, args, extraEnv = {}) {
     const s = this.store.settings;
     const w = wsl.parseWslPath(cwd);
@@ -2833,7 +2833,7 @@ class AgentManager extends EventEmitter {
 
   // ソースを変更しないタスクの権限モード。リポジトリのフォルダ（手元の作業中のファイル）で動くので、
   // Claude Code はファイルを書き換えるツールを止めたうえで、コマンドは毎回カードで確かめる（「計画だけ」ならそれに従う）。
-  // Codex / Gemini / Cursor はツールを個別に止められないので、読み取りだけの「計画」モードで動かす
+  // Codex / Antigravity / Gemini / Cursor はツールを個別に止められないので、読み取りだけの「計画」モードで動かす
   readOnlyPermissionMode(agent, mode) {
     if (agent !== 'claude') return 'plan';
     return mode === 'plan' ? 'plan' : 'default';
@@ -3036,7 +3036,7 @@ class AgentManager extends EventEmitter {
       const attachDir = this.attachDirOf(c);
       if (attachDir) args.push('--add-dir', attachDir);
     } else {
-      // Codex / Gemini / Cursor は、ほかの CLI の会話は引き継げないので新しい会話で始める
+      // Codex / Antigravity / Gemini / Cursor は、ほかの CLI の会話は引き継げないので新しい会話で始める
       if (c.forkNext) {
         c.sessionId = null;
         c.forkNext = false;
@@ -3082,7 +3082,7 @@ class AgentManager extends EventEmitter {
     child.stdin.on('error', () => {});
     if (agent === 'claude') this.writeMessage(run, spoken, null, attachments.imageBlocks(sentAtts));
     else {
-      // Codex / Gemini は指示を stdin で1回だけ受け取る（Cursor は引数で受け取ったので空で閉じる）。実行中の btw は終了後の追加指示にする
+      // Codex / Antigravity / Gemini は指示を stdin で1回だけ受け取る（Cursor は引数で受け取ったので空で閉じる）。実行中の btw は終了後の追加指示にする
       run.stdinClosed = true;
       child.stdin.end(providers.promptViaArg(agent) ? '' : spoken);
     }
@@ -3356,7 +3356,7 @@ class AgentManager extends EventEmitter {
     }
   }
 
-  // Codex / Gemini / Cursor の出力（providers.js で共通の形に直したもの）を、ログとカードに反映する
+  // Codex / Antigravity / Gemini / Cursor の出力（providers.js で共通の形に直したもの）を、ログとカードに反映する
   applyAction(c, a, run) {
     const who = { agent: run.agent };
     switch (a.type) {
@@ -3520,7 +3520,7 @@ class AgentManager extends EventEmitter {
       c.pendingPrompt = `${c.pendingPrompt || ''}\n\n${wrapped}`;
       entry.state = 'queued';
     } else if (c.status === 'running' && agentOf(c) !== 'claude') {
-      // Codex / Gemini / Cursor は実行中の stdin 追加に対応していないので、終了後の追加指示にする
+      // Codex / Antigravity / Gemini / Cursor は実行中の stdin 追加に対応していないので、終了後の追加指示にする
       entry.state = 'follow';
     } else {
       const run = this.runs && this.runs.get(id);
