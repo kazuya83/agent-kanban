@@ -7,14 +7,14 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const rs = require('../src/repo-setup');
 
-const tmpdir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-rs-'));
+const tmpdir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-rs-'));
 const out = (cwd, ...a) => execFileSync('git', a, { cwd }).toString().trim();
 
 test('normalizeCloneUrl: 使える形だけ受け付ける', () => {
   assert.strictEqual(rs.normalizeCloneUrl(' https://github.com/a/b.git '), 'https://github.com/a/b.git');
   assert.strictEqual(rs.normalizeCloneUrl('git@github.com:a/b.git'), 'git@github.com:a/b.git');
   assert.strictEqual(rs.normalizeCloneUrl('ssh://git@example.com/a/b'), 'ssh://git@example.com/a/b');
-  assert.strictEqual(rs.normalizeCloneUrl('kazuya83/agent-kanban'), 'https://github.com/kazuya83/agent-kanban.git');
+  assert.strictEqual(rs.normalizeCloneUrl('kazuya83/worktree-kanban'), 'https://github.com/kazuya83/worktree-kanban.git');
   assert.strictEqual(rs.normalizeCloneUrl('a/b.git'), 'https://github.com/a/b.git');
   for (const bad of ['', 'ext::sh -c touch% /tmp/x', 'file:///etc', '--upload-pack=touch x', '/tmp/repo', 'a/.git', 'https://github.com', 'git@h:-oProxy', '-oProxyCommand@h:x', 'git@-oProxy:x']) {
     assert.throws(() => rs.normalizeCloneUrl(bad), undefined, bad);

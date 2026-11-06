@@ -22,7 +22,7 @@ function buildFlowPrompt({ request, flow, enabled, customAgents, defaultAgent })
   const customs = customAgents.length
     ? customAgents.map((c) => `- ID: ${c.id} / 名前: ${c.name} / CLI: ${c.agent}${c.description ? ` / 説明: ${c.description}` : ''}`).join('\n')
     : '（なし）';
-  return `Agent Kanban の Pipeline のフローチャートを、次の指示どおりに作る、または直してください。
+  return `Worktree Kanban の Pipeline のフローチャートを、次の指示どおりに作る、または直してください。
 ファイルの変更・コマンドの実行はしないでください。リポジトリを調べる必要もありません。
 質問はせず、足りないところは妥当に決めて、返事はフロー全体の JSON だけにしてください（説明の文やコードブロックの印は不要です）。
 

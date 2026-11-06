@@ -12,7 +12,7 @@ const Subtasks = require('../src/subtasks');
 const FAKE_CLAUDE = path.join(__dirname, 'fake-claude.js');
 
 function setup(extra = {}) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-sub-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-sub-'));
   const repo = path.join(tmp, 'repo');
   fs.mkdirSync(repo);
   const g = (...a) => execFileSync('git', a, { cwd: repo }).toString();

@@ -65,7 +65,7 @@ test('relayFlow だけを変えると既定の Pipeline が変わり、一覧を
 });
 
 function setup() {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-pipes-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-pipes-'));
   const repo = path.join(tmp, 'repo');
   fs.mkdirSync(repo);
   const g = (...a) => execFileSync('git', a, { cwd: repo });

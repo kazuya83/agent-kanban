@@ -1,6 +1,6 @@
 ---
 name: build-apps
-description: Agent Kanban のテストと、Mac（dmg）・Windows（exe / zip）・Linux（AppImage）のビルドをこの Mac で行う。レビューのとき（「ビルドして」「3つの OS でビルドできるか確かめて」「install.sh / install.ps1 を直した」）や、main にマージしたあとリリースするとき（「リリースして」「新しい版を出して」。手順は /release スキルと同じ）に使う。GitHub Actions ではビルド・リリースをしないので、これがその代わり。
+description: Worktree Kanban のテストと、Mac（dmg）・Windows（exe / zip）・Linux（AppImage）のビルドをこの Mac で行う。レビューのとき（「ビルドして」「3つの OS でビルドできるか確かめて」「install.sh / install.ps1 を直した」）や、main にマージしたあとリリースするとき（「リリースして」「新しい版を出して」。手順は /release スキルと同じ）に使う。GitHub Actions ではビルド・リリースをしないので、これがその代わり。
 argument-hint: '[review | release]'
 ---
 

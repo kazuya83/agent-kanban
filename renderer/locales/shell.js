@@ -101,11 +101,11 @@
     "fr": "<strong>② Transmettre la clé publique à l’hôte</strong> (à faire vous-même)",
     "zh": "<strong>② 把公钥交给主机</strong>（请自行完成）"
   },
-  "公開鍵のファイル <b>{v1}</b> を、USB・共有フォルダ・メールなどでホストの PC の好きな場所に置き、ホストの Agent Kanban の「RC設定」→「操作側の公開鍵を登録する」で選んで登録します。秘密鍵（{v2}）は渡さないでください。アプリを使わずに登録するなら、ホストの OS に合ったコマンドをホストで実行します:": {
-    "en": "Put the public key file <b>{v1}</b> somewhere on the host PC (USB drive, shared folder, email, and so on), then in Agent Kanban on the host choose “RC settings” → “Register the client public key”. Do not hand over the private key ({v2}). To register without the app, run the command that matches the host OS:",
-    "es": "Coloca el archivo de la clave pública <b>{v1}</b> en el PC del host (USB, carpeta compartida, correo, etc.) y, en Agent Kanban del host, elige «Ajustes de RC» → «Registrar la clave pública del cliente». No entregues la clave privada ({v2}). Para registrarla sin la aplicación, ejecuta en el host el comando según su sistema:",
-    "fr": "Placez le fichier de clé publique <b>{v1}</b> quelque part sur le PC hôte (clé USB, dossier partagé, e-mail, etc.), puis dans Agent Kanban sur l’hôte choisissez « Réglages RC » → « Enregistrer la clé publique du client ». Ne transmettez pas la clé privée ({v2}). Pour l’enregistrer sans l’application, exécutez sur l’hôte la commande adaptée à son OS :",
-    "zh": "把公钥文件 <b>{v1}</b> 放到主机上的任意位置（U 盘、共享文件夹、邮件等），然后在主机的 Agent Kanban 中选择「RC 设置」→「注册客户端公钥」。不要交出私钥（{v2}）。若不用应用注册，请在主机上按操作系统运行对应命令："
+  "公開鍵のファイル <b>{v1}</b> を、USB・共有フォルダ・メールなどでホストの PC の好きな場所に置き、ホストの Worktree Kanban の「RC設定」→「操作側の公開鍵を登録する」で選んで登録します。秘密鍵（{v2}）は渡さないでください。アプリを使わずに登録するなら、ホストの OS に合ったコマンドをホストで実行します:": {
+    "en": "Put the public key file <b>{v1}</b> somewhere on the host PC (USB drive, shared folder, email, and so on), then in Worktree Kanban on the host choose “RC settings” → “Register the client public key”. Do not hand over the private key ({v2}). To register without the app, run the command that matches the host OS:",
+    "es": "Coloca el archivo de la clave pública <b>{v1}</b> en el PC del host (USB, carpeta compartida, correo, etc.) y, en Worktree Kanban del host, elige «Ajustes de RC» → «Registrar la clave pública del cliente». No entregues la clave privada ({v2}). Para registrarla sin la aplicación, ejecuta en el host el comando según su sistema:",
+    "fr": "Placez le fichier de clé publique <b>{v1}</b> quelque part sur le PC hôte (clé USB, dossier partagé, e-mail, etc.), puis dans Worktree Kanban sur l’hôte choisissez « Réglages RC » → « Enregistrer la clé publique du client ». Ne transmettez pas la clé privée ({v2}). Pour l’enregistrer sans l’application, exécutez sur l’hôte la commande adaptée à son OS :",
+    "zh": "把公钥文件 <b>{v1}</b> 放到主机上的任意位置（U 盘、共享文件夹、邮件等），然后在主机的 Worktree Kanban 中选择「RC 设置」→「注册客户端公钥」。不要交出私钥（{v2}）。若不用应用注册，请在主机上按操作系统运行对应命令："
   },
   "ホストが Mac（ターミナルで）": {
     "en": "Host is a Mac (in Terminal)",
@@ -491,11 +491,11 @@
     "fr": "<span>Commande ssh</span>",
     "zh": "<span>ssh 命令</span>"
   },
-  "SSH は鍵で入れる必要があります（パスワードは入力できません）。ホスト側で SSH サーバーをオンにしてください（Mac は「リモートログイン」、Windows は「OpenSSH サーバー」）。接続先とユーザー名は、ホストの Agent Kanban のこの画面に出ています。": {
-    "en": "SSH must use a key (a password cannot be typed). Turn on the SSH server on the host (Remote Login on Mac, OpenSSH Server on Windows). The host and username are shown on this screen in Agent Kanban on the host.",
-    "es": "SSH tiene que entrar con clave (no se puede escribir una contraseña). Activa el servidor SSH en el host (en Mac, «Inicio de sesión remoto»; en Windows, «Servidor OpenSSH»). El destino y el usuario aparecen en esta pantalla de Agent Kanban en el host.",
-    "fr": "SSH doit utiliser une clé (un mot de passe ne peut pas être saisi). Activez le serveur SSH sur l’hôte (« Session à distance » sur Mac, « Serveur OpenSSH » sur Windows). L’hôte et le nom d’utilisateur s’affichent sur cet écran d’Agent Kanban sur l’hôte.",
-    "zh": "SSH 必须用密钥登录（无法输入密码）。请在主机上打开 SSH 服务器（Mac 为「远程登录」，Windows 为「OpenSSH 服务器」）。连接地址和用户名显示在主机 Agent Kanban 的这个画面上。"
+  "SSH は鍵で入れる必要があります（パスワードは入力できません）。ホスト側で SSH サーバーをオンにしてください（Mac は「リモートログイン」、Windows は「OpenSSH サーバー」）。接続先とユーザー名は、ホストの Worktree Kanban のこの画面に出ています。": {
+    "en": "SSH must use a key (a password cannot be typed). Turn on the SSH server on the host (Remote Login on Mac, OpenSSH Server on Windows). The host and username are shown on this screen in Worktree Kanban on the host.",
+    "es": "SSH tiene que entrar con clave (no se puede escribir una contraseña). Activa el servidor SSH en el host (en Mac, «Inicio de sesión remoto»; en Windows, «Servidor OpenSSH»). El destino y el usuario aparecen en esta pantalla de Worktree Kanban en el host.",
+    "fr": "SSH doit utiliser une clé (un mot de passe ne peut pas être saisi). Activez le serveur SSH sur l’hôte (« Session à distance » sur Mac, « Serveur OpenSSH » sur Windows). L’hôte et le nom d’utilisateur s’affichent sur cet écran d’Worktree Kanban sur l’hôte.",
+    "zh": "SSH 必须用密钥登录（无法输入密码）。请在主机上打开 SSH 服务器（Mac 为「远程登录」，Windows 为「OpenSSH 服务器」）。连接地址和用户名显示在主机 Worktree Kanban 的这个画面上。"
   },
   "SSH の鍵を確かめています…": {
     "en": "Checking the SSH key…",

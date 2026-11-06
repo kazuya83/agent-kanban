@@ -19,8 +19,8 @@ test('前の版のタグは、出す版より小さい中でいちばん新し�
 });
 
 test('origin の URL から owner/repo を取り出す', () => {
-  assert.strictEqual(repoFromUrl('git@github.com:kazuya83/agent-kanban.git'), 'kazuya83/agent-kanban');
-  assert.strictEqual(repoFromUrl('https://github.com/kazuya83/agent-kanban'), 'kazuya83/agent-kanban');
+  assert.strictEqual(repoFromUrl('git@github.com:kazuya83/worktree-kanban.git'), 'kazuya83/worktree-kanban');
+  assert.strictEqual(repoFromUrl('https://github.com/kazuya83/worktree-kanban'), 'kazuya83/worktree-kanban');
   assert.strictEqual(repoFromUrl('/tmp/repo.git'), null);
 });
 
@@ -35,14 +35,14 @@ test('見出しごとにまとめ、ダウンロードの表と比較のリン�
       { subject: 'agent: 一覧が表示されない', files: ['renderer/renderer.js'] },
       { subject: 'agent: 入力欄の高さを直す', files: ['renderer/styles.css'] },
     ],
-    assets: ['dist/agent-kanban-0.1.49-linux-x86_64.AppImage', 'dist/agent-kanban-0.1.49-mac-arm64.dmg'],
+    assets: ['dist/worktree-kanban-0.1.49-linux-x86_64.AppImage', 'dist/worktree-kanban-0.1.49-mac-arm64.dmg'],
   });
   assert.match(md, /^v0\.1\.48 からの変更点です。/);
   assert.match(md, /## ✨ 新機能・改善\n\n- 入力欄の高さを直す\n/);
   assert.match(md, /## 🐛 不具合の修正\n\n- 一覧が表示されない\n/);
   assert.strictEqual(md.match(/入力欄の高さを直す/g).length, 1);
   assert.ok(md.indexOf('macOS（Apple シリコン）') < md.indexOf('Linux（AppImage）'));
-  assert.match(md, /https:\/\/github\.com\/o\/r\/releases\/download\/v0\.1\.49\/agent-kanban-0\.1\.49-mac-arm64\.dmg/);
+  assert.match(md, /https:\/\/github\.com\/o\/r\/releases\/download\/v0\.1\.49\/worktree-kanban-0\.1\.49-mac-arm64\.dmg/);
   assert.match(md, /\*\*Full Changelog\*\*: https:\/\/github\.com\/o\/r\/compare\/v0\.1\.48\.\.\.v0\.1\.49\n$/);
 });
 

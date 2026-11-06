@@ -69,7 +69,7 @@ test('migrateSettings: プロジェクトごとの設定がなかったころは
 });
 
 test('Store: 保存して読み直しても、プロジェクトごとの設定が残る', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-rs-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-rs-'));
   const file = path.join(tmp, 'board.json');
   const store = new Store(file);
   switchRepoSettings(store.settings, '/a');

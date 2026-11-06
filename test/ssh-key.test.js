@@ -84,11 +84,11 @@ test('鍵はあるのに公開鍵が無いときは、作り直し方を出す',
 // ---------------- ホスト側: 受け取った公開鍵を登録する ----------------
 const { parsePublicKey, authorizedKeysPath, installPublicKey } = require('../src/ssh-key');
 
-const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFake agent-kanban me@client';
+const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFake worktree-kanban me@client';
 
 test('公開鍵の読み取り: .pub の1行だけを受け付け、秘密鍵は断る', () => {
   assert.strictEqual(parsePublicKey(`${PUB}\n`).line, PUB);
-  assert.strictEqual(parsePublicKey(`${PUB}\r\n`).comment, 'agent-kanban me@client');
+  assert.strictEqual(parsePublicKey(`${PUB}\r\n`).comment, 'worktree-kanban me@client');
   assert.throws(() => parsePublicKey('-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----'), /秘密鍵/);
   assert.throws(() => parsePublicKey('hello world'), /公開鍵のファイルではない/);
   assert.throws(() => parsePublicKey(`${PUB}\n${PUB}`), /公開鍵のファイルではない/);

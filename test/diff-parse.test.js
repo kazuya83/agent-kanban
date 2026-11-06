@@ -9,7 +9,7 @@ const git = require('../src/git');
 const { parseDiff, buildTree, treeOrder, unquote } = require('../renderer/diff-parse');
 
 test('parseDiff: 実際の git diff から、ファイルごとの状態・行番号・増減を取り出す', async () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-diff-'));
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-diff-'));
   const g = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo });
   g('init', '-q', '-b', 'main');
   fs.mkdirSync(path.join(repo, 'src', 'lib'), { recursive: true });

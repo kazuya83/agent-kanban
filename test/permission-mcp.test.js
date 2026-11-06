@@ -108,13 +108,13 @@ test('接続できないときの拒否理由は、起動時に渡した言語�
     for (const k of ['KANBAN_PORT', 'KANBAN_TOKEN', 'KANBAN_CARD', 'KANBAN_LANGUAGE']) delete env[k];
     const en = await decisionFrom(env, file);
     assert.strictEqual(en.behavior, 'deny');
-    assert.doesNotMatch(en.message, /Agent Kanban に接続できなかったため拒否しました/);
+    assert.doesNotMatch(en.message, /Worktree Kanban に接続できなかったため拒否しました/);
     assert.match(en.message, /could not be reached/);
     const jaFile = writeConf(tmp, { KANBAN_PORT: '1', KANBAN_TOKEN: 'tok', KANBAN_CARD: 'c1' });
     const ja = await decisionFrom(env, jaFile);
-    assert.match(ja.message, /Agent Kanban に接続できなかったため拒否しました/);
+    assert.match(ja.message, /Worktree Kanban に接続できなかったため拒否しました/);
     const bad = await decisionFrom({ ...env, KANBAN_LANGUAGE: 'jp' }, jaFile);
-    assert.match(bad.message, /Agent Kanban に接続できなかったため拒否しました/, '知らない言語コードは日本語のまま');
+    assert.match(bad.message, /Worktree Kanban に接続できなかったため拒否しました/, '知らない言語コードは日本語のまま');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -1,11 +1,11 @@
 {
-  "name": "agent-kanban",
+  "name": "worktree-kanban",
   "version": "0.1.8",
-  "description": "Desktop app that manages AI coding agent tasks (Claude Code / Codex CLI / Gemini CLI / Cursor CLI) on a kanban board and runs them in parallel, one git worktree each",
+  "description": "Kanban desktop app that runs AI coding agents (Claude Code / Codex CLI / Gemini CLI / Cursor CLI) in parallel, one git worktree per task. Mac and Windows can each remotely operate the other",
   "main": "main.js",
   "license": "MIT",
   "author": "kazuya83",
-  "homepage": "https://github.com/kazuya83/agent-kanban",
+  "homepage": "https://github.com/kazuya83/worktree-kanban",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
@@ -21,8 +21,8 @@
   },
   "build": {
     "appId": "dev.agentkanban.app",
-    "productName": "Agent Kanban",
-    "artifactName": "agent-kanban-${version}-${os}-${arch}.${ext}",
+    "productName": "Worktree Kanban",
+    "artifactName": "worktree-kanban-${version}-${os}-${arch}.${ext}",
     "files": ["main.js", "preload.js", "src/**", "renderer/**"],
     "asarUnpack": ["src/permission-mcp.js", "renderer/i18n.js", "renderer/locales/**/*.js"],
     "directories": {
@@ -37,7 +37,7 @@
       "gatekeeperAssess": false
     },
     "dmg": {
-      "artifactName": "agent-kanban-${version}-mac-${arch}.${ext}"
+      "artifactName": "worktree-kanban-${version}-mac-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -45,16 +45,16 @@
         { "target": "portable", "arch": ["x64"] },
         { "target": "zip", "arch": ["x64"] }
       ],
-      "artifactName": "agent-kanban-${version}-win-${arch}.${ext}"
+      "artifactName": "worktree-kanban-${version}-win-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "agent-kanban-${version}-win-setup.${ext}"
+      "artifactName": "worktree-kanban-${version}-win-setup.${ext}"
     },
     "portable": {
-      "artifactName": "agent-kanban-${version}-win-portable.${ext}"
+      "artifactName": "worktree-kanban-${version}-win-portable.${ext}"
     },
     "linux": {
       "target": [{ "target": "AppImage", "arch": ["x64"] }],

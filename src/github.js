@@ -71,7 +71,7 @@ async function viaGh(gh, repoPath, slug, number) {
 }
 
 async function viaApi(slug, number, token) {
-  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'agent-kanban' };
+  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'worktree-kanban' };
   if (token) headers.Authorization = `Bearer ${token}`;
   const base = `https://api.github.com/repos/${slug.owner}/${slug.repo}`;
   const res = await fetch(`${base}/issues/${number}`, { headers });
@@ -325,7 +325,7 @@ async function fetchSubIssues(repoPath, number) {
     list = JSON.parse(out || '[]');
   } else {
     const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
-    const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'agent-kanban' };
+    const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'worktree-kanban' };
     if (token) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(`https://api.github.com/${pathName}?per_page=100`, { headers });
     if (res.status === 404) return [];

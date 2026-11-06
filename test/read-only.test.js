@@ -12,7 +12,7 @@ const { PermissionServer } = require('../src/permission-server');
 const FAKE = path.join(__dirname, 'fake-claude.js');
 
 function setup() {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-readonly-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-readonly-'));
   const repo = path.join(tmp, 'repo');
   fs.mkdirSync(repo);
   const git = (...a) => execFileSync('git', a, { cwd: repo });

@@ -729,7 +729,7 @@ class AgentManager extends EventEmitter {
     this.pending = new Map(); // permission request id -> { cardId, toolName, input, resolve }
     this.permission = null; // { port, token }
     // 指示に添付したファイルの置き場所（作業フォルダの外）
-    this.attachRoot = (opts && opts.attachDir) || path.join(os.tmpdir(), 'agent-kanban-attachments');
+    this.attachRoot = (opts && opts.attachDir) || path.join(os.tmpdir(), 'worktree-kanban-attachments');
     for (const c of this.store.cards) migrateRelayCard(c);
     this.recoverInterrupted();
     // 前回の終了で止まっていたサブタスクの続き（終わっていたサブタスクのマージなど）
@@ -1553,7 +1553,7 @@ class AgentManager extends EventEmitter {
       if (createIssues) {
         for (const x of list) {
           if (x.issue) continue;
-          const made = await this.createSubIssue(c.repoPath, c.issue.number, { title: x.title, body: `${x.prompt}\n\n---\n${tr('Agent Kanban のサブタスクとして作成しました（親: #{number}）。', { number: c.issue.number })}` });
+          const made = await this.createSubIssue(c.repoPath, c.issue.number, { title: x.title, body: `${x.prompt}\n\n---\n${tr('Worktree Kanban のサブタスクとして作成しました（親: #{number}）。', { number: c.issue.number })}` });
           x.issue = { number: made.number, title: made.title, url: made.url };
           // 途中で失敗しても、作ったサブIssue は覚えておく（もう一度押したときに二重に作らない）
           c.subtaskProposal.items = list;
@@ -3442,7 +3442,7 @@ class AgentManager extends EventEmitter {
     const subIssues = c.subtasks ? c.subtasks.items.filter((x) => x.issue && x.state === 'merged').map((x) => `Closes #${x.issue.number}`) : [];
     if (subIssues.length) lines.push(...subIssues, '');
     if (c.lastMessage) lines.push(c.lastMessage, '');
-    lines.push('---', tr('Agent Kanban のタスクから作成しました。'));
+    lines.push('---', tr('Worktree Kanban のタスクから作成しました。'));
     return { title, body: lines.join('\n') };
   }
 
