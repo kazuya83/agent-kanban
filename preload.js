@@ -72,6 +72,11 @@ contextBridge.exposeInMainWorld('api', {
   readNotifications: (ids) => call('notifications:read', { ids }),
   clearNotifications: (ids) => call('notifications:clear', { ids }),
   actNotification: (id) => call('notifications:act', { id }),
+  createSchedule: (p) => call('schedules:create', p),
+  updateSchedule: (p) => call('schedules:update', p), // { id, ...変える項目 }
+  deleteSchedule: (id) => call('schedules:delete', { id }),
+  // { id, start }: start が true で「今すぐ実行」、false で「タスクだけ作成」。作ったカードの ID を返す
+  runSchedule: (p) => call('schedules:run', p),
   btw: (id, text) => call('card:btw', { id, text }),
   setSession: (id, session) => call('card:setSession', { id, session }),
   listSessions: () => call('sessions:list'),

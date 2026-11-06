@@ -1,7 +1,7 @@
 // Agent Kanban 同士の遠隔操作（ペアリング・RPC・イベント）
 const test = require('node:test');
 const assert = require('node:assert');
-const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, MAX_PAIR_FAILURES, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory, redactForRemote, MAX_CONNECTION_HISTORY } = require('../src/remote');
+const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, MAX_PAIR_FAILURES, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory, redactForRemote, MAX_CONNECTION_HISTORY, composeTabs } = require('../src/remote');
 
 test('遠隔で転送するチャンネルと、しないチャンネル', () => {
   assert.strictEqual(isProxyChannel('board:get'), true);
@@ -115,6 +115,82 @@ test('ペアリングコードで接続し、ボード操作とイベントを�
   } finally {
     await host.stop();
   }
+});
+
+// 接続済みのホストとクライアントを用意して fn を動かす
+async function withPair(invoke, fn) {
+  const host = new RemoteHost({ port: 0, tokens: [], onTokens: () => {}, invoke });
+  await host.start(0);
+  const client = new RemoteClient();
+  try {
+    await client.connect({ host: '127.0.0.1', port: host.port, code: host.status().pairCode });
+    await fn(client, host);
+  } finally {
+    client.disconnect();
+    await host.stop();
+  }
+}
+
+test('スケジュールの4つの操作はホストへ転送され、引数と結果がそのまま届く', async () => {
+  const calls = [];
+  await withPair(
+    async (channel, arg) => {
+      calls.push([channel, arg]);
+      return { channel };
+    },
+    async (client) => {
+      for (const [ch, arg] of [
+        ['schedules:create', { title: '毎朝', rule: { kind: 'daily', hour: 9, minute: 0 } }],
+        ['schedules:update', { id: 's1', enabled: false }],
+        ['schedules:delete', { id: 's1' }],
+        ['schedules:run', { id: 's1', start: true }],
+      ]) {
+        assert.strictEqual(isProxyChannel(ch), true);
+        assert.strictEqual(isLocalChannel(ch), false);
+        assert.deepStrictEqual(await client.invoke(ch, arg), { channel: ch });
+        assert.deepStrictEqual(calls.at(-1), [ch, arg]);
+      }
+    },
+  );
+});
+
+test('スケジュールの処理がホストで失敗したら、その理由が操作側に届く', async () => {
+  await withPair(
+    async () => {
+      throw new Error('先にリポジトリを開いてください');
+    },
+    async (client) => {
+      await assert.rejects(client.invoke('schedules:create', {}), /先にリポジトリを開いてください/);
+    },
+  );
+});
+
+test('ボードの schedules は遠隔でも消えず、設定の秘密だけが抜かれる', async () => {
+  const schedules = [{ id: 's1', repoPath: '/host/repo', title: '毎朝', runs: [] }];
+  await withPair(
+    async () => ({ settings: { repoPath: '/host/repo', remotePairTokens: ['secret'] }, cards: [], schedules }),
+    async (client) => {
+      const b = await client.invoke('board:get');
+      assert.deepStrictEqual(b.schedules, schedules);
+      assert.strictEqual(b.settings.remotePairTokens, undefined);
+    },
+  );
+});
+
+test('古いホスト: ボードに schedules がなくても、画面には空の一覧を渡す', () => {
+  const old = { settings: { repoPath: '/h' }, repoTabs: [{ path: '/h' }], cards: [] };
+  const local = { settings: { repoPath: '/l', recentRepoPaths: [] }, repoTabs: [{ path: '/l' }], cards: [], schedules: [{ id: 'l1' }] };
+  assert.deepStrictEqual(composeTabs(old, local, 'host').schedules, []);
+  // 壊れた値でも配列にする
+  assert.deepStrictEqual(composeTabs({ ...old, schedules: null }, local, 'host').schedules, []);
+  assert.deepStrictEqual(composeTabs({ ...old, schedules: 'x' }, local, 'host').schedules, []);
+  // このマシンのタブを見ているときは、このマシンの分
+  assert.deepStrictEqual(composeTabs(old, local, 'local').schedules, [{ id: 'l1' }]);
+  // 接続していないとき
+  assert.deepStrictEqual(composeTabs(null, local).schedules, [{ id: 'l1' }]);
+  assert.deepStrictEqual(composeTabs(null, { settings: {}, repoTabs: [] }).schedules, []);
+  // 新しいホストの分はそのまま
+  assert.deepStrictEqual(composeTabs({ ...old, schedules: [{ id: 'h1' }] }, local, 'host').schedules, [{ id: 'h1' }]);
 });
 
 test('間違ったペアリングコードでは接続できない', async () => {

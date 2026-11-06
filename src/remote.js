@@ -121,6 +121,11 @@ const PROXY_CHANNELS = new Set([
   'notifications:read',
   'notifications:clear',
   'notifications:act',
+  // スケジュールはホストのアプリの中で動くので、登録も実行もホストで行う
+  'schedules:create',
+  'schedules:update',
+  'schedules:delete',
+  'schedules:run',
   'skills:list',
   'card:btw',
   'card:setSession',
@@ -184,11 +189,13 @@ function composeTabs(host, local, view = 'host') {
     const cur = (board && board.settings && board.settings.repoPath) || '';
     return ((board && board.repoTabs) || []).filter((t) => t && t.path).map((t) => ({ ...t, remote, active: on && t.path === cur }));
   };
-  if (!host) return { ...local, repoTabs: side(local, false, true) };
+  // 古い版のホストのボードには schedules がない
+  const withSchedules = (board) => ({ ...board, schedules: Array.isArray(board.schedules) ? board.schedules : [] });
+  if (!host) return withSchedules({ ...local, repoTabs: side(local, false, true) });
   const v = view === 'local' ? 'local' : 'host';
   const base = v === 'local' ? local : host;
   return {
-    ...base,
+    ...withSchedules(base),
     repoTabs: [...side(host, true, v === 'host'), ...side(local, false, v === 'local')],
     // リポジトリを選ぶ画面で、側ごとの「最近開いたリポジトリ」を出すため
     recentBySide: { host: (host.settings && host.settings.recentRepoPaths) || [], local: (local.settings && local.settings.recentRepoPaths) || [] },
