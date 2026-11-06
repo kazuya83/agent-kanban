@@ -89,6 +89,7 @@ const PROXY_CHANNELS = new Set([
   'repo:create',
   'repo:info',
   'settings:update',
+  'flow:generate',
   'card:create',
   'chat:create',
   'card:createFromIssues',

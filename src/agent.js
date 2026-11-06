@@ -2383,9 +2383,10 @@ class AgentManager extends EventEmitter {
    * @param {string} cwd
    * @param {string} prompt
    * @param {string} [model]  使うモデル（なければ設定の既定）
+   * @param {number} [timeoutMs]  待つ時間の上限
    * @returns {Promise<string>}
    */
-  async askOnce(agent, cwd, prompt, model) {
+  async askOnce(agent, cwd, prompt, model, timeoutMs = 120000) {
     const s = this.store.settings;
     let args;
     let parser = null;
@@ -2421,7 +2422,7 @@ class AgentManager extends EventEmitter {
       const timer = setTimeout(() => {
         killTree(child);
         reject(new Error('時間がかかりすぎました'));
-      }, 120000);
+      }, timeoutMs);
       child.stdout.setEncoding('utf8');
       child.stdout.on('data', (d) => {
         if (!parser) return void (out += d);

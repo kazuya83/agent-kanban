@@ -26,6 +26,7 @@
   const MAX_LOOPS_DEFAULT = 3;
   const MAX_LOOPS_LIMIT = 10;
   const TYPE_LABEL = { start: '開始', step: '工程', if: '分岐', parallel: '並列', join: '合流', end: '終了' };
+  const NODE_W = { start: 120, step: 200, if: 170, parallel: 160, join: 160, end: 120 };
 
   function trunc(s, n) {
     const t = String(s == null ? '' : s);
@@ -395,6 +396,49 @@
     };
   }
 
+  // ---------- 並べる ----------
+
+  /**
+   * ノードを開始から上下に並べ直す（前のノードへ戻る線は数えない。同じ段のノードは横に並べる）
+   * @param {{ nodes: object[], edges: object[] }} flow  x, y を書き換える
+   * @returns {{ nodes: object[], edges: object[] }} flow
+   */
+  function autoLayout(flow) {
+    const back = backEdges(flow);
+    const forward = flow.edges.filter((e) => !back.has(e.id));
+    const rank = new Map();
+    // 枝の長さが違っても、合流は長い枝のあとに来るように、入る線がすべて済んだノードから段を決める
+    const waiting = new Map(flow.nodes.map((n) => [n.id, forward.filter((e) => e.to === n.id).length]));
+    const queue = flow.nodes.filter((n) => !waiting.get(n.id)).map((n) => n.id);
+    while (queue.length) {
+      const id = queue.shift();
+      const r = rank.get(id) || 0;
+      rank.set(id, r);
+      for (const e of forward) {
+        if (e.from !== id) continue;
+        rank.set(e.to, Math.max(rank.get(e.to) || 0, r + 1));
+        waiting.set(e.to, waiting.get(e.to) - 1);
+        if (!waiting.get(e.to)) queue.push(e.to);
+      }
+    }
+    const rows = [];
+    for (const n of flow.nodes) {
+      const r = rank.get(n.id) || 0;
+      (rows[r] = rows[r] || []).push(n);
+    }
+    const GAP_X = 240;
+    const GAP_Y = 110;
+    const widest = Math.max(1, ...rows.map((row) => (row ? row.length : 0)));
+    const center = 40 + (widest * GAP_X) / 2;
+    rows.forEach((row, r) => {
+      row.forEach((n, i) => {
+        n.x = Math.round(center + (i - (row.length - 1) / 2) * GAP_X - (NODE_W[n.type] || 160) / 2);
+        n.y = 30 + r * GAP_Y;
+      });
+    });
+    return flow;
+  }
+
   // ---------- 前のバージョンの工程のリストから作る ----------
 
   /**
@@ -459,6 +503,7 @@
     resultValue,
     route,
     judgeOf,
+    autoLayout,
     flowFromSteps,
   };
 });
