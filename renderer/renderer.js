@@ -450,7 +450,7 @@ function cardHtml(c) {
         ${isUnreadChat(c) ? tr('<span class="unread-chip" title="まだ読んでいない返事があります">未読</span>') : ''}
         ${since ? `<span class="elapsed" data-since="${since}">${elapsed(since)}</span>` : ''}
       </div>
-      <div class="card-title">${c.issue ? tr('<a class="issue-chip" data-url="{url}" title="Issue を開く">#{number}</a> {v}', { url: (esc(c.issue.url)), number: (c.issue.number), v: (esc(c.title.replace(/^#\d+\s*/, ''))) }) : esc(c.title)}</div>
+      <div class="card-title">${c.issue ? tr('<a class="issue-chip" data-url="{url}" title="Issue を開く">{key}</a> {v}', { url: (esc(c.issue.url)), key: (esc(IssueRef.keyOf(c.issue))), v: (esc(IssueRef.stripKey(c.title, c.issue))) }) : esc(c.title)}</div>
       ${orchChipsHtml(c)}
       ${c.readOnly ? tr('<div class="card-skill-row"><span class="readonly-chip" title="ソースを変更しないタスク: worktree を作らず、ファイルを書き換えるツールを止めて動かします。確かめたら「完了にする」で完了にします">{v}ソース変更なし</span></div>', { v: (icon('lock')) }) : ''}
       ${c.skill ? tr('<div class="card-skill-row"><span class="skill-chip small" title="最初の指示で使うスキル">{v}/{skill}</span></div>', { v: (icon('zap')), skill: (esc(c.skill)) }) : ''}
@@ -1272,7 +1272,7 @@ function subtaskApproveHtml(c) {
 }
 // サブタスクの一覧を編集する欄（提案を直す・開始前に決める）
 function subRowHtml(x, title = new Map(), showAfter = false) {
-  return tr('<div class="sub-row" data-key="{v}" data-after="{v2}" data-issue="{v3}">\n      <div class="sub-row-head"><input class="sub-title" placeholder="サブタスクの名前" value="{v4}" />{v5}<button class="icon" type="button" data-sact="remove" title="このサブタスクを外す">✕</button></div>\n      <textarea class="sub-prompt" rows="3" placeholder="このサブタスクでやること">{v6}</textarea>\n      {v7}\n    </div>', { v: (esc(x.key || '')), v2: (esc(JSON.stringify(x.after || []))), v3: (esc(x.issue ? JSON.stringify(x.issue) : '')), v4: (esc(x.title || '')), v5: (x.issue ? `<span class="muted small">#${x.issue.number}</span>` : ''), v6: (esc(x.prompt || '')), v7: (showAfter && x.after && x.after.length ? tr('<small class="muted">{v} のあとに始めます</small>', { v: quoteNames(x.after.map((a) => esc(title.get(a) || a))) }) : '') });
+  return tr('<div class="sub-row" data-key="{v}" data-after="{v2}" data-issue="{v3}">\n      <div class="sub-row-head"><input class="sub-title" placeholder="サブタスクの名前" value="{v4}" />{v5}<button class="icon" type="button" data-sact="remove" title="このサブタスクを外す">✕</button></div>\n      <textarea class="sub-prompt" rows="3" placeholder="このサブタスクでやること">{v6}</textarea>\n      {v7}\n    </div>', { v: (esc(x.key || '')), v2: (esc(JSON.stringify(x.after || []))), v3: (esc(x.issue ? JSON.stringify(x.issue) : '')), v4: (esc(x.title || '')), v5: (x.issue ? `<span class="muted small">${esc(IssueRef.keyOf(x.issue))}</span>` : ''), v6: (esc(x.prompt || '')), v7: (showAfter && x.after && x.after.length ? tr('<small class="muted">{v} のあとに始めます</small>', { v: quoteNames(x.after.map((a) => esc(title.get(a) || a))) }) : '') });
 }
 function subEditorHtml(items, { showAfter = false } = {}) {
   const title = new Map(items.map((x) => [x.key, x.title]));
@@ -1301,7 +1301,7 @@ function subMergeSelectHtml(id, value) {
 function subtaskProposalHtml(c) {
   const who = esc(agentShort(agentOf(c)));
   const items = c.subtaskProposal.items;
-  return tr('<div class="sub-box sub-proposal" id="subProposal"><b>{v}{who} が、{n} 個のサブタスクに分けて進めることを提案しています</b>\n    <small>それぞれ、このタスクのブランチから分けたブランチで別のエージェントが作業し、終わったものからこのブランチにマージします。すべてマージしたら、{who} が全体を仕上げてからレビューに回します。名前や指示は直せます。</small>\n    {v2}\n    {v3}\n    {v4}\n    <div class="d-actions"><button class="btn primary" data-sact="accept">{v5}サブタスクでやる</button><button class="btn" data-sact="decline">分けずに進める</button></div>\n    <small>ほかの分け方にしてほしいときは、下の欄に文章で書いて送ってください。</small></div>', { v: (icon('branch')), who, n: (items.length), v2: (subEditorHtml(items, { showAfter: true })), v3: (subMergeSelectHtml('subMerge', (state.board.settings || {}).subtaskMerge)), v4: (c.issue ? tr('<label class="check"><input type="checkbox" id="subIssues" /> GitHub にもサブIssue を作って、#{number} にぶら下げる</label>', { number: (c.issue.number) }) : ''), v5: (icon('play')) });
+  return tr('<div class="sub-box sub-proposal" id="subProposal"><b>{v}{who} が、{n} 個のサブタスクに分けて進めることを提案しています</b>\n    <small>それぞれ、このタスクのブランチから分けたブランチで別のエージェントが作業し、終わったものからこのブランチにマージします。すべてマージしたら、{who} が全体を仕上げてからレビューに回します。名前や指示は直せます。</small>\n    {v2}\n    {v3}\n    {v4}\n    <div class="d-actions"><button class="btn primary" data-sact="accept">{v5}サブタスクでやる</button><button class="btn" data-sact="decline">分けずに進める</button></div>\n    <small>ほかの分け方にしてほしいときは、下の欄に文章で書いて送ってください。</small></div>', { v: (icon('branch')), who, n: (items.length), v2: (subEditorHtml(items, { showAfter: true })), v3: (subMergeSelectHtml('subMerge', (state.board.settings || {}).subtaskMerge)), v4: (c.issue && issueProviderInfo(IssueRef.providerOf(c.issue)).canSubIssue ? tr('<label class="check"><input type="checkbox" id="subIssues" /> {label} にもサブIssue を作って、{key} にぶら下げる</label>', { label: (esc(issueProviderInfo(IssueRef.providerOf(c.issue)).label)), key: (esc(IssueRef.keyOf(c.issue))) }) : ''), v5: (icon('play')) });
 }
 // サブタスク1つの金額（動いているものはカードの、終わったものは記録した金額）
 function subItemCost(x) {
@@ -1357,7 +1357,7 @@ function subBoardHtml(c) {
       const [mark, label] = subStateInfo(s);
       const k = x.cardId && x.state === 'running' ? card(x.cardId) : null;
       const info = [];
-      if (x.issue) info.push(`<a class="issue-chip" data-url="${esc(x.issue.url)}">#${x.issue.number}</a>`);
+      if (x.issue) info.push(`<a class="issue-chip" data-url="${esc(x.issue.url)}">${esc(IssueRef.keyOf(x.issue))}</a>`);
       if (x.after && x.after.length) info.push(tr('<span class="muted small" title="自動で進めるときの順番です。サブタスクだけ開始するときは、順番に関係なく始められます">{v} のあと（目安）</span>', { v: quoteNames(x.after.map((a) => esc(title.get(a) || a))) }));
       if (x.manual) info.push(tr('<span class="muted small">個別に開始</span>'));
       if (k) info.push(`<span class="rf-agent">${personaIcon(k.persona, agentOf(k))}${esc(whoShort(agentOf(k), k.persona))}</span>`);
@@ -1436,7 +1436,7 @@ function openSubtaskDetail(p, x, { editing = false } = {}) {
   const title = new Map(p.subtasks.items.map((y) => [y.key, y.title]));
   const startable = x.state === 'pending' && p.status !== 'running' && p.status !== 'queued' && p.status !== 'done' && !p.conflict;
   const rows = [tr('<dt>状態</dt><dd><span class="rf-state">{label}</span></dd>', { label: (esc(label)) })];
-  if (x.issue) rows.push(`<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(x.issue.url)}">#${x.issue.number}</a> ${esc(x.issue.title || '')}</dd>`);
+  if (x.issue) rows.push(`<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(x.issue.url)}">${esc(IssueRef.keyOf(x.issue))}</a> ${esc(x.issue.title || '')}</dd>`);
   if (x.after && x.after.length) rows.push(tr('<dt>順番（目安）</dt><dd>{v} のあと</dd>', { v: quoteNames(x.after.map((a) => esc(title.get(a) || a))) }));
   if (x.agent) rows.push(tr('<dt>エージェント</dt><dd>{v}</dd>', { v: (esc(agentLabel(x.agent))) }));
   if (x.branch) rows.push(tr('<dt>ブランチ</dt><dd>{branch}</dd>', { branch: (esc(x.branch)) }));
@@ -1504,7 +1504,7 @@ async function subtaskAction(c, el) {
     const items = subRowsFrom(box);
     if (!items.length) return toast(tr('サブタスクを1つ以上入れてください'));
     const createIssues = !!($('subIssues') && $('subIssues').checked);
-    if (createIssues && !confirm(tr('GitHub に {n} 件のサブIssue を作って、#{number} にぶら下げます。よろしいですか？', { n: (items.filter((x) => !x.issue).length), number: (c.issue.number) }))) return;
+    if (createIssues && !confirm(tr('{label} に {n} 件のサブIssue を作って、{key} にぶら下げます。よろしいですか？', { label: issueProviderInfo(IssueRef.providerOf(c.issue)).label, n: (items.filter((x) => !x.issue).length), key: IssueRef.keyOf(c.issue) }))) return;
     return runBusy(createIssues ? tr('サブIssue を作って、サブタスクを始めています…') : tr('サブタスクを始めています…'), () => api.acceptSubtasks(c.id, { items, merge: $('subMerge').value, createIssues }), tr('サブタスクを始めました'));
   }
 }
@@ -1849,7 +1849,7 @@ function renderDetailHead() {
 function detailMetaHtml(c) {
   const s = c.status;
   const chat = isChat(c);
-  return tr('<dl class="d-meta">\n      {v}\n      {v2}\n      <dt>モデル</dt><dd>{v3}</dd>\n      {v4}\n      {v5}\n      {v6}\n      {v7}\n      {v8}\n      {v9}\n      {v10}\n      {v11}\n      {v12}\n      {v13}\n    </dl>', { v: (c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''), v2: (!chat || c.persona ? tr('<dt>エージェント</dt><dd>{v}{v2}{v3}</dd>', { v: (personaIcon(c.persona, agentOf(c))), v2: (esc(whoLabel(agentOf(c), c.persona))), v3: (c.persona && c.persona.description ? ` <span class="muted small">${esc(c.persona.description)}</span>` : '') }) : ''), v3: (c.model ? esc(c.model) : settingsModel(agentOf(c)) ? tr('{v} <span class="muted small">（設定の既定）</span>', { v: (esc(settingsModel(agentOf(c)))) }) : tr('<span class="muted small">CLI の既定</span>')), v4: (sessionRowHtml(c)), v5: (chat ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（worktree は作りません）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v6: (!chat && c.readOnly ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（ソースを変更しないタスク。worktree は作らず、ファイルを書き換えるツールを止めて、このフォルダで動かします。作ったものはチャットに出ます）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v7: (!chat && isNoGit(c) && !c.readOnly ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（git で管理していないフォルダ。worktree は作らず、このフォルダで直接動かします）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v8: (c.branch ? tr('<dt>ブランチ</dt><dd>{branch} ← {baseBranch}</dd>', { branch: (esc(c.branch)), baseBranch: (esc(c.baseBranch)) }) : ''), v9: (c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''), v10: (c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}${c.prState === 'MERGED' ? tr('（マージ済み）') : c.prState === 'CLOSED' ? tr('（閉じられました）') : ''}${c.prState === 'OPEN' && c.prMergeable === 'CONFLICTING' ? tr(' <span class="badge b-conflict">コンフリクト</span>{v}', { v: (c.worktreePath && !c.conflict && (s === 'review' || s === 'failed') ? tr(' <button class="btn small" data-act="prConflict">解消する</button>') : '') }) : ''}${ciBadgeHtml(c, s)}</dd>` : ''), v11: ((c.mergedInto || []).length ? tr('<dt>マージ済み</dt><dd>{v}</dd>', { v: (c.mergedInto.map((b) => esc(b) + ((c.pushedTo || []).includes(b) ? tr('（origin にも push 済み）') : '')).join(', ')) }) : ''), v12: (c.costUsd ? tr('<dt>コスト</dt><dd>${v}</dd>', { v: (c.costUsd.toFixed(3)) }) : ''), v13: ((c.alwaysAllow || []).length ? tr('<dt>常に許可</dt><dd>{v}</dd>', { v: (c.alwaysAllow.map(esc).join(', ')) }) : '') });
+  return tr('<dl class="d-meta">\n      {v}\n      {v2}\n      <dt>モデル</dt><dd>{v3}</dd>\n      {v4}\n      {v5}\n      {v6}\n      {v7}\n      {v8}\n      {v9}\n      {v10}\n      {v11}\n      {v12}\n      {v13}\n    </dl>', { v: (c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">${esc(IssueRef.keyOf(c.issue))}</a> ${esc(c.issue.url)}</dd>` : ''), v2: (!chat || c.persona ? tr('<dt>エージェント</dt><dd>{v}{v2}{v3}</dd>', { v: (personaIcon(c.persona, agentOf(c))), v2: (esc(whoLabel(agentOf(c), c.persona))), v3: (c.persona && c.persona.description ? ` <span class="muted small">${esc(c.persona.description)}</span>` : '') }) : ''), v3: (c.model ? esc(c.model) : settingsModel(agentOf(c)) ? tr('{v} <span class="muted small">（設定の既定）</span>', { v: (esc(settingsModel(agentOf(c)))) }) : tr('<span class="muted small">CLI の既定</span>')), v4: (sessionRowHtml(c)), v5: (chat ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（worktree は作りません）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v6: (!chat && c.readOnly ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（ソースを変更しないタスク。worktree は作らず、ファイルを書き換えるツールを止めて、このフォルダで動かします。作ったものはチャットに出ます）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v7: (!chat && isNoGit(c) && !c.readOnly ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（git で管理していないフォルダ。worktree は作らず、このフォルダで直接動かします）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v8: (c.branch ? tr('<dt>ブランチ</dt><dd>{branch} ← {baseBranch}</dd>', { branch: (esc(c.branch)), baseBranch: (esc(c.baseBranch)) }) : ''), v9: (c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''), v10: (c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}${c.prState === 'MERGED' ? tr('（マージ済み）') : c.prState === 'CLOSED' ? tr('（閉じられました）') : ''}${c.prState === 'OPEN' && c.prMergeable === 'CONFLICTING' ? tr(' <span class="badge b-conflict">コンフリクト</span>{v}', { v: (c.worktreePath && !c.conflict && (s === 'review' || s === 'failed') ? tr(' <button class="btn small" data-act="prConflict">解消する</button>') : '') }) : ''}${ciBadgeHtml(c, s)}</dd>` : ''), v11: ((c.mergedInto || []).length ? tr('<dt>マージ済み</dt><dd>{v}</dd>', { v: (c.mergedInto.map((b) => esc(b) + ((c.pushedTo || []).includes(b) ? tr('（origin にも push 済み）') : '')).join(', ')) }) : ''), v12: (c.costUsd ? tr('<dt>コスト</dt><dd>${v}</dd>', { v: (c.costUsd.toFixed(3)) }) : ''), v13: ((c.alwaysAllow || []).length ? tr('<dt>常に許可</dt><dd>{v}</dd>', { v: (c.alwaysAllow.map(esc).join(', ')) }) : '') });
 }
 
 function renderInfo(c) {
@@ -3285,10 +3285,16 @@ function newTask(opts = {}) {
   );
 }
 
-// 新しいタスクの作り方（自然言語で書く / GitHub の Issue から）を切り替えるタブ
+// 登録されている課題管理サービス（古い版のホストのボードには無いので、GitHub だけとして扱う）
+const GITHUB_PROVIDER = { id: 'github', label: 'GitHub', refPlaceholder: '例: 12 または 12, 15, 18', canSync: true, canSubIssue: true };
+const issueProviders = () => (state.board.issueProviders && state.board.issueProviders.length ? state.board.issueProviders : [GITHUB_PROVIDER]);
+const issueProviderInfo = (id) => issueProviders().find((p) => p.id === id) || (id === GITHUB_PROVIDER.id ? GITHUB_PROVIDER : { id, label: id, refPlaceholder: '' });
+const projectIssueProvider = () => issueProviderInfo(state.board.settings.issueProvider || GITHUB_PROVIDER.id);
+
+// 新しいタスクの作り方（自然言語で書く / 課題管理サービスの Issue から）を切り替えるタブ
 function taskModeTabsHtml(active) {
   const tab = (mode, label) => `<button type="button" class="tab ${mode === active ? 'active' : ''}" data-task-mode="${mode}" role="tab" aria-selected="${mode === active}">${label}</button>`;
-  return `<nav class="tabs task-mode-tabs" role="tablist">${tab('text', tr('自然言語で作成'))}${tab('issue', tr('GitHub Issue から作成'))}</nav>`;
+  return `<nav class="tabs task-mode-tabs" role="tablist">${tab('text', tr('自然言語で作成'))}${tab('issue', tr('{label} Issue から作成', { label: esc(projectIssueProvider().label) }))}</nav>`;
 }
 function bindTaskModeTabs() {
   document.querySelectorAll('#modalBox [data-task-mode]').forEach((b) => {
@@ -3596,7 +3602,7 @@ function openSessionManager() {
   );
 }
 
-// ---------------- GitHub Issue から作る ----------------
+// ---------------- Issue から作る ----------------
 
 // Issue 番号からカードを作る（上部の枠と、詳細ダイアログの両方から使う）
 async function createFromIssues(numbers, extra, autoStart, session, skill, agent, model) {
@@ -3612,13 +3618,15 @@ async function createFromIssues(numbers, extra, autoStart, session, skill, agent
 // Issue から作成するダイアログ（Issue 番号・会話・追加の指示・gh の準備）
 function openIssueModal(prefill = '') {
   if (!state.board.settings.repoPath) return chooseRepo();
+  const tracker = projectIssueProvider();
+  const isGithub = tracker.id === GITHUB_PROVIDER.id;
   openModal(
     `<h2>${tr('新しいタスク')}</h2>
      ${taskModeTabsHtml('issue')}
-     <label class="field"><span>${tr('Issue 番号（複数ならカンマかスペースで区切る。1つの Issue が1枚のカードになり、並列で動きます）')}</span>
-       <input id="nNumbers" placeholder="${esc(tr('例: 12 または 12, 15, 18'))}" inputmode="numeric" value="${esc(prefill)}" /></label>
+     <label class="field"><span>${isGithub ? tr('Issue 番号（複数ならカンマかスペースで区切る。1つの Issue が1枚のカードになり、並列で動きます）') : tr('Issue の番号または URL（複数ならカンマかスペースで区切る。1つの Issue が1枚のカードになり、並列で動きます）')}</span>
+       <input id="nNumbers" placeholder="${esc(tracker.refPlaceholder ? tr(tracker.refPlaceholder) : '')}" ${isGithub ? 'inputmode="numeric"' : ''} value="${esc(prefill)}" /></label>
      <p class="muted small" id="nRepoInfo">${tr('リポジトリを確認しています…')}</p>
-     <div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div>
+     ${isGithub ? `<div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div>` : ''}
      ${agentFieldHtml('n')}
      ${modelFieldHtml('n')}
      ${sessionFieldHtml('n')}
@@ -3628,16 +3636,28 @@ function openIssueModal(prefill = '') {
     () => {
       bindTaskModeTabs();
       $('nNumbers').focus();
-      api.repoGithub().then(
-        (g) => {
-          const el = $('nRepoInfo');
-          if (!el) return;
-          if (!g || !g.slug) el.textContent = tr('このリポジトリの origin が GitHub ではないため、Issue を読み込めません。');
-          else el.textContent = tr('{owner}/{repo} の Issue を読み込みます。', { owner: g.slug.owner, repo: g.slug.repo });
-        },
-        () => {},
-      );
-      refreshGh();
+      if (isGithub) {
+        api.repoGithub().then(
+          (g) => {
+            const el = $('nRepoInfo');
+            if (!el) return;
+            if (!g || !g.slug) el.textContent = tr('このリポジトリの origin が GitHub ではないため、Issue を読み込めません。');
+            else el.textContent = tr('{owner}/{repo} の Issue を読み込みます。', { owner: g.slug.owner, repo: g.slug.repo });
+          },
+          () => {},
+        );
+        refreshGh();
+      } else {
+        api.trackers().then(
+          (list) => {
+            const el = $('nRepoInfo');
+            if (!el) return;
+            const t = list.find((x) => x.id === tracker.id);
+            el.textContent = t && t.configured ? tr('{label} の Issue を読み込みます。', { label: tracker.label }) : tr('{label} に接続していません。設定の「連携」で接続してください。', { label: tracker.label });
+          },
+          () => {},
+        );
+      }
       fillSessionField('n');
       bindAgentField('n', (v) => {
         toggleSessionField('n', firstAgentOf(v));
@@ -3734,8 +3754,8 @@ async function openPr(c) {
   const agentBranches = others.filter((b) => b.startsWith('agent/'));
   const def = c.prBase && others.includes(c.prBase) ? c.prBase : c.baseBranch;
   const opt = (b) => `<option value="${esc(b)}" ${b === def ? 'selected' : ''}>${esc(b)}${b === c.baseBranch ? tr('（ベース）') : ''}</option>`;
-  const title = c.issue ? c.title.replace(/^#\d+\s*/, '') : c.title;
-  const body = [c.issue ? `Closes #${c.issue.number}\n` : '', c.lastMessage ? `${c.lastMessage}\n` : '', tr('---\nWorktree Kanban のタスクから作成しました。')].join('\n').trim();
+  const title = c.issue ? IssueRef.stripKey(c.title, c.issue) : c.title;
+  const body = [c.issue ? `${IssueRef.linkLine(c.issue)}\n` : '', c.lastMessage ? `${c.lastMessage}\n` : '', tr('---\nWorktree Kanban のタスクから作成しました。')].join('\n').trim();
   const updating = !!c.prUrl;
   openModal(
     `<h2>${updating ? tr('PR を更新') : tr('PR を作成')}</h2>
@@ -4130,6 +4150,8 @@ function renderSettingsView() {
       <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> ${tr('タスクが完了したとき、前に完了したタスクと似た作業が続いていたら、スキルにしないか通知で聞く（右上のベル）')}</label>
       <label class="check"><input type="checkbox" id="sDeleteSessions" ${s.deleteSessionsOnMerge !== false ? 'checked' : ''} /> ${tr('マージして完了したら、そのタスクの作業に使った Claude Code の会話（セッション）を消す（引き継いだ元の会話は残します）')}</label>`,
     update: `<div id="updPanel" class="gh-panel upd-panel">${updatePanelHtml(state.update)}</div>`,
+    integrations: `<small class="muted s-note">${tr('ここの項目は、どのプロジェクトでも同じです。トークンは OS の安全な保存先の鍵で暗号化して保存し、保存したあとは画面に出しません。')}</small>
+      <div id="sTrackers" class="tracker-list">${tr('連携先を確かめています…')}</div>`,
     branch: `<small class="muted s-note">${tr('「このプロジェクト」の項目{v1}は、プロジェクト（リポジトリ）ごとに覚えます。タブを切り替えると、そのプロジェクトの設定に変わります。初めて開いたプロジェクトは初期値から始まります。', { v1: (projectName ? tr('（<code>{v1}</code>）', { v1: (esc(projectName)) }) : '') })}</small>
       <label class="field">${tr('<span>ベースブランチ（worktree の作成元・マージ先）</span>')}
         <select id="sBase">${baseOptions({ branches: [], current: '' })}</select></label>
@@ -4152,9 +4174,12 @@ function renderSettingsView() {
         <textarea id="sRunScript" class="mono" rows="3" spellcheck="false" placeholder="${tr('例: npm run dev')}">${esc(s.runScript || '')}</textarea>
         <small>${tr('開発サーバーなど、タスクの変更を手で確かめるためのコマンドです。worktree タブから動かす・止めることができ、セットアップと片付けも手で動かせます。')}</small></label>
       <small class="muted s-note">${tr('スクリプトは macOS・Linux・WSL では sh / bash で動き、途中の行が失敗するとそこで止まります。Windows では各行を && でつないで cmd で動かします。環境変数 WORKTREE_KANBAN_ROOT（リポジトリ）、WORKTREE_KANBAN_WORKTREE、WORKTREE_KANBAN_BRANCH、WORKTREE_KANBAN_BASE_BRANCH、WORKTREE_KANBAN_TASK_ID が使えます。WORKTREE_KANBAN_PORT と PORT にはタスクごとに分けたポートが入り、そこから連続する10個を使えます（並列で動かしてもぶつかりません）。')}</small>`,
-    issue: `<div class="field">
-        <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> ${tr('Issue のステータスを自動で変える（GitHub Projects）')}</label>
-        <small>${tr('Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。')}</small>
+    issue: `<label class="field"><span>${tr('使う課題管理サービス')}</span>
+        <select id="sIssueProvider">${issueProviders().map((p) => `<option value="${esc(p.id)}" ${p.id === (s.issueProvider || GITHUB_PROVIDER.id) ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>
+        <small>${tr('「＋ 新しいタスク」の Issue の欄で使います。接続先とトークンは、全般の「連携」で設定します。')}</small></label>
+      <div class="field">
+        <label class="check" id="sIssueSyncRow"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> <span id="sIssueSyncLabel"></span></label>
+        <div id="sGithubIssue"><small>${tr('Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。')}</small>
         <div class="status-map" id="sStatusMap" ${s.issueStatusSync !== false ? '' : 'hidden'}>
           <label class="field">${tr('<span>変える項目（Project の単一選択フィールド名。空なら Status）</span>')}<input id="sStatusField" placeholder="Status" value="${esc(s.statusFieldName || '')}" /></label>
           <div class="row">
@@ -4164,7 +4189,7 @@ function renderSettingsView() {
           </div>
           <small>${tr('列ごとに使う選択肢の名前を指定できます（カンマ区切りで候補を複数書けます。大文字小文字・絵文字・記号は無視して比べます）。空の列は名前から自動で探します。')}</small>
         </div>
-        <div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div></div>`,
+        <div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div></div></div>`,
     permission: `<label class="field">${tr('<span>権限モード</span>')}
         <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(tr(l))}</option>`).join('')}</select>
         <small>${tr('自動で許可されない操作は、カードに「承認待ち」として表示されます。')}</small></label>
@@ -4617,6 +4642,16 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
   );
   // 「Issue のステータスを自動で変える」にチェックがあるときだけ、項目名と選択肢の指定を出す
   $('sIssueSync').onchange = () => ($('sStatusMap').hidden = !$('sIssueSync').checked);
+  // GitHub Projects の欄は GitHub を選んだときだけ。同期できないサービスでは、同期の欄を出さない
+  const drawIssueProvider = () => {
+    const p = issueProviderInfo($('sIssueProvider').value);
+    $('sGithubIssue').hidden = p.id !== GITHUB_PROVIDER.id;
+    $('sIssueSyncRow').hidden = !p.canSync;
+    $('sIssueSyncLabel').textContent = p.id === GITHUB_PROVIDER.id ? tr('Issue のステータスを自動で変える（GitHub Projects）') : tr('Issue のステータスを自動で変える');
+  };
+  $('sIssueProvider').onchange = drawIssueProvider;
+  drawIssueProvider();
+  drawTrackers();
   refreshGh();
   bindUpdatePanel();
   // 言語は保存ボタンを待たず、選んだら手元の設定へ書いて画面を読み直す
@@ -4673,6 +4708,8 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
         // 元の CLI を使わない設定にしたカスタムエージェントの競争の選択も覚えておく
         competeCustomAgents: [...new Set([...[...document.querySelectorAll('.sCompeteCustom:checked')].map((x) => x.value), ...[...competeCustomSel].filter((id) => { const ca = cas.find((x) => x.id === id); return ca && !on.includes(ca.agent); })])],
         defaultSkill: defSkill || '',
+        // 変えたときだけ送る（古い版のホストは知らない設定を受け取らないので、変えていなければエラーにしない）
+        ...($('sIssueProvider').value !== (s.issueProvider || GITHUB_PROVIDER.id) ? { issueProvider: $('sIssueProvider').value } : {}),
         issueStatusSync: $('sIssueSync').checked,
         suggestSkillsOnDone: $('sSuggestSkills').checked,
         deleteSessionsOnMerge: $('sDeleteSessions').checked,
@@ -4694,6 +4731,81 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
   // 一覧を描いて高さが決まってから戻す
   $('settingsMain').scrollTop = scrollTop;
   settingsNav.sync();
+}
+
+// 設定の「連携」の欄。登録されているサービスごとに、configFields の欄を出す。
+// トークンの欄は空のまま描く（値は画面に届かない。設定済みかどうかだけ分かる）
+function trackerFieldHtml(t, f) {
+  const hint = f.help ? `<small>${esc(tr(f.help))}</small>` : '';
+  const ph = f.placeholder ? `placeholder="${esc(tr(f.placeholder))}"` : '';
+  const v = t.config[f.name];
+  if (f.type === 'checkbox') return `<label class="check"><input type="checkbox" data-field="${esc(f.name)}" ${v ? 'checked' : ''} /> ${esc(tr(f.label))}</label>${hint}`;
+  let input;
+  if (f.type === 'secret') input = `<input type="password" data-secret="${esc(f.name)}" autocomplete="off" spellcheck="false" placeholder="${esc(t.secrets[f.name] ? tr('設定済み（変えるときだけ入れてください）') : f.placeholder ? tr(f.placeholder) : '')}" />`;
+  else if (f.type === 'select') input = `<select data-field="${esc(f.name)}">${(f.options || []).map((o) => `<option value="${esc(o.value)}" ${o.value === v ? 'selected' : ''}>${esc(tr(o.label))}</option>`).join('')}</select>`;
+  else if (f.type === 'textarea') input = `<textarea data-field="${esc(f.name)}" rows="2" spellcheck="false" ${ph}>${esc(v || '')}</textarea>`;
+  else input = `<input data-field="${esc(f.name)}" autocomplete="off" spellcheck="false" ${ph} value="${esc(v || '')}" />`;
+  return `<label class="field"><span>${esc(tr(f.label))}</span>${input}${hint}</label>`;
+}
+
+function trackerCardHtml(t) {
+  const fields = t.configFields || [];
+  const badge = !fields.length ? '' : t.configured ? `<span class="badge">${tr('設定済み')}</span>` : `<span class="badge">${tr('未設定')}</span>`;
+  return `<div class="tracker-card" data-tracker="${esc(t.id)}">
+      <div class="tracker-head"><b>${esc(t.label)}</b>${badge}</div>
+      ${fields.map((f) => trackerFieldHtml(t, f)).join('')}
+      <div class="tracker-actions">
+        ${fields.length ? `<button class="btn small primary" type="button" data-tact="save">${tr('保存')}</button>` : ''}
+        ${t.canTest ? `<button class="btn small" type="button" data-tact="test">${tr('接続テスト')}</button>` : ''}
+        ${fields.length && (t.saved || Object.values(t.secrets).some(Boolean)) ? `<button class="btn small danger" type="button" data-tact="remove">${tr('削除')}</button>` : ''}
+      </div>
+    </div>`;
+}
+
+// 欄の入力を { config, secrets } にする（トークンの空の欄は入れない）
+function readTrackerCard(card) {
+  const config = {};
+  const secrets = {};
+  card.querySelectorAll('[data-field]').forEach((el) => (config[el.dataset.field] = el.type === 'checkbox' ? el.checked : el.value));
+  card.querySelectorAll('[data-secret]').forEach((el) => {
+    if (el.value) secrets[el.dataset.secret] = el.value;
+  });
+  return { config, secrets };
+}
+
+async function drawTrackers() {
+  const box = $('sTrackers');
+  let list;
+  try {
+    list = await api.trackers();
+  } catch (err) {
+    // 古い版のホストなど
+    if ($('sTrackers') === box) box.textContent = err.message || String(err);
+    return;
+  }
+  if ($('sTrackers') !== box) return; // 読み込み中に描き直した・別の画面に変わった
+  box.innerHTML = list.map(trackerCardHtml).join('');
+  box.querySelectorAll('[data-tact]').forEach((b) => {
+    b.onclick = async () => {
+      const card = b.closest('[data-tracker]');
+      const id = card.dataset.tracker;
+      const label = card.querySelector('.tracker-head b').textContent;
+      if (b.dataset.tact === 'test') {
+        const r = await runBusy(tr('接続を試しています…'), () => api.testTracker({ id, ...readTrackerCard(card) }));
+        if (r) toast(r.message || (r.ok ? tr('接続できました') : tr('接続できませんでした')), r.ok ? 'ok' : undefined);
+        return;
+      }
+      if (b.dataset.tact === 'remove') {
+        if (!confirm(tr('{label} の接続先とトークンを消しますか？', { label }))) return;
+        if (await runBusy(tr('消しています…'), () => api.removeTracker(id))) toast(tr('消しました'), 'ok');
+      } else {
+        const r = await runBusy(tr('保存しています…'), () => api.saveTracker({ id, ...readTrackerCard(card) }));
+        if (!r) return;
+        toast(r.cleared && r.cleared.length ? tr('保存しました。接続先を変えたので、保存していたトークンは消しました。入れ直してください') : tr('保存しました'), 'ok');
+      }
+      drawTrackers();
+    };
+  });
 }
 
 async function pickRepo(opts) {

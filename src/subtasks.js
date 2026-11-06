@@ -5,7 +5,7 @@
 // - すべてマージしたら、親のエージェントが仕上げ（テスト・つなぎの直し）をしてからレビューに回す
 //
 // 親のカード: c.subtasks = {
-//   items: [{ key, title, prompt, after: [key], issue?: { number, title, url }, cardId?, state, report?, branch?, costUsd? }],
+//   items: [{ key, title, prompt, after: [key], issue?: c.issue と同じ形, cardId?, state, report?, branch?, costUsd? }],
 //     state: pending（まだ始めていない）/ running（サブタスクのカードがある）
 //            review（「取り込む」で親のブランチにマージした。完了へドラッグされるのを待っている）
 //            merged（親のブランチにマージして完了） / done（取り込まずに完了にした） / skipped（破棄された）
@@ -22,6 +22,7 @@
 // サブタスクのカード: c.subtaskOf = { parent, key, approved? }
 
 const { tr } = require('../renderer/i18n');
+const { cleanIssue, keyOf } = require('../renderer/issue-ref');
 
 const SUBTASK_MARKER = '[[SUBTASKS]]';
 const SUBTASK_LANG = 'subtasks';
@@ -60,7 +61,8 @@ function cleanItems(list) {
     for (let n = 2; used.has(key); n++) key = `${cleanKey(x.key, i)}-${n}`;
     used.add(key);
     const item = { key, title: title || truncate(prompt.split('\n')[0], 60), prompt: prompt || title, after: Array.isArray(x.after) ? x.after.map((a) => String(a ?? '').trim()).filter(Boolean) : [] };
-    if (x.issue && Number(x.issue.number) > 0) item.issue = { number: Number(x.issue.number), title: String(x.issue.title || ''), url: String(x.issue.url || '') };
+    const issue = cleanIssue(x.issue);
+    if (issue) item.issue = issue;
     out.push(item);
     if (out.length >= MAX_SUBTASKS) break;
   }
@@ -166,7 +168,7 @@ function buildPlanPrompt(items) {
     '## サブタスク',
   ];
   for (const x of items) {
-    lines.push('', `### key: ${x.key} — ${x.title}${x.issue ? `（Issue #${x.issue.number}）` : ''}`, truncate(x.prompt, 3000));
+    lines.push('', `### key: ${x.key} — ${x.title}${x.issue ? `（Issue ${keyOf(x.issue)}）` : ''}`, truncate(x.prompt, 3000));
   }
   return lines.join('\n');
 }
@@ -190,7 +192,7 @@ function buildChildPrompt(parent, item) {
     '## このサブタスクでやること',
     item.prompt,
   ];
-  if (item.issue) lines.push('', `（GitHub の Issue #${item.issue.number} ${item.issue.url || ''} のサブタスクです）`.replace(/\s+）/, '）'));
+  if (item.issue) lines.push('', `（Issue ${keyOf(item.issue)} ${item.issue.url || ''} のサブタスクです）`.replace(/\s+）/, '）'));
   const others = st.items.filter((x) => x.key !== item.key);
   if (others.length) {
     lines.push('', '## ほかのサブタスク（参考。ここでは作業しないでください）');
