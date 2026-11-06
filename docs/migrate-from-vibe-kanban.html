@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How to migrate from Vibe Kanban to Worktree Kanban</title>
+  <meta name="description" content="What changed at Vibe Kanban, how to keep your branches, worktrees, and exported data, and how to move to Worktree Kanban step by step.">
+  <link rel="canonical" href="https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.html">
+  <link rel="alternate" hreflang="en" href="https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.html">
+  <link rel="alternate" hreflang="ja" href="https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.ja.html">
+  <link rel="icon" href="images/icon.png">
+  <link rel="stylesheet" href="migrate.css">
+</head>
+<body>
+  <header>
+    <img src="images/icon.png" alt="">
+    <a href="./">Worktree Kanban</a>
+    <a class="lang" href="migrate-from-vibe-kanban.ja.html" lang="ja">日本語</a>
+  </header>
+  <main>
+    <h1>How to migrate from Vibe Kanban</h1>
+    <p class="checked">Checked against Vibe Kanban's announcement and source code on November 7, 2026. Worktree Kanban is not affiliated with Vibe Kanban or bloop.</p>
+    <p>Your code is safe: Vibe Kanban's work lives in ordinary git branches and worktrees, so it does not depend on any app. Worktree Kanban cannot import Vibe Kanban's boards automatically, so this guide saves what matters first, then moves open work over by hand. Allow about 30 minutes per repository.</p>
+
+    <h2>What happened to Vibe Kanban</h2>
+    <ul>
+      <li>On April 10, 2026, bloop, the company behind Vibe Kanban, <a href="https://www.vibekanban.com/blog/shutdown">announced it was shutting down</a>. The project's README says Vibe Kanban is sunsetting.</li>
+      <li>The announcement kept remote services for 30 days. Those services covered cloud kanban issues, comments, projects, and organisations. Paid subscriptions ended.</li>
+      <li>Local workspaces were announced to keep working, and the project was handed to the community. The <a href="https://github.com/BloopAI/vibe-kanban">repository</a> still received commits in November 2026. Its most recent GitHub release is v0.1.44, from April 24, 2026.</li>
+    </ul>
+    <p><strong>If you only use local workspaces, nothing forces you to move today.</strong> The reasons to plan a move are the lack of a company behind the project and the absence of new tagged releases since April.</p>
+
+    <h2>What carries over</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>In Vibe Kanban</th><th>In Worktree Kanban</th></tr></thead>
+        <tbody>
+          <tr><td>Git branches and commits</td><td>Stay in your repository, ready to use</td></tr>
+          <tr><td>Workspaces in progress</td><td>Recreate them as tasks based on the existing branch (step 5)</td></tr>
+          <tr><td>Board, issues, and agent conversations</td><td>Not imported. Keep the backup for reference and recreate what is still open</td></tr>
+          <tr><td>Setup script</td><td>Setup script</td></tr>
+          <tr><td>Copy files</td><td>Add <code>cp</code> lines to the Setup script</td></tr>
+          <tr><td>Dev server script</td><td>Run script, started by hand from the worktree tab</td></tr>
+          <tr><td>Cleanup and Archive scripts</td><td>Cleanup script, which runs just before a worktree is removed</td></tr>
+          <tr><td>Agent sign-in</td><td>Unchanged: both apps use the CLI on your machine</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Check the differences first</h2>
+    <p>Worktree Kanban is not a drop-in replacement, so check these before you start.</p>
+    <h3>You would lose</h3>
+    <ul>
+      <li><strong>Some agents.</strong> Worktree Kanban runs Claude Code, Codex CLI, Gemini CLI, and Cursor CLI. It does not run GitHub Copilot, Amp, OpenCode, Droid, CCR, or Qwen Code. On Codex, Gemini, and Cursor, approving actions on the card and a few other features are <a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/agents.md">not available</a>.</li>
+      <li><strong>The built-in preview browser.</strong> Open your dev server in your normal browser instead.</li>
+      <li><strong>Workspaces spanning several repositories.</strong> Each task belongs to one repository. You can keep up to 3 repositories open as tabs.</li>
+      <li><strong>Vibe Kanban's own MCP server</strong> for managing tasks from an agent.</li>
+      <li><strong>Team boards.</strong> Worktree Kanban keeps its board on one machine. There is no shared cloud board.</li>
+      <li><strong>The Apache-2.0 license.</strong> Worktree Kanban is source-available under <a href="https://github.com/kazuya83/worktree-kanban/blob/main/LICENSE">FSL-1.1-ALv2</a>, which excludes competing commercial products and services. Each version also becomes available under Apache 2.0 two years after its release.</li>
+    </ul>
+    <h3>You would gain</h3>
+    <ul>
+      <li><a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/remote.md">Mac and Windows remote control</a> over an SSH tunnel, with no external server.</li>
+      <li><a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/agents.md">Pipelines and competition</a>: chain agents in a flowchart, or have several solve the same task.</li>
+      <li>Splitting large tasks into subtasks, and scheduled tasks.</li>
+    </ul>
+
+    <h2>Migrate in 6 steps</h2>
+
+    <h3>1. Save your work in git</h3>
+    <p>Run this in each repository to list Vibe Kanban's worktrees and branches. The prefix is <code>vk</code> unless you changed it in Vibe Kanban's settings.</p>
+<pre><code>git worktree list
+git branch --list 'vk/*'</code></pre>
+    <p>For each worktree you want to keep, commit anything uncommitted and push the branch. This matters because the default worktree location is a temporary folder.</p>
+<pre><code>git -C &lt;worktree-path&gt; status --short
+git -C &lt;worktree-path&gt; add -A
+git -C &lt;worktree-path&gt; commit -m "WIP: move from Vibe Kanban"
+git -C &lt;worktree-path&gt; push -u origin HEAD</code></pre>
+
+    <h3>2. Export cloud data, if you used it</h3>
+    <p>Open <code>/export</code> in Vibe Kanban. It downloads a zip with <code>issues.csv</code>, <code>projects.csv</code>, <code>users.csv</code>, and optionally attachments. The cloud services were announced to last only 30 days, so this may no longer work. If you did not use cloud projects, skip this step.</p>
+
+    <h3>3. Back up local data</h3>
+    <p>Copy this folder somewhere safe. It holds the database (<code>db.v2.sqlite</code>), <code>config.json</code>, and <code>profiles.json</code>. It can also hold <code>credentials.json</code>, so keep the copy private and do not commit it.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>OS</th><th>Folder</th></tr></thead>
+        <tbody>
+          <tr><td>Mac</td><td><code>~/Library/Application Support/ai.bloop.vibe-kanban</code></td></tr>
+          <tr><td>Linux</td><td><code>~/.local/share/vibe-kanban</code></td></tr>
+          <tr><td>Windows</td><td><code>%APPDATA%\bloop\vibe-kanban\data</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>4. Install Worktree Kanban</h3>
+    <p>Mac / Linux:</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.sh | bash</code></pre>
+    <p>Windows (PowerShell):</p>
+<pre><code>irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex</code></pre>
+    <p>Or <a href="https://github.com/kazuya83/worktree-kanban/releases/latest">download it from Releases</a>. The builds are not signed or notarized, so your OS may warn you the first time. Then open your repository, choose your agents under "Agents to use" in Settings, and add your scripts under "Branches and landing".</p>
+
+    <h3>5. Move open work</h3>
+    <ul>
+      <li><strong>Work that is nearly finished:</strong> finish it from the worktree or branch in your terminal, and merge it or open a PR as usual.</li>
+      <li><strong>Work that needs more agent time:</strong> set "Base branch" to the <code>vk/...</code> branch under "Branches and landing", then create a task. Its worktree starts from that branch. The merge target defaults to the same branch, so choose your main branch in the merge dialog if you want to land it directly. Then set "Base branch" back.</li>
+      <li><strong>Issues not started yet:</strong> create tasks by hand. If they are GitHub Issues, use the "Create from a GitHub Issue" tab under "+ New task".</li>
+    </ul>
+    <p>The agent does not see the Vibe Kanban conversation, so write what is done and what is left in the new task.</p>
+
+    <h3>6. Clean up</h3>
+    <p>Once everything is merged or pushed, remove the old worktrees and any branches you no longer need. <code>git branch -d</code> refuses to delete a branch that is not merged.</p>
+<pre><code>git worktree remove &lt;worktree-path&gt;
+git branch -d vk/&lt;branch-name&gt;
+git worktree prune</code></pre>
+    <p>If you are unsure, do this later. Keeping both apps for a while does no harm.</p>
+
+    <a class="download" href="https://github.com/kazuya83/worktree-kanban/releases/latest">Download Worktree Kanban</a>
+  </main>
+  <footer><a href="./">Home</a> · <a href="https://github.com/kazuya83/worktree-kanban">GitHub</a> · <a href="https://github.com/kazuya83/worktree-kanban/blob/main/LICENSE">FSL-1.1-ALv2 License</a></footer>
+</body>
+</html>

@@ -115,7 +115,7 @@ function sameShape(a, b) {
   if (ha.length === 0 || hb.length === 0) return false;
   if (ha.join(',') !== hb.join(',')) return false;
   // 画像は言語ごとのフォルダ、日本語の文書は .ja.md にあるので、言語の部分は比べない
-  const target = (x) => x.target.replace(/^docs\/images\/[a-z]+\//, 'docs/images/').replace(/^(docs\/[^/]+)\.ja\.md$/, '$1.md');
+  const target = (x) => x.target.replace(/^docs\/images\/[a-z]+\//, 'docs/images/').replace(/^(docs\/[^/]+)\.ja\.md$/, '$1.md').replace(/\.ja\.html$/, '.html');
   const la = links(a).map(target);
   const lb = links(b).map(target);
   if (la.length === 0 || la.length !== lb.length) return false;
