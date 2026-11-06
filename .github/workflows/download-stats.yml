@@ -1,0 +1,44 @@
+# Hourly snapshot of GitHub Releases asset download counts → docs/download-stats.json
+# (dashboard: docs/download-stats.html on GitHub Pages)
+name: Download stats
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: download-stats
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Update download-stats.json
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/update-download-stats.mjs
+
+      - name: Commit and push if changed
+        run: |
+          git add docs/download-stats.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "chore: update download stats snapshot"
+            git push
+          fi

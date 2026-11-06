@@ -301,7 +301,7 @@ test('5つの README は見出しとリンク先が一致し、言語リンク�
   for (let i = 1; i < texts.length; i++) {
     assert.equal(sameShape(texts[0], texts[i]), true, README_FILES[i]);
   }
-  assert.deepEqual(headingLevels(texts[0]), [1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2]);
+  assert.deepEqual(headingLevels(texts[0]), [1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2]);
 });
 
 test('冒頭の太字・承認・自動更新は、5言語で同じ事実を言う', () => {

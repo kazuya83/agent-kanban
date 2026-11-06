@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ダウンロード数 — Worktree Kanban</title>
+  <meta name="description" content="GitHub Releases のアセット別ダウンロード数の推移（GitHub Actions が毎時記録）">
+  <link rel="icon" href="images/icon.png">
+  <style>
+    :root { --ink: #1f2430; --muted: #646b7a; --line: #dfe2e9; --accent: #3b5bfd; --bg: #f6f7f9; --card: #fff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans CJK JP", sans-serif; }
+    header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; max-width: 980px; margin: 0 auto; padding: 18px 20px; }
+    header img { width: 28px; height: 28px; }
+    header a { color: var(--accent); text-decoration: none; font-weight: 600; }
+    header a:hover { text-decoration: underline; }
+    main { max-width: 980px; margin: 0 auto; padding: 0 20px 48px; }
+    h1 { margin: 0 0 8px; font-size: clamp(22px, 3.5vw, 28px); }
+    .lead { margin: 0 0 24px; color: var(--muted); font-size: 14px; max-width: 720px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 28px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+    .card h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .card p { margin: 0; font-size: 26px; font-weight: 700; color: var(--ink); }
+    .card p small { display: block; margin-top: 8px; font-size: 12px; font-weight: 400; color: var(--muted); }
+    section { margin-bottom: 32px; }
+    section h2 { margin: 0 0 12px; font-size: 17px; font-weight: 600; }
+    .chart-wrap { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 12px 8px; }
+    canvas { max-height: 280px; }
+    .err { color: #b42318; font-size: 14px; }
+    footer { padding: 0 20px 32px; text-align: center; color: var(--muted); font-size: 14px; }
+    footer a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="images/icon.png" alt="">
+    <a href="./index.html">Worktree Kanban</a>
+    <span style="color:var(--muted);font-size:14px;">/ ダウンロード数</span>
+  </header>
+  <main>
+    <h1>ダウンロード数ダッシュボード</h1>
+    <p class="lead">
+      GitHub Releases に載っている<strong>アセット</strong>のダウンロード数です（<code>git clone</code> やソース ZIP は含みません）。
+      GitHub Actions が<strong>毎時</strong>合計を記録しています。グラフは「その期間に増えた数」です。
+    </p>
+    <p id="status" class="err" hidden></p>
+    <div class="cards">
+      <div class="card">
+        <h2>累計（全リリース）</h2>
+        <p id="total">—</p>
+      </div>
+      <div class="card">
+        <h2>過去7日間の増分</h2>
+        <p id="weekDelta">—</p>
+      </div>
+      <div class="card">
+        <h2>データ最終更新</h2>
+        <p id="updated"><small>—</small></p>
+      </div>
+    </div>
+    <section>
+      <h2>今日（このブラウザのタイムゾーン）の1時間ごと</h2>
+      <div class="chart-wrap"><canvas id="chartToday" aria-label="今日の時間帯別の増分"></canvas></div>
+    </section>
+    <section>
+      <h2>直近7日（日別）</h2>
+      <div class="chart-wrap"><canvas id="chartWeek" aria-label="直近7日の日別増分"></canvas></div>
+    </section>
+  </main>
+  <footer>
+    <a href="https://github.com/kazuya83/worktree-kanban">GitHub</a>
+    · <a href="https://github.com/kazuya83/worktree-kanban/releases">Releases</a>
+  </footer>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+  <script>
+    const JSON_URL = './download-stats.json';
+
+    function showErr(msg) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.hidden = false;
+    }
+
+    /** @returns {number[]} */
+    function parseSnapshots(data) {
+      const raw = data.snapshots || [];
+      return raw
+        .map((s) => ({ t: new Date(s.t), total: Number(s.total) }))
+        .filter((s) => Number.isFinite(s.t.getTime()) && Number.isFinite(s.total))
+        .sort((a, b) => a.t - b.t);
+    }
+
+    /** Last snapshot at or before `t`, or null */
+    function lastAtOrBefore(snaps, t) {
+      let best = null;
+      for (const s of snaps) {
+        if (s.t <= t) best = s;
+        else break;
+      }
+      return best;
+    }
+
+    function startOfLocalDay(d) {
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+    }
+
+    function endOfLocalDay(d) {
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+    }
+
+    /** Hour index 0..23 → last total in that hour today, or null */
+    function hourlyEndTotalsToday(snaps, now) {
+      const day0 = startOfLocalDay(now);
+      const out = Array(24).fill(null);
+      for (let h = 0; h < 24; h++) {
+        const a = new Date(day0.getTime() + h * 60 * 60 * 1000);
+        const b = new Date(day0.getTime() + (h + 1) * 60 * 60 * 1000);
+        let lastInHour = null;
+        for (const s of snaps) {
+          if (s.t >= a && s.t < b) lastInHour = s;
+        }
+        out[h] = lastInHour ? lastInHour.total : null;
+      }
+      return out;
+    }
+
+    function hourlyDeltasToday(snaps, now) {
+      const day0 = startOfLocalDay(now);
+      const before = lastAtOrBefore(snaps, new Date(day0.getTime() - 1));
+      const baseline = before ? before.total : null;
+      const ends = hourlyEndTotalsToday(snaps, now);
+      const deltas = [];
+      let prev = baseline;
+      for (let h = 0; h < 24; h++) {
+        if (ends[h] == null) {
+          deltas.push(null);
+          continue;
+        }
+        const delta = prev == null ? null : ends[h] - prev;
+        prev = ends[h];
+        deltas.push(delta);
+      }
+      return deltas;
+    }
+
+    /** Last 7 local calendar days: { label, delta } */
+    function dailyDeltasLastWeek(snaps, now) {
+      const rows = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, 12, 0, 0, 0);
+        const start = startOfLocalDay(d);
+        const end = endOfLocalDay(d);
+        const before = lastAtOrBefore(snaps, new Date(start.getTime() - 1));
+        const lastInDay = lastAtOrBefore(snaps, end);
+        const delta =
+          lastInDay && (before || lastInDay.t >= start)
+            ? lastInDay.total - (before ? before.total : 0)
+            : 0;
+        const label = `${d.getMonth() + 1}/${d.getDate()}`;
+        rows.push({ label, delta: Math.max(0, delta) });
+      }
+      return rows;
+    }
+
+    function weekSum(dailyRows) {
+      return dailyRows.reduce((s, r) => s + r.delta, 0);
+    }
+
+    let chartToday;
+    let chartWeek;
+
+    function render(snaps, updatedAt) {
+      const now = new Date();
+      const latest = snaps.length ? snaps[snaps.length - 1] : null;
+      document.getElementById('total').textContent = latest ? latest.total.toLocaleString('ja-JP') : '—';
+
+      const daily = dailyDeltasLastWeek(snaps, now);
+      document.getElementById('weekDelta').textContent = latest
+        ? weekSum(daily).toLocaleString('ja-JP')
+        : '—';
+
+      const updEl = document.getElementById('updated');
+      if (updatedAt) {
+        const dt = new Date(updatedAt);
+        updEl.innerHTML = `<small>${dt.toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' })}</small>`;
+      } else {
+        updEl.innerHTML = '<small>—</small>';
+      }
+
+      const hourLabels = Array.from({ length: 24 }, (_, h) => `${h}時`);
+      const hourDeltas = hourlyDeltasToday(snaps, now);
+      const todayData = hourDeltas.map((v) => (v == null ? 0 : v));
+
+      const hasTodaySignal = hourDeltas.some((v) => v != null);
+
+      if (chartToday) chartToday.destroy();
+      chartToday = new Chart(document.getElementById('chartToday'), {
+        type: 'bar',
+        data: {
+          labels: hourLabels,
+          datasets: [
+            {
+              label: '増分（件）',
+              data: todayData,
+              backgroundColor: hourDeltas.map((v) => (v == null ? 'transparent' : 'rgba(59, 91, 253, 0.75)')),
+              borderRadius: 4,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label(ctx) {
+                  const v = hourDeltas[ctx.dataIndex];
+                  if (v == null) return 'データなし（この時間帯にまだ記録がありません）';
+                  return `増分: ${v.toLocaleString('ja-JP')} 件`;
+                },
+              },
+            },
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { precision: 0 },
+              title: { display: true, text: '1時間あたりの増分' },
+            },
+            x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+          },
+        },
+      });
+
+      if (!hasTodaySignal && latest) {
+        showErr('「今日」のグラフには、今日記録されたスナップショットがまだありません。ワークフロー実行後に再読み込みしてください。');
+      }
+
+      if (chartWeek) chartWeek.destroy();
+      chartWeek = new Chart(document.getElementById('chartWeek'), {
+        type: 'bar',
+        data: {
+          labels: daily.map((r) => r.label),
+          datasets: [
+            {
+              label: '増分（件）',
+              data: daily.map((r) => r.delta),
+              backgroundColor: 'rgba(59, 91, 253, 0.75)',
+              borderRadius: 4,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: '1日あたりの増分' } },
+          },
+        },
+      });
+    }
+
+    fetch(JSON_URL)
+      .then((r) => {
+        if (!r.ok) throw new Error(`JSON を読めませんでした (${r.status})`);
+        return r.json();
+      })
+      .then((data) => {
+        const snaps = parseSnapshots(data);
+        if (snaps.length === 0) {
+          showErr('スナップショットがまだありません。GitHub Actions の「Download stats」が走るとデータが溜まります。');
+        }
+        render(snaps, data.updatedAt);
+      })
+      .catch((e) => {
+        showErr(e.message || String(e));
+      });
+  </script>
+</body>
+</html>
