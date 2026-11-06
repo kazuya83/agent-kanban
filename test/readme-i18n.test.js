@@ -114,8 +114,10 @@ function sameShape(a, b) {
   const hb = headingLevels(b);
   if (ha.length === 0 || hb.length === 0) return false;
   if (ha.join(',') !== hb.join(',')) return false;
-  const la = links(a).map((x) => x.target);
-  const lb = links(b).map((x) => x.target);
+  // 画像は言語ごとのフォルダにあるので、言語の部分は比べない
+  const target = (x) => x.target.replace(/^docs\/images\/[a-z]+\//, 'docs/images/');
+  const la = links(a).map(target);
+  const lb = links(b).map(target);
   if (la.length === 0 || la.length !== lb.length) return false;
   return la.every((t, i) => t === lb[i]);
 }
@@ -299,7 +301,7 @@ test('5つの README は見出しとリンク先が一致し、言語リンク�
   for (let i = 1; i < texts.length; i++) {
     assert.equal(sameShape(texts[0], texts[i]), true, README_FILES[i]);
   }
-  assert.deepEqual(headingLevels(texts[0]), [1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2]);
+  assert.deepEqual(headingLevels(texts[0]), [1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2]);
 });
 
 test('冒頭の太字・承認・自動更新は、5言語で同じ事実を言う', () => {

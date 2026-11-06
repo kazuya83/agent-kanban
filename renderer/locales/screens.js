@@ -1,5 +1,4 @@
-const api = (typeof module === 'object' && module.exports ? require('../i18n.js') : I18n);
-api.add({
+(typeof module === 'object' && module.exports ? require('../i18n.js') : I18n).add({
   "作成したらすぐに開始する": {
     "en": "Start as soon as it is created",
     "es": "Empezar en cuanto se cree",
@@ -2630,7 +2629,7 @@ api.add({
   }
 });
 
-api.add({
+(typeof module === 'object' && module.exports ? require('../i18n.js') : I18n).add({
   "会話を始める": {
     "en": "Start a conversation",
     "es": "Empezar una conversación",

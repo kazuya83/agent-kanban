@@ -44,3 +44,10 @@ test('前の版が更新で探す名前のファイルだけを写す', () => {
   assert.strictEqual(fs.readFileSync(path.join(out, 'agent-kanban-1.2.3-win-x64.zip'), 'utf8'), 'worktree-kanban-1.2.3-win-x64.zip');
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+test('画面で読む翻訳のファイルは、最上位で名前を宣言しない（window.api などとぶつかって読み込めなくなる）', () => {
+  const dir = path.join(root, 'renderer/locales');
+  for (const f of fs.readdirSync(dir)) {
+    assert.doesNotMatch(fs.readFileSync(path.join(dir, f), 'utf8'), /^(?:const|let|class)\s/m, f);
+  }
+});

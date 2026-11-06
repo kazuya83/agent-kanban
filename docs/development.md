@@ -119,6 +119,16 @@ npm test
 
 テストでは、偽の claude（`test/fake-claude.js`）を使います。worktree の作成、承認（MCP 経由）、同時実行数の制限、追加指示、マージ、破棄、停止を通しで確かめます。
 
+## 名前を変えたときに残しているもの
+
+Agent Kanban から Worktree Kanban へ改名しても、今のユーザーがそのまま使えるように、次は前の名前のままにしています。
+
+- データの場所（userData の `agent-kanban` フォルダ。`main.js` で固定）、SSH の鍵（`agent-kanban_ed25519`）、Pipeline のファイル形式、appId
+- Release の前の名前のファイル（`agent-kanban-<版>-…`）。改名前の版は、このファイルがないと自分を更新できません（`scripts/legacy-assets.sh`）
+- インストーラの `AGENT_KANBAN_VERSION` の指定と、Linux の `~/.local/bin/agent-kanban`（改名前の版が更新のあとに起動するため）
+
+画面の画像とデモ GIF の撮り直しは [scripts/capture/README.md](../scripts/capture/README.md) を見てください。
+
 ---
 
 [← README に戻る](../README.md)

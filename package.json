@@ -1,7 +1,7 @@
 {
   "name": "worktree-kanban",
   "version": "0.1.8",
-  "description": "Desktop app that manages AI coding agent tasks (Claude Code / Codex CLI / Gemini CLI / Cursor CLI) on a kanban board and runs them in parallel, one git worktree each",
+  "description": "Kanban desktop app that runs AI coding agents (Claude Code / Codex CLI / Gemini CLI / Cursor CLI) in parallel, one git worktree per task. Mac and Windows can each remotely operate the other",
   "main": "main.js",
   "license": "MIT",
   "author": "kazuya83",
