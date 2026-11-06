@@ -66,6 +66,8 @@ Avec Codex / Gemini / Cursor, à cause des limites de la CLI, l'approbation sur 
 
 Vous pouvez piloter le tableau du PC qui fait tourner les agents (l'hôte) depuis Worktree Kanban sur un autre PC (le client). Mac ou Windows peuvent être l'hôte, et l'un ou l'autre peut être le client. Sur le client, vous approuvez, répondez aux questions, envoyez des instructions supplémentaires, mergez, etc., comme sur l'écran de l'hôte.
 
+![Se connecter depuis un autre PC et approuver sur le tableau de l’hôte](docs/images/fr/feature-remote.gif)
+
 - L'application hôte n'écoute que sur `127.0.0.1`. L'application cliente se connecte avec un tunnel `ssh -N -L` : l'hôte n'a donc besoin que d'un serveur SSH. Pour vous connecter depuis l'extérieur, utilisez Tailscale ou un réseau du même genre
 - SSH se connecte avec une clé. Dans les « Réglages RC » du client, créez une clé ed25519 (`~/.ssh/agent-kanban_ed25519`) et enregistrez la clé publique dans les « Réglages RC » de l'hôte
 - La première fois, l'appairage se fait avec un code à 6 chiffres affiché sur l'hôte. Ensuite, un jeton enregistré reconnecte la destination précédente
@@ -76,11 +78,25 @@ Vous pouvez piloter le tableau du PC qui fait tourner les agents (l'hôte) depui
 
 La procédure, et comment réparer une connexion qui échoue, se trouve dans [docs/remote.md](docs/remote.md) (English).
 
-Également : découper une grande tâche en sous-tâches qui avancent en parallèle ou dans l'ordre (elles partent de la branche parente et y sont fusionnées une fois terminées ; une seule sous-tâche peut aussi être démarrée ; les sous-issues GitHub sont prises en charge), changer l'état (colonne) d'une carte par glisser-déposer, messages à un agent en cours d'exécution (btw), pièces jointes image et fichier, Pipeline et compétition (combinaisons de plusieurs agents), et dépôts WSL sous Windows. L'utilisation est résumée dans [docs/usage.md](docs/usage.md) (English).
+Également : changer l'état (colonne) d'une carte par glisser-déposer, messages à un agent en cours d'exécution (btw), pièces jointes image et fichier, compétition (plusieurs agents résolvent la même tâche), et dépôts WSL sous Windows. L'utilisation est résumée dans [docs/usage.md](docs/usage.md) (English).
+
+### Pipeline : décrivez un flux en langage naturel et lancez vos tâches dessus
+Écrivez le flux voulu en langage naturel, par exemple « implémenter avec Codex, relire avec Claude et revenir à l’implémentation s’il y a des corrections à faire », et l’agent construit l’organigramme. Choisissez ce Pipeline en créant une tâche : les agents se passent le travail étape par étape, en suivant ses branches et ses boucles. Vous pouvez aussi modifier l’organigramme à la main.
+
+![Écrire un flux en langage naturel, le choisir pour une nouvelle tâche, puis voir les étapes avancer et revenir en arrière après une relecture](docs/images/fr/feature-pipeline.gif)
+
+Les détails sont dans [docs/agents.md](docs/agents.md) (English).
+
+### Sous-tâches
+Quand une tâche est grande, l’agent peut proposer de la découper en sous-tâches. Elles partent de la branche parente, avancent en parallèle ou dans l’ordre, et y sont fusionnées une fois terminées.
+
+![Accepter la proposition de découpage, puis voir les sous-tâches avancer et être fusionnées](docs/images/fr/feature-subtasks.gif)
 
 ### Lancer plusieurs dépôts en parallèle
 
 Les dépôts s'ouvrent en onglets (3 au plus). Changer d'onglet n'arrête pas les tâches des autres dépôts. Un onglet qui n'est pas sélectionné affiche **combien de tâches tournent** (bleu) et **combien attendent une action de votre part** (approbation, question, etc., en orange) : les onglets suffisent pour voir quel dépôt a besoin de vous. La limite du nombre de tâches lancées en même temps (le réglage correspondant) est partagée par tous les dépôts.
+
+![Changer d’onglet de dépôt pendant que les tâches des autres continuent](docs/images/fr/feature-repos.gif)
 
 ![Trois dépôts ouverts en onglets. Les onglets inactifs indiquent combien de tâches tournent et combien attendent une action](docs/images/fr/repo-tabs.png)
 
@@ -94,6 +110,8 @@ Vous pouvez ouvrir un dossier qui n'est pas un dépôt git (production vidéo et
 
 Quand une action a besoin d'une permission, vous lisez la commande et l'entrée en entier sur la carte et dans le panneau de détail, puis vous choisissez autoriser, refuser, ou toujours autoriser pour cette tâche. En cas de refus, vous pouvez renvoyer une raison à l'agent.
 
+![Lire la commande complète, puis l’approuver](docs/images/fr/feature-approval.gif)
+
 <details>
 <summary>Voir l'écran</summary>
 
@@ -104,6 +122,8 @@ Quand une action a besoin d'une permission, vous lisez la commande et l'entrée 
 ### Créer des tâches depuis des GitHub Issues
 
 Dans l'onglet « Créer depuis une GitHub Issue » de « Nouvelle tâche », saisissez des numéros (`21, 22, 24`, etc.). Les instructions sont construites à partir du titre, du corps et des commentaires de l'Issue, et une carte est créée par Issue. La branche s'appelle `agent/issue-21-…`, et le corps du PR contient `Closes #21`. Cela utilise `gh`.
+
+![Saisir des numéros d’Issue pour créer une carte par Issue](docs/images/fr/feature-issue.gif)
 
 <details>
 <summary>Voir l'écran</summary>
@@ -116,6 +136,8 @@ Dans l'onglet « Créer depuis une GitHub Issue » de « Nouvelle tâche », sai
 
 Quand Claude Code pose une question avec `AskUserQuestion`, la carte devient une question et un formulaire de réponse s'affiche. Le choix multiple et le texte libre (Autre) sont pris en charge.
 
+![Répondre à une question de l’agent en choisissant une option](docs/images/fr/feature-question.gif)
+
 <details>
 <summary>Voir l'écran</summary>
 
@@ -126,6 +148,8 @@ Quand Claude Code pose une question avec `AskUserQuestion`, la carte devient une
 ### worktree et diff
 
 L'onglet « worktree » montre les commits de la branche, les changements non commités, le rapport avec la base, et les autres worktrees du même dépôt. Dans l'onglet « diff », vous choisissez les fichiers modifiés dans un arbre groupé par dossier et vous lisez le diff fichier par fichier.
+
+![Relire le diff, puis fusionner](docs/images/fr/feature-merge.gif)
 
 <details>
 <summary>Voir l'écran</summary>
@@ -140,6 +164,8 @@ L'onglet « worktree » montre les commits de la branche, les changements non co
 
 Dans « Conversation », vous pouvez interroger l'agent sur le dépôt sans créer de tâche (worktree). Les réponses s'affichent en Markdown. Quand vous voulez qu'il se mette au travail, « En faire une tâche » poursuit cette conversation comme une tâche.
 
+![Poser une question sur le code dans une conversation, puis en faire une tâche](docs/images/fr/feature-chat.gif)
+
 <details>
 <summary>Voir l'écran</summary>
 
@@ -150,6 +176,8 @@ Dans « Conversation », vous pouvez interroger l'agent sur le dépôt sans cré
 ### Notifications
 
 L'attente d'approbation, les questions, l'attente d'une réponse, l'attente de revue et la fin de tâche s'accumulent sur l'icône de cloche en haut à droite, et une notification de bureau s'affiche aussi. Un clic sur une notification ouvre cette tâche.
+
+![Ouvrir une notification pour aller à la carte qui vous attend](docs/images/fr/feature-notifications.gif)
 
 <details>
 <summary>Voir l'écran</summary>
@@ -162,6 +190,8 @@ L'attente d'approbation, les questions, l'attente d'une réponse, l'attente de r
 
 Si un merge entre en conflit, la carte devient un conflit. Une fois la branche de base intégrée dans la branche de la tâche, vous pouvez faire résoudre le conflit par l'agent ou le corriger vous-même dans un éditeur. Dans les deux cas, la branche de base ne change pas tant que vous n'avez pas mergé.
 
+![Laisser l’agent résoudre un conflit, puis fusionner](docs/images/fr/feature-conflict.gif)
+
 <details>
 <summary>Voir l'écran</summary>
 
@@ -173,6 +203,8 @@ Si un merge entre en conflit, la carte devient un conflit. Une fois la branche d
 
 À la création d'une tâche, vous pouvez choisir une skill de Claude Code (elle est passée comme `/nom-de-la-skill`). Vous pouvez aussi choisir une conversation passée de Claude Code (session) et reprendre là où elle s'était arrêtée.
 
+![Choisir une skill et une conversation passée pour une nouvelle tâche](docs/images/fr/feature-skills.gif)
+
 <details>
 <summary>Voir l'écran</summary>
 
@@ -183,6 +215,8 @@ Si un merge entre en conflit, la carte devient un conflit. Une fois la branche d
 ### Planificateur de tâches
 
 Depuis le menu de la barre du haut, passez au « Planificateur de tâches » pour gérer, sous forme de cartes, des planifications qui créent et lancent une tâche à une date donnée (une fois, toutes les heures, tous les jours, toutes les semaines ou tous les mois). Vous pouvez enregistrer une tâche du kanban comme planification, et créer tout de suite une tâche à partir d'une planification. Les planifications ne tournent que tant que l'application est ouverte (détails dans [docs/usage.md](docs/usage.md) (English)).
+
+![Enregistrer une vérification quotidienne des dépendances, la lancer tout de suite et voir le résultat sur le tableau](docs/images/fr/feature-scheduler.gif)
 
 ## Prérequis
 

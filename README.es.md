@@ -66,6 +66,8 @@ En Codex / Gemini / Cursor, por los límites de la CLI, no están disponibles la
 
 Puedes manejar el tablero del PC que ejecuta los agentes (el host) desde Worktree Kanban en otro PC (el cliente). Tanto Mac como Windows pueden ser el host, y cualquiera de los dos puede ser el cliente. En el cliente puedes aprobar, responder preguntas, enviar instrucciones adicionales, hacer merge, etc., igual que en la pantalla del host.
 
+![Conectarse desde otro PC y aprobar en el tablero del host](docs/images/es/feature-remote.gif)
+
 - La aplicación del host solo escucha en `127.0.0.1`. La del cliente conecta con un túnel `ssh -N -L`, así que en el host solo hace falta un servidor SSH. Para conectar desde fuera, usa Tailscale u otra red similar
 - SSH entra con una clave. En los «Ajustes de RC» del cliente, crea una clave ed25519 (`~/.ssh/agent-kanban_ed25519`) y registra la clave pública en los «Ajustes de RC» del host
 - La primera vez se empareja con un código de 6 dígitos que aparece en el host. Después, un token guardado vuelve a conectar con el destino anterior
@@ -76,11 +78,25 @@ Puedes manejar el tablero del PC que ejecuta los agentes (el host) desde Worktre
 
 Los pasos, y cómo arreglar una conexión que falla, están en [docs/remote.md](docs/remote.md) (English).
 
-Además: dividir una tarea grande en subtareas que avanzan en paralelo o en orden (salen de la rama padre y se fusionan al terminar; también se puede iniciar una sola subtarea; se admiten los sub-issues de GitHub), cambiar el estado (columna) de una tarjeta arrastrándola, mensajes a un agente en ejecución (btw), adjuntar imágenes y archivos, Pipeline y competición (combinaciones de varios agentes), y repositorios de WSL en Windows. El uso está resumido en [docs/usage.md](docs/usage.md) (English).
+Además: cambiar el estado (columna) de una tarjeta arrastrándola, mensajes a un agente en ejecución (btw), adjuntar imágenes y archivos, competición (varios agentes resuelven la misma tarea), y repositorios de WSL en Windows. El uso está resumido en [docs/usage.md](docs/usage.md) (English).
+
+### Pipeline: describe un flujo en lenguaje natural y ejecuta tareas con él
+Escribe el flujo que quieres en lenguaje natural, por ejemplo «implementar con Codex, revisar con Claude y volver a la implementación si hay cambios que hacer», y el agente construye el diagrama de flujo. Elige ese Pipeline al crear una tarea y los agentes se pasarán el trabajo paso a paso, siguiendo sus ramas y bucles. También puedes editar el diagrama a mano.
+
+![Escribir un flujo en lenguaje natural, elegirlo para una tarea nueva y ver cómo avanzan los pasos y vuelven atrás tras una revisión](docs/images/es/feature-pipeline.gif)
+
+Los detalles están en [docs/agents.md](docs/agents.md) (English).
+
+### Subtareas
+Cuando una tarea es grande, el agente puede proponer dividirla en subtareas. Salen de la rama padre, avanzan en paralelo o en orden y se fusionan a medida que terminan.
+
+![Aceptar la propuesta de dividir una tarea y ver cómo las subtareas avanzan y se fusionan](docs/images/es/feature-subtasks.gif)
 
 ### Ejecutar varios repositorios en paralelo
 
 Los repositorios se abren en pestañas (hasta 3). Cambiar de pestaña no detiene las tareas de los otros repositorios. Una pestaña que no está seleccionada muestra **cuántas tareas están en marcha** (azul) y **cuántas esperan tu respuesta** (aprobación, una pregunta, etc., en naranja), así que las pestañas bastan para ver qué repositorio te necesita. El límite de tareas simultáneas (el ajuste de cuántas ejecutar a la vez) se comparte entre todos los repositorios.
+
+![Cambiar de pestaña de repositorio mientras las tareas de las demás siguen en marcha](docs/images/es/feature-repos.gif)
 
 ![Tres repositorios abiertos en pestañas. Las pestañas inactivas muestran cuántas tareas están en marcha y cuántas esperan tu respuesta](docs/images/es/repo-tabs.png)
 
@@ -94,6 +110,8 @@ Puedes abrir una carpeta que no es un repositorio git (producción de vídeo y o
 
 Cuando una acción necesita permiso, puedes leer el comando y la entrada completos en la tarjeta y en el panel de detalle, y luego elegir permitir, rechazar o permitir siempre en esta tarea. Al rechazar, puedes devolver un motivo al agente.
 
+![Leer el comando completo y aprobarlo](docs/images/es/feature-approval.gif)
+
 <details>
 <summary>Ver pantalla</summary>
 
@@ -104,6 +122,8 @@ Cuando una acción necesita permiso, puedes leer el comando y la entrada complet
 ### Crear tareas desde GitHub Issues
 
 En la pestaña «Crear desde un GitHub Issue» de «Nueva tarea», escribe números (`21, 22, 24`, etc.). Construye las instrucciones a partir del título, el cuerpo y los comentarios del Issue, y crea una tarjeta por Issue. La rama se llama `agent/issue-21-…`, y el cuerpo del PR incluye `Closes #21`. Usa `gh`.
+
+![Introducir números de Issue para crear una tarjeta por Issue](docs/images/es/feature-issue.gif)
 
 <details>
 <summary>Ver pantalla</summary>
@@ -116,6 +136,8 @@ En la pestaña «Crear desde un GitHub Issue» de «Nueva tarea», escribe núme
 
 Cuando Claude Code pregunta con `AskUserQuestion`, la tarjeta pasa a ser una pregunta y aparece un formulario de respuesta. Se admiten la selección múltiple y el texto libre (Otro).
 
+![Responder a una pregunta del agente eligiendo una opción](docs/images/es/feature-question.gif)
+
 <details>
 <summary>Ver pantalla</summary>
 
@@ -126,6 +148,8 @@ Cuando Claude Code pregunta con `AskUserQuestion`, la tarjeta pasa a ser una pre
 ### worktree y diff
 
 La pestaña «worktree» muestra los commits de la rama, los cambios sin commit, la relación con la base y los otros worktrees del mismo repositorio. En la pestaña «diff» eliges los archivos cambiados en un árbol agrupado por carpeta y ves el diff de cada archivo.
+
+![Revisar el diff y fusionar](docs/images/es/feature-merge.gif)
 
 <details>
 <summary>Ver pantalla</summary>
@@ -140,6 +164,8 @@ La pestaña «worktree» muestra los commits de la rama, los cambios sin commit,
 
 En «Conversación» puedes preguntar al agente sobre el repositorio sin crear una tarea (worktree). Las respuestas se muestran en Markdown. Cuando quieras que empiece a trabajar, «Convertir en tarea» continúa esa conversación como tarea.
 
+![Preguntar sobre el código en una conversación y convertirla en tarea](docs/images/es/feature-chat.gif)
+
 <details>
 <summary>Ver pantalla</summary>
 
@@ -150,6 +176,8 @@ En «Conversación» puedes preguntar al agente sobre el repositorio sin crear u
 ### Notificaciones
 
 La espera de aprobación, las preguntas, la espera de respuesta, la espera de revisión y la finalización se acumulan en el icono de la campana, arriba a la derecha, y también sale una notificación de escritorio. Al pulsar una notificación se abre esa tarea.
+
+![Abrir una notificación para ir a la tarjeta que te necesita](docs/images/es/feature-notifications.gif)
 
 <details>
 <summary>Ver pantalla</summary>
@@ -162,6 +190,8 @@ La espera de aprobación, las preguntas, la espera de respuesta, la espera de re
 
 Si un merge entra en conflicto, la tarjeta pasa a ser un conflicto. Después de incorporar la rama base en la rama de la tarea, puedes pedir al agente que lo resuelva o corregirlo tú en un editor. En ambos casos, la rama base no cambia hasta que hagas el merge.
 
+![Pedir al agente que resuelva un conflicto y fusionar](docs/images/es/feature-conflict.gif)
+
 <details>
 <summary>Ver pantalla</summary>
 
@@ -173,6 +203,8 @@ Si un merge entra en conflicto, la tarjeta pasa a ser un conflicto. Después de 
 
 Al crear una tarea puedes elegir una skill de Claude Code (se pasa como `/nombre-de-la-skill`). También puedes elegir una conversación anterior de Claude Code (sesión) y continuar desde ahí.
 
+![Elegir una skill y una conversación anterior para una tarea nueva](docs/images/es/feature-skills.gif)
+
 <details>
 <summary>Ver pantalla</summary>
 
@@ -183,6 +215,8 @@ Al crear una tarea puedes elegir una skill de Claude Code (se pasa como `/nombre
 ### Programador de tareas
 
 Desde el menú de la barra superior, cambia a «Programador de tareas» para gestionar, en tarjetas, programaciones que crean y ejecutan una tarea en un momento dado (una vez, cada hora, cada día, cada semana o cada mes). Puedes registrar una tarea del kanban como programación, y también crear una tarea desde una programación en el momento. Las programaciones solo se ejecutan mientras la aplicación está abierta (más detalles en [docs/usage.md](docs/usage.md) (English)).
+
+![Registrar una revisión diaria de dependencias, ejecutarla ahora y ver el resultado en el tablero](docs/images/es/feature-scheduler.gif)
 
 ## Requisitos
 

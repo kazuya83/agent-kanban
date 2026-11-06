@@ -66,6 +66,8 @@ On Codex / Gemini / Cursor, in-card approval, multiple-choice questions, btw, an
 
 You can operate the board on the PC that runs the agents (the host) from Worktree Kanban on another PC (the client). Either Mac or Windows can be the host, and either can be the client. On the client you can approve, answer questions, send extra instructions, merge, and so on, the same way as on the host screen.
 
+![Connecting from another PC, then approving on the host’s board](docs/images/en/feature-remote.gif)
+
 - The host app listens only on `127.0.0.1`. The client app connects with an `ssh -N -L` tunnel, so the host only needs an SSH server. Use Tailscale or similar when you connect from outside
 - SSH uses a key. In the client's "RC settings", create an ed25519 key (`~/.ssh/agent-kanban_ed25519`) and register the public key in the host's "RC settings"
 - The first time, you pair with a 6-digit code shown on the host. After that, a saved token reconnects to the previous destination
@@ -76,11 +78,25 @@ You can operate the board on the PC that runs the agents (the host) from Worktre
 
 Steps, and how to fix a connection that fails, are in [docs/remote.md](docs/remote.md).
 
-Also included: splitting a large task into subtasks that run in parallel or in order (branched from the parent branch and merged back when done; you can also start a single subtask; GitHub sub-issues are supported), drag-and-drop changes to a card's state (column), messages to a running agent (btw), image and file attachments, Pipeline and competition (combinations of several agents), and WSL repositories on Windows. Usage is summarized in [docs/usage.md](docs/usage.md).
+Also included: drag-and-drop changes to a card's state (column), messages to a running agent (btw), image and file attachments, competition (several agents solving the same task), and WSL repositories on Windows. Usage is summarized in [docs/usage.md](docs/usage.md).
+
+### Pipeline: describe a flow in plain language and run tasks on it
+Write the flow you want in plain language, such as "implement with Codex, review with Claude, and go back to implementation if changes are needed", and the agent builds the flowchart. Pick that Pipeline when you create a task, and agents hand the work over step by step, following its branches and loops. You can also edit the flowchart by hand.
+
+![Writing a flow in plain language, picking it for a new task, and watching the steps run and loop back after a review](docs/images/en/feature-pipeline.gif)
+
+See [docs/agents.md](docs/agents.md) for details.
+
+### Subtasks
+When a task is large, the agent can propose splitting it into subtasks. They branch from the parent branch, run in parallel or in order, and are merged back as they finish.
+
+![Accepting a proposal to split a task, then watching the subtasks run and merge](docs/images/en/feature-subtasks.gif)
 
 ### Run several repositories in parallel
 
 Repositories open as tabs (up to 3). Switching tabs does not stop tasks in the other repositories. A tab that is not selected shows **how many tasks are running** (blue) and **how many tasks are waiting for you** (approval, a question, and so on, in orange), so you can see which repository needs you from the tabs alone. The limit on how many tasks run at once (the setting for how many to run at once) is shared across every repository.
+
+![Switching between repository tabs while tasks keep running in the others](docs/images/en/feature-repos.gif)
 
 ![Three repositories open as tabs. Inactive tabs show how many tasks are running and how many are waiting for you](docs/images/en/repo-tabs.png)
 
@@ -94,6 +110,8 @@ You can open a folder that is not a git repository (video production and other w
 
 When an action needs permission, you can read the full command and input on the card and in the detail panel, then choose allow, deny, or always allow for this task. When you deny, you can send a reason back to the agent.
 
+![Reading the full command, then approving it](docs/images/en/feature-approval.gif)
+
 <details>
 <summary>Screenshot</summary>
 
@@ -104,6 +122,8 @@ When an action needs permission, you can read the full command and input on the 
 ### Create tasks from GitHub Issues
 
 On the "Create from GitHub Issue" tab of "New task", enter numbers (`21, 22, 24`, and so on). It builds the instructions from the Issue title, body, and comments, and creates one card per Issue. The branch is named `agent/issue-21-…`, and the PR body includes `Closes #21`. This uses `gh`.
+
+![Entering Issue numbers to create one card per Issue](docs/images/en/feature-issue.gif)
 
 <details>
 <summary>Screenshot</summary>
@@ -116,6 +136,8 @@ On the "Create from GitHub Issue" tab of "New task", enter numbers (`21, 22, 24`
 
 When Claude Code asks with `AskUserQuestion`, the card becomes a question and an answer form appears. Multiple choice and free text (Other) are both supported.
 
+![Answering an agent’s question by choosing an option](docs/images/en/feature-question.gif)
+
 <details>
 <summary>Screenshot</summary>
 
@@ -126,6 +148,8 @@ When Claude Code asks with `AskUserQuestion`, the card becomes a question and an
 ### worktree and diff
 
 The "worktree" tab shows the branch commits, uncommitted changes, how the branch relates to the base, and the other worktrees in the same repository. On the "diff" tab you pick changed files in a tree grouped by folder and read the diff file by file.
+
+![Reviewing the diff, then merging](docs/images/en/feature-merge.gif)
 
 <details>
 <summary>Screenshot</summary>
@@ -140,6 +164,8 @@ The "worktree" tab shows the branch commits, uncommitted changes, how the branch
 
 In "Chat" you can ask the agent about the repository without creating a task (worktree). Replies are shown as Markdown. When you want it to start working, "Make this a task" continues that conversation as a task.
 
+![Asking about the code in a conversation, then turning it into a task](docs/images/en/feature-chat.gif)
+
 <details>
 <summary>Screenshot</summary>
 
@@ -150,6 +176,8 @@ In "Chat" you can ask the agent about the repository without creating a task (wo
 ### Notifications
 
 Waiting for approval, questions, waiting for an answer, waiting for review, and completion collect on the bell icon at the top right, and a desktop notification is shown. Clicking a notification opens that task.
+
+![Opening a notification to go to the card that needs you](docs/images/en/feature-notifications.gif)
 
 <details>
 <summary>Screenshot</summary>
@@ -162,6 +190,8 @@ Waiting for approval, questions, waiting for an answer, waiting for review, and 
 
 If a merge conflicts, the card becomes a conflict. After the base branch is merged into the task branch, you can have the agent resolve it or fix it yourself in an editor. Either way, the base branch stays unchanged until you merge.
 
+![Having the agent resolve a conflict, then merging](docs/images/en/feature-conflict.gif)
+
 <details>
 <summary>Screenshot</summary>
 
@@ -173,6 +203,8 @@ If a merge conflicts, the card becomes a conflict. After the base branch is merg
 
 When you create a task, you can pick one Claude Code skill (it is passed as `/skill-name`). You can also pick a past Claude Code conversation (session) and start from where it left off.
 
+![Choosing a skill and a past conversation for a new task](docs/images/en/feature-skills.gif)
+
 <details>
 <summary>Screenshot</summary>
 
@@ -183,6 +215,8 @@ When you create a task, you can pick one Claude Code skill (it is passed as `/sk
 ### Task scheduler
 
 From the menu in the top bar, switch to "Task scheduler" to manage schedules that create and run a task at a set time (once, hourly, daily, weekly, or monthly) as cards. You can register a kanban task as a schedule directly, and you can create a task from a schedule right away. Schedules run only while the app is open (see [docs/usage.md](docs/usage.md)).
+
+![Registering a daily dependency check, running it now, and seeing the result on the board](docs/images/en/feature-scheduler.gif)
 
 ## Requirements
 
