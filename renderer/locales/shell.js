@@ -330,9 +330,9 @@
     "zh": "通过 SSH{v1} · 主机端口 {v2}"
   },
   "（ポート {v1}）": {
-    "en": "(port {v1})",
-    "es": "(puerto {v1})",
-    "fr": "(port {v1})",
+    "en": " (port {v1})",
+    "es": " (puerto {v1})",
+    "fr": " (port {v1})",
     "zh": "（端口 {v1}）"
   },
   "<strong>これまでの接続</strong>（カードを押すと、保存したトークンでつなぎます）": {
@@ -744,9 +744,9 @@
     "zh": "当前检出的分支{v1}"
   },
   "（今は {v1}）": {
-    "en": "(now {v1})",
-    "es": "(ahora {v1})",
-    "fr": "(actuellement {v1})",
+    "en": " (now {v1})",
+    "es": " (ahora {v1})",
+    "fr": " (actuellement {v1})",
     "zh": "（当前是 {v1}）"
   },
   "ここの項目は、どのプロジェクトでも同じです。": {
@@ -1158,9 +1158,9 @@
     "zh": "保存"
   },
   "（使わない設定）": {
-    "en": "(not enabled)",
-    "es": "(no se usa)",
-    "fr": "(non utilisé)",
+    "en": " (not enabled)",
+    "es": " (no se usa)",
+    "fr": " (non utilisé)",
     "zh": "（设为不使用）"
   },
   "編集": {
@@ -1356,9 +1356,9 @@
     "zh": "已导出{v1}"
   },
   "（カスタムエージェントの工程があります。ほかのプロジェクトで使うときは「まとめてエクスポート」で一緒に書き出してください）": {
-    "en": "(A step uses a custom agent. To use it in another project, export it together with “Export together”.)",
-    "es": "(Hay un paso con agente personalizado. Para usarlo en otro proyecto, expórtalo junto con «Exportar juntos».)",
-    "fr": "(Une étape utilise un agent personnalisé. Pour l’utiliser dans un autre projet, exportez-le avec « Exporter ensemble ».)",
+    "en": " (A step uses a custom agent. To use it in another project, export it together with “Export together”.)",
+    "es": " (Hay un paso con agente personalizado. Para usarlo en otro proyecto, expórtalo junto con «Exportar juntos».)",
+    "fr": " (Une étape utilise un agent personnalisé. Pour l’utiliser dans un autre projet, exportez-le avec « Exporter ensemble ».)",
     "zh": "（有使用自定义智能体的工序。要在其他项目使用时，请用「一起导出」一并写出。）"
   },
   "<span>カスタムエージェント</span>": {
@@ -1758,9 +1758,9 @@
     "zh": "当前版本：<b>v{v1}</b>"
   },
   "（{v1} に確かめました）": {
-    "en": "(checked at {v1})",
-    "es": "(comprobado el {v1})",
-    "fr": "(vérifié le {v1})",
+    "en": " (checked at {v1})",
+    "es": " (comprobado el {v1})",
+    "fr": " (vérifié le {v1})",
     "zh": "（于 {v1} 确认）"
   },
   "v{v1} に更新しています。アプリを終了して入れ替え、起動し直します…": {
@@ -1890,9 +1890,9 @@
     "zh": "无法更新到 v{v1}（仍是 v{v2}）。详情请从设置的「应用更新」打开记录查看"
   },
   "（開発版）": {
-    "en": "(dev build)",
-    "es": "(versión de desarrollo)",
-    "fr": "(version de développement)",
+    "en": " (dev build)",
+    "es": " (versión de desarrollo)",
+    "fr": " (version de développement)",
     "zh": "（开发版）"
   },
   "全般": {

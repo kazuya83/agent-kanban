@@ -244,6 +244,108 @@ test('担当範囲の tr と index.html の日本語は、4言語とも訳があ
   assert.strictEqual(I18n.tr('全般'), 'General');
 });
 
+test('後ろにつく括弧は、英西仏では空白のあと。空のときと中国語・日本語は空白を足さない', () => {
+  const note = '（カスタムエージェントの工程があります。ほかのプロジェクトで使うときは「まとめてエクスポート」で一緒に書き出してください）';
+  const compose = () => ({
+    dev: `v0.1.8${I18n.tr('（開発版）')}`,
+    latest: I18n.tr('最新の版です{v1}', { v1: I18n.tr('（{v1} に確かめました）', { v1: 'Nov 6' }) }),
+    latestEmpty: I18n.tr('最新の版です{v1}', { v1: '' }),
+    branch: I18n.tr('チェックアウト中のブランチ{v1}', { v1: I18n.tr('（今は {v1}）', { v1: 'main' }) }),
+    branchEmpty: I18n.tr('チェックアウト中のブランチ{v1}', { v1: '' }),
+    exported: I18n.tr('エクスポートしました{v1}', { v1: I18n.tr(note) }),
+    exportedEmpty: I18n.tr('エクスポートしました{v1}', { v1: '' }),
+    off: `Claude Code${I18n.tr('（使わない設定）')}`,
+    ssh: I18n.tr('SSH 経由{v1}・ホストのポート {v2}', { v1: I18n.tr('（ポート {v1}）', { v1: 2222 }), v2: 17831 }),
+    ssh22: I18n.tr('SSH 経由{v1}・ホストのポート {v2}', { v1: '', v2: 17831 }),
+  });
+
+  I18n.setLanguage('en');
+  assert.deepStrictEqual(compose(), {
+    dev: 'v0.1.8 (dev build)',
+    latest: 'You are on the latest version (checked at Nov 6)',
+    latestEmpty: 'You are on the latest version',
+    branch: 'Checked-out branch (now main)',
+    branchEmpty: 'Checked-out branch',
+    exported: 'Exported (A step uses a custom agent. To use it in another project, export it together with “Export together”.)',
+    exportedEmpty: 'Exported',
+    off: 'Claude Code (not enabled)',
+    ssh: 'via SSH (port 2222) · host port 17831',
+    ssh22: 'via SSH · host port 17831',
+  });
+
+  I18n.setLanguage('es');
+  assert.deepStrictEqual(compose(), {
+    dev: 'v0.1.8 (versión de desarrollo)',
+    latest: 'Estás en la última versión (comprobado el Nov 6)',
+    latestEmpty: 'Estás en la última versión',
+    branch: 'Rama actual (ahora main)',
+    branchEmpty: 'Rama actual',
+    exported: 'Exportado (Hay un paso con agente personalizado. Para usarlo en otro proyecto, expórtalo junto con «Exportar juntos».)',
+    exportedEmpty: 'Exportado',
+    off: 'Claude Code (no se usa)',
+    ssh: 'por SSH (puerto 2222) · puerto del host 17831',
+    ssh22: 'por SSH · puerto del host 17831',
+  });
+
+  I18n.setLanguage('fr');
+  assert.deepStrictEqual(compose(), {
+    dev: 'v0.1.8 (version de développement)',
+    latest: 'Vous avez la dernière version (vérifié le Nov 6)',
+    latestEmpty: 'Vous avez la dernière version',
+    branch: 'Branche extraite (actuellement main)',
+    branchEmpty: 'Branche extraite',
+    exported: 'Exporté (Une étape utilise un agent personnalisé. Pour l’utiliser dans un autre projet, exportez-le avec « Exporter ensemble ».)',
+    exportedEmpty: 'Exporté',
+    off: 'Claude Code (non utilisé)',
+    ssh: 'via SSH (port 2222) · port de l’hôte 17831',
+    ssh22: 'via SSH · port de l’hôte 17831',
+  });
+
+  I18n.setLanguage('zh');
+  assert.deepStrictEqual(compose(), {
+    dev: 'v0.1.8（开发版）',
+    latest: '已是最新版本（于 Nov 6 确认）',
+    latestEmpty: '已是最新版本',
+    branch: '当前检出的分支（当前是 main）',
+    branchEmpty: '当前检出的分支',
+    exported: '已导出（有使用自定义智能体的工序。要在其他项目使用时，请用「一起导出」一并写出。）',
+    exportedEmpty: '已导出',
+    off: 'Claude Code（设为不使用）',
+    ssh: '通过 SSH（端口 2222） · 主机端口 17831',
+    ssh22: '通过 SSH · 主机端口 17831',
+  });
+
+  I18n.setLanguage('ja');
+  const ja = compose();
+  assert.strictEqual(ja.dev, 'v0.1.8（開発版）');
+  assert.strictEqual(ja.latestEmpty, '最新の版です');
+  assert.strictEqual(ja.branchEmpty, 'チェックアウト中のブランチ');
+  assert.strictEqual(ja.exportedEmpty, 'エクスポートしました');
+  assert.strictEqual(ja.off, 'Claude Code（使わない設定）');
+  assert.strictEqual(ja.ssh, 'SSH 経由（ポート 2222）・ホストのポート 17831');
+  assert.strictEqual(ja.ssh22, 'SSH 経由・ホストのポート 17831');
+  for (const s of Object.values(ja)) assert.strictEqual(s, s.trim(), s);
+});
+
+test('Pipeline の取り込み確認は、名前の区切りを訳す', () => {
+  const src = read('renderer/renderer.js');
+  const block = sliceBetween(src, 'const importFlows = async () => {', 'if (!m.addedPipelines.length');
+  assert.match(block, /m\.addedPipelines\.join\(tr\('、'\)\)/);
+  assert.doesNotMatch(block, /addedPipelines\.join\('、'\)/);
+  I18n.setLanguage('en');
+  assert.strictEqual(['速い', '丁寧'].join(I18n.tr('、')), '速い, 丁寧');
+  I18n.setLanguage('es');
+  assert.strictEqual(['速い', '丁寧'].join(I18n.tr('、')), '速い, 丁寧');
+  I18n.setLanguage('fr');
+  assert.strictEqual(['速い', '丁寧'].join(I18n.tr('、')), '速い, 丁寧');
+  I18n.setLanguage('zh');
+  assert.strictEqual(['速い', '丁寧'].join(I18n.tr('、')), '速い、丁寧');
+  I18n.setLanguage('ja');
+  assert.strictEqual(['速い', '丁寧'].join(I18n.tr('、')), '速い、丁寧');
+  assert.strictEqual(['ひとつ'].join(I18n.tr('、')), 'ひとつ');
+  assert.strictEqual([].join(I18n.tr('、')), '');
+});
+
 test('言語のセレクトは全般にあり、選ぶと保存して読み直す。失敗したら元に戻して知らせる', () => {
   const src = read('renderer/renderer.js');
   const view = sliceBetween(src, 'function renderSettingsView()', 'function pickRepo(');

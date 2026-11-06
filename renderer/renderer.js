@@ -4338,7 +4338,7 @@ function renderSettingsView() {
       return toast(e.message || String(e));
     }
     const lines = [`${tr('「{v1}」から取り込みます。', { v1: (f.name) })}`];
-    if (m.addedPipelines.length) lines.push(`Pipeline: ${m.addedPipelines.join('、')}`);
+    if (m.addedPipelines.length) lines.push(`Pipeline: ${m.addedPipelines.join(tr('、'))}`);
     if (m.addedAgents.length) lines.push(`${tr('カスタムエージェント（追加）: {v1}', { v1: (m.addedAgents.join(tr('、'))) })}`);
     if (m.reusedAgents.length) lines.push(`${tr('カスタムエージェント（同じものがあるので、それを使う）: {v1}', { v1: (m.reusedAgents.join(tr('、'))) })}`);
     if (m.missing.length) lines.push(`
