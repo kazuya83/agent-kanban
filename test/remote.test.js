@@ -6,6 +6,7 @@ const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isL
 test('遠隔で転送するチャンネルと、しないチャンネル', () => {
   assert.strictEqual(isProxyChannel('board:get'), true);
   assert.strictEqual(isProxyChannel('card:send'), true);
+  assert.strictEqual(isProxyChannel('card:rewind'), true);
   assert.strictEqual(isProxyChannel('settings:update'), true);
   assert.strictEqual(isProxyChannel('remote:connect'), false);
   assert.strictEqual(isProxyChannel('app:info'), false);

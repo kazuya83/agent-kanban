@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('api', {
   markSeen: (id) => call('card:markSeen', id),
   stop: (id) => call('card:stop', id),
   send: (id, message, skill, attachments) => call('card:send', { id, message, skill, attachments }),
+  rewind: (id, checkpointId) => call('card:rewind', { id, checkpointId }),
   adoptCompetitor: (id) => call('compete:adopt', id),
   setSubtasks: (id, p) => call('subtasks:set', { ...(p || {}), id }),
   acceptSubtasks: (id, p) => call('subtasks:accept', { ...(p || {}), id }),

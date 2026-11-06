@@ -64,6 +64,9 @@ test('ソースを変更しないタスク: worktree を作らず、書き換え
     // worktree・ブランチは作らず、リポジトリのファイルも変えない
     assert.strictEqual(c.worktreePath, undefined);
     assert.strictEqual(c.branch, undefined);
+    const pub = agents.publicCards().find((x) => x.id === c.id);
+    assert.match(pub.rewind.blocked, /worktree がありません/);
+    assert.doesNotMatch(pub.rewind.blocked, /git で管理していない/);
     assert.ok(!fs.existsSync(path.join(tmp, 'repo.worktrees')));
     assert.strictEqual(execFileSync('git', ['status', '--porcelain'], { cwd: repo }).toString(), '');
     await assert.rejects(agents.merge(c.id), /完了にする/);

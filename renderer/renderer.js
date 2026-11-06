@@ -119,7 +119,7 @@ function pipelineOfRef(v, s = state.board.settings || {}) {
   return isRelayRef(v) ? pipelines(s).find((p) => p.id === v.slice(RELAY_PREFIX.length)) || null : null;
 }
 
-const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'chat', logs: new Map(), headSig: '', relayOpen: new Set(), chartZoom: null, view: AppView.loadView(localStorage) };
+const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'chat', logs: new Map(), logsVersion: new Map(), logsLoading: new Map(), headSig: '', relayOpen: new Set(), chartZoom: null, view: AppView.loadView(localStorage) };
 const $ = (id) => document.getElementById(id);
 // index.html の data-icon="名前" の場所に、モノクロの SVG アイコンを入れる（icons.js）
 for (const el of document.querySelectorAll('[data-icon]')) el.outerHTML = icon(el.dataset.icon, el.className);
@@ -957,9 +957,21 @@ async function select(id, { subFrom = null } = {}) {
   updateTabsFor(card(id));
   markSeenIfOpen();
   if (!state.logs.has(id)) {
-    const logs = await run(() => api.logs(id));
-    state.logs.set(id, logs || []);
+    // 読み込みのあいだに logsVersion が進んでも、古いログを新しい版だと扱わない
+    const seen = card(id) ? card(id).logsVersion : undefined;
+    const logs = await readLogs(id, seen);
+    // 新しい読みに引き継がれたら、捨てた結果では保存も描画もしない
+    if (logs === 'superseded') return;
+    // 配列が返ったときだけ保存する。失敗はマップに置かず、次に開いたときに読み直す。
+    // 先に成功した読みを、あとから届いた失敗や古い結果で消さない
+    if (Array.isArray(logs) && (!state.logs.has(id) || state.logsVersion.get(id) === seen)) {
+      state.logs.set(id, logs);
+      state.logsVersion.set(id, seen);
+    }
   }
+  if (card(id)) await ensureLogsFresh(card(id));
+  // 読み直しているあいだに別のカードを開いていたら、そちらの描画を上書きしない
+  if (state.selected !== id) return;
   renderDetailBody();
 }
 
@@ -1072,10 +1084,153 @@ function flowGoto(n) {
   return tr('{v}「{v2}」へ', { v: tr(typeName), v2: FlowModel.displayText(shown, n.type) });
 }
 
+// 戻す地点。戻せるかの判定はしない（blocked と points は publicCards が渡す）
+function rewindView(c) {
+  const raw = c && c.rewind;
+  const points = [];
+  if (raw && typeof raw === 'object' && Array.isArray(raw.points)) {
+    for (const p of raw.points) {
+      if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !p.id) continue;
+      points.push({
+        id: p.id,
+        at: typeof p.at === 'number' && Number.isFinite(p.at) ? p.at : null,
+        seq: typeof p.seq === 'number' && Number.isFinite(p.seq) ? p.seq : null,
+        label: typeof p.label === 'string' ? p.label : '',
+        stepIndex: Number.isInteger(p.stepIndex) && p.stepIndex >= 0 ? p.stepIndex : null,
+        stepStart: p.stepStart === true,
+        agent: typeof p.agent === 'string' ? p.agent : '',
+      });
+    }
+  }
+  const blocked = raw && typeof raw === 'object' && typeof raw.blocked === 'string' && raw.blocked.trim() ? raw.blocked.trim() : null;
+  return { blocked, points };
+}
+// 工程の最初の実行。points は古い順。seq が小さいものを優先し、同じなら先に来たもの
+function rewindStepPoint(points, stepIndex) {
+  let best = null;
+  for (const p of points || []) {
+    if (!p.stepStart || p.stepIndex !== stepIndex) continue;
+    if (!best) {
+      best = p;
+      continue;
+    }
+    const bs = best.seq == null ? Infinity : best.seq;
+    const ps = p.seq == null ? Infinity : p.seq;
+    if (ps < bs) best = p;
+  }
+  return best;
+}
+function rewindButtonHtml(point, verb, blocked) {
+  const title = blocked ? ` title="${esc(blocked.replace(/\s+/g, ' ').trim())}"` : '';
+  return tr('<button type="button" class="btn small ghost rw-btn" data-act="rewind" data-cp="{id}"{disabled}{title}>{verb}</button>', {
+    id: esc(point.id),
+    disabled: blocked ? ' disabled' : '',
+    title,
+    verb,
+  });
+}
+function rewindStepHtml(view, stepIndex) {
+  if (!view || !Array.isArray(view.points)) return '';
+  const point = rewindStepPoint(view.points, stepIndex);
+  if (!point) return '';
+  return `<div class="rf-rewind">${rewindButtonHtml(point, tr('ここからやり直す'), view.blocked)}</div>`;
+}
+function rewindFlowNote(view, stepCount) {
+  if (!view || !view.blocked) return '';
+  const n = Number.isInteger(stepCount) && stepCount > 0 ? stepCount : 0;
+  for (let i = 0; i < n; i++) {
+    if (rewindStepPoint(view.points, i)) return tr('<p class="rf-rewind-note">{reason}</p>', { reason: esc(view.blocked) });
+  }
+  return '';
+}
+function rewindConfirmMessage(point) {
+  const name = point && point.label ? tr('「{name}」', { name: point.label }) : tr('この時点');
+  return tr('{name}に戻しますか？\nあとの変更は捨てられ、元に戻せません。戻したら、すぐに動き始めます。', { name });
+}
+async function rewindCard(c, checkpointId) {
+  if (isBusy()) return;
+  if (!c || typeof checkpointId !== 'string' || !checkpointId) return;
+  const view = rewindView(c);
+  if (view.blocked) return;
+  const point = view.points.find((p) => p.id === checkpointId);
+  if (!point) return;
+  if (!confirm(rewindConfirmMessage(point))) return;
+  await runBusy(tr('戻しています…'), () => api.rewind(c.id, point.id), tr('戻しました'));
+}
+// 進捗タブの「履歴」。points は古い順なので、画面では逆（新しい順）に出す
+function rewindHistoryHtml(c) {
+  const view = rewindView(c);
+  if (!view.points.length) return '';
+  const note = view.blocked ? tr('<p class="rw-blocked">{reason}</p>', { reason: esc(view.blocked) }) : '';
+  const rows = view.points.slice().reverse().map((p) => {
+    const bits = [];
+    if (p.at != null) bits.push(`<span class="rw-t">${esc(hhmm(p.at))}</span>`);
+    bits.push(`<span class="rw-x">${esc(p.label || tr('（名前なし）'))}</span>`);
+    if (p.agent) bits.push(`<span class="rw-who">${esc(agentShort(p.agent))}</span>`);
+    if (p.stepStart) bits.push(`<span class="rw-start">${esc(tr('工程の最初'))}</span>`);
+    if (p.seq != null) bits.push(`<span class="rw-seq">#${esc(p.seq)}</span>`);
+    return `<li><span class="rw-main">${bits.join('')}</span>${rewindButtonHtml(p, tr('ここに戻す'), view.blocked)}</li>`;
+  }).join('');
+  return tr('<section class="pg-sec pg-history"><div class="pg-sec-head"><b>{v}履歴</b> <span class="muted small">新しい順</span></div>{note}<ul class="pg-rewind">{rows}</ul></section>', { v: icon('clock'), note, rows });
+}
+// 同じ版の api.logs は1本だけ。run() は使わない（失敗のたびにトーストを出さない）。
+// 失敗や配列でない結果は fail。別の版の読みが始まったあとの結果は superseded。
+function readLogs(id, version) {
+  const cur = state.logsLoading.get(id);
+  if (cur && cur.version === version) return cur.promise;
+  let done;
+  const promise = new Promise((resolve) => { done = resolve; });
+  const flight = { version, promise };
+  state.logsLoading.set(id, flight);
+  (async () => {
+    let logs;
+    try {
+      logs = await api.logs(id);
+    } catch {
+      logs = undefined;
+    }
+    // 版が進んで別の読みに替わったときだけ、この結果は使わない
+    if (state.logsLoading.get(id) !== flight) {
+      done('superseded');
+      return;
+    }
+    state.logsLoading.delete(id);
+    done(Array.isArray(logs) ? logs : 'fail');
+  })();
+  return promise;
+}
+// logsVersion が変わっていたら、読み込み済みのログを取り直す。
+// 同じ版の読みが既にあれば、その Promise を待つ。失敗したときはログも版も変えず、次の更新で静かにやり直す。
+async function ensureLogsFresh(c) {
+  if (!c || !state.logs.has(c.id)) return;
+  if (state.logsVersion.get(c.id) === c.logsVersion) return;
+  const version = c.logsVersion;
+  const logs = await readLogs(c.id, version);
+  if (logs === 'superseded' || !Array.isArray(logs)) return;
+  const now = card(c.id);
+  if (!now || now.logsVersion !== version) {
+    if (now) await ensureLogsFresh(now);
+    return;
+  }
+  state.logs.set(now.id, logs);
+  state.logsVersion.set(now.id, version);
+  afterLogsReloaded(now.id);
+}
+function afterLogsReloaded(id) {
+  if (state.selected !== id) return;
+  if (state.tab === 'log' || state.tab === 'chat') renderDetailBody();
+  else if (state.tab === 'progress') {
+    const body = $('detailBody');
+    if (body) body.dataset.progressSig = '';
+    scheduleProgress();
+  }
+}
+
 // 詳細: Pipelineの工程をワークフローの形で見せる（状態・エージェント・時間・金額・前の工程の報告）
 function relayFlowHtml(c) {
   if (!c.relay || isChat(c)) return '';
   const r = c.relay;
+  const rw = rewindView(c);
   const hist = new Map((r.history || []).map((h) => [h.index, h])); // 同じ工程を何度か動かしたら、最後の回
   const runs = (i) => (r.history || []).filter((h) => h.index === i).length + (i === r.index && !r.waiting && !r.atJoin ? 1 : 0);
   const doneN = r.steps.filter((_, i) => relayStepState(c, i) === 'done').length;
@@ -1128,10 +1283,11 @@ function relayFlowHtml(c) {
         ${judgeHtml}
         ${st.instruction ? `<div class="rf-inst" title="${esc(st.instruction)}">${esc(st.instruction)}</div>` : ''}
         ${report}
+        ${rewindStepHtml(rw, i)}
       </div>
     </li>`;
   });
-  return tr('<div class="relay-flow"><div class="rf-title">{v}Pipeline{v2} <span class="muted small">{doneN}/{length} 工程が完了{v3}{v4}</span></div>{v5}<ol class="rf-list">{v6}</ol></div>', { v: (icon('pipeline')), v2: (r.pipeline && r.pipeline.name && r.pipeline.name !== 'Pipeline' ? tr('「{name}」', { name: esc(r.pipeline.name) }) : ''), doneN, length: (r.steps.length), v3: (loopN ? tr('・ループ {loopN} 回', { loopN }) : ''), v4: (r.limitReached ? tr('・ループの上限で終了') : ''), v5: (relayWaitHtml(c)), v6: (nodes.join('')) });
+  return tr('<div class="relay-flow"><div class="rf-title">{v}Pipeline{v2} <span class="muted small">{doneN}/{length} 工程が完了{v3}{v4}</span></div>{v5}<ol class="rf-list">{v6}</ol></div>', { v: (icon('pipeline')), v2: (r.pipeline && r.pipeline.name && r.pipeline.name !== 'Pipeline' ? tr('「{name}」', { name: esc(r.pipeline.name) }) : ''), doneN, length: (r.steps.length), v3: (loopN ? tr('・ループ {loopN} 回', { loopN }) : ''), v4: (r.limitReached ? tr('・ループの上限で終了') : ''), v5: (relayWaitHtml(c) + rewindFlowNote(rw, r.steps.length)), v6: (nodes.join('')) });
 }
 
 // ---------------- サブタスク ----------------
@@ -1512,7 +1668,7 @@ async function subtaskAction(c, el) {
   }
 }
 
-// 「進捗」タブ: エージェントの TODO・Pipelineのフローチャート・最近の作業
+// 「進捗」タブ: エージェントの TODO・Pipelineのフローチャート・戻す履歴・最近の作業
 const TODO_MARK = { completed: ['✓', tr('完了')], in_progress: ['▶', tr('作業中')], pending: ['○', tr('これから')], cancelled: ['–', tr('取りやめ')] };
 function todoListHtml(todos, title) {
   const items = (todos && todos.items) || [];
@@ -1637,6 +1793,7 @@ function progressHtml(c) {
     parts.push(tr('<section class="pg-sec"><div class="pg-sec-head"><b>{v}フローチャート</b></div>{v2}</section>', { v: (icon('pipeline')), v2: (relayChartHtml(c)) }));
     parts.push(`<section class="pg-sec">${relayFlowHtml(c)}</section>`);
   }
+  parts.push(rewindHistoryHtml(c));
   // 今のエージェントの TODO（並列の枝を待っているときは、枝ごと）
   const kids = c.relay && c.relay.waiting ? c.relay.waiting.children.map((id) => card(id)).filter(Boolean) : [];
   if (kids.length) for (const k of kids) parts.push(todoListHtml(k.todos, tr('枝「{label}」の TODO', { label: (esc(k.relay.branchOf.label)) })));
@@ -1972,9 +2129,14 @@ async function detailAction(e) {
   if (chip) return run(() => api.openExternal(chip.dataset.url));
   const go = e.target.closest('[data-goto]');
   if (go) return select(go.dataset.goto);
-  const act = e.target.closest('[data-act]')?.dataset.act;
+  const btn = e.target.closest('[data-act]');
+  const act = btn?.dataset.act;
   const c = card(state.selected);
   if (!act || !c) return;
+  if (act === 'rewind') {
+    if (btn.disabled) return;
+    return rewindCard(c, btn.dataset.cp);
+  }
   if (act === 'start') runBusy(tr('タスクを開始しています…'), () => api.start(c.id));
   if (act === 'resume') runBusy(tr('再開しています…'), () => api.resume(c.id), tr('再開しました'));
   if (act === 'dismissInterrupted') run(() => api.dismissInterrupted(c.id));
@@ -5258,6 +5420,7 @@ api.onBoard((board) => {
     renderDetailHead();
     const c = card(state.selected);
     if (c) {
+      ensureLogsFresh(c);
       updateBtwTab(c);
       // サブタスクがなくなって、今のタブが消えたら開き直す
       const tabBefore = state.tab;
@@ -5309,6 +5472,9 @@ document.addEventListener('click', (e) => {
 
 api.onLog(({ id, entry }) => {
   if (!state.logs.has(id)) return;
+  const current = card(id);
+  // 戻したあとは版が進んでいる。読み直す前に足すと、捨てたログの末尾に新しい行が残る
+  if (current && state.logsVersion.get(id) !== current.logsVersion) return;
   state.logs.get(id).push(entry);
   if (state.selected === id && state.tab === 'log') {
     const body = $('detailBody');
