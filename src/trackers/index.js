@@ -37,6 +37,10 @@
 //   createSubIssue(ctx, parentRef, { title, body }) → { key, number?, title, url }
 //   fetchSubIssues(ctx, parentRef) → fetchIssue と同じ形の配列（comments は無くてよい）
 //
+//   コードのホスト（origin が matchesRemote に合うリポジトリの MR を、gh の代わりに扱う）は次を持つ
+//   createMergeRequest(ctx, { head, base, title, body }) → { url, number, created }   開いている MR があれば created: false で返す
+//   mergeRequestState(ctx, { url }) → gh.pullRequestState と同じ形
+//
 // 上の ref には、カードの c.issue（renderer/issue-ref.js の形）もそのまま渡る。
 // チャットサービス（parseRefs・fetchIssue を持たない）は、configFields と testConnection で「連携」の欄にだけ出る。
 // 接続の状態を画面に出すには setStatusSource(id, fn) を呼ぶ（fn の返り値 { state, text } にトークンを入れない）。
@@ -188,6 +192,12 @@ class Trackers extends EventEmitter {
     return hit ? hit.id : DEFAULT_PROVIDER;
   }
 
+  // origin の URL のリポジトリを、gh の代わりに扱うコードのホスト。無ければ ''（GitHub・それ以外）
+  codeHostOf(url) {
+    const hit = list().find((p) => typeof p.createMergeRequest === 'function' && typeof p.matchesRemote === 'function' && p.matchesRemote(url, this.configOf(p.id)));
+    return hit ? hit.id : '';
+  }
+
   // draft: 接続テストで使う、画面に入力中の値 { config, secrets }
   context(p, { repoPath = '', ghPath, draft = null, used = [] } = {}) {
     const saved = this.configOf(p.id);
@@ -313,7 +323,7 @@ class Trackers extends EventEmitter {
 }
 
 // 組み込みのプロバイダ。サービスを足すときは、ここに1行足す
-const BUILTIN = ['./github', './linear', './jira'];
+const BUILTIN = ['./github', './gitlab', './linear', './jira'];
 for (const file of BUILTIN) register(require(file));
 register(require('../slack').provider); // 課題管理ではないので、本体は src/slack.js にある
 

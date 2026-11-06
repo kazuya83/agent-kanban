@@ -816,19 +816,32 @@ app.whenReady().then(async () => {
     switchRepoSettings(s, dir);
     s.repoTabs = tabs;
   };
-  // 初めて開いたプロジェクトは初期値から始める。取り込み方は PR を作成。ただし origin が GitHub でない・git なしなら直接マージ。
+  // 初めて開いたプロジェクトは初期値から始める。取り込み方は PR を作成。ただし origin が GitHub でも GitLab でもない・git なしなら直接マージ。
   // 使う課題管理サービスは origin から推定する（分からなければ GitHub のまま）
   const initRepoSettings = async (dir) => {
     const noGit = isNoGitRepo(store.settings, dir);
     const gh = noGit ? false : await git.isGitHubRemote(dir).catch(() => false);
     const url = noGit ? '' : await git.git(dir, ['remote', 'get-url', 'origin']).catch(() => '');
     const issueProvider = url ? trackers.guessFromRemote(url.trim()) : 'github';
-    const patch = { ...(gh ? {} : { integration: 'merge' }), ...(issueProvider === 'github' ? {} : { issueProvider }) };
+    const canReview = gh || (!!url && !!trackers.codeHostOf(url.trim()));
+    const patch = { ...(canReview ? {} : { integration: 'merge' }), ...(issueProvider === 'github' ? {} : { issueProvider }) };
     if (!Object.keys(patch).length) return;
     store.setRepoSettings(dir, patch);
     store.save();
     notifyBoard();
   };
+  // origin のコードのホストを覚える（画面の PR / MR の文言に使う。origin や接続先は変わることがあるので、開くたびに確かめる）
+  const refreshCodeHost = async (dir) => {
+    if (!dir || isNoGitRepo(store.settings, dir)) return;
+    const url = await git.git(dir, ['remote', 'get-url', 'origin']).catch(() => '');
+    const codeHost = url ? trackers.codeHostOf(url.trim()) : '';
+    if ((store.repoSettings(dir).codeHost || '') === codeHost) return;
+    store.setRepoSettings(dir, { codeHost });
+    store.save();
+    notifyBoard();
+  };
+  trackers.on('changed', () => refreshCodeHost(store.settings.repoPath).catch(() => {}));
+  refreshCodeHost(store.settings.repoPath).catch(() => {});
   const openRepo = (dir, { tab } = {}) => {
     const s = store.settings;
     const fresh = !!dir && !hasRepoSettings(s, dir);
@@ -836,7 +849,7 @@ app.whenReady().then(async () => {
     s.recentRepoPaths = touchRecentRepo(s.recentRepoPaths, dir);
     store.save();
     notifyBoard();
-    if (fresh) initRepoSettings(dir).catch(() => {});
+    (fresh ? initRepoSettings(dir).catch(() => {}) : Promise.resolve()).then(() => refreshCodeHost(dir)).catch(() => {});
     return dir;
   };
   // タブを切り替える（タブにあるリポジトリだけ）
