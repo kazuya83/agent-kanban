@@ -474,4 +474,10 @@
   "（マージ済み）": { en: "(merged)", es: "(fusionado)", fr: "(fusionné)", zh: "（已合并）" },
   "（戻った回数 {v}/{v2}）": { en: "(returned {v}/{v2})", es: "(vueltas {v}/{v2})", fr: "(retours {v}/{v2})", zh: "（返回次数 {v}/{v2}）" },
   "（閉じられました）": { en: "(closed)", es: "(cerrado)", fr: "(fermée)", zh: "（已关闭）" },
+  "CI 成功": {"en":"CI passed","es":"CI correcta","fr":"CI réussie","zh":"CI 成功"},
+  "CI 実行中": {"en":"CI running","es":"CI en curso","fr":"CI en cours","zh":"CI 运行中"},
+  "CI 要確認": {"en":"CI needs review","es":"CI por revisar","fr":"CI à vérifier","zh":"CI 待确认"},
+  "CI 失敗": {"en":"CI failed","es":"CI fallida","fr":"CI échouée","zh":"CI 失败"},
+  "自動で修正中": {"en":"Fixing automatically","es":"Corrigiendo automáticamente","fr":"Correction automatique en cours","zh":"正在自动修复"},
+  "直してもらう": {"en":"Ask to fix","es":"Pedir corrección","fr":"Demander la correction","zh":"请求修复"},
 });

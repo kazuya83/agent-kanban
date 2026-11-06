@@ -2284,5 +2284,6 @@
     "es": "No se encontró el comando {v1}. Instala {v2} e inicia sesión, o indica la ruta completa de {v1} en Ajustes (se puede ver con which {v1} en la terminal, o where {v1} en Windows). Si no lo usas, quita la marca en Ajustes → «Agentes en uso».",
     "fr": "La commande {v1} est introuvable. Installez {v2} et connectez-vous, ou indiquez le chemin complet de {v1} dans les réglages (which {v1} dans un terminal, where {v1} sous Windows). Si vous ne l’utilisez pas, décochez-la dans Réglages → « Agents utilisés ».",
     "zh": "找不到 {v1} 命令。请安装 {v2} 并登录，或在「设置」里填写 {v1} 的完整路径（在终端用 which {v1}，Windows 用 where {v1} 查看）。如果不用，请在「设置」的「使用的智能体」里取消勾选。"
-  }
+  },
+  "PR の CI が失敗したら、エージェントに直してもらって push する（続けて 3 回まで）": {"en":"When PR CI fails, have the agent fix it and push (up to 3 times in a row)","es":"Si la CI del PR falla, pedir al agente que la corrija y haga push (hasta 3 veces seguidas)","fr":"Si la CI du PR échoue, demander à l'agent de corriger et de pousser (jusqu'à 3 fois de suite)","zh":"PR 的 CI 失败时，让代理修复并 push（最多连续 3 次）"},
 });
