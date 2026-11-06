@@ -649,11 +649,11 @@ function renderRemoteInfo() {
   el.onclick = () => openRemoteSettings();
 }
 
-// 表示する画面（カンバン管理 / タスクスケジューラ）を DOM に反映する
+// 表示する画面（カンバン管理 / タスクスケジューラ / 設定）を DOM に反映する
 function applyView() {
-  const scheduler = state.view === 'scheduler';
-  $('board').classList.toggle('hidden', scheduler);
-  $('schedulerView').classList.toggle('hidden', !scheduler);
+  $('board').classList.toggle('hidden', state.view !== 'kanban');
+  $('schedulerView').classList.toggle('hidden', state.view !== 'scheduler');
+  $('settingsView').classList.toggle('hidden', state.view !== 'settings');
   document.querySelectorAll('#navMenu [data-view]').forEach((b) => {
     const on = b.dataset.view === state.view;
     b.classList.toggle('active', on);
@@ -665,11 +665,13 @@ function applyView() {
 function setView(view) {
   const next = AppView.normalizeView(view);
   if (next === state.view) return;
+  // 未保存の値は確認なしで捨てる
+  if (state.view === 'settings') clearSettingsView();
   state.view = next;
   AppView.saveView(localStorage, next);
   applyView();
-  // タスク詳細はカンバンの横に開くものなので、スケジューラ画面では閉じる
-  if (next === 'scheduler' && state.selected) closeDetail();
+  // タスク詳細はカンバンの横に開くものなので、ほかの画面では閉じる
+  if (next !== 'kanban' && state.selected) closeDetail();
   else renderBoard();
 }
 
@@ -696,6 +698,7 @@ function renderBoard() {
   renderChatBtn();
   $('runInfo').textContent = `実行中 ${running}/${settings.maxParallel || 1}`;
   if (state.view === 'scheduler') return renderSchedulerView();
+  if (state.view === 'settings') return renderSettingsViewIfStale();
 
   if (!settings.repoPath) {
     $('board').innerHTML = viewingHost()
@@ -2903,8 +2906,11 @@ function openModal(html, onReady) {
   onReady?.();
 }
 function closeModal() {
+  // 設定画面の上の Issue ダイアログで gh にログインしたかもしれないので、後ろの gh の欄も確かめ直す
+  const ghDialog = state.view === 'settings' && !$('modal').classList.contains('hidden') && $('modal').querySelector('#ghPanel');
   $('modal').classList.add('hidden');
   state.chatListOpen = false;
+  if (ghDialog) refreshGh();
 }
 $('modal').addEventListener('mousedown', (e) => {
   if (e.target === $('modal')) closeModal();
@@ -3939,534 +3945,580 @@ function openRemoteSettings() {
   );
 }
 
-async function openSettings() {
+// 設定画面（ハンバーガーメニューの「設定」）。
+// 入力中の値が消えないよう、開いたときと、見ているプロジェクトが変わったときにだけ描く（renderBoard は頻繁に呼ばれる）
+let settingsViewKey = null; // いま描いてある設定画面のプロジェクト（描いていなければ null）
+let settingsNav = null;
+const currentSettingsKey = () => `${viewingHost()}:${state.board.settings.repoPath}`;
+
+// 別のプロジェクトの値が画面に残っていると、そのまま今のプロジェクトに保存してしまうので描き直す
+function renderSettingsViewIfStale() {
+  if (settingsViewKey !== currentSettingsKey()) renderSettingsView();
+}
+
+// 画面を離れたら中身を消す（sBase などの ID が、ほかの画面やダイアログと紛らわしく残らないように）
+function clearSettingsView() {
+  $('settingsView').innerHTML = '';
+  settingsViewKey = null;
+  settingsNav = null;
+}
+
+// 設定画面を開く。section を渡すと、その節までスクロールする（もう開いていても、スクロールは動かす）
+function openSettings(section) {
+  setView('settings');
+  if (section) settingsNav?.scrollTo(section);
+}
+
+function renderSettingsView() {
   const s = state.board.settings;
+  const viewKey = currentSettingsKey();
   const projectName = String(s.repoPath || '').split(/[\\/]/).filter(Boolean).pop() || '';
-  // ブランチ一覧は git を何回も起動するので（Windows だと遅い）、待たずにモーダルを開いてから後で入れる
+  // ブランチ一覧は git を何回も起動するので（Windows だと遅い）、待たずに画面を描いてから後で入れる
   const baseOptions = (info) =>
     `<option value="">チェックアウト中のブランチ${info.current ? `（今は ${esc(info.current)}）` : ''}</option>` +
     [...new Set([...(s.baseBranch ? [s.baseBranch] : []), ...info.branches])]
       .map((b) => `<option ${b === s.baseBranch ? 'selected' : ''}>${esc(b)}</option>`)
       .join('');
-  openModal(
-    `<h2>設定</h2>
-     <div class="field"><span>アプリの更新</span><div id="updPanel" class="gh-panel upd-panel">${updatePanelHtml(state.update)}</div></div>
-
-     <h3 class="s-section">このプロジェクトの設定${projectName ? `（<code>${esc(projectName)}</code>）` : ''}</h3>
-     <small class="muted s-note">ここの項目はプロジェクト（リポジトリ）ごとに覚えます。タブを切り替えると、そのプロジェクトの設定に変わります。初めて開いたプロジェクトは初期値から始まります。</small>
-     <label class="field"><span>ベースブランチ（worktree の作成元・マージ先）</span>
-       <select id="sBase">${baseOptions({ branches: [], current: '' })}</select></label>
-     <label class="field"><span>レビュー後の取り込み方</span>
-       <select id="sIntegration">
-         <option value="merge" ${s.integration !== 'pr' ? 'selected' : ''}>直接マージする（ローカルで git merge）</option>
-         <option value="pr" ${s.integration === 'pr' ? 'selected' : ''}>PR を作成する（origin に push して gh pr create）</option>
-       </select>
-       <small>レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。</small></label>
-     <label class="field"><span>ブランチの命名規則（自然言語で書けます）</span>
-       <textarea id="sBranchRule" rows="2" placeholder="例: feature/<Issue番号>-<内容を表す短い英語> にする。Issue がないときは feature/<内容を表す短い英語>">${esc(s.branchNamingRule || '')}</textarea>
-       <small>書いておくと、タスクの開始時にそのタスクのエージェントがこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。</small></label>
-     <div class="field">
-       <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> Issue のステータスを自動で変える（GitHub Projects）</label>
-       <small>Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。</small>
-       <div class="status-map" id="sStatusMap" ${s.issueStatusSync !== false ? '' : 'hidden'}>
-         <label class="field"><span>変える項目（Project の単一選択フィールド名。空なら Status）</span><input id="sStatusField" placeholder="Status" value="${esc(s.statusFieldName || '')}" /></label>
-         <div class="row">
-           <label class="field"><span>実行中 →</span><input id="sMapProgress" placeholder="自動（In progress など）" value="${esc((s.statusMapping || {}).inProgress || '')}" /></label>
-           <label class="field"><span>レビュー →</span><input id="sMapReview" placeholder="自動（In review など）" value="${esc((s.statusMapping || {}).inReview || '')}" /></label>
-           <label class="field"><span>完了 →</span><input id="sMapDone" placeholder="自動（Done など）" value="${esc((s.statusMapping || {}).done || '')}" /></label>
-         </div>
-         <small>列ごとに使う選択肢の名前を指定できます（カンマ区切りで候補を複数書けます。大文字小文字・絵文字・記号は無視して比べます）。空の列は名前から自動で探します。</small>
-       </div>
-       <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div></div>
-     <label class="field"><span>権限モード</span>
-       <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
-       <small>自動で許可されない操作は、カードに「承認待ち」として表示されます。</small></label>
-     <label class="field"><span>Claude Code に最初から許可しておくツール（カンマか改行で区切る）</span>
-       <textarea id="sAllowed" rows="2" placeholder="例: Bash(npm test:*), Bash(git status), WebSearch">${esc(s.allowedTools)}</textarea></label>
-     <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
-       <small>「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
-     <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
-     <small class="muted s-note">仕様を詰めるときに、分けたほうがよい大きなタスクなら、エージェントがサブタスクに分けることを提案します（「サブタスクでやる」と答えたら分けます）。開始前のタスクには、進捗タブから手動でサブタスクを足せます（足したあとは「サブタスク」タブで見られます）。</small>
-     <label class="field"><span>サブタスクが終わったら（既定。タスクごとに開始前に変えられます）</span><select id="sSubtaskMerge"><option value="auto"${s.subtaskMerge !== 'review' ? ' selected' : ''}>自動で親のブランチにマージする</option><option value="review"${s.subtaskMerge === 'review' ? ' selected' : ''}>確かめてからマージする</option></select></label>
-
-     <h3 class="s-section">アプリ全体の設定</h3>
-     <small class="muted s-note">ここから下の項目は、どのプロジェクトでも同じです（「このプロジェクトの設定」と書いた項目だけは、プロジェクトごとに覚えます）。</small>
-     <label class="field"><span>同時に動かす数</span><input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
-     <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したとき、前に完了したタスクと似た作業が続いていたら、スキルにしないか通知で聞く（右上のベル）</label>
-     <label class="check"><input type="checkbox" id="sDeleteSessions" ${s.deleteSessionsOnMerge !== false ? 'checked' : ''} /> マージして完了したら、そのタスクの作業に使った Claude Code の会話（セッション）を消す（引き継いだ元の会話は残します）</label>
-
-     <h4 class="s-section s-sub">使うエージェント</h4>
-     <small class="muted s-note">チェックを付けたエージェントだけ、コマンドとモデルを設定でき、タスク・会話・Pipeline・競争で選べます（1つ以上）。</small>
-     ${agentConfigHtml('claude', s, `
-       <div class="row">
-         <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath || 'claude')}" /></label>
-         <label class="field"><span>モデル（空なら既定）</span><input id="sModel" placeholder="例: sonnet / opus" value="${esc(s.model || '')}" /></label>
-       </div>`)}
-     ${agentConfigHtml('codex', s, `
-       <div class="row">
-         <label class="field"><span>codex コマンドのパス</span><input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
-         <label class="field"><span>モデル（空なら既定）</span><input id="sCodexModel" placeholder="例: gpt-5-codex" value="${esc(s.codexModel || '')}" /></label>
-       </div>`)}
-     ${agentConfigHtml('gemini', s, `
-       <div class="row">
-         <label class="field"><span>gemini コマンドのパス</span><input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
-         <label class="field"><span>モデル（空なら既定）</span><input id="sGeminiModel" placeholder="例: gemini-2.5-pro" value="${esc(s.geminiModel || '')}" /></label>
-       </div>`)}
-     ${agentConfigHtml('cursor', s, `
-       <div class="row">
-         <label class="field"><span>cursor-agent コマンドのパス</span><input id="sCursor" value="${esc(s.cursorPath || 'cursor-agent')}" /></label>
-         <label class="field"><span>モデル（空なら既定）</span><input id="sCursorModel" placeholder="例: gpt-5 / sonnet-4.5" value="${esc(s.cursorModel || '')}" /></label>
-       </div>`)}
-     <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。</small>
-     <div class="field"><span>${icon('bot')}カスタムエージェント（このプロジェクトの設定）</span>
-       <div id="sCustomList" class="ca-list"></div>
-       <div id="sCustomForm" class="ca-form" hidden></div>
-       <div><button class="btn small" id="sCustomAdd" type="button">＋ カスタムエージェントを追加</button></div>
-       <small>元にするエージェント（CLI）とモデルに、プロフィール（名前・アイコンと色・説明・振る舞いの指示）を持たせます。タスク・会話を作るときの「エージェント」の欄、Pipelineの工程、競争で選べます。振る舞いの指示は、最初の指示の前に付けて渡します。</small></div>
-     <label class="field"><span>新しいタスク・会話で最初から選んでおくエージェント</span>
-       <select id="sDefaultAgent"></select>
-       <small>オーケストレーションで Pipeline・競争を選んでいれば、タスクを作るときの「エージェント」の欄では、そちらを最初から選んでおきます（使えない状態のときや会話では、このエージェント）。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>
-
-     <h4 class="s-section s-sub">オーケストレーション</h4>
-     <div class="field"><span>使うオーケストレーション（Pipelineと競争は、どちらか1つだけ使えます。使わないこともできます）</span>
-       <div class="check-row">
-         <label class="check"><input type="radio" name="sOrch" value="relay" ${orchestrationOf(s) === 'relay' ? 'checked' : ''} /> ${icon('pipeline')}Pipeline</label>
-         <label class="check"><input type="radio" name="sOrch" value="compete" ${orchestrationOf(s) === 'compete' ? 'checked' : ''} /> ${icon('flag')}競争</label>
-         <label class="check"><input type="radio" name="sOrch" value="none" ${orchestrationOf(s) === 'none' ? 'checked' : ''} /> なし</label>
-       </div>
-       <small>選んだ方だけ、タスクを作るときに「エージェント」の欄で選べます。「なし」なら、いつも1つのエージェントで動かします（Pipeline・競争の設定は消えずに残ります）。</small></div>
-     <div class="field" id="sRelayField"><span>${icon('pipeline')}Pipeline（このプロジェクトの設定。いくつでも作れます）</span>
-       <div id="sRelayList" class="pl-list"></div>
-       <div id="sRelayExport" class="ca-form" hidden></div>
-       <div class="pl-tools">
-         <button class="btn small" id="sRelayAdd" type="button">＋ Pipelineを追加</button>
-         <button class="btn small" id="sRelayImport" type="button">インポート（.json / .zip）</button>
-         <button class="btn small" id="sRelayBundle" type="button">まとめてエクスポート（zip）</button>
-       </div>
-       <small>工程（エージェントと担当の説明）を線でつなぎ、分岐（if）・ループ・並列を組めます。工程が終わるたびに変更をコミットし、最後の報告と一緒に次の工程へ渡します。タスクを作るときに、どの Pipeline で動かすかを選べます（「既定」のものを最初から選んでおきます）。<br />
-       「エクスポート」は Pipeline 1つを .json に、「まとめてエクスポート」は選んだ Pipeline とカスタムエージェントを zip にします。インポートは .json か zip を選びます（同じ中身のカスタムエージェントがあればそれを使い、なければ足します）。Pipeline の一覧の変更は、すぐに保存します。</small></div>
-     <div class="field" id="sCompeteField"><span>${icon('flag')}競争させるエージェント（2つ以上）</span>
-       <div class="check-row" id="sCompeteBox"></div>
-       <small>使うエージェントにチェックを付けたものと、このプロジェクトのカスタムエージェントから選べます（カスタムエージェントの選択は、プロジェクトごとに覚えます）。</small></div>
-
-     <div class="modal-actions"><button class="btn ghost" id="sCancel">キャンセル</button><button class="btn primary" id="sOk">保存</button></div>`,
-    () => {
-      // Pipeline の一覧（追加・編集・削除・インポートは、その場で保存する）
-      let flows = JSON.parse(JSON.stringify(pipelines(s)));
-      let flowDefId = (defaultPipeline(s) || {}).id || '';
-      // 画面でチェックを付けている「使うエージェント」
-      const using = () => AGENTS.map((x) => x[0]).filter((a) => document.querySelector(`.sUse[value="${a}"]`)?.checked);
-      let competeSel = new Set(s.competeAgents || []);
-      const drawAgents = () => {
-        const on = using();
-        const list = on.length ? on : ['claude'];
-        // 最初から選んでおくエージェント
-        const dsel = $('sDefaultAgent');
-        const cur = dsel.value || defaultAgent(s);
-        dsel.innerHTML = list.map((a) => `<option value="${a}" ${a === cur ? 'selected' : ''}>${esc(agentLabel(a))}</option>`).join('');
-        if (!list.includes(cur)) dsel.value = list[0];
-        // 競争させるエージェント
-        document.querySelectorAll('.sCompete').forEach((x) => (x.checked ? competeSel.add(x.value) : competeSel.delete(x.value)));
-        document.querySelectorAll('.sCompeteCustom').forEach((x) => (x.checked ? competeCustomSel.add(x.value) : competeCustomSel.delete(x.value)));
-        $('sCompeteBox').innerHTML =
-          list.map((a) => `<label class="check"><input type="checkbox" class="sCompete" value="${a}" ${competeSel.has(a) ? 'checked' : ''} /> ${agentIcon(a)}${esc(agentLabel(a))}</label>`).join('') +
-          cas
-            .filter((ca) => list.includes(ca.agent))
-            .map((ca) => `<label class="check"><input type="checkbox" class="sCompeteCustom" value="${esc(ca.id)}" ${competeCustomSel.has(ca.id) ? 'checked' : ''} /> ${personaIcon(ca, ca.agent)}${esc(whoLabel(ca.agent, ca))}</label>`)
-            .join('');
-      };
-      // ---- カスタムエージェント（保存するまでは、この画面の中の写しを変える） ----
-      let cas = JSON.parse(JSON.stringify(customAgents(s)));
-      let competeCustomSel = new Set(s.competeCustomAgents || []);
-      const newCaId = () => {
-        let id;
-        do id = `ca${Math.random().toString(16).slice(2, 10)}`;
-        while (cas.some((x) => x.id === id));
-        return id;
-      };
-      const drawCustomList = () => {
-        $('sCustomList').innerHTML = cas.length
-          ? cas
-              .map(
-                (ca, i) => `<div class="ca-item" style="--pc:${esc(ca.color || '#6366f1')}">
-                  ${personaIcon(ca, ca.agent)}
-                  <div class="ca-main"><b>${esc(ca.name)}</b> <span class="muted small">${agentIcon(ca.agent)}${esc(agentLabel(ca.agent))}${ca.model ? ` / ${esc(ca.model)}` : ''}${using().includes(ca.agent) ? '' : '（使わない設定）'}</span>
-                    ${ca.description ? `<div class="small">${esc(ca.description)}</div>` : ''}
-                    ${ca.instruction ? `<div class="muted small rs-inst">${esc(ca.instruction)}</div>` : ''}</div>
-                  <div class="ca-acts"><button class="btn small" type="button" data-ca-edit="${i}">編集</button><button class="btn small danger" type="button" data-ca-del="${i}">削除</button></div>
-                </div>`,
-              )
-              .join('')
-          : '<div class="muted small">まだありません</div>';
-        $('sCustomList').querySelectorAll('[data-ca-edit]').forEach((b) => (b.onclick = () => openCustomForm(Number(b.dataset.caEdit))));
-        $('sCustomList').querySelectorAll('[data-ca-del]').forEach((b) => {
-          b.onclick = () => {
-            const ca = cas[Number(b.dataset.caDel)];
-            const used = flows.some((p) => PipelinePack.usedCustomIds(p.flow).includes(ca.id));
-            if (!confirm(`カスタムエージェント「${ca.name}」を削除しますか？${used ? '\nPipelineの工程で使っています。削除すると、その工程を選び直すまでPipelineを始められません。' : ''}\n（作ってあるタスクは、そのまま動きます）`)) return;
-            cas.splice(Number(b.dataset.caDel), 1);
-            competeCustomSel.delete(ca.id);
-            $('sCustomForm').hidden = true;
-            redrawCustom();
-          };
-        });
-      };
-      const redrawCustom = () => {
-        drawCustomList();
-        drawRelay();
-        drawAgents();
-      };
-      // 追加（index が null）・編集のフォーム
-      const openCustomForm = (index) => {
-        const cur = index === null ? { id: '', name: '', icon: '', color: '#6366f1', description: '', instruction: '', agent: using()[0] || 'claude', model: '' } : cas[index];
-        const box = $('sCustomForm');
-        box.hidden = false;
-        box.innerHTML = `<h4>${index === null ? 'カスタムエージェントを追加' : `「${esc(cur.name)}」を編集`}</h4>
-          <div class="row ca-row3">
-            <label class="field"><span>名前</span><input id="caName" maxlength="30" placeholder="例: 慎重なレビュアー" value="${esc(cur.name)}" /></label>
-            <label class="field"><span>アイコン（絵文字）</span><input id="caIcon" maxlength="8" placeholder="絵文字か1文字" value="${esc(cur.icon || '')}" /></label>
-            <label class="field"><span>色</span><input id="caColor" type="color" value="${esc(cur.color || '#6366f1')}" /></label>
-          </div>
-          <label class="field"><span>説明（役割の一言）</span><input id="caDesc" maxlength="200" placeholder="例: セキュリティとテストの抜けを重点的に見る" value="${esc(cur.description || '')}" /></label>
+  // 節の中身。並びと見出しは AppView.SETTINGS_NAV に合わせる
+  const sections = {
+    general: `<small class="muted s-note">ここの項目は、どのプロジェクトでも同じです。</small>
+      <label class="field"><span>同時に動かす数</span><input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
+      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したとき、前に完了したタスクと似た作業が続いていたら、スキルにしないか通知で聞く（右上のベル）</label>
+      <label class="check"><input type="checkbox" id="sDeleteSessions" ${s.deleteSessionsOnMerge !== false ? 'checked' : ''} /> マージして完了したら、そのタスクの作業に使った Claude Code の会話（セッション）を消す（引き継いだ元の会話は残します）</label>`,
+    update: `<div id="updPanel" class="gh-panel upd-panel">${updatePanelHtml(state.update)}</div>`,
+    branch: `<small class="muted s-note">「このプロジェクト」の項目${projectName ? `（<code>${esc(projectName)}</code>）` : ''}は、プロジェクト（リポジトリ）ごとに覚えます。タブを切り替えると、そのプロジェクトの設定に変わります。初めて開いたプロジェクトは初期値から始まります。</small>
+      <label class="field"><span>ベースブランチ（worktree の作成元・マージ先）</span>
+        <select id="sBase">${baseOptions({ branches: [], current: '' })}</select></label>
+      <label class="field"><span>レビュー後の取り込み方</span>
+        <select id="sIntegration">
+          <option value="merge" ${s.integration !== 'pr' ? 'selected' : ''}>直接マージする（ローカルで git merge）</option>
+          <option value="pr" ${s.integration === 'pr' ? 'selected' : ''}>PR を作成する（origin に push して gh pr create）</option>
+        </select>
+        <small>レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。</small></label>
+      <label class="field"><span>ブランチの命名規則（自然言語で書けます）</span>
+        <textarea id="sBranchRule" rows="2" placeholder="例: feature/<Issue番号>-<内容を表す短い英語> にする。Issue がないときは feature/<内容を表す短い英語>">${esc(s.branchNamingRule || '')}</textarea>
+        <small>書いておくと、タスクの開始時にそのタスクのエージェントがこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。</small></label>`,
+    issue: `<div class="field">
+        <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> Issue のステータスを自動で変える（GitHub Projects）</label>
+        <small>Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。</small>
+        <div class="status-map" id="sStatusMap" ${s.issueStatusSync !== false ? '' : 'hidden'}>
+          <label class="field"><span>変える項目（Project の単一選択フィールド名。空なら Status）</span><input id="sStatusField" placeholder="Status" value="${esc(s.statusFieldName || '')}" /></label>
           <div class="row">
-            <label class="field"><span>元にするエージェント</span><select id="caAgent">${AGENTS.map(([a, l]) => `<option value="${a}" ${a === cur.agent ? 'selected' : ''}>${esc(l)}${using().includes(a) ? '' : '（使わない設定）'}</option>`).join('')}</select></label>
-            <label class="field"><span>モデル（空なら設定の既定）</span><input id="caModel" list="caModelList" autocomplete="off" spellcheck="false" value="${esc(cur.model || '')}" /><datalist id="caModelList"></datalist></label>
+            <label class="field"><span>実行中 →</span><input id="sMapProgress" placeholder="自動（In progress など）" value="${esc((s.statusMapping || {}).inProgress || '')}" /></label>
+            <label class="field"><span>レビュー →</span><input id="sMapReview" placeholder="自動（In review など）" value="${esc((s.statusMapping || {}).inReview || '')}" /></label>
+            <label class="field"><span>完了 →</span><input id="sMapDone" placeholder="自動（Done など）" value="${esc((s.statusMapping || {}).done || '')}" /></label>
           </div>
-          <label class="field"><span>振る舞いの指示（性格・やり方。最初の指示の前に付けます）</span><textarea id="caInst" rows="5" maxlength="4000" placeholder="例: 変更は小さく保ち、直す前に必ず理由を説明してください。テストが通るまで完了にしないでください。">${esc(cur.instruction || '')}</textarea></label>
-          <div class="ca-preview" id="caPreview"></div>
-          <div class="modal-actions"><button class="btn ghost small" id="caCancel" type="button">やめる</button><button class="btn primary small" id="caOk" type="button">${index === null ? '追加' : '決定'}</button></div>`;
-        const read = () => ({
-          id: cur.id || newCaId(),
-          name: $('caName').value.trim(),
-          icon: $('caIcon').value.trim(),
-          color: $('caColor').value,
-          description: $('caDesc').value.trim(),
-          instruction: $('caInst').value.trim(),
-          agent: $('caAgent').value,
-          model: $('caModel').value.trim(),
-        });
-        const preview = () => {
-          const v = read();
-          $('caModelList').innerHTML = (MODEL_SUGGEST[v.agent] || []).map((m) => `<option value="${esc(m)}"></option>`).join('');
-          $('caModel').placeholder = settingsModel(v.agent) ? `例: ${settingsModel(v.agent)}（設定の既定）` : `例: ${(MODEL_SUGGEST[v.agent] || [])[0] || ''}`;
-          $('caPreview').innerHTML = `<span class="orch-chip agent persona" style="--pc:${esc(v.color)}">${personaIcon(v, v.agent)}${esc(whoLabel(v.agent, { ...v, name: v.name || '（名前）' }))}</span>`;
-        };
-        box.querySelectorAll('input, select, textarea').forEach((el) => (el.oninput = el.onchange = preview));
-        preview();
-        $('caName').focus();
-        $('caCancel').onclick = () => (box.hidden = true);
-        $('caOk').onclick = () => {
-          const v = read();
-          if (!v.name) return toast('名前を入れてください');
-          if (v.model && !/^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$/.test(v.model)) return toast(`モデル名に使えない文字が入っています: ${v.model}`);
-          if (cas.some((x, i) => i !== index && x.name === v.name)) return toast(`「${v.name}」という名前のカスタムエージェントはもうあります`);
-          if (index === null) cas.push(v);
-          else cas[index] = v;
-          box.hidden = true;
-          redrawCustom();
-        };
-      };
-      $('sCustomAdd').onclick = () => openCustomForm(null);
-      // ---- Pipeline の一覧 ----
-      const saveFlows = async (msg, extra = {}) => {
-        const r = await runBusy(msg, () => api.updateSettings({ relayFlows: flows, relayFlowId: flowDefId, customAgents: cas, ...extra }), '保存しました');
-        if (!r) return false;
-        flows = JSON.parse(JSON.stringify(r.relayFlows || flows));
-        flowDefId = r.relayFlowId || flowDefId;
-        if (Array.isArray(r.customAgents)) cas = JSON.parse(JSON.stringify(r.customAgents));
-        return true;
-      };
-      // 名前を入れてもらう（Electron では prompt() が使えないので、一覧の下に入力欄を出す）。やめたら null
-      const askName = (title, initial, okLabel) =>
-        new Promise((resolve) => {
-          const box = $('sRelayExport');
-          box.hidden = false;
-          box.innerHTML = `<h4>${esc(title)}</h4>
-            <label class="field"><span>名前（${PipelinePack.PIPELINE_NAME_MAX}文字まで）</span><input id="plName" maxlength="${PipelinePack.PIPELINE_NAME_MAX}" value="${esc(initial)}" /></label>
-            <div class="modal-actions"><button class="btn ghost small" id="plCancel" type="button">やめる</button><button class="btn primary small" id="plOk" type="button">${esc(okLabel)}</button></div>`;
-          const done = (v) => {
-            box.hidden = true;
-            resolve(v);
-          };
-          $('plName').focus();
-          $('plName').select();
-          $('plName').onkeydown = (e) => {
-            if (e.key === 'Enter' && !e.isComposing) (e.preventDefault(), $('plOk').click());
-          };
-          $('plCancel').onclick = () => done(null);
-          $('plOk').onclick = () => {
-            const v = $('plName').value.trim();
-            if (!v) return toast('名前を入れてください');
-            done(v);
-          };
-        });
-      const newFlowName = (base) => PipelinePack.uniqueName(base, new Set(flows.map((p) => p.name)), PipelinePack.PIPELINE_NAME_MAX);
-      const newFlowId = () => {
-        let id;
-        do id = `p${Math.random().toString(16).slice(2, 10)}`;
-        while (flows.some((x) => x.id === id));
-        return id;
-      };
-      const editFlow = (i) =>
-        FlowEditor.open({
-          flow: flows[i].flow || { nodes: [], edges: [] },
-          agents: AGENTS,
-          enabled: using(),
-          customAgents: cas,
-          modelSuggest: MODEL_SUGGEST,
-          defaultAgent: $('sDefaultAgent').value || 'claude',
-          generate: (request, flow, agent) => api.generateFlow({ request, flow, agent, enabled: using(), customAgents: cas }),
-          onSave: async (flow) => {
-            // 工程で選んだカスタムエージェントも一緒に保存する（この画面で追加したばかりのものを使えるように）
-            const id = flows[i].id;
-            const prev = flows[i].flow;
-            flows[i].flow = flow;
-            if (!(await saveFlows('フローチャートを保存しています…'))) {
-              const j = flows.findIndex((p) => p.id === id);
-              if (j >= 0) flows[j].flow = prev;
-              return false;
-            }
-            drawRelay();
-            return true;
-          },
-        });
-      // Pipeline 1つを .json に書き出す
-      const exportOne = async (p) => {
-        const data = PipelinePack.toBase64(new TextEncoder().encode(PipelinePack.exportPipelineJson(p)));
-        const used = PipelinePack.usedCustomIds(p.flow).filter((id) => cas.some((x) => x.id === id));
-        const r = await run(() => api.saveFile({ name: `${PipelinePack.safeFileName(p.name)}.pipeline`, data, ext: 'json' }));
-        if (r) toast(`エクスポートしました${used.length ? '（カスタムエージェントの工程があります。ほかのプロジェクトで使うときは「まとめてエクスポート」で一緒に書き出してください）' : ''}`, 'ok');
-      };
-      // まとめてエクスポート: 書き出す Pipeline とカスタムエージェントを選んで zip にする
-      const openBundle = (preset) => {
-        const box = $('sRelayExport');
-        const selP = new Set(preset ? [preset] : flows.map((p) => p.id));
-        const usedBy = () => new Set(flows.filter((p) => selP.has(p.id)).flatMap((p) => PipelinePack.usedCustomIds(p.flow)));
-        const selC = new Set([...usedBy()].filter((id) => cas.some((x) => x.id === id)));
-        box.hidden = false;
-        const draw = () => {
-          const used = usedBy();
-          box.innerHTML = `<h4>まとめてエクスポート（zip）</h4>
-            <div class="field"><span>Pipeline</span><div class="check-row">${flows.map((p) => `<label class="check"><input type="checkbox" class="bxP" value="${esc(p.id)}" ${selP.has(p.id) ? 'checked' : ''} /> ${esc(p.name)}</label>`).join('')}</div></div>
-            <div class="field"><span>カスタムエージェント</span><div class="check-row">${cas.length ? cas.map((ca) => `<label class="check"><input type="checkbox" class="bxC" value="${esc(ca.id)}" ${selC.has(ca.id) ? 'checked' : ''} /> ${personaIcon(ca, ca.agent)}${esc(ca.name)}${used.has(ca.id) ? ' <span class="muted small">（工程で使用）</span>' : ''}</label>`).join('') : '<span class="muted small">まだありません</span>'}</div>
-            ${[...used].some((id) => cas.some((x) => x.id === id) && !selC.has(id)) ? `<small class="relay-sum-err">${icon('alert')}工程で使っているカスタムエージェントを外すと、取り込んだ先でその工程のエージェントを選び直すことになります</small>` : ''}</div>
-            <div class="modal-actions"><button class="btn ghost small" id="bxCancel" type="button">やめる</button><button class="btn primary small" id="bxOk" type="button">zip でエクスポート</button></div>`;
-          box.querySelectorAll('.bxP').forEach((cb) => (cb.onchange = () => {
-            if (cb.checked) {
-              selP.add(cb.value);
-              // 選んだ Pipeline の工程が使うカスタムエージェントにも、チェックを付ける
-              for (const id of PipelinePack.usedCustomIds((flows.find((p) => p.id === cb.value) || {}).flow)) if (cas.some((x) => x.id === id)) selC.add(id);
-            } else selP.delete(cb.value);
-            draw();
-          }));
-          box.querySelectorAll('.bxC').forEach((cb) => (cb.onchange = () => ((cb.checked ? selC.add(cb.value) : selC.delete(cb.value)), draw())));
-          $('bxCancel').onclick = () => (box.hidden = true);
-          $('bxOk').onclick = async () => {
-            const ps = flows.filter((p) => selP.has(p.id));
-            const cs = cas.filter((ca) => selC.has(ca.id));
-            if (!ps.length && !cs.length) return toast('エクスポートするものを選んでください');
-            const data = PipelinePack.toBase64(PipelinePack.exportBundleZip({ pipelines: ps, customAgents: cs }));
-            const name = ps.length === 1 ? PipelinePack.safeFileName(ps[0].name) : 'pipelines';
-            const r = await run(() => api.saveFile({ name, data, ext: 'zip' }));
-            if (r) {
-              box.hidden = true;
-              toast(`Pipeline ${ps.length} 個・カスタムエージェント ${cs.length} 個をエクスポートしました`, 'ok');
-            }
-          };
-        };
-        draw();
-      };
-      // インポート: .json（Pipeline 1つ）か zip（Pipeline とカスタムエージェント）を読んで、一覧に足す
-      const importFlows = async () => {
-        const f = await run(() => api.openFile());
-        if (!f) return;
-        let parsed;
-        try {
-          parsed = await PipelinePack.parseImport(f.name, PipelinePack.fromBase64(f.data));
-        } catch (e) {
-          return toast(e.message || String(e));
-        }
-        let m;
-        try {
-          m = PipelinePack.mergeImport({ relayFlows: flows, customAgents: cas }, parsed);
-        } catch (e) {
-          return toast(e.message || String(e));
-        }
-        const lines = [`「${f.name}」から取り込みます。`];
-        if (m.addedPipelines.length) lines.push(`Pipeline: ${m.addedPipelines.join('、')}`);
-        if (m.addedAgents.length) lines.push(`カスタムエージェント（追加）: ${m.addedAgents.join('、')}`);
-        if (m.reusedAgents.length) lines.push(`カスタムエージェント（同じものがあるので、それを使う）: ${m.reusedAgents.join('、')}`);
-        if (m.missing.length) lines.push(`\nカスタムエージェントが見つからない工程があります（取り込んだあと、フローチャートで選び直してください）: ${m.missing.join('、')}`);
-        if (parsed.skipped.length) lines.push(`\n読めなかったファイル: ${parsed.skipped.join('、')}`);
-        if (!m.addedPipelines.length && !m.addedAgents.length) return toast(`取り込むものはありません（同じカスタムエージェントがもうあります）`);
-        if (!confirm(lines.join('\n'))) return;
-        const before = { flows, cas };
-        flows = m.relayFlows;
-        cas = m.customAgents;
-        if (!(await saveFlows('取り込んでいます…'))) {
-          flows = before.flows;
-          cas = before.cas;
-        }
-        redrawCustom();
-      };
-      // Pipelineのフローの要約（工程の並びと、分岐・並列・ループの数）と、Pipeline ごとの操作
-      const drawRelay = () => {
-        $('sRelayList').innerHTML = flows
+          <small>列ごとに使う選択肢の名前を指定できます（カンマ区切りで候補を複数書けます。大文字小文字・絵文字・記号は無視して比べます）。空の列は名前から自動で探します。</small>
+        </div>
+        <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div></div>`,
+    permission: `<label class="field"><span>権限モード</span>
+        <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+        <small>自動で許可されない操作は、カードに「承認待ち」として表示されます。</small></label>
+      <label class="field"><span>Claude Code に最初から許可しておくツール（カンマか改行で区切る）</span>
+        <textarea id="sAllowed" rows="2" placeholder="例: Bash(npm test:*), Bash(git status), WebSearch">${esc(s.allowedTools)}</textarea></label>`,
+    task: `<div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
+        <small>「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
+      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
+      <small class="muted s-note">仕様を詰めるときに、分けたほうがよい大きなタスクなら、エージェントがサブタスクに分けることを提案します（「サブタスクでやる」と答えたら分けます）。開始前のタスクには、進捗タブから手動でサブタスクを足せます（足したあとは「サブタスク」タブで見られます）。</small>
+      <label class="field"><span>サブタスクが終わったら（既定。タスクごとに開始前に変えられます）</span><select id="sSubtaskMerge"><option value="auto"${s.subtaskMerge !== 'review' ? ' selected' : ''}>自動で親のブランチにマージする</option><option value="review"${s.subtaskMerge === 'review' ? ' selected' : ''}>確かめてからマージする</option></select></label>`,
+    agents: `<small class="muted s-note">ここの項目は、どのプロジェクトでも同じです（「このプロジェクトの設定」と書いた項目だけは、プロジェクトごとに覚えます）。</small>
+      <small class="muted s-note">チェックを付けたエージェントだけ、コマンドとモデルを設定でき、タスク・会話・Pipeline・競争で選べます（1つ以上）。</small>
+      ${agentConfigHtml('claude', s, `
+        <div class="row">
+          <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath || 'claude')}" /></label>
+          <label class="field"><span>モデル（空なら既定）</span><input id="sModel" placeholder="例: sonnet / opus" value="${esc(s.model || '')}" /></label>
+        </div>`)}
+      ${agentConfigHtml('codex', s, `
+        <div class="row">
+          <label class="field"><span>codex コマンドのパス</span><input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
+          <label class="field"><span>モデル（空なら既定）</span><input id="sCodexModel" placeholder="例: gpt-5-codex" value="${esc(s.codexModel || '')}" /></label>
+        </div>`)}
+      ${agentConfigHtml('gemini', s, `
+        <div class="row">
+          <label class="field"><span>gemini コマンドのパス</span><input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
+          <label class="field"><span>モデル（空なら既定）</span><input id="sGeminiModel" placeholder="例: gemini-2.5-pro" value="${esc(s.geminiModel || '')}" /></label>
+        </div>`)}
+      ${agentConfigHtml('cursor', s, `
+        <div class="row">
+          <label class="field"><span>cursor-agent コマンドのパス</span><input id="sCursor" value="${esc(s.cursorPath || 'cursor-agent')}" /></label>
+          <label class="field"><span>モデル（空なら既定）</span><input id="sCursorModel" placeholder="例: gpt-5 / sonnet-4.5" value="${esc(s.cursorModel || '')}" /></label>
+        </div>`)}
+      <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。</small>
+      <label class="field"><span>新しいタスク・会話で最初から選んでおくエージェント</span>
+        <select id="sDefaultAgent"></select>
+        <small>オーケストレーションで Pipeline・競争を選んでいれば、タスクを作るときの「エージェント」の欄では、そちらを最初から選んでおきます（使えない状態のときや会話では、このエージェント）。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>`,
+    custom: `<small class="muted s-note">カスタムエージェントは、このプロジェクトの設定です。</small>
+         <div class="field">
+        <div id="sCustomList" class="ca-list"></div>
+        <div id="sCustomForm" class="ca-form" hidden></div>
+        <div><button class="btn small" id="sCustomAdd" type="button">＋ カスタムエージェントを追加</button></div>
+        <small>元にするエージェント（CLI）とモデルに、プロフィール（名前・アイコンと色・説明・振る舞いの指示）を持たせます。タスク・会話を作るときの「エージェント」の欄、Pipelineの工程、競争で選べます。振る舞いの指示は、最初の指示の前に付けて渡します。</small></div>`,
+    orchestration: `<div class="field"><span>使うオーケストレーション（Pipelineと競争は、どちらか1つだけ使えます。使わないこともできます）</span>
+        <div class="check-row">
+          <label class="check"><input type="radio" name="sOrch" value="relay" ${orchestrationOf(s) === 'relay' ? 'checked' : ''} /> ${icon('pipeline')}Pipeline</label>
+          <label class="check"><input type="radio" name="sOrch" value="compete" ${orchestrationOf(s) === 'compete' ? 'checked' : ''} /> ${icon('flag')}競争</label>
+          <label class="check"><input type="radio" name="sOrch" value="none" ${orchestrationOf(s) === 'none' ? 'checked' : ''} /> なし</label>
+        </div>
+        <small>選んだ方だけ、タスクを作るときに「エージェント」の欄で選べます。「なし」なら、いつも1つのエージェントで動かします（Pipeline・競争の設定は消えずに残ります）。</small></div>
+      <div class="field" id="sRelayField"><span>${icon('pipeline')}Pipeline（このプロジェクトの設定。いくつでも作れます）</span>
+        <div id="sRelayList" class="pl-list"></div>
+        <div id="sRelayExport" class="ca-form" hidden></div>
+        <div class="pl-tools">
+          <button class="btn small" id="sRelayAdd" type="button">＋ Pipelineを追加</button>
+          <button class="btn small" id="sRelayImport" type="button">インポート（.json / .zip）</button>
+          <button class="btn small" id="sRelayBundle" type="button">まとめてエクスポート（zip）</button>
+        </div>
+        <small>工程（エージェントと担当の説明）を線でつなぎ、分岐（if）・ループ・並列を組めます。工程が終わるたびに変更をコミットし、最後の報告と一緒に次の工程へ渡します。タスクを作るときに、どの Pipeline で動かすかを選べます（「既定」のものを最初から選んでおきます）。<br />
+        「エクスポート」は Pipeline 1つを .json に、「まとめてエクスポート」は選んだ Pipeline とカスタムエージェントを zip にします。インポートは .json か zip を選びます（同じ中身のカスタムエージェントがあればそれを使い、なければ足します）。Pipeline の一覧の変更は、すぐに保存します。</small></div>
+      <div class="field" id="sCompeteField"><span>${icon('flag')}競争させるエージェント（2つ以上）</span>
+        <div class="check-row" id="sCompeteBox"></div>
+        <small>使うエージェントにチェックを付けたものと、このプロジェクトのカスタムエージェントから選べます（カスタムエージェントの選択は、プロジェクトごとに覚えます）。</small></div>`,
+  };
+  // 描き直しても（元に戻す・タブの切り替え）、見ていた節から動かさない
+  const scrollTop = $('settingsMain')?.scrollTop || 0;
+  const sectionsHtml = AppView.SETTINGS_NAV.flatMap((g) => g.items)
+    .map(({ id, label }) => `<section id="settings-${id}" class="settings-section" data-section="${id}"><h2 class="settings-title">${esc(label)}</h2>${sections[id]}</section>`)
+    .join('');
+  $('settingsView').innerHTML = `<nav id="settingsNav" class="settings-nav" aria-label="設定の項目">${AppView.settingsNavHtml(icon)}</nav>
+    <div id="settingsMain" class="settings-main">
+      <div class="settings-content">${sectionsHtml}</div>
+      <div class="settings-actions"><button class="btn ghost" id="sCancel">元に戻す</button><button class="btn primary" id="sOk">保存</button></div>
+    </div>`;
+  settingsViewKey = viewKey;
+  // ダイアログの操作を待つ間に、画面を離れたりプロジェクトが変わったりしたら、この描画の値では保存も描き直しもしない
+  const isStale = () => settingsViewKey !== viewKey;
+  settingsNav = AppView.bindSettingsNav({ nav: $('settingsNav'), scroller: $('settingsMain'), section: (id) => $(`settings-${id}`) });
+
+  // Pipeline の一覧（追加・編集・削除・インポートは、その場で保存する）
+  let flows = JSON.parse(JSON.stringify(pipelines(s)));
+  let flowDefId = (defaultPipeline(s) || {}).id || '';
+  // 画面でチェックを付けている「使うエージェント」
+  const using = () => AGENTS.map((x) => x[0]).filter((a) => document.querySelector(`.sUse[value="${a}"]`)?.checked);
+  let competeSel = new Set(s.competeAgents || []);
+  const drawAgents = () => {
+    const on = using();
+    const list = on.length ? on : ['claude'];
+    // 最初から選んでおくエージェント
+    const dsel = $('sDefaultAgent');
+    const cur = dsel.value || defaultAgent(s);
+    dsel.innerHTML = list.map((a) => `<option value="${a}" ${a === cur ? 'selected' : ''}>${esc(agentLabel(a))}</option>`).join('');
+    if (!list.includes(cur)) dsel.value = list[0];
+    // 競争させるエージェント
+    document.querySelectorAll('.sCompete').forEach((x) => (x.checked ? competeSel.add(x.value) : competeSel.delete(x.value)));
+    document.querySelectorAll('.sCompeteCustom').forEach((x) => (x.checked ? competeCustomSel.add(x.value) : competeCustomSel.delete(x.value)));
+    $('sCompeteBox').innerHTML =
+      list.map((a) => `<label class="check"><input type="checkbox" class="sCompete" value="${a}" ${competeSel.has(a) ? 'checked' : ''} /> ${agentIcon(a)}${esc(agentLabel(a))}</label>`).join('') +
+      cas
+        .filter((ca) => list.includes(ca.agent))
+        .map((ca) => `<label class="check"><input type="checkbox" class="sCompeteCustom" value="${esc(ca.id)}" ${competeCustomSel.has(ca.id) ? 'checked' : ''} /> ${personaIcon(ca, ca.agent)}${esc(whoLabel(ca.agent, ca))}</label>`)
+        .join('');
+  };
+  // ---- カスタムエージェント（保存するまでは、この画面の中の写しを変える） ----
+  let cas = JSON.parse(JSON.stringify(customAgents(s)));
+  let competeCustomSel = new Set(s.competeCustomAgents || []);
+  const newCaId = () => {
+    let id;
+    do id = `ca${Math.random().toString(16).slice(2, 10)}`;
+    while (cas.some((x) => x.id === id));
+    return id;
+  };
+  const drawCustomList = () => {
+    $('sCustomList').innerHTML = cas.length
+      ? cas
           .map(
-            (p, i) => `<div class="pl-item ${p.id === flowDefId ? 'is-default' : ''}">
-              <div class="pl-head"><b>${icon('pipeline')}${esc(p.name)}</b>${p.id === flowDefId ? ' <span class="pl-badge">既定</span>' : ''}
-                <div class="pl-acts">
-                  <button class="btn small" type="button" data-pl-edit="${i}">フローチャートを編集</button>
-                  <button class="btn small ghost" type="button" data-pl-rename="${i}">名前</button>
-                  <button class="btn small ghost" type="button" data-pl-copy="${i}">複製</button>
-                  ${p.id === flowDefId ? '' : `<button class="btn small ghost" type="button" data-pl-def="${i}">既定にする</button>`}
-                  <button class="btn small ghost" type="button" data-pl-export="${i}">エクスポート</button>
-                  <button class="btn small ghost" type="button" data-pl-bundle="${i}" title="この Pipeline と、工程で使うカスタムエージェントを zip にします">zip</button>
-                  ${flows.length > 1 ? `<button class="btn small danger" type="button" data-pl-del="${i}">削除</button>` : ''}
-                </div></div>
-              <div class="relay-summary">${relayFlowSummaryHtml(p.flow, using(), cas)}</div>
+            (ca, i) => `<div class="ca-item" style="--pc:${esc(ca.color || '#6366f1')}">
+              ${personaIcon(ca, ca.agent)}
+              <div class="ca-main"><b>${esc(ca.name)}</b> <span class="muted small">${agentIcon(ca.agent)}${esc(agentLabel(ca.agent))}${ca.model ? ` / ${esc(ca.model)}` : ''}${using().includes(ca.agent) ? '' : '（使わない設定）'}</span>
+                ${ca.description ? `<div class="small">${esc(ca.description)}</div>` : ''}
+                ${ca.instruction ? `<div class="muted small rs-inst">${esc(ca.instruction)}</div>` : ''}</div>
+              <div class="ca-acts"><button class="btn small" type="button" data-ca-edit="${i}">編集</button><button class="btn small danger" type="button" data-ca-del="${i}">削除</button></div>
             </div>`,
           )
-          .join('');
-        const on = (attr, fn) => $('sRelayList').querySelectorAll(`[data-${attr}]`).forEach((b) => (b.onclick = () => fn(Number(b.getAttribute(`data-${attr}`)))));
-        on('pl-edit', editFlow);
-        on('pl-export', (i) => exportOne(flows[i]));
-        on('pl-bundle', (i) => openBundle(flows[i].id));
-        on('pl-rename', async (i) => {
-          const v = await askName(`「${flows[i].name}」の名前を変える`, flows[i].name, '決定');
-          if (v == null) return;
-          const name = [...v].slice(0, PipelinePack.PIPELINE_NAME_MAX).join('').trim();
-          if (flows.some((p, j) => j !== i && p.name === name)) return toast(`「${name}」という名前の Pipeline はもうあります`);
-          const prev = flows[i].name;
-          flows[i].name = name;
-          if (!(await saveFlows('名前を変えています…'))) flows[i].name = prev;
-          drawRelay();
-        });
-        on('pl-copy', async (i) => {
-          flows.push({ id: newFlowId(), name: newFlowName(`${flows[i].name} のコピー`), flow: JSON.parse(JSON.stringify(flows[i].flow)) });
-          if (!(await saveFlows('複製しています…'))) flows.pop();
-          drawRelay();
-        });
-        on('pl-def', async (i) => {
-          const prev = flowDefId;
-          flowDefId = flows[i].id;
-          if (!(await saveFlows('既定の Pipeline を変えています…'))) flowDefId = prev;
-          drawRelay();
-        });
-        on('pl-del', async (i) => {
-          const p = flows[i];
-          if (!confirm(`Pipeline「${p.name}」を削除しますか？\n（作ってあるタスクは、そのまま動きます）`)) return;
-          const before = { flows: [...flows], flowDefId };
-          flows.splice(i, 1);
-          if (flowDefId === p.id) flowDefId = flows[0].id;
-          if (!(await saveFlows('削除しています…'))) ({ flows, flowDefId } = before);
-          drawRelay();
-        });
+          .join('')
+      : '<div class="muted small">まだありません</div>';
+    $('sCustomList').querySelectorAll('[data-ca-edit]').forEach((b) => (b.onclick = () => openCustomForm(Number(b.dataset.caEdit))));
+    $('sCustomList').querySelectorAll('[data-ca-del]').forEach((b) => {
+      b.onclick = () => {
+        const ca = cas[Number(b.dataset.caDel)];
+        const used = flows.some((p) => PipelinePack.usedCustomIds(p.flow).includes(ca.id));
+        if (!confirm(`カスタムエージェント「${ca.name}」を削除しますか？${used ? '\nPipelineの工程で使っています。削除すると、その工程を選び直すまでPipelineを始められません。' : ''}\n（作ってあるタスクは、そのまま動きます）`)) return;
+        cas.splice(Number(b.dataset.caDel), 1);
+        competeCustomSel.delete(ca.id);
+        $('sCustomForm').hidden = true;
+        redrawCustom();
       };
-      $('sRelayAdd').onclick = async () => {
-        const v = await askName('Pipelineを追加', newFlowName('Pipeline'), '追加してフローチャートを編集');
-        if (v == null) return;
-        const name = [...v].slice(0, PipelinePack.PIPELINE_NAME_MAX).join('').trim();
-        if (flows.some((p) => p.name === name)) return toast(`「${name}」という名前の Pipeline はもうあります`);
-        // 新しい Pipeline は「実装 → レビュー」から始める（既定の Pipeline の形をまねず、初めの形にする）
-        flows.push({ id: newFlowId(), name, flow: null });
-        if (!(await saveFlows('Pipeline を追加しています…'))) flows.pop();
+    });
+  };
+  const redrawCustom = () => {
+    if (isStale()) return;
+    drawCustomList();
+    drawRelay();
+    drawAgents();
+  };
+  // 追加（index が null）・編集のフォーム
+  const openCustomForm = (index) => {
+    const cur = index === null ? { id: '', name: '', icon: '', color: '#6366f1', description: '', instruction: '', agent: using()[0] || 'claude', model: '' } : cas[index];
+    const box = $('sCustomForm');
+    box.hidden = false;
+    box.innerHTML = `<h4>${index === null ? 'カスタムエージェントを追加' : `「${esc(cur.name)}」を編集`}</h4>
+      <div class="row ca-row3">
+        <label class="field"><span>名前</span><input id="caName" maxlength="30" placeholder="例: 慎重なレビュアー" value="${esc(cur.name)}" /></label>
+        <label class="field"><span>アイコン（絵文字）</span><input id="caIcon" maxlength="8" placeholder="絵文字か1文字" value="${esc(cur.icon || '')}" /></label>
+        <label class="field"><span>色</span><input id="caColor" type="color" value="${esc(cur.color || '#6366f1')}" /></label>
+      </div>
+      <label class="field"><span>説明（役割の一言）</span><input id="caDesc" maxlength="200" placeholder="例: セキュリティとテストの抜けを重点的に見る" value="${esc(cur.description || '')}" /></label>
+      <div class="row">
+        <label class="field"><span>元にするエージェント</span><select id="caAgent">${AGENTS.map(([a, l]) => `<option value="${a}" ${a === cur.agent ? 'selected' : ''}>${esc(l)}${using().includes(a) ? '' : '（使わない設定）'}</option>`).join('')}</select></label>
+        <label class="field"><span>モデル（空なら設定の既定）</span><input id="caModel" list="caModelList" autocomplete="off" spellcheck="false" value="${esc(cur.model || '')}" /><datalist id="caModelList"></datalist></label>
+      </div>
+      <label class="field"><span>振る舞いの指示（性格・やり方。最初の指示の前に付けます）</span><textarea id="caInst" rows="5" maxlength="4000" placeholder="例: 変更は小さく保ち、直す前に必ず理由を説明してください。テストが通るまで完了にしないでください。">${esc(cur.instruction || '')}</textarea></label>
+      <div class="ca-preview" id="caPreview"></div>
+      <div class="modal-actions"><button class="btn ghost small" id="caCancel" type="button">やめる</button><button class="btn primary small" id="caOk" type="button">${index === null ? '追加' : '決定'}</button></div>`;
+    const read = () => ({
+      id: cur.id || newCaId(),
+      name: $('caName').value.trim(),
+      icon: $('caIcon').value.trim(),
+      color: $('caColor').value,
+      description: $('caDesc').value.trim(),
+      instruction: $('caInst').value.trim(),
+      agent: $('caAgent').value,
+      model: $('caModel').value.trim(),
+    });
+    const preview = () => {
+      const v = read();
+      $('caModelList').innerHTML = (MODEL_SUGGEST[v.agent] || []).map((m) => `<option value="${esc(m)}"></option>`).join('');
+      $('caModel').placeholder = settingsModel(v.agent) ? `例: ${settingsModel(v.agent)}（設定の既定）` : `例: ${(MODEL_SUGGEST[v.agent] || [])[0] || ''}`;
+      $('caPreview').innerHTML = `<span class="orch-chip agent persona" style="--pc:${esc(v.color)}">${personaIcon(v, v.agent)}${esc(whoLabel(v.agent, { ...v, name: v.name || '（名前）' }))}</span>`;
+    };
+    box.querySelectorAll('input, select, textarea').forEach((el) => (el.oninput = el.onchange = preview));
+    preview();
+    $('caName').focus();
+    $('caCancel').onclick = () => (box.hidden = true);
+    $('caOk').onclick = () => {
+      const v = read();
+      if (!v.name) return toast('名前を入れてください');
+      if (v.model && !/^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$/.test(v.model)) return toast(`モデル名に使えない文字が入っています: ${v.model}`);
+      if (cas.some((x, i) => i !== index && x.name === v.name)) return toast(`「${v.name}」という名前のカスタムエージェントはもうあります`);
+      if (index === null) cas.push(v);
+      else cas[index] = v;
+      box.hidden = true;
+      redrawCustom();
+    };
+  };
+  $('sCustomAdd').onclick = () => openCustomForm(null);
+  // ---- Pipeline の一覧 ----
+  const saveFlows = async (msg, extra = {}) => {
+    // フローチャートの編集中にプロジェクトが変わったら（遠隔操作の切断など）、前のプロジェクトの一覧を保存しない
+    if (isStale()) {
+      toast('プロジェクトが変わったので保存しませんでした');
+      return false;
+    }
+    const r = await runBusy(msg, () => api.updateSettings({ relayFlows: flows, relayFlowId: flowDefId, customAgents: cas, ...extra }), '保存しました');
+    if (!r) return false;
+    Object.assign(state.board.settings, r);
+    flows = JSON.parse(JSON.stringify(r.relayFlows || flows));
+    flowDefId = r.relayFlowId || flowDefId;
+    if (Array.isArray(r.customAgents)) cas = JSON.parse(JSON.stringify(r.customAgents));
+    return true;
+  };
+  // 名前を入れてもらう（Electron では prompt() が使えないので、一覧の下に入力欄を出す）。やめたら null
+  const askName = (title, initial, okLabel) =>
+    new Promise((resolve) => {
+      const box = $('sRelayExport');
+      box.hidden = false;
+      box.innerHTML = `<h4>${esc(title)}</h4>
+        <label class="field"><span>名前（${PipelinePack.PIPELINE_NAME_MAX}文字まで）</span><input id="plName" maxlength="${PipelinePack.PIPELINE_NAME_MAX}" value="${esc(initial)}" /></label>
+        <div class="modal-actions"><button class="btn ghost small" id="plCancel" type="button">やめる</button><button class="btn primary small" id="plOk" type="button">${esc(okLabel)}</button></div>`;
+      const done = (v) => {
+        box.hidden = true;
+        resolve(v);
+      };
+      $('plName').focus();
+      $('plName').select();
+      $('plName').onkeydown = (e) => {
+        if (e.key === 'Enter' && !e.isComposing) (e.preventDefault(), $('plOk').click());
+      };
+      $('plCancel').onclick = () => done(null);
+      $('plOk').onclick = () => {
+        const v = $('plName').value.trim();
+        if (!v) return toast('名前を入れてください');
+        done(v);
+      };
+    });
+  const newFlowName = (base) => PipelinePack.uniqueName(base, new Set(flows.map((p) => p.name)), PipelinePack.PIPELINE_NAME_MAX);
+  const newFlowId = () => {
+    let id;
+    do id = `p${Math.random().toString(16).slice(2, 10)}`;
+    while (flows.some((x) => x.id === id));
+    return id;
+  };
+  const editFlow = (i) =>
+    FlowEditor.open({
+      flow: flows[i].flow || { nodes: [], edges: [] },
+      agents: AGENTS,
+      enabled: using(),
+      customAgents: cas,
+      modelSuggest: MODEL_SUGGEST,
+      defaultAgent: $('sDefaultAgent').value || 'claude',
+      generate: (request, flow, agent) => api.generateFlow({ request, flow, agent, enabled: using(), customAgents: cas }),
+      onSave: async (flow) => {
+        // 工程で選んだカスタムエージェントも一緒に保存する（この画面で追加したばかりのものを使えるように）
+        const id = flows[i].id;
+        const prev = flows[i].flow;
+        flows[i].flow = flow;
+        if (!(await saveFlows('フローチャートを保存しています…'))) {
+          const j = flows.findIndex((p) => p.id === id);
+          if (j >= 0) flows[j].flow = prev;
+          return false;
+        }
         drawRelay();
-        const i = flows.findIndex((p) => p.name === name);
-        if (i >= 0) editFlow(i);
-      };
-      $('sRelayImport').onclick = importFlows;
-      $('sRelayBundle').onclick = () => openBundle(null);
-      drawCustomList();
-      drawRelay();
-      drawAgents();
-      // 選んだオーケストレーションの欄だけ出す（選んでいない方の設定は保存したまま残す）
-      const orch = () => document.querySelector('input[name="sOrch"]:checked')?.value || 'relay';
-      const drawOrch = () => {
-        $('sRelayField').hidden = orch() !== 'relay';
-        $('sCompeteField').hidden = orch() !== 'compete';
-      };
-      document.querySelectorAll('input[name="sOrch"]').forEach((r) => (r.onchange = drawOrch));
-      drawOrch();
-      // 「使う」のチェックを切り替えたら、そのエージェントの欄を出し入れして、選べるエージェントを描き直す
-      document.querySelectorAll('.sUse').forEach((cb) => {
-        cb.onchange = () => {
-          const box = cb.closest('.agent-cfg');
-          box.classList.toggle('on', cb.checked);
-          box.querySelector('.agent-cfg-body').hidden = !cb.checked;
-          redrawCustom();
-        };
-      });
-      let defSkill = s.defaultSkill || null;
-      const drawDef = () => renderSkillSlot('sSkill', defSkill, (v) => ((defSkill = v), drawDef()));
-      drawDef();
-      const sel = $('sBase');
-      api.repoInfo().then(
-        (info) => {
-          // 読み込み中にモーダルを閉じたり別の画面に変わっていたら何もしない
-          if (!info || $('sBase') !== sel || $('modal').classList.contains('hidden')) return;
-          const picked = sel.value;
-          sel.innerHTML = baseOptions({ branches: info.branches || [], current: info.current || '' });
-          sel.value = picked;
-        },
-        () => {},
-      );
-      // 「Issue のステータスを自動で変える」にチェックがあるときだけ、項目名と選択肢の指定を出す
-      $('sIssueSync').onchange = () => ($('sStatusMap').hidden = !$('sIssueSync').checked);
-      refreshGh();
-      bindUpdatePanel();
-      $('sCancel').onclick = closeModal;
-      $('sOk').onclick = async () => {
-        const on = using();
-        if (!on.length) return toast('使うエージェントを1つ以上選んでください');
-        if (!$('sCustomForm').hidden && !confirm('カスタムエージェントの編集を決定していません。編集中の内容を捨てて保存しますか？')) return;
-        const steps = flows.flatMap((p) => FlowModel.orderSteps(p.flow || { nodes: [], edges: [] }).map((st) => ({ ...st, label: flows.length > 1 ? `${p.name}: ${st.label || '（名前なし）'}` : st.label })));
-        const lostStep = steps.find((st) => stepWho(st, cas).missing);
-        if (lostStep && orch() === 'relay' && !confirm(`Pipelineの工程「${lostStep.label || '（名前なし）'}」のカスタムエージェントがありません。このままだとPipelineを始められません。保存しますか？`)) return;
-        const offStep = steps.find((st) => !on.includes(stepWho(st, cas).agent));
-        if (offStep && orch() === 'relay' && !confirm(`Pipelineの工程「${offStep.label || '（名前なし）'}」の ${agentLabel(stepWho(offStep, cas).agent)} は使わない設定です。このままだとPipelineを始められません。保存しますか？`)) return;
-        const r = await runBusy('設定を保存しています…', () =>
-          api.updateSettings({
-            baseBranch: $('sBase').value,
-            integration: $('sIntegration').value,
-            branchNamingRule: $('sBranchRule').value.trim(),
-            permissionMode: $('sMode').value,
-            allowedTools: $('sAllowed').value,
-            maxParallel: $('sMax').value,
-            model: $('sModel').value.trim(),
-            claudePath: $('sClaude').value.trim() || 'claude',
-            codexPath: $('sCodex').value.trim() || 'codex',
-            codexModel: $('sCodexModel').value.trim(),
-            geminiPath: $('sGemini').value.trim() || 'gemini',
-            geminiModel: $('sGeminiModel').value.trim(),
-            cursorPath: $('sCursor').value.trim() || 'cursor-agent',
-            cursorModel: $('sCursorModel').value.trim(),
-            defaultAgent: $('sDefaultAgent').value,
-            enabledAgents: on,
-            orchestration: orch(),
-            // 使わない設定にしたエージェントの競争の選択は覚えておく（また使う設定にしたら戻る）
-            competeAgents: [...new Set([...[...document.querySelectorAll('.sCompete:checked')].map((x) => x.value), ...[...competeSel].filter((a) => !on.includes(a))])],
-            customAgents: cas,
-            // 元の CLI を使わない設定にしたカスタムエージェントの競争の選択も覚えておく
-            competeCustomAgents: [...new Set([...[...document.querySelectorAll('.sCompeteCustom:checked')].map((x) => x.value), ...[...competeCustomSel].filter((id) => { const ca = cas.find((x) => x.id === id); return ca && !on.includes(ca.agent); })])],
-            defaultSkill: defSkill || '',
-            issueStatusSync: $('sIssueSync').checked,
-            suggestSkillsOnDone: $('sSuggestSkills').checked,
-            deleteSessionsOnMerge: $('sDeleteSessions').checked,
-            specCheck: $('sSpecCheck').checked,
-            subtaskMerge: $('sSubtaskMerge').value,
-            statusFieldName: $('sStatusField').value.trim(),
-            statusMapping: { inProgress: $('sMapProgress').value.trim(), inReview: $('sMapReview').value.trim(), done: $('sMapDone').value.trim() },
-          }),
-        );
+        return true;
+      },
+    });
+  // Pipeline 1つを .json に書き出す
+  const exportOne = async (p) => {
+    const data = PipelinePack.toBase64(new TextEncoder().encode(PipelinePack.exportPipelineJson(p)));
+    const used = PipelinePack.usedCustomIds(p.flow).filter((id) => cas.some((x) => x.id === id));
+    const r = await run(() => api.saveFile({ name: `${PipelinePack.safeFileName(p.name)}.pipeline`, data, ext: 'json' }));
+    if (r) toast(`エクスポートしました${used.length ? '（カスタムエージェントの工程があります。ほかのプロジェクトで使うときは「まとめてエクスポート」で一緒に書き出してください）' : ''}`, 'ok');
+  };
+  // まとめてエクスポート: 書き出す Pipeline とカスタムエージェントを選んで zip にする
+  const openBundle = (preset) => {
+    const box = $('sRelayExport');
+    const selP = new Set(preset ? [preset] : flows.map((p) => p.id));
+    const usedBy = () => new Set(flows.filter((p) => selP.has(p.id)).flatMap((p) => PipelinePack.usedCustomIds(p.flow)));
+    const selC = new Set([...usedBy()].filter((id) => cas.some((x) => x.id === id)));
+    box.hidden = false;
+    const draw = () => {
+      const used = usedBy();
+      box.innerHTML = `<h4>まとめてエクスポート（zip）</h4>
+        <div class="field"><span>Pipeline</span><div class="check-row">${flows.map((p) => `<label class="check"><input type="checkbox" class="bxP" value="${esc(p.id)}" ${selP.has(p.id) ? 'checked' : ''} /> ${esc(p.name)}</label>`).join('')}</div></div>
+        <div class="field"><span>カスタムエージェント</span><div class="check-row">${cas.length ? cas.map((ca) => `<label class="check"><input type="checkbox" class="bxC" value="${esc(ca.id)}" ${selC.has(ca.id) ? 'checked' : ''} /> ${personaIcon(ca, ca.agent)}${esc(ca.name)}${used.has(ca.id) ? ' <span class="muted small">（工程で使用）</span>' : ''}</label>`).join('') : '<span class="muted small">まだありません</span>'}</div>
+        ${[...used].some((id) => cas.some((x) => x.id === id) && !selC.has(id)) ? `<small class="relay-sum-err">${icon('alert')}工程で使っているカスタムエージェントを外すと、取り込んだ先でその工程のエージェントを選び直すことになります</small>` : ''}</div>
+        <div class="modal-actions"><button class="btn ghost small" id="bxCancel" type="button">やめる</button><button class="btn primary small" id="bxOk" type="button">zip でエクスポート</button></div>`;
+      box.querySelectorAll('.bxP').forEach((cb) => (cb.onchange = () => {
+        if (cb.checked) {
+          selP.add(cb.value);
+          // 選んだ Pipeline の工程が使うカスタムエージェントにも、チェックを付ける
+          for (const id of PipelinePack.usedCustomIds((flows.find((p) => p.id === cb.value) || {}).flow)) if (cas.some((x) => x.id === id)) selC.add(id);
+        } else selP.delete(cb.value);
+        draw();
+      }));
+      box.querySelectorAll('.bxC').forEach((cb) => (cb.onchange = () => ((cb.checked ? selC.add(cb.value) : selC.delete(cb.value)), draw())));
+      $('bxCancel').onclick = () => (box.hidden = true);
+      $('bxOk').onclick = async () => {
+        const ps = flows.filter((p) => selP.has(p.id));
+        const cs = cas.filter((ca) => selC.has(ca.id));
+        if (!ps.length && !cs.length) return toast('エクスポートするものを選んでください');
+        const data = PipelinePack.toBase64(PipelinePack.exportBundleZip({ pipelines: ps, customAgents: cs }));
+        const name = ps.length === 1 ? PipelinePack.safeFileName(ps[0].name) : 'pipelines';
+        const r = await run(() => api.saveFile({ name, data, ext: 'zip' }));
         if (r) {
-          closeModal();
-          toast('保存しました', 'ok');
-          checkEnv();
+          box.hidden = true;
+          toast(`Pipeline ${ps.length} 個・カスタムエージェント ${cs.length} 個をエクスポートしました`, 'ok');
         }
       };
+    };
+    draw();
+  };
+  // インポート: .json（Pipeline 1つ）か zip（Pipeline とカスタムエージェント）を読んで、一覧に足す
+  const importFlows = async () => {
+    const f = await run(() => api.openFile());
+    if (!f) return;
+    let parsed;
+    try {
+      parsed = await PipelinePack.parseImport(f.name, PipelinePack.fromBase64(f.data));
+    } catch (e) {
+      return toast(e.message || String(e));
+    }
+    let m;
+    try {
+      m = PipelinePack.mergeImport({ relayFlows: flows, customAgents: cas }, parsed);
+    } catch (e) {
+      return toast(e.message || String(e));
+    }
+    const lines = [`「${f.name}」から取り込みます。`];
+    if (m.addedPipelines.length) lines.push(`Pipeline: ${m.addedPipelines.join('、')}`);
+    if (m.addedAgents.length) lines.push(`カスタムエージェント（追加）: ${m.addedAgents.join('、')}`);
+    if (m.reusedAgents.length) lines.push(`カスタムエージェント（同じものがあるので、それを使う）: ${m.reusedAgents.join('、')}`);
+    if (m.missing.length) lines.push(`\nカスタムエージェントが見つからない工程があります（取り込んだあと、フローチャートで選び直してください）: ${m.missing.join('、')}`);
+    if (parsed.skipped.length) lines.push(`\n読めなかったファイル: ${parsed.skipped.join('、')}`);
+    if (!m.addedPipelines.length && !m.addedAgents.length) return toast(`取り込むものはありません（同じカスタムエージェントがもうあります）`);
+    if (!confirm(lines.join('\n'))) return;
+    const before = { flows, cas };
+    flows = m.relayFlows;
+    cas = m.customAgents;
+    if (!(await saveFlows('取り込んでいます…'))) {
+      flows = before.flows;
+      cas = before.cas;
+    }
+    redrawCustom();
+  };
+  // Pipelineのフローの要約（工程の並びと、分岐・並列・ループの数）と、Pipeline ごとの操作
+  const drawRelay = () => {
+    if (isStale()) return;
+    $('sRelayList').innerHTML = flows
+      .map(
+        (p, i) => `<div class="pl-item ${p.id === flowDefId ? 'is-default' : ''}">
+          <div class="pl-head"><b>${icon('pipeline')}${esc(p.name)}</b>${p.id === flowDefId ? ' <span class="pl-badge">既定</span>' : ''}
+            <div class="pl-acts">
+              <button class="btn small" type="button" data-pl-edit="${i}">フローチャートを編集</button>
+              <button class="btn small ghost" type="button" data-pl-rename="${i}">名前</button>
+              <button class="btn small ghost" type="button" data-pl-copy="${i}">複製</button>
+              ${p.id === flowDefId ? '' : `<button class="btn small ghost" type="button" data-pl-def="${i}">既定にする</button>`}
+              <button class="btn small ghost" type="button" data-pl-export="${i}">エクスポート</button>
+              <button class="btn small ghost" type="button" data-pl-bundle="${i}" title="この Pipeline と、工程で使うカスタムエージェントを zip にします">zip</button>
+              ${flows.length > 1 ? `<button class="btn small danger" type="button" data-pl-del="${i}">削除</button>` : ''}
+            </div></div>
+          <div class="relay-summary">${relayFlowSummaryHtml(p.flow, using(), cas)}</div>
+        </div>`,
+      )
+      .join('');
+    const on = (attr, fn) => $('sRelayList').querySelectorAll(`[data-${attr}]`).forEach((b) => (b.onclick = () => fn(Number(b.getAttribute(`data-${attr}`)))));
+    on('pl-edit', editFlow);
+    on('pl-export', (i) => exportOne(flows[i]));
+    on('pl-bundle', (i) => openBundle(flows[i].id));
+    on('pl-rename', async (i) => {
+      const v = await askName(`「${flows[i].name}」の名前を変える`, flows[i].name, '決定');
+      if (v == null) return;
+      const name = [...v].slice(0, PipelinePack.PIPELINE_NAME_MAX).join('').trim();
+      if (flows.some((p, j) => j !== i && p.name === name)) return toast(`「${name}」という名前の Pipeline はもうあります`);
+      const prev = flows[i].name;
+      flows[i].name = name;
+      if (!(await saveFlows('名前を変えています…'))) flows[i].name = prev;
+      drawRelay();
+    });
+    on('pl-copy', async (i) => {
+      flows.push({ id: newFlowId(), name: newFlowName(`${flows[i].name} のコピー`), flow: JSON.parse(JSON.stringify(flows[i].flow)) });
+      if (!(await saveFlows('複製しています…'))) flows.pop();
+      drawRelay();
+    });
+    on('pl-def', async (i) => {
+      const prev = flowDefId;
+      flowDefId = flows[i].id;
+      if (!(await saveFlows('既定の Pipeline を変えています…'))) flowDefId = prev;
+      drawRelay();
+    });
+    on('pl-del', async (i) => {
+      const p = flows[i];
+      if (!confirm(`Pipeline「${p.name}」を削除しますか？\n（作ってあるタスクは、そのまま動きます）`)) return;
+      const before = { flows: [...flows], flowDefId };
+      flows.splice(i, 1);
+      if (flowDefId === p.id) flowDefId = flows[0].id;
+      if (!(await saveFlows('削除しています…'))) ({ flows, flowDefId } = before);
+      drawRelay();
+    });
+  };
+  $('sRelayAdd').onclick = async () => {
+    const v = await askName('Pipelineを追加', newFlowName('Pipeline'), '追加してフローチャートを編集');
+    if (v == null) return;
+    const name = [...v].slice(0, PipelinePack.PIPELINE_NAME_MAX).join('').trim();
+    if (flows.some((p) => p.name === name)) return toast(`「${name}」という名前の Pipeline はもうあります`);
+    // 新しい Pipeline は「実装 → レビュー」から始める（既定の Pipeline の形をまねず、初めの形にする）
+    flows.push({ id: newFlowId(), name, flow: null });
+    if (!(await saveFlows('Pipeline を追加しています…'))) flows.pop();
+    drawRelay();
+    const i = flows.findIndex((p) => p.name === name);
+    if (i >= 0) editFlow(i);
+  };
+  $('sRelayImport').onclick = importFlows;
+  $('sRelayBundle').onclick = () => openBundle(null);
+  drawCustomList();
+  drawRelay();
+  drawAgents();
+  // 選んだオーケストレーションの欄だけ出す（選んでいない方の設定は保存したまま残す）
+  const orch = () => document.querySelector('input[name="sOrch"]:checked')?.value || 'relay';
+  const drawOrch = () => {
+    $('sRelayField').hidden = orch() !== 'relay';
+    $('sCompeteField').hidden = orch() !== 'compete';
+  };
+  document.querySelectorAll('input[name="sOrch"]').forEach((r) => (r.onchange = drawOrch));
+  drawOrch();
+  // 「使う」のチェックを切り替えたら、そのエージェントの欄を出し入れして、選べるエージェントを描き直す
+  document.querySelectorAll('.sUse').forEach((cb) => {
+    cb.onchange = () => {
+      const box = cb.closest('.agent-cfg');
+      box.classList.toggle('on', cb.checked);
+      box.querySelector('.agent-cfg-body').hidden = !cb.checked;
+      redrawCustom();
+    };
+  });
+  let defSkill = s.defaultSkill || null;
+  const drawDef = () => renderSkillSlot('sSkill', defSkill, (v) => ((defSkill = v), drawDef()));
+  drawDef();
+  const sel = $('sBase');
+  api.repoInfo().then(
+    (info) => {
+      // 読み込み中に描き直したり別の画面に変わっていたら何もしない
+      if (!info || $('sBase') !== sel || state.view !== 'settings') return;
+      const picked = sel.value;
+      sel.innerHTML = baseOptions({ branches: info.branches || [], current: info.current || '' });
+      sel.value = picked;
     },
+    () => {},
   );
+  // 「Issue のステータスを自動で変える」にチェックがあるときだけ、項目名と選択肢の指定を出す
+  $('sIssueSync').onchange = () => ($('sStatusMap').hidden = !$('sIssueSync').checked);
+  refreshGh();
+  bindUpdatePanel();
+  $('sCancel').onclick = () => {
+    renderSettingsView();
+    toast('保存済みの値に戻しました', 'ok');
+  };
+  $('sOk').onclick = async () => {
+    const on = using();
+    if (!on.length) return toast('使うエージェントを1つ以上選んでください');
+    if (!$('sCustomForm').hidden && !confirm('カスタムエージェントの編集を決定していません。編集中の内容を捨てて保存しますか？')) return;
+    const steps = flows.flatMap((p) => FlowModel.orderSteps(p.flow || { nodes: [], edges: [] }).map((st) => ({ ...st, label: flows.length > 1 ? `${p.name}: ${st.label || '（名前なし）'}` : st.label })));
+    const lostStep = steps.find((st) => stepWho(st, cas).missing);
+    if (lostStep && orch() === 'relay' && !confirm(`Pipelineの工程「${lostStep.label || '（名前なし）'}」のカスタムエージェントがありません。このままだとPipelineを始められません。保存しますか？`)) return;
+    const offStep = steps.find((st) => !on.includes(stepWho(st, cas).agent));
+    if (offStep && orch() === 'relay' && !confirm(`Pipelineの工程「${offStep.label || '（名前なし）'}」の ${agentLabel(stepWho(offStep, cas).agent)} は使わない設定です。このままだとPipelineを始められません。保存しますか？`)) return;
+    const r = await runBusy('設定を保存しています…', () =>
+      api.updateSettings({
+        baseBranch: $('sBase').value,
+        integration: $('sIntegration').value,
+        branchNamingRule: $('sBranchRule').value.trim(),
+        permissionMode: $('sMode').value,
+        allowedTools: $('sAllowed').value,
+        maxParallel: $('sMax').value,
+        model: $('sModel').value.trim(),
+        claudePath: $('sClaude').value.trim() || 'claude',
+        codexPath: $('sCodex').value.trim() || 'codex',
+        codexModel: $('sCodexModel').value.trim(),
+        geminiPath: $('sGemini').value.trim() || 'gemini',
+        geminiModel: $('sGeminiModel').value.trim(),
+        cursorPath: $('sCursor').value.trim() || 'cursor-agent',
+        cursorModel: $('sCursorModel').value.trim(),
+        defaultAgent: $('sDefaultAgent').value,
+        enabledAgents: on,
+        orchestration: orch(),
+        // 使わない設定にしたエージェントの競争の選択は覚えておく（また使う設定にしたら戻る）
+        competeAgents: [...new Set([...[...document.querySelectorAll('.sCompete:checked')].map((x) => x.value), ...[...competeSel].filter((a) => !on.includes(a))])],
+        customAgents: cas,
+        // 元の CLI を使わない設定にしたカスタムエージェントの競争の選択も覚えておく
+        competeCustomAgents: [...new Set([...[...document.querySelectorAll('.sCompeteCustom:checked')].map((x) => x.value), ...[...competeCustomSel].filter((id) => { const ca = cas.find((x) => x.id === id); return ca && !on.includes(ca.agent); })])],
+        defaultSkill: defSkill || '',
+        issueStatusSync: $('sIssueSync').checked,
+        suggestSkillsOnDone: $('sSuggestSkills').checked,
+        deleteSessionsOnMerge: $('sDeleteSessions').checked,
+        specCheck: $('sSpecCheck').checked,
+        subtaskMerge: $('sSubtaskMerge').value,
+        statusFieldName: $('sStatusField').value.trim(),
+        statusMapping: { inProgress: $('sMapProgress').value.trim(), inReview: $('sMapReview').value.trim(), done: $('sMapDone').value.trim() },
+      }),
+    );
+    if (r) {
+      // 画面に残るので、保存した値（サーバー側で整えた値も含む）で描き直す。ボードの更新を待たずに反映する
+      Object.assign(state.board.settings, r);
+      renderSettingsView();
+      toast('保存しました', 'ok');
+      checkEnv();
+    }
+  };
+  // 一覧を描いて高さが決まってから戻す
+  $('settingsMain').scrollTop = scrollTop;
+  settingsNav.sync();
 }
 
 async function pickRepo(opts) {
@@ -4787,7 +4839,6 @@ async function repoSetupModal(mode, distros = []) {
 $('newBtn').onclick = () => newTask();
 $('chatBtn').onclick = openChats;
 $('detailBackdrop').addEventListener('mousedown', closeDetailOrBack);
-$('settingsBtn').onclick = openSettings;
 $('sessionsBtn').onclick = openSessionManager;
 $('rcBtn').onclick = openRemoteSettings;
 
@@ -4803,8 +4854,10 @@ async function refreshGh() {
 }
 
 function renderGh(st) {
-  const el = $('ghPanel');
+  // 設定画面の上に Issue のダイアログを開くと gh の欄が2つになるので、手前のダイアログのほうを描く
+  const el = document.querySelector('#modal:not(.hidden) #ghPanel') || $('ghPanel');
   if (!el) return;
+  const part = (id) => el.querySelector(`#${id}`);
   const log = ghState.lines.length ? `<pre class="gh-log">${esc(ghState.lines.slice(-8).join('\n'))}</pre>` : '';
   if (ghState.busy && ghState.code) {
     el.className = 'gh-panel gh-warn';
@@ -4813,9 +4866,9 @@ function renderGh(st) {
       <div class="gh-code"><code>${esc(ghState.code.code)}</code><button class="btn small" id="ghCopy">コピー</button><button class="btn small ghost" id="ghOpen">ページを開く</button></div>
       <p class="muted small">ログインが終わると、自動でこの画面に戻ります。</p>${log}
       <button class="btn small ghost" id="ghCancel">やめる</button>`;
-    $('ghCopy').onclick = () => navigator.clipboard.writeText(ghState.code.code).then(() => toast('コピーしました', 'ok'));
-    $('ghOpen').onclick = () => run(() => api.openExternal(ghState.code.url));
-    $('ghCancel').onclick = () => api.ghCancel();
+    part('ghCopy').onclick = () => navigator.clipboard.writeText(ghState.code.code).then(() => toast('コピーしました', 'ok'));
+    part('ghOpen').onclick = () => run(() => api.openExternal(ghState.code.url));
+    part('ghCancel').onclick = () => api.ghCancel();
     return;
   }
   if (ghState.busy) {
@@ -4837,9 +4890,9 @@ function renderGh(st) {
         : `<button class="btn primary small" id="ghDownload">ダウンロードページを開く</button> <span class="muted small">インストールしたら「もう一度確認」を押してください</span>`}
       <div><button class="btn small ghost" id="ghRecheck">もう一度確認</button></div>${log}
       <p class="muted small">public リポジトリなら、gh がなくても読み込めます。</p>`;
-    if ($('ghInstall')) $('ghInstall').onclick = () => ghAction('install');
-    if ($('ghDownload')) $('ghDownload').onclick = () => run(() => api.openExternal(st.downloadUrl));
-    $('ghRecheck').onclick = refreshGh;
+    if (part('ghInstall')) part('ghInstall').onclick = () => ghAction('install');
+    if (part('ghDownload')) part('ghDownload').onclick = () => run(() => api.openExternal(st.downloadUrl));
+    part('ghRecheck').onclick = refreshGh;
     return;
   }
   if (!st.loggedIn) {
@@ -4847,8 +4900,8 @@ function renderGh(st) {
     el.innerHTML = `<b>gh は入っていますが、GitHub にログインしていません</b>
       <p><button class="btn primary small" id="ghLogin">GitHub にログイン</button> <span class="muted small">ブラウザが開くので、表示されたコードを入力します</span></p>
       <div><button class="btn small ghost" id="ghRecheck">もう一度確認</button></div>${log}`;
-    $('ghLogin').onclick = () => ghAction('login');
-    $('ghRecheck').onclick = refreshGh;
+    part('ghLogin').onclick = () => ghAction('login');
+    part('ghRecheck').onclick = refreshGh;
     return;
   }
   if (st.hasProjectScope === false && state.board.settings.issueStatusSync !== false) {
@@ -4857,8 +4910,8 @@ function renderGh(st) {
       <p>Issue のステータス（GitHub Projects の In progress / In review / Done）を自動で変えるには、project の権限が必要です。</p>
       <p><button class="btn primary small" id="ghScope">Projects の権限を追加</button> <span class="muted small">ブラウザが開くので、表示されたコードを入力します</span></p>
       <div><button class="btn small ghost" id="ghRecheck">もう一度確認</button></div>${log}`;
-    $('ghScope').onclick = () => ghAction('scope');
-    $('ghRecheck').onclick = refreshGh;
+    part('ghScope').onclick = () => ghAction('scope');
+    part('ghRecheck').onclick = refreshGh;
     return;
   }
   el.className = 'gh-panel ok';
@@ -5187,7 +5240,7 @@ api.updateStatus().then((u) => {
   if (!r.ok) state.updateFailedLog = true;
 }, () => {});
 api.onUpdate(setUpdate);
-$('updateBadge')?.addEventListener('click', openSettings);
+$('updateBadge')?.addEventListener('click', () => openSettings('update'));
 
 // 左上に、いま動いているアプリのバージョンを出す
 api.appInfo().then(

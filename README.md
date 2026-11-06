@@ -123,7 +123,7 @@ irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | i
 | --- | --- |
 | [画面と使い方](docs/usage.md) | 承認・質問・仕様の確認・タスクスケジューラ・スキル・会話・btw・マージ / PR・Issue のステータス・通知・コンフリクトなど、機能ごとの使い方 |
 | [エージェントとオーケストレーション](docs/agents.md) | Claude Code / Codex / Gemini / Cursor の違い、Pipeline・競争 |
-| [設定](docs/settings.md) | 設定画面の項目 |
+| [設定](docs/settings.md) | トップバーのメニューから開く設定の画面と項目 |
 | [遠隔操作](docs/remote.md) | 別の PC から SSH トンネルでボードを操作する手順と、つながらないときの直し方 |
 | [インストール](docs/install.md) | インストール・アップデート・アンインストール、Windows で WSL のリポジトリを使う |
 | [開発者向け](docs/development.md) | ソースから動かす・ビルド・リリース・アプリのしくみ・テスト |
