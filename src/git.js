@@ -52,6 +52,29 @@ async function currentBranch(repo) {
   return (await git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
 }
 
+// 戻す先のコミット。40桁の16進数だけ受け付ける（HEAD や「-」で始まる値は git に渡さない）
+function assertCommitSha(sha) {
+  if (typeof sha !== 'string' || !/^[0-9a-f]{40}$/.test(sha)) throw new Error(tr('コミットの指定が正しくありません'));
+  return sha;
+}
+
+async function commitExists(repo, sha) {
+  assertCommitSha(sha);
+  try {
+    await git(repo, ['cat-file', '-e', `${sha}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// 作業ツリーをそのコミットに戻し、未追跡ファイルを消す。ignore されたもの（node_modules など）は残す
+async function resetHardClean(wt, sha) {
+  assertCommitSha(sha);
+  await git(wt, ['reset', '--hard', sha]);
+  await git(wt, ['clean', '-fd']);
+}
+
 async function revParse(repo, ref) {
   try {
     return (await git(repo, ['rev-parse', '--verify', `${ref}^{commit}`])).trim();
@@ -440,6 +463,9 @@ module.exports = {
   toplevel,
   currentBranch,
   revParse,
+  assertCommitSha,
+  commitExists,
+  resetHardClean,
   branches,
   addWorktree,
   removeWorktree,
