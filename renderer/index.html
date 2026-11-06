@@ -6,6 +6,7 @@
     <title>Agent Kanban</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="scheduler.css" />
+    <link rel="stylesheet" href="settings.css" />
   </head>
   <body>
     <header class="topbar">
@@ -14,6 +15,7 @@
         <nav id="navMenu" class="nav-menu hidden" aria-label="画面の切り替え">
           <button class="nav-item" type="button" data-view="kanban"><span data-icon="logo"></span>カンバン管理</button>
           <button class="nav-item" type="button" data-view="scheduler"><span data-icon="calendar"></span>タスクスケジューラ</button>
+          <button class="nav-item" type="button" data-view="settings"><span data-icon="settings"></span>設定</button>
         </nav>
       </div>
       <div class="brand"><span class="logo" data-icon="logo"></span><span class="brand-text"><span class="brand-name">Agent Kanban</span><span id="appVersion" class="brand-ver"></span><button id="updateBadge" class="update-badge hidden" type="button" title="設定の「アプリの更新」を開きます"></button></span></div>
@@ -23,7 +25,6 @@
       <span id="runInfo" class="pill"></span>
       <button id="rcBtn" class="btn ghost" title="遠隔操作（RC）: ホストの開始・別の PC への接続・SSH の鍵"><span data-icon="monitor"></span><span class="btn-label">RC設定</span></button>
       <button id="sessionsBtn" class="btn ghost" title="Claude Code の会話（セッション）を一覧して消します（タスクとは別に管理できます）"><span data-icon="clock"></span><span class="btn-label">セッション</span></button>
-      <button id="settingsBtn" class="btn ghost" title="設定"><span data-icon="settings"></span><span class="btn-label">設定</span></button>
       <button id="chatBtn" class="btn chat-btn" title="タスクを作らずに、このリポジトリについてエージェントと話します"><span data-icon="chat"></span><span class="btn-label">会話</span><span id="chatCount" class="chat-count hidden"></span></button>
       <button id="newBtn" class="btn primary" title="新しいタスク"><span data-icon="plus"></span><span class="btn-label">新しいタスク</span></button>
       <div class="notif-wrap">
@@ -36,6 +37,7 @@
     <div class="layout">
       <main id="board" class="board"></main>
       <main id="schedulerView" class="scheduler-view hidden"></main>
+      <main id="settingsView" class="settings-view hidden"></main>
       <div id="detailBackdrop" class="d-backdrop hidden"></div>
       <aside id="detail" class="detail hidden">
         <div id="detailResizer" class="d-resizer" title="ドラッグで幅を変えられます（ダブルクリックで元の幅に戻します）"></div>
