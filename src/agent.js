@@ -2538,7 +2538,8 @@ class AgentManager extends EventEmitter {
             KANBAN_PORT: String(this.permission.port),
             KANBAN_TOKEN: this.permission.token,
             KANBAN_CARD: c.id,
-            ...(wslDistro ? { WSLENV: 'ELECTRON_RUN_AS_NODE/u:KANBAN_PORT/u:KANBAN_TOKEN/u:KANBAN_CARD/u' } : {}),
+            KANBAN_LANGUAGE: I18n.getLanguage(),
+            ...(wslDistro ? { WSLENV: 'ELECTRON_RUN_AS_NODE/u:KANBAN_PORT/u:KANBAN_TOKEN/u:KANBAN_CARD/u:KANBAN_LANGUAGE/u' } : {}),
           },
         },
       },
@@ -3247,7 +3248,7 @@ class AgentManager extends EventEmitter {
       return;
     }
     if (decision === 'allow') this.settle(reqId, { behavior: 'allow', updatedInput: p.input }, tr('許可'));
-    else this.settle(reqId, { behavior: 'deny', message: (message && message.trim()) || 'ユーザーが拒否しました' }, tr('拒否'));
+    else this.settle(reqId, { behavior: 'deny', message: (message && message.trim()) || tr('ユーザーが拒否しました') }, tr('拒否'));
   }
 
   settle(reqId, result, label) {
@@ -3625,7 +3626,7 @@ class AgentManager extends EventEmitter {
         this.log(c, 'error',tr('PR が {base} とコンフリクトしています。「エージェントに解消してもらう」か「自分で解消する」で直して、PR を更新してください: {prUrl}', { base, prUrl: c.prUrl }));
         this.notify(c, 'conflict', tr('PR がコンフリクトしています: {title}', { title: c.title }), c.prUrl);
       } else if (!c.worktreePath) {
-        this.log(c, 'error',tr('PR が {v} とコンフリクトしています（worktree を片付けたので、GitHub 上で解消してください）: {prUrl}', { v: base || 'マージ先', prUrl: c.prUrl }));
+        this.log(c, 'error',tr('PR が {v} とコンフリクトしています（worktree を片付けたので、GitHub 上で解消してください）: {prUrl}', { v: base || tr('マージ先'), prUrl: c.prUrl }));
       }
       changed = true;
     } else if (now !== 'CONFLICTING' && c.conflict && c.conflict.pr && !active) {

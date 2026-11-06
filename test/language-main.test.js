@@ -4,7 +4,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const I18n = require('../renderer/i18n');
 const { tr } = I18n;
 const { Store, languageForBoardFile, assertLanguage, defaultRepoSettings } = require('../src/store');
@@ -12,7 +12,8 @@ const { isLocalChannel, isProxyChannel, stripLocalSettings, redactForRemote, res
 const { parseMarkdownQuestions, isOtherOption, withReplyLanguage, isQuitInterrupt, buildBranchNamePrompt, AgentManager } = require('../src/agent');
 const providers = require('../src/providers');
 const git = require('../src/git');
-const { Updater } = require('../src/updater');
+const { Updater, installCommand } = require('../src/updater');
+const { fetchIssue } = require('../src/github');
 const { describeOrder } = require('../src/subtasks');
 const { explainSshError } = require('../src/ssh-tunnel');
 
@@ -384,6 +385,16 @@ test('英語にすると、残っていたエラーと通知が日本語のま�
     ['先にペアリングまたは認証してください', null],
     ['Codex がエラーで止まりました', null],
     ['GitHub Projects のステータスを変えるには、gh に project の権限が必要です。設定の「Projects の権限を追加」を押すか、ターミナルで gh auth refresh -h github.com -s project を実行してください', null],
+    ['（終了コード {code}）', { code: 0 }],
+    ['拒否されました: {msg}', { msg: 'no' }],
+    ['（gh のエラー: {message}）', { message: 'auth failed' }],
+    ['マージ先', null],
+    ['工程{n}', { n: 1 }],
+    ['v{v} に更新します', { v: '1.2.3' }],
+    ['更新しました', null],
+    ['エラー: 更新できませんでした', null],
+    ['ユーザーが拒否しました', null],
+    ['Agent Kanban に接続できなかったため拒否しました: {message}', { message: 'ECONNREFUSED' }],
   ];
   try {
     for (const code of ['en', 'es', 'fr', 'zh']) {
@@ -492,5 +503,170 @@ test('英語にすると、残っていたエラーと通知が日本語のま�
     assert.strictEqual(await git.operationInProgress(repo), 'rebase');
   } finally {
     I18n.setLanguage(prev);
+  }
+});
+
+function toolResultText(events) {
+  const hit = events.find((x) => x.type === 'tool_result');
+  assert.ok(hit, 'tool_result がない');
+  return hit;
+}
+
+test('英語にすると、ログ・Issue のエラー・工程名と更新ログが日本語のままにならない', async () => {
+  const prev = I18n.getLanguage();
+  const dir = tmpDir();
+  const oldPath = process.env.PATH;
+  const oldFetch = global.fetch;
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin);
+  if (process.platform === 'win32') {
+    fs.writeFileSync(path.join(bin, 'gh.cmd'), '@echo auth failed>&2\r\n@echo more detail>&2\r\n@exit /b 1\r\n');
+  } else {
+    fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\necho auth failed >&2\necho more detail >&2\nexit 1\n', { mode: 0o755 });
+  }
+  const ghRepo = path.join(dir, 'gh-repo');
+  fs.mkdirSync(ghRepo);
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: ghRepo });
+  execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/o/r.git'], { cwd: ghRepo });
+  const mergeRepo = path.join(dir, 'merge-repo');
+  fs.mkdirSync(mergeRepo);
+  const g = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: mergeRepo });
+  g('init', '-q', '-b', 'main');
+  fs.writeFileSync(path.join(mergeRepo, 'f.txt'), 'base\n');
+  g('add', 'f.txt');
+  g('commit', '-qm', 'init');
+  g('checkout', '-q', '-b', 'other');
+  fs.writeFileSync(path.join(mergeRepo, 'f.txt'), 'other\n');
+  g('commit', '-qam', 'other');
+  g('checkout', '-q', 'main');
+  fs.writeFileSync(path.join(mergeRepo, 'f.txt'), 'main\n');
+  g('commit', '-qam', 'main');
+  const store = new Store(path.join(dir, 'board.json'));
+  const agents = new AgentManager(store, { mcpScript: path.join(__dirname, '..', 'src', 'permission-mcp.js'), mcpDir: path.join(dir, 'mcp'), nodeBin: process.execPath });
+  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+  try {
+    I18n.setLanguage('en');
+    const codex = providers.createParser('codex');
+    const empty = toolResultText(codex.onEvent({ type: 'item.completed', item: { id: '1', type: 'command_execution', command: 'true', aggregated_output: '', exit_code: 0, status: 'completed' } }));
+    assert.strictEqual(empty.text, '(exit code 0)');
+    assert.strictEqual(empty.error, false, '終了コード 0 は失敗にしない');
+    const unknown = toolResultText(codex.onEvent({ type: 'item.completed', item: { id: '2', type: 'command_execution', command: 'true', aggregated_output: '', status: 'failed' } }));
+    assert.strictEqual(unknown.text, '(exit code ?)');
+    assert.doesNotMatch(unknown.text, /終了コード/);
+    const kept = toolResultText(codex.onEvent({ type: 'item.completed', item: { id: '3', type: 'command_execution', command: 'echo', aggregated_output: 'hello', exit_code: 1, status: 'completed' } }));
+    assert.strictEqual(kept.text, 'hello', '出力があるときは終了コードの文に置き換えない');
+    const cursor = providers.createParser('cursor');
+    const shell = toolResultText(cursor.onEvent({ type: 'tool_call', subtype: 'completed', call_id: 'e', tool_call: { shellToolCall: { args: { command: 'true' }, result: { success: { stdout: '', stderr: '  ', exitCode: 0 } } } } }));
+    assert.strictEqual(shell.text, '(exit code 0)');
+    assert.doesNotMatch(shell.text, /終了コード/);
+    const rejected = toolResultText(cursor.onEvent({ type: 'tool_call', subtype: 'completed', call_id: 'r', tool_call: { shellToolCall: { args: { command: 'rm' }, result: { rejected: { message: 'not allowed' } } } } }));
+    assert.strictEqual(rejected.text, 'Rejected: not allowed');
+    assert.strictEqual(rejected.error, true);
+    assert.doesNotMatch(rejected.text, /拒否されました/);
+    const plain = toolResultText(cursor.onEvent({ type: 'tool_call', subtype: 'completed', call_id: 'f', tool_call: { shellToolCall: { result: { error: { message: 'boom' } } } } }));
+    assert.strictEqual(plain.text, 'boom', '拒否以外の失敗には拒否の接頭辞を付けない');
+
+    global.fetch = async () => ({ ok: false, status: 503 });
+    await assert.rejects(() => fetchIssue(ghRepo, 7), (err) => {
+      assert.doesNotMatch(err.message, /（gh のエラー:/);
+      assert.doesNotMatch(err.message, /more detail/, 'gh の標準エラーは先頭の1行だけ足す');
+      assert.match(err.message, /gh error: auth failed/);
+      assert.match(err.message, /503/);
+      return true;
+    });
+    global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ number: 7, title: 'T', body: '', html_url: 'https://github.com/o/r/issues/7', state: 'open', labels: [], comments: 0 }) });
+    const issue = await fetchIssue(ghRepo, 7);
+    assert.strictEqual(issue.title, 'T', 'API が成功したときは gh のエラーを足さない');
+    assert.strictEqual(issue.slug.owner, 'o');
+
+    await assert.rejects(() => git.merge(mergeRepo, 'other', 'm', ''), (err) => {
+      assert.doesNotMatch(err.message, /マージ先/);
+      assert.match(err.message, /merge target/);
+      assert.match(err.message, /f\.txt/);
+      return true;
+    });
+    await assert.rejects(() => git.merge(mergeRepo, 'other', 'm'), (err) => {
+      assert.match(err.message, /merge target/, '名前を省いたときも同じフォールバック');
+      return true;
+    });
+    const bare = { id: 'pr', title: 'PR', status: 'review', prUrl: 'https://github.com/o/r/pull/1', logs: [], repoPath: mergeRepo };
+    agents.updatePrConflict(bare, { state: 'OPEN', mergeable: 'CONFLICTING', baseRefName: '' });
+    assert.doesNotMatch(bare.logs.at(-1).text, /マージ先/);
+    assert.match(bare.logs.at(-1).text, /merge target/);
+    const named = { id: 'pr2', title: 'PR', status: 'review', prUrl: 'https://github.com/o/r/pull/2', logs: [], repoPath: mergeRepo };
+    agents.updatePrConflict(named, { state: 'OPEN', mergeable: 'CONFLICTING', baseRefName: 'develop' });
+    assert.match(named.logs.at(-1).text, /develop/);
+    assert.doesNotMatch(named.logs.at(-1).text, /merge target|マージ先/);
+
+    assert.deepStrictEqual(
+      providers.cleanRelaySteps([
+        { agent: 'claude', label: '', instruction: 'do' },
+        { agent: 'codex', label: '   ', instruction: 'next' },
+        { agent: 'gemini', label: '', instruction: '' },
+      ]).map((s) => s.label),
+      ['Step 1', 'Step 2'],
+    );
+    assert.strictEqual(providers.cleanRelaySteps([{ agent: 'claude', label: '実装', instruction: 'do' }])[0].label, '実装', '書いてある名前はそのまま残す');
+    I18n.setLanguage('fr');
+    assert.strictEqual(providers.cleanRelaySteps([{ agent: 'claude', instruction: 'do' }])[0].label, 'Étape 1');
+    I18n.setLanguage('es');
+    assert.match(installCommand({ platform: 'darwin', pid: 1, version: '1.0.0', execPath: '/x' }).args[1], /Actualizando a v1\.0\.0/);
+    I18n.setLanguage('en');
+    const mac = installCommand({ platform: 'darwin', pid: 4, version: '1.2.3', execPath: '/x/Agent Kanban.app/Contents/MacOS/Agent Kanban' });
+    assert.doesNotMatch(mac.args[1], /に更新します|更新しました|更新できませんでした/);
+    assert.match(mac.args[1], /Updating to v1\.2\.3/);
+    assert.match(mac.args[1], /==> Updated/);
+    assert.match(mac.args[1], /Error: update failed/);
+    if (process.platform !== 'win32') {
+      const syntax = spawnSync('/bin/bash', ['-n', '-c', mac.args[1]]);
+      assert.strictEqual(syntax.status, 0, String(syntax.stderr));
+    }
+    const ps = installCommand({ platform: 'win32', pid: 4, version: 'v1.2.3', execPath: "C:\\a'b.exe" }).args.at(-1);
+    assert.doesNotMatch(ps, /に更新します|更新しました|更新できませんでした/);
+    assert.match(ps, /Updating to v1\.2\.3/);
+    assert.match(ps, /Error: update failed/);
+    assert.match(ps, /a''b/);
+
+    agents.setPermissionEndpoint(9, 'tok');
+    const conf = JSON.parse(fs.readFileSync(agents.writeMcpConfig({ id: 'lang' }), 'utf8')).mcpServers.agent_kanban;
+    assert.strictEqual(conf.env.KANBAN_LANGUAGE, 'en');
+    const wslConf = JSON.parse(fs.readFileSync(agents.writeMcpConfig({ id: 'lang-wsl' }, 'Ubuntu'), 'utf8')).mcpServers.agent_kanban;
+    assert.strictEqual(wslConf.env.KANBAN_LANGUAGE, 'en');
+    assert.match(wslConf.env.WSLENV, /KANBAN_LANGUAGE\/u/);
+    const card = { id: 'perm', title: 'perm', status: 'running', repoPath: mergeRepo, logs: [] };
+    store.cards.push(card);
+    const denied = agents.requestPermission({ cardId: 'perm', toolName: 'Bash', input: { command: 'ls' } });
+    agents.answerPermission('perm', card.permissions[0].id, 'deny', '   ');
+    assert.strictEqual((await denied).message, 'The user denied it');
+    const custom = agents.requestPermission({ cardId: 'perm', toolName: 'Bash', input: { command: 'pwd' } });
+    agents.answerPermission('perm', card.permissions[0].id, 'deny', ' 自分の理由 ');
+    assert.strictEqual((await custom).message, '自分の理由', 'ユーザーが書いた理由はそのまま渡す');
+
+    I18n.setLanguage('zh');
+    const refused = explainSshError('Connection refused', { host: '100.1.2.3', user: 'me', sshPort: 22 });
+    assert.doesNotMatch(refused, /请如果/);
+    assert.match(refused, /如果主机是 Mac，请打开/);
+    assert.match(refused, /me@100\.1\.2\.3:22/);
+
+    I18n.setLanguage('ja');
+    assert.strictEqual(providers.cleanRelaySteps([{ agent: 'claude', instruction: 'do' }])[0].label, '工程1');
+    const jaLog = installCommand({ platform: 'darwin', pid: 4, version: '1.2.3', execPath: '/x' }).args[1];
+    assert.match(jaLog, /v1\.2\.3 に更新します/);
+    assert.match(jaLog, /更新しました/);
+    assert.match(jaLog, /エラー: 更新できませんでした/);
+    await assert.rejects(() => git.merge(mergeRepo, 'other', 'm', ''), /マージ先/);
+    global.fetch = async () => ({ ok: false, status: 503 });
+    await assert.rejects(() => fetchIssue(ghRepo, 7), (err) => {
+      assert.match(err.message, /（gh のエラー: auth failed）/);
+      assert.doesNotMatch(err.message, /more detail/);
+      return true;
+    });
+    const jaEmpty = providers.createParser('codex').onEvent({ type: 'item.completed', item: { id: 'j', type: 'command_execution', command: 'true', aggregated_output: '', exit_code: 0, status: 'completed' } });
+    assert.strictEqual(toolResultText(jaEmpty).text, '（終了コード 0）');
+  } finally {
+    process.env.PATH = oldPath;
+    global.fetch = oldFetch;
+    I18n.setLanguage(prev);
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

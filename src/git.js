@@ -115,7 +115,7 @@ async function merge(cwd, branch, message, target) {
     const files = await conflictFiles(cwd).catch(() => []);
     await git(cwd, ['merge', '--abort']).catch(() => {});
     if (files.length) {
-      const e = new Error(tr('{v} へのマージでコンフリクトが起きたため、マージを中止しました（{v2}）', { v: target || 'マージ先', v2: files.join(', ') }));
+      const e = new Error(tr('{v} へのマージでコンフリクトが起きたため、マージを中止しました（{v2}）', { v: target || tr('マージ先'), v2: files.join(', ') }));
       e.conflictFiles = files;
       throw e;
     }

@@ -67,17 +67,21 @@ function installCommand({ platform, pid, version, execPath, env = {} }) {
   if (!/^\d+(\.\d+)*$/.test(v)) throw new Error(tr('版の番号が正しくありません: {version}', { version }));
   const n = parseInt(pid, 10);
   if (!(n > 0)) throw new Error(tr('プロセス番号が正しくありません'));
+  // 入れ替えはアプリ終了後に動くので、スクリプトを作る時点の言語で文を埋め込んでおく
+  const starting = tr('v{v} に更新します', { v });
+  const done = tr('更新しました');
+  const failed = tr('エラー: 更新できませんでした');
   if (platform === 'win32') {
     const script = [
       "$ErrorActionPreference = 'Stop'",
       `Wait-Process -Id ${n} -ErrorAction SilentlyContinue`,
       'Start-Sleep -Milliseconds 500',
-      `Write-Output ("==> v${v} に更新します: " + (Get-Date))`,
+      `Write-Output (${psq(`==> ${starting}: `)} + (Get-Date))`,
       `$env:AGENT_KANBAN_VERSION = ${psq(v)}`,
       'Remove-Item Env:AGENT_KANBAN_NO_LAUNCH -ErrorAction SilentlyContinue',
       // install.ps1 は入れたあとに起動する。入れられなかったときは元のアプリを起動し直す
-      `try { Invoke-RestMethod -Uri ${psq(INSTALL_PS1)} -UseBasicParsing | Invoke-Expression; Write-Output '==> 更新しました' }`,
-      `catch { Write-Output ("エラー: 更新できませんでした: " + $_); Start-Process -FilePath ${psq(execPath)} }`,
+      `try { Invoke-RestMethod -Uri ${psq(INSTALL_PS1)} -UseBasicParsing | Invoke-Expression; Write-Output ${psq(`==> ${done}`)} }`,
+      `catch { Write-Output (${psq(`${failed}: `)} + $_); Start-Process -FilePath ${psq(execPath)} }`,
     ].join('\n');
     return { command: 'powershell.exe', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-Command', script] };
   }
@@ -96,13 +100,13 @@ function installCommand({ platform, pid, version, execPath, env = {} }) {
   const script = [
     `while kill -0 ${n} 2>/dev/null; do sleep 0.5; done`,
     'sleep 0.5',
-    `echo "==> v${v} に更新します: $(date)"`,
+    `echo ${shq(`==> ${starting}:`)} "$(date)"`,
     'set -o pipefail',
     `if curl -fsSL ${shq(INSTALL_SH)} | AGENT_KANBAN_VERSION=${shq(v)} bash; then`,
-    "  echo '==> 更新しました'",
+    `  echo ${shq(`==> ${done}`)}`,
     `  ${relaunchNew}`,
     'else',
-    "  echo 'エラー: 更新できませんでした'",
+    `  echo ${shq(failed)}`,
     `  ${relaunchOld}`,
     'fi',
   ].join('\n');

@@ -199,7 +199,7 @@ function codexParser({ summarize }) {
             started.delete(item.id);
             if (item.type === 'command_execution') {
               const failed = item.status === 'failed' || (item.exit_code != null && item.exit_code !== 0);
-              out.push({ type: 'tool_result', text: trunc(item.aggregated_output || `（終了コード ${item.exit_code ?? '?'}）`, 1500), error: failed });
+              out.push({ type: 'tool_result', text: trunc(item.aggregated_output || tr('（終了コード {code}）', { code: item.exit_code ?? '?' }), 1500), error: failed });
             } else if (item.type === 'mcp_tool_call') {
               const r = item.error ? item.error.message || JSON.stringify(item.error) : JSON.stringify(item.result ?? '');
               out.push({ type: 'tool_result', text: trunc(r, 1500), error: item.status === 'failed' || !!item.error });
@@ -308,7 +308,7 @@ function cursorParser({ summarize }) {
       if (t.kind === 'shell') {
         const out = [ok.stdout, ok.stderr].filter((x) => String(x || '').trim()).join('\n');
         const failed = ok.exitCode != null && ok.exitCode !== 0;
-        return { text: trunc(out || `（終了コード ${ok.exitCode ?? '?'}）`, 1500), error: failed };
+        return { text: trunc(out || tr('（終了コード {code}）', { code: ok.exitCode ?? '?' }), 1500), error: failed };
       }
       if (typeof ok.content === 'string') return { text: trunc(ok.content, 1500), error: false };
       return { text: trunc(typeof ok === 'object' ? JSON.stringify(ok) : String(ok), 1500), error: false };
@@ -316,7 +316,7 @@ function cursorParser({ summarize }) {
     const bad = r.error || r.failure || r.rejected;
     if (bad) {
       const msg = typeof bad === 'string' ? bad : bad.message || bad.error || bad.reason || bad.stderr || JSON.stringify(bad);
-      return { text: trunc(r.rejected ? `拒否されました: ${msg}` : msg, 1500), error: true };
+      return { text: trunc(r.rejected ? tr('拒否されました: {msg}', { msg }) : msg, 1500), error: true };
     }
     return { text: 'ok', error: false };
   };
@@ -433,7 +433,7 @@ function cleanRelaySteps(steps) {
   return base
     .filter((_, i) => map.has(i))
     .map(({ raw, ...x }, i) => {
-      const out = { ...x, label: x.label || `工程${i + 1}` };
+      const out = { ...x, label: x.label || tr('工程{n}', { n: i + 1 }) };
       const onPass = cleanRelayTarget(raw.onPass, map);
       const onFail = cleanRelayTarget(raw.onFail, map);
       if (onPass !== null) out.onPass = onPass;

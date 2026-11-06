@@ -124,7 +124,7 @@ async function fetchIssue(repoPath, number, opts = {}) {
     return { ...(await viaApi(slug, number, token)), slug };
   } catch (err) {
     // gh も API もだめなら、gh のエラーのほうが原因に近いことが多いので添える
-    if (ghError && ghError.stderr) err.message += `\n（gh のエラー: ${String(ghError.stderr).trim().split('\n')[0]}）`;
+    if (ghError && ghError.stderr) err.message += `\n${tr('（gh のエラー: {message}）', { message: String(ghError.stderr).trim().split('\n')[0] })}`;
     throw err;
   }
 }
