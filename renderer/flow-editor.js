@@ -1,5 +1,6 @@
 // Pipelineのフローチャートを編集する画面（設定のモーダルの上に、もう1つのモーダルとして出す）
 // - ノードはドラッグで並べ、下の丸（出口）から別のノードへドラッグすると線をつなぐ
+// - ノードも線もないところをドラッグすると、キャンバスをスクロールする
 // - ノード・線を押すと、右の欄で中身（エージェント・担当の説明・期待値・ループの上限など）を変えられる
 // - 形は FlowModel（flow-model.js）で確かめ、直すところがあるうちは保存できない
 (function (root) {
@@ -72,7 +73,7 @@
         <h2>Pipelineのフローチャート</h2>
         <div class="fe-tools">${ADD.map(([t, l, tip]) => `<button class="btn small fe-add" data-type="${t}" type="button" title="${esc(tip)}">＋ ${esc(l)}</button>`).join('')}</div>
       </div>
-      <p class="muted small fe-help">ノードはドラッグで動かせます。右上のボタンか、⌘（Ctrl）を押しながらのスクロール・ピンチで拡大・縮小できます。ノードの下の丸（出口）から別のノードへドラッグすると、線をつなげます。前のノードへ戻る線を引くとループになり、戻る上限を決められます。ノードや線を選んで Delete キーで消せます。</p>
+      <p class="muted small fe-help">ノードはドラッグで動かせます。何もないところをドラッグすると、スクロールできます。右上のボタンか、⌘（Ctrl）を押しながらのスクロール・ピンチで拡大・縮小できます。ノードの下の丸（出口）から別のノードへドラッグすると、線をつなげます。前のノードへ戻る線を引くとループになり、戻る上限を決められます。ノードや線を選んで Delete キーで消せます。</p>
       <div class="fe-main">
         <div class="fe-canvas-wrap"><div class="fe-canvas" id="feCanvas"><div class="fe-sizer" id="feSizer"><div class="fe-inner" id="feInner"><svg class="fe-svg" id="feSvg"></svg></div></div></div><div class="zoom-host" id="feZoom"></div></div>
         <div class="fe-side" id="feSide"></div>
@@ -398,8 +399,9 @@
       };
     });
 
-    // ---------- ドラッグ（ノードを動かす・線をつなぐ） ----------
+    // ---------- ドラッグ（ノードを動かす・線をつなぐ・スクロールする） ----------
     let drag = null;
+    const PAN_SLOP = 4; // これより小さい動きは、スクロールではなくクリックとして扱う
     const pt = (ev) => {
       const r = inner.getBoundingClientRect();
       return { x: (ev.clientX - r.left) / zoom, y: (ev.clientY - r.top) / zoom };
@@ -422,10 +424,21 @@
         return;
       }
       if (edgeEl) return select({ kind: 'edge', id: edgeEl.dataset.id });
-      if (sel) select(null);
+      // 何もないところ: ドラッグならスクロール、動かさずに離したら選択を外す（onUp）
+      drag = { kind: 'pan', x: ev.clientX, y: ev.clientY, left: canvas.scrollLeft, top: canvas.scrollTop, moved: false };
     };
     const onMove = (ev) => {
       if (!drag) return;
+      if (drag.kind === 'pan') {
+        const dx = ev.clientX - drag.x;
+        const dy = ev.clientY - drag.y;
+        if (!drag.moved && Math.abs(dx) < PAN_SLOP && Math.abs(dy) < PAN_SLOP) return;
+        drag.moved = true;
+        inner.classList.add('panning');
+        canvas.scrollLeft = drag.left - dx;
+        canvas.scrollTop = drag.top - dy;
+        return;
+      }
       const p = pt(ev);
       if (drag.kind === 'move') {
         const n = node(drag.id);
@@ -467,6 +480,11 @@
       if (!drag) return;
       const d = drag;
       drag = null;
+      if (d.kind === 'pan') {
+        inner.classList.remove('panning');
+        if (!d.moved && sel) select(null);
+        return;
+      }
       if (d.kind === 'move') {
         if (d.moved) {
           touch();

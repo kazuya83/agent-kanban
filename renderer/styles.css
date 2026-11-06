@@ -872,7 +872,8 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .fe-canvas-wrap { flex: 1; min-width: 0; position: relative; display: flex; }
 .fe-canvas { flex: 1; min-width: 0; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background-color: var(--bg); background-image: radial-gradient(color-mix(in srgb, var(--muted) 28%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
 .fe-sizer { position: relative; overflow: hidden; }
-.fe-inner { position: relative; user-select: none; transform-origin: 0 0; }
+.fe-inner { position: relative; user-select: none; transform-origin: 0 0; cursor: grab; }
+.fe-inner.panning, .fe-inner.panning * { cursor: grabbing; }
 .fe-svg { position: absolute; left: 0; top: 0; overflow: visible; }
 .fe-edge { cursor: pointer; }
 .fe-edge .fe-hit { fill: none; stroke: transparent; stroke-width: 14; }
