@@ -5,6 +5,10 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.DiffParse = api;
 })(typeof self !== 'undefined' ? self : this, function () {
+  function tr(key, vars) {
+    const api = typeof module === 'object' && module.exports ? require('./i18n.js') : typeof I18n !== 'undefined' ? I18n : null;
+    return api ? api.tr(key, vars) : key;
+  }
   // git が "..." で囲んで C 風にエスケープしたパスを元に戻す
   function unquote(s) {
     if (!s || s[0] !== '"' || s[s.length - 1] !== '"') return s;
@@ -63,7 +67,7 @@
     const lines = String(text || '').split('\n');
     const finish = () => {
       if (!f) return;
-      if (!f.path) f.path = f.newPath || f.oldPath || '(不明)';
+      if (!f.path) f.path = f.newPath || f.oldPath || tr('(不明)');
       if (!f.status) f.status = f.oldPath == null ? 'A' : f.newPath == null ? 'D' : f.oldPath !== f.newPath ? 'R' : 'M';
       files.push(f);
     };
