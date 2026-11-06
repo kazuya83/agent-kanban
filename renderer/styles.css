@@ -987,6 +987,15 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .pg-recent .rw-tool .rw-x { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
 .pg-recent .rw-error .rw-x { color: var(--err); }
 .pg-recent .rw-result .rw-x { color: var(--ok); }
+.rf-rewind { margin-top: 6px; }
+.rf-rewind-note, .rw-blocked { margin: 0 0 6px; color: var(--warn); font-size: 12px; white-space: pre-wrap; }
+.pg-rewind { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.pg-rewind li { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; flex-wrap: wrap; }
+.pg-rewind .rw-main { display: flex; gap: 8px; min-width: 0; flex: 1; align-items: baseline; }
+.pg-rewind .rw-x { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-rewind .rw-t, .pg-rewind .rw-who, .pg-rewind .rw-start, .pg-rewind .rw-seq { flex: none; color: var(--muted); }
+.pg-rewind .rw-t { font-variant-numeric: tabular-nums; }
+.pg-rewind .rw-btn { flex: none; }
 
 /* 進捗タブ: Pipelineのフローチャート（読み取り専用） */
 .pg-chart { overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px; background-color: var(--bg); background-image: radial-gradient(color-mix(in srgb, var(--muted) 22%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
