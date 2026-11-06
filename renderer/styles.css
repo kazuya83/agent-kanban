@@ -629,6 +629,8 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 /* worktree タブ */
 .wt-toolbar { padding: 8px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .wt-toolbar .btn { margin-left: auto; }
+.wt-script-bar { padding: 8px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.wt-script-out { margin: 0; padding: 8px 14px; max-height: 240px; overflow: auto; border-bottom: 1px solid var(--line); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
 .wt { padding-top: 10px; padding-bottom: 6px; }
 .wt h4 { margin: 14px 0 6px; font-size: 12.5px; }
 .wt h4:first-child { margin-top: 0; }

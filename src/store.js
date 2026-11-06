@@ -234,6 +234,9 @@ const DEFAULT_SETTINGS = {
   claudePath: 'claude',
   maxParallel: 3,
   defaultSkill: '', // 新しいタスクを作るときに最初から選んでおくスキル
+  setupScript: '', // worktree を作った直後、エージェントの開始前に動かすスクリプト
+  teardownScript: '', // worktree を消す直前に動かすスクリプト
+  runScript: '', // タスク詳細の「実行」ボタンで動かすスクリプト（開発サーバーなど）
   integration: 'pr', // レビュー後の取り込み方: merge（ローカルで直接マージ） / pr（push してプルリクエストを作る）
   issueStatusSync: true, // Issue から作ったタスクの列に合わせて、GitHub Projects の Status（In progress / In review / Done）を変える
   statusFieldName: '', // Projects で変える項目（単一選択）の名前。空なら「Status」
@@ -307,7 +310,7 @@ const MAX_NOTIFICATIONS = 200;
 
 // ---------- プロジェクト（リポジトリ）ごとの設定 ----------
 // リポジトリに関わる設定だけをプロジェクトごとに持つ。コマンドのパス・モデル・同時に動かす数・自動更新などはアプリ全体で1つ
-const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'subtaskMerge', 'pushAfterMerge', 'relayFlow', 'relayFlows', 'relayFlowId', 'customAgents', 'competeCustomAgents'];
+const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'subtaskMerge', 'pushAfterMerge', 'relayFlow', 'relayFlows', 'relayFlowId', 'customAgents', 'competeCustomAgents', 'setupScript', 'teardownScript', 'runScript'];
 const MAX_REPO_SETTINGS = 200;
 
 // 初めて開いたプロジェクトの設定（初期値。取り込み方は PR を作成。GitHub でないリポジトリは開いたときに直接マージにする）

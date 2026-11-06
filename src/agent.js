@@ -18,6 +18,7 @@ const { agentLabel, agentShort } = providers;
 const { isNoGitRepo, cleanRelayFlow, pipelineOf } = require('./store');
 const FlowModel = require('../renderer/flow-model');
 const Subtasks = require('./subtasks');
+const { SCRIPT_KINDS, SCRIPT_SETTINGS, cleanScript, appendOutput, startScript } = require('./worktree-scripts');
 const I18n = require('../renderer/i18n');
 const { tr } = I18n;
 
@@ -699,6 +700,19 @@ function userLogExtra(skill, atts, parsed) {
   return Object.keys(extra).length ? extra : undefined;
 }
 
+const TEARDOWN_TIMEOUT_MS = 5 * 60 * 1000; // 片付けが止まらなくても、マージや破棄を待たせ続けない
+
+function scriptPassed(run) {
+  return run.code === 0 && !run.stopped && !run.timedOut;
+}
+
+function scriptFailReason(run) {
+  if (run.stopped) return tr('止めました');
+  if (run.timedOut) return tr('時間切れ');
+  if (run.error) return run.error;
+  return run.code === null ? tr('シグナル {signal}', { signal: run.signal || '?' }) : tr('終了コード {code}', { code: run.code });
+}
+
 function killTree(child) {
   if (!child || child.exitCode !== null) return;
   if (child.viaWsl) {
@@ -726,6 +740,7 @@ class AgentManager extends EventEmitter {
     this.store = store;
     this.opts = opts;
     this.procs = new Map(); // cardId -> child process
+    this.scriptRuns = new Map(); // cardId -> 最後に動かしたスクリプト（セットアップ・片付け・実行）
     this.pending = new Map(); // permission request id -> { cardId, toolName, input, resolve }
     this.permission = null; // { port, token }
     // 指示に添付したファイルの置き場所（作業フォルダの外）
@@ -831,13 +846,15 @@ class AgentManager extends EventEmitter {
     this.shuttingDown = true;
     this.unwatchPullRequests();
     const runs = [...(this.runs || new Map()).values()];
+    // スクリプトは別のプロセスグループで動くので、止めないとアプリの終了後も残る
+    const scripts = [...this.scriptRuns.values()].filter((r) => r.running).map((r) => r.handle.stop());
     for (const [id, child] of this.procs) {
       const c = this.store.card(id);
       if (c) this.log(c, 'system',tr('アプリを終了するため中断しました。次に起動したときに「再開」できます'));
       this.denyAllPending(id, tr('アプリを終了します'));
       killTree(child);
     }
-    const done = Promise.all(runs.map((r) => r.done));
+    const done = Promise.all([...runs.map((r) => r.done), ...scripts]);
     await Promise.race([done, new Promise((r) => setTimeout(r, timeoutMs).unref())]);
     this.store.flush();
   }
@@ -1758,7 +1775,8 @@ class AgentManager extends EventEmitter {
         // 親はまだ開始前: 親のブランチだけ作って、親のエージェントは動かさない（順番は決めずに、手で進める）
         this.log(p, 'user', p.prompt, userLogExtra(p.skill, p.attachments, p.attachmentsParsed));
         delete p.attachmentsParsed;
-        await this.prepareWorktree(p);
+        if (p.worktreePath && fs.existsSync(p.worktreePath)) await this.ensureSetup(p); // 前回セットアップが失敗した
+        else await this.prepareWorktree(p);
         if (!this.store.card(id)) return;
         p.status = 'review';
         p.startedAt = Date.now();
@@ -2380,7 +2398,15 @@ class AgentManager extends EventEmitter {
       return;
     }
     const child = this.procs.get(id);
-    if (!child) throw new Error(tr('実行中ではありません'));
+    if (!child) {
+      // エージェントの開始前にセットアップスクリプトが動いているところ
+      const run = this.scriptRuns.get(id);
+      if (run?.running && run.auto) {
+        run.handle.stop();
+        return;
+      }
+      throw new Error(tr('実行中ではありません'));
+    }
     c.stopRequested = true;
     this.denyAllPending(id, tr('停止されました'));
     killTree(child);
@@ -2446,7 +2472,105 @@ class AgentManager extends EventEmitter {
       delete c.reopenFrom;
     }
     this.log(c, 'system',tr('worktree を作成しました: {wt}（ブランチ {branch} / ベース {base}）', { wt, branch, base }));
+    c.setupPending = !!this.scriptOf(c, 'setup');
     this.changed(c);
+    await this.ensureSetup(c);
+  }
+
+  // ---------- worktree のスクリプト（セットアップ・片付け・実行） ----------
+
+  scriptOf(c, kind) {
+    return cleanScript(this.store.repoSettings(c.repoPath)[SCRIPT_SETTINGS[kind]]);
+  }
+
+  scriptEnv(c) {
+    const p = (dir) => (wsl.isWslPath(dir) ? wsl.toLinux(dir) : dir);
+    return {
+      WORKTREE_KANBAN_ROOT: p(c.repoPath),
+      WORKTREE_KANBAN_WORKTREE: p(c.worktreePath),
+      WORKTREE_KANBAN_BRANCH: c.branch || '',
+      WORKTREE_KANBAN_BASE_BRANCH: c.baseBranch || '',
+      WORKTREE_KANBAN_TASK_ID: c.id,
+    };
+  }
+
+  // 1つのタスクで同時に動かすスクリプトは1つだけ（出力の表示も1つ）
+  execScript(c, kind, script, { auto = false, timeoutMs = 0 } = {}) {
+    const run = { kind, auto, running: true, output: '', startedAt: Date.now(), endedAt: null, code: null, signal: null, stopped: false, timedOut: false, error: null };
+    run.handle = startScript({ cwd: c.worktreePath, script, env: this.scriptEnv(c), timeoutMs, onOutput: (text) => (run.output = appendOutput(run.output, text)) });
+    this.scriptRuns.set(c.id, run);
+    return run.handle.done.then((r) => {
+      Object.assign(run, r, { running: false, endedAt: Date.now() });
+      return run;
+    });
+  }
+
+  async stopRunningScript(id) {
+    const run = this.scriptRuns.get(id);
+    if (run?.running) await run.handle.stop();
+  }
+
+  // セットアップが済んでいなければ動かす。失敗したら throw して、エージェントを始めない（タスクはエラーになる）
+  async ensureSetup(c) {
+    if (!c.setupPending) return;
+    const script = this.scriptOf(c, 'setup');
+    if (!script) {
+      delete c.setupPending;
+      return;
+    }
+    await this.stopRunningScript(c.id);
+    this.log(c, 'system', tr('セットアップスクリプトを実行します'));
+    this.changed(c);
+    const run = await this.execScript(c, 'setup', script, { auto: true });
+    if (!scriptPassed(run)) throw new Error(tr('セットアップスクリプトが失敗したので、エージェントは開始していません（{reason}）。\n{output}', { reason: scriptFailReason(run), output: run.output.slice(-2000).trim() }));
+    delete c.setupPending;
+    this.log(c, 'system', tr('セットアップスクリプトが終わりました'));
+    this.changed(c);
+  }
+
+  // 片付けスクリプトを動かしてから worktree を消す。片付けが失敗しても worktree は消す
+  async removeWorktreeOf(c, top) {
+    await this.stopRunningScript(c.id);
+    const script = this.scriptOf(c, 'teardown');
+    if (script && fs.existsSync(c.worktreePath)) {
+      this.log(c, 'system', tr('片付けスクリプトを実行します'));
+      const run = await this.execScript(c, 'teardown', script, { auto: true, timeoutMs: this.opts.teardownTimeoutMs || TEARDOWN_TIMEOUT_MS });
+      if (scriptPassed(run)) this.log(c, 'system', tr('片付けスクリプトが終わりました'));
+      else this.log(c, 'error', tr('片付けスクリプトが失敗しましたが、worktree は消します（{reason}）。\n{output}', { reason: scriptFailReason(run), output: run.output.slice(-2000).trim() }));
+    }
+    await git.removeWorktree(top, c.worktreePath);
+    this.scriptRuns.delete(c.id);
+  }
+
+  scriptState(id) {
+    const c = this.must(id);
+    const scripts = Object.fromEntries(SCRIPT_KINDS.map((k) => [k, !!this.scriptOf(c, k)]));
+    const r = this.scriptRuns.get(id);
+    const run = r ? { kind: r.kind, auto: r.auto, running: r.running, output: r.output, startedAt: r.startedAt, endedAt: r.endedAt, code: r.code, stopped: r.stopped, timedOut: r.timedOut, error: r.error } : null;
+    return { scripts, run };
+  }
+
+  // 画面のボタンから動かす。終わるのは待たない（出力と結果は scriptState で見る）
+  startScriptNow(id, kind) {
+    const c = this.must(id);
+    if (!SCRIPT_KINDS.includes(kind)) throw new Error(tr('スクリプトの種類が正しくありません'));
+    if (isChat(c) || isNoGit(c) || !c.worktreePath || !fs.existsSync(c.worktreePath)) throw new Error(tr('worktree がありません'));
+    if (this.merging?.has(id)) throw new Error(tr('処理中です'));
+    if (this.scriptRuns.get(id)?.running) throw new Error(tr('ほかのスクリプトが動いています'));
+    const script = this.scriptOf(c, kind);
+    if (!script) throw new Error(tr('スクリプトが設定されていません'));
+    this.execScript(c, kind, script).then((run) => {
+      if (kind !== 'setup' || !scriptPassed(run) || !this.store.card(id)) return;
+      // 手で直してセットアップが通ったら、再開したときにもう一度は動かさない
+      delete c.setupPending;
+      this.changed(c);
+    });
+    return this.scriptState(id);
+  }
+
+  async stopScriptNow(id) {
+    await this.stopRunningScript(this.must(id).id);
+    return this.scriptState(id);
   }
 
   /**
@@ -2635,6 +2759,7 @@ class AgentManager extends EventEmitter {
     if (inFolder) {
       if (!c.repoPath || !fs.existsSync(c.repoPath)) throw new Error(isNoGit(c) ? tr('フォルダが見つかりません: {path}', { path: c.repoPath }) : tr('リポジトリのフォルダが見つかりません: {path}', { path: c.repoPath }));
     } else if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
+    else await this.ensureSetup(c); // 前回セットアップが失敗したタスクをやり直すとき
     const cwd = inFolder ? c.repoPath : c.worktreePath;
     const s = this.store.settings;
     const rs = this.store.repoSettings(c.repoPath); // 権限モード・許可しておくツールは、そのタスクのプロジェクトの設定
@@ -3418,7 +3543,7 @@ class AgentManager extends EventEmitter {
         this.changed(c);
         return { merged: true };
       }
-      await git.removeWorktree(top, c.worktreePath);
+      await this.removeWorktreeOf(c, top);
       await git.deleteBranch(top, c.branch);
       c.finalDiff = truncate(finalDiff, 300000);
       c.worktreePath = null;
@@ -3504,7 +3629,7 @@ class AgentManager extends EventEmitter {
       const finalDiff = await git.diff(c.worktreePath, c.baseCommit);
       if (opts.keep === false) {
         // ブランチは origin に残っているので、ローカルの worktree とブランチは片付ける
-        await git.removeWorktree(top, c.worktreePath);
+        await this.removeWorktreeOf(c, top);
         await git.deleteBranch(top, c.branch);
         c.finalDiff = truncate(finalDiff, 300000);
         c.worktreePath = null;
@@ -3611,7 +3736,15 @@ class AgentManager extends EventEmitter {
       }
       const top = c.repoPath;
       const finalDiff = await git.diff(c.worktreePath, c.baseCommit).catch(() => '');
-      await git.removeWorktree(top, c.worktreePath);
+      // 片付けスクリプトのあいだに、次の見回りが同じタスクを片付けないようにする
+      this.merging = this.merging || new Set();
+      this.merging.add(c.id);
+      try {
+        await this.removeWorktreeOf(c, top);
+      } finally {
+        this.merging.delete(c.id);
+      }
+      if (!this.store.card(c.id)) return false;
       await git.deleteBranch(top, c.branch);
       c.finalDiff = truncate(finalDiff, 300000);
       c.worktreePath = null;
@@ -3911,7 +4044,9 @@ class AgentManager extends EventEmitter {
       killTree(child);
       await new Promise((r) => (child.exitCode !== null ? r() : child.once('close', r)));
     }
-    if (c.worktreePath) await git.removeWorktree(c.repoPath, c.worktreePath);
+    if (c.worktreePath) await this.removeWorktreeOf(c, c.repoPath);
+    else await this.stopRunningScript(id);
+    this.scriptRuns.delete(id);
     if (c.branch && c.status !== 'done' && !c.afterDone) await git.deleteBranch(c.repoPath, c.branch);
     fs.rmSync(path.join(this.opts.mcpDir, `${id}.json`), { force: true });
     attachments.removeCardAttachments(this.attachRoot, id);
