@@ -173,3 +173,120 @@ test('担当範囲の表示文は tr の外に残っていない', () => {
   for (const m of stripped.matchAll(/`([^`]*)`/g)) if (HAS_JP.test(m[1])) left.push(m[1].slice(0, 40));
   assert.deepStrictEqual(left, []);
 });
+
+const PUNCT = /[・「」（）]/;
+
+function grab(src, startName, endName) {
+  const s = src.indexOf(`function ${startName}(`);
+  const e = src.indexOf(`function ${endName}(`);
+  assert.ok(s >= 0 && e > s, startName);
+  return src.slice(s, e);
+}
+
+test('括弧と区切りは tr の中にあり、英西仏の訳では全角のまま残らない', () => {
+  const src = boardSrc();
+  const noComment = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const stripped = noComment.replace(/tr\(\s*'(?:\\.|[^'\\])*'/g, "tr(''");
+  assert.strictEqual(stripped.match(/[^\n]*[・「」（）][^\n]*/)?.[0] || '', '');
+
+  const keys = ownKeys();
+  for (const lang of ['en', 'es', 'fr']) {
+    I18n.setLanguage(lang);
+    for (const key of keys) assert.ok(!PUNCT.test(I18n.tr(key)), `${lang}: ${key.slice(0, 80)}`);
+  }
+
+  const bar = '<span class="rb-seg rs-{stt}" title="{n}. {label}（{who}）: {state}"></span>';
+  const li = '<li><a href="#" data-open-card="{id}">{label}</a>（{who}・{st}）</li>';
+  const elapsed = '（<span class="elapsed" data-since="{since}">{elapsed}</span>）';
+  const chip = keys.find((k) => k.includes('attach-chip') && k.includes('（{v}）'));
+  const progress = keys.find((k) => k.includes('{counts} ・ {v}'));
+  assert.ok(chip && progress);
+
+  I18n.setLanguage('ja');
+  assert.strictEqual(I18n.tr('{name}（{cli}）', { name: 'Pat', cli: 'Claude' }), 'Pat（Claude）');
+  assert.strictEqual(I18n.tr('「{name}」', { name: '設計' }), '「設計」');
+  assert.strictEqual(I18n.tr('{a}・{b}', { a: '「設計」', b: '「実装」' }), '「設計」・「実装」');
+  assert.strictEqual(I18n.tr('（{at}）', { at: '09:00' }), '（09:00）');
+  assert.strictEqual(I18n.tr('完了 {n}', { n: 0 }), '完了 0');
+  assert.strictEqual(I18n.tr(bar, { stt: 'running', n: 1, label: 'L', who: 'C', state: '実行中' }), '<span class="rb-seg rs-running" title="1. L（C）: 実行中"></span>');
+
+  I18n.setLanguage('en');
+  assert.strictEqual(I18n.tr('{name}（{cli}）', { name: 'Pat', cli: 'Claude' }), 'Pat (Claude)');
+  assert.strictEqual(I18n.tr('「{name}」', { name: 'Design' }), '“Design”');
+  assert.strictEqual(I18n.tr('{a}・{b}', { a: '“Design”', b: '“Build”' }), '“Design” · “Build”');
+  assert.strictEqual(I18n.tr(' ・ '), ' · ');
+  assert.strictEqual(I18n.tr('（{at}）', { at: '' }), ' ()');
+  assert.strictEqual(I18n.tr('{name}（{cli}）', {}), '{name} ({cli})');
+  assert.strictEqual(I18n.tr('{name}（{cli}）', { name: 'A<B>', cli: 'C"D', extra: 1 }), 'A<B> (C"D)');
+  assert.strictEqual(I18n.tr('完了 {n}', { n: 0 }), 'Done 0');
+  assert.strictEqual(I18n.tr('完了 {n}', { n: '' }), 'Done ');
+  assert.strictEqual(I18n.tr(bar, { stt: 'running', n: 2, label: 'A&amp;B', who: 'Pat', state: 'Running' }), '<span class="rb-seg rs-running" title="2. A&amp;B (Pat): Running"></span>');
+  assert.strictEqual(I18n.tr(li, { id: 'a&quot;b', label: 'Branch', who: 'Claude', st: 'Review' }), '<li><a href="#" data-open-card="a&quot;b">Branch</a> (Claude · Review)</li>');
+  assert.strictEqual(I18n.tr(elapsed, { since: '12', elapsed: '1 min' }), ' (<span class="elapsed" data-since="12">1 min</span>)');
+  assert.match(I18n.tr(chip, { name: 'a.txt', v: '1 KB', v2: '', i: 0 }), /title="a\.txt \(1 KB\)"/);
+  assert.match(I18n.tr(progress), /\{counts\} · \{v\}/);
+  assert.ok(!I18n.tr(progress).includes('・'));
+
+  I18n.setLanguage('es');
+  assert.strictEqual(I18n.tr('「{name}」', { name: 'Diseño' }), '«Diseño»');
+  assert.strictEqual(I18n.tr(li, { id: '1', label: 'Rama', who: 'Claude', st: 'Revisión' }), '<li><a href="#" data-open-card="1">Rama</a> (Claude · Revisión)</li>');
+  I18n.setLanguage('fr');
+  assert.strictEqual(I18n.tr('「{name}」', { name: 'Plan' }), '« Plan »');
+  assert.strictEqual(I18n.tr(bar, { stt: 'done', n: 3, label: 'L', who: 'C', state: 'Terminé' }), '<span class="rb-seg rs-done" title="3. L (C) : Terminé"></span>');
+  assert.strictEqual(I18n.setLanguage('EN'), 'fr');
+  assert.strictEqual(I18n.tr('「{name}」', { name: 'Plan' }), '« Plan »');
+
+  I18n.setLanguage('zh');
+  assert.strictEqual(I18n.tr('{name}（{cli}）', { name: 'Pat', cli: 'Claude' }), 'Pat（Claude）');
+  assert.strictEqual(I18n.tr('「{name}」', { name: '设计' }), '「设计」');
+  assert.strictEqual(I18n.tr('{a}・{b}', { a: '甲', b: '乙' }), '甲、乙');
+  assert.strictEqual(I18n.tr(bar, { stt: 'pending', n: 1, label: 'L', who: 'C', state: '等待' }), '<span class="rb-seg rs-pending" title="1. L（C）：等待"></span>');
+  assert.strictEqual(I18n.tr(li, { id: '1', label: '分支', who: 'Claude', st: '审查' }), '<li><a href="#" data-open-card="1">分支</a>（Claude、审查）</li>');
+  assert.strictEqual(I18n.tr(elapsed, { since: '12', elapsed: '1 分钟' }), '（<span class="elapsed" data-since="12">1 分钟</span>）');
+  assert.match(I18n.tr(chip, { name: 'a.txt', v: '1 KB', v2: '', i: 0 }), /title="a\.txt（1 KB）"/);
+  assert.match(I18n.tr(progress), /\{counts\} · \{v\}/);
+  I18n.setLanguage('ja');
+});
+
+test('名前の列と箇条書きの区切りは、空や1件でも崩れない', () => {
+  const src = boardSrc();
+  const { joinMid, quoteNames } = new Function('tr', `${grab(src, 'joinMid', 'stepWho')}\nreturn { joinMid, quoteNames };`)(I18n.tr);
+  const { plainText } = new Function('tr', `${grab(src, 'plainText', 'card')}\nreturn { plainText };`)(I18n.tr);
+  assert.strictEqual(src.match(/quoteNames\(x\.after\.map\(\(a\) => esc\(title\.get\(a\) \|\| a\)\)\)/g).length, 3);
+  assert.match(src, /tr\('「\{name\}」', \{ name: esc\(r\.pipeline\.name\) \}\)/);
+  assert.match(src, /tr\('<span class="muted small">（\{at\}）<\/span>', \{ at: esc\(/);
+  assert.match(src, /tr\('（\{at\}）', \{ at: esc\(hhmm\(x\.mergedAt\)\) \}\)/);
+  assert.match(src, /label: esc\(st\.label\),\s*who: esc\(whoShort\(st\.agent, st\.persona\)\),\s*state: esc\(RELAY_STATE\[stt\]\[1\]\)/);
+  assert.match(src, /id: esc\(k\.id\), label: esc\(k\.relay\.branchOf\.label\), who: esc\(agentShort\(agentOf\(k\)\)\), st: esc\(st\)/);
+
+  I18n.setLanguage('ja');
+  assert.strictEqual(joinMid(null), '');
+  assert.strictEqual(joinMid(undefined), '');
+  assert.strictEqual(joinMid([]), '');
+  assert.strictEqual(joinMid(['だけ']), 'だけ');
+  assert.strictEqual(joinMid(['A', 'B', 'C']), 'A・B・C');
+  assert.strictEqual(joinMid(['', '']), '・');
+  assert.strictEqual(quoteNames(null), '');
+  assert.strictEqual(quoteNames([]), '');
+  assert.strictEqual(quoteNames(['設計']), '「設計」');
+  assert.strictEqual(quoteNames(['設計', '実装']), '「設計」・「実装」');
+  assert.strictEqual(quoteNames(['<b>']), '「<b>」');
+  assert.strictEqual(plainText(null), '');
+  assert.strictEqual(plainText(''), '');
+  assert.strictEqual(plainText('-'), '-');
+  assert.strictEqual(plainText('- 実行中\n* 次\n+ 最後'), '・実行中 ・次 ・最後');
+  assert.strictEqual(plainText('```\n- hidden\n```'), '');
+
+  I18n.setLanguage('en');
+  assert.strictEqual(joinMid(['A', 'B', 'C']), 'A · B · C');
+  assert.strictEqual(joinMid([0, false]), '0 · false');
+  assert.strictEqual(quoteNames(['Design', 'Build']), '“Design” · “Build”');
+  assert.strictEqual(quoteNames(['']), '“”');
+  assert.strictEqual(plainText('- 実行中\n* 次'), '·実行中 ·次');
+  I18n.setLanguage('zh');
+  assert.strictEqual(joinMid(['甲', '乙']), '甲、乙');
+  assert.strictEqual(quoteNames(['设计', '实现']), '「设计」、「实现」');
+  assert.strictEqual(I18n.setLanguage(''), 'zh');
+  assert.strictEqual(quoteNames(['设计']), '「设计」');
+  I18n.setLanguage('ja');
+});

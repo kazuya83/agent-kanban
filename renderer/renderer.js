@@ -78,10 +78,19 @@ function personaIcon(p, agent) {
 }
 // 担当の呼び名（カスタムエージェントなら「名前（CLI）」）
 function whoLabel(agent, p) {
-  return p && p.name ? `${p.name}（${agentShort(agent)}）` : agentLabel(agent);
+  return p && p.name ? tr('{name}（{cli}）', { name: p.name, cli: agentShort(agent) }) : agentLabel(agent);
 }
 function whoShort(agent, p) {
   return p && p.name ? p.name : agentShort(agent);
+}
+// 複数の表示を言語の区切りでつなぐ。1件なら区切りは出さない。空なら空文字
+function joinMid(parts) {
+  if (!parts || !parts.length) return '';
+  return parts.slice(1).reduce((a, b) => tr('{a}・{b}', { a, b }), parts[0]);
+}
+// 名前をかぎ括弧で囲んでつなぐ。HTML へ入れる名前は、呼び出し側で esc してから渡す
+function quoteNames(names) {
+  return joinMid((names || []).map((name) => tr('「{name}」', { name })));
 }
 // Pipelineの工程のノードの、動かすエージェント・プロフィール（カスタムエージェントの工程は、今の設定のものを引く）
 function stepWho(n, list = customAgents()) {
@@ -129,7 +138,7 @@ function plainText(md) {
     .map((l) =>
       l
         .replace(/^#{1,6}\s+/, '')
-        .replace(/^[-*+]\s+/, '・')
+        .replace(/^[-*+]\s+/, tr('・'))
         .replace(/^\d+\.\s+/, '')
         .replace(/^>\s?/, '')
         .replace(/^\||\|$/g, '')
@@ -870,7 +879,7 @@ async function answer(cardId, reqId, decision, message) {
 function interruptedBoxHtml(c) {
   const it = c.interrupted;
   const how = it.kind === 'queued' ? tr('待機中だった指示を、そのままもう一度渡して始めます。') : c.sessionId ? tr('同じ会話の続きとして、中断したところから作業を続けてもらいます。') : tr('最後に渡した指示で、もう一度始めます。');
-  return tr('<div class="int-box">\n    <b>{v}アプリの終了で中断されました</b>{v2}\n    <p class="small">{how}別の指示で続けたいときは、下の欄から追加指示を送ってください。</p>\n    <div class="cf-actions"><button class="btn primary" data-act="resume">{v3}再開</button><button class="btn ghost" data-act="dismissInterrupted" title="再開せずに、中断の表示だけ消します">再開しない</button></div>\n  </div>', { v: (icon('pause')), v2: (it.at ? `<span class="muted small">（${esc(new Date(it.at).toLocaleString(I18n.locale()))}）</span>` : ''), how: (esc(how)), v3: (icon('play')) });
+  return tr('<div class="int-box">\n    <b>{v}アプリの終了で中断されました</b>{v2}\n    <p class="small">{how}別の指示で続けたいときは、下の欄から追加指示を送ってください。</p>\n    <div class="cf-actions"><button class="btn primary" data-act="resume">{v3}再開</button><button class="btn ghost" data-act="dismissInterrupted" title="再開せずに、中断の表示だけ消します">再開しない</button></div>\n  </div>', { v: (icon('pause')), v2: (it.at ? tr('<span class="muted small">（{at}）</span>', { at: esc(new Date(it.at).toLocaleString(I18n.locale())) }) : ''), how: (esc(how)), v3: (icon('play')) });
 }
 
 // 前回の終了で中断されたタスクがあれば、ボードの上に「すべて再開」を出す
@@ -976,7 +985,7 @@ function closeDetailOrBack() {
 
 // Pipelineの工程の状態（ワークフロー表示用）
 const RELAY_STATE = {
-  pending: ['・', tr('待ち')],
+  pending: [tr('・'), tr('待ち')],
   queued: ['…', tr('待機中')],
   running: ['▶', tr('実行中')],
   question: ['?', tr('質問中')],
@@ -1024,7 +1033,16 @@ function hhmm(t) {
 // ボードのカード: 工程の数だけ区切った進み具合のバー
 function relayBarHtml(c) {
   const r = c.relay;
-  const segs = r.steps.map((st, i) => `<span class="rb-seg rs-${relayStepState(c, i)}" title="${i + 1}. ${esc(st.label)}（${esc(whoShort(st.agent, st.persona))}）: ${RELAY_STATE[relayStepState(c, i)][1]}"></span>`);
+  const segs = r.steps.map((st, i) => {
+    const stt = relayStepState(c, i);
+    return tr('<span class="rb-seg rs-{stt}" title="{n}. {label}（{who}）: {state}"></span>', {
+      stt,
+      n: i + 1,
+      label: esc(st.label),
+      who: esc(whoShort(st.agent, st.persona)),
+      state: esc(RELAY_STATE[stt][1]),
+    });
+  });
   return `<div class="relay-bar">${segs.join('')}</div>`;
 }
 
@@ -1070,7 +1088,7 @@ function relayFlowHtml(c) {
     const judgeHtml = judge
       ? tr('<div class="rf-info">分岐「{label}」: {v}{v2}</div>', { label: (esc(judge.node.label)), v: (FlowModel.outEdges(r.flow, judge.node.id)
           .map((e) => `${esc(e.value || tr('それ以外'))}${e.value && e.else ? tr('（それ以外も）') : ''} → ${esc(tgt(e))}${back.has(e.id) && (r.counts || {})[e.id] ? tr('（戻った回数 {v}/{v2}）', { v: (r.counts[e.id]), v2: (e.maxLoops || 3) }) : ''}`)
-          .join(' ・ ')), v2: (result ? ` <span class="rf-verdict v-${result === 'fail' ? 'fail' : result === 'pass' ? 'pass' : 'other'}">${esc(result === 'fail' ? tr('差し戻し') : result === 'pass' ? tr('合格') : result)}</span>` : '') })
+          .join(tr(' ・ '))), v2: (result ? ` <span class="rf-verdict v-${result === 'fail' ? 'fail' : result === 'pass' ? 'pass' : 'other'}">${esc(result === 'fail' ? tr('差し戻し') : result === 'pass' ? tr('合格') : result)}</span>` : '') })
       : '';
     const key = `${c.id}:${i}`;
     const report = prev && String(prev.report || '').trim()
@@ -1080,14 +1098,14 @@ function relayFlowHtml(c) {
       <span class="rf-dot">${mark}</span>
       <div class="rf-body">
         <div class="rf-head"><b>${i + 1}. ${esc(st.label)}</b>${h && h.branch ? tr(' <span class="rf-branch">並列の枝</span>') : ''} <span class="rf-agent">${personaIcon(st.persona, st.agent)}${esc(whoLabel(st.agent, st.persona))}${st.model ? ` / ${esc(st.model)}` : ''}</span> <span class="rf-state">${label}</span></div>
-        ${info.length ? `<div class="rf-info">${info.join(' ・ ')}</div>` : ''}
+        ${info.length ? `<div class="rf-info">${info.join(tr(' ・ '))}</div>` : ''}
         ${judgeHtml}
         ${st.instruction ? `<div class="rf-inst" title="${esc(st.instruction)}">${esc(st.instruction)}</div>` : ''}
         ${report}
       </div>
     </li>`;
   });
-  return tr('<div class="relay-flow"><div class="rf-title">{v}Pipeline{v2} <span class="muted small">{doneN}/{length} 工程が完了{v3}{v4}</span></div>{v5}<ol class="rf-list">{v6}</ol></div>', { v: (icon('pipeline')), v2: (r.pipeline && r.pipeline.name && r.pipeline.name !== 'Pipeline' ? `「${esc(r.pipeline.name)}」` : ''), doneN, length: (r.steps.length), v3: (loopN ? tr('・ループ {loopN} 回', { loopN }) : ''), v4: (r.limitReached ? tr('・ループの上限で終了') : ''), v5: (relayWaitHtml(c)), v6: (nodes.join('')) });
+  return tr('<div class="relay-flow"><div class="rf-title">{v}Pipeline{v2} <span class="muted small">{doneN}/{length} 工程が完了{v3}{v4}</span></div>{v5}<ol class="rf-list">{v6}</ol></div>', { v: (icon('pipeline')), v2: (r.pipeline && r.pipeline.name && r.pipeline.name !== 'Pipeline' ? tr('「{name}」', { name: esc(r.pipeline.name) }) : ''), doneN, length: (r.steps.length), v3: (loopN ? tr('・ループ {loopN} 回', { loopN }) : ''), v4: (r.limitReached ? tr('・ループの上限で終了') : ''), v5: (relayWaitHtml(c)), v6: (nodes.join('')) });
 }
 
 // ---------------- サブタスク ----------------
@@ -1224,7 +1242,7 @@ function subtaskApproveHtml(c) {
 }
 // サブタスクの一覧を編集する欄（提案を直す・開始前に決める）
 function subRowHtml(x, title = new Map(), showAfter = false) {
-  return tr('<div class="sub-row" data-key="{v}" data-after="{v2}" data-issue="{v3}">\n      <div class="sub-row-head"><input class="sub-title" placeholder="サブタスクの名前" value="{v4}" />{v5}<button class="icon" type="button" data-sact="remove" title="このサブタスクを外す">✕</button></div>\n      <textarea class="sub-prompt" rows="3" placeholder="このサブタスクでやること">{v6}</textarea>\n      {v7}\n    </div>', { v: (esc(x.key || '')), v2: (esc(JSON.stringify(x.after || []))), v3: (esc(x.issue ? JSON.stringify(x.issue) : '')), v4: (esc(x.title || '')), v5: (x.issue ? `<span class="muted small">#${x.issue.number}</span>` : ''), v6: (esc(x.prompt || '')), v7: (showAfter && x.after && x.after.length ? tr('<small class="muted">{v} のあとに始めます</small>', { v: (x.after.map((a) => `「${esc(title.get(a) || a)}」`).join('・')) }) : '') });
+  return tr('<div class="sub-row" data-key="{v}" data-after="{v2}" data-issue="{v3}">\n      <div class="sub-row-head"><input class="sub-title" placeholder="サブタスクの名前" value="{v4}" />{v5}<button class="icon" type="button" data-sact="remove" title="このサブタスクを外す">✕</button></div>\n      <textarea class="sub-prompt" rows="3" placeholder="このサブタスクでやること">{v6}</textarea>\n      {v7}\n    </div>', { v: (esc(x.key || '')), v2: (esc(JSON.stringify(x.after || []))), v3: (esc(x.issue ? JSON.stringify(x.issue) : '')), v4: (esc(x.title || '')), v5: (x.issue ? `<span class="muted small">#${x.issue.number}</span>` : ''), v6: (esc(x.prompt || '')), v7: (showAfter && x.after && x.after.length ? tr('<small class="muted">{v} のあとに始めます</small>', { v: quoteNames(x.after.map((a) => esc(title.get(a) || a))) }) : '') });
 }
 function subEditorHtml(items, { showAfter = false } = {}) {
   const title = new Map(items.map((x) => [x.key, x.title]));
@@ -1274,7 +1292,12 @@ function subtaskProgressHtml(c) {
   if (!hasSubtasks(c)) return '';
   const n = subCounts(c);
   const pct = subDonePct(n);
-  const counts = [[tr('完了'), n.done], [tr('作業中'), n.running], [tr('未着手'), n.pending], [tr('破棄'), n.skipped]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join('・');
+  const counts = joinMid([
+    n.done ? tr('完了 {n}', { n: n.done }) : '',
+    n.running ? tr('作業中 {n}', { n: n.running }) : '',
+    n.pending ? tr('未着手 {n}', { n: n.pending }) : '',
+    n.skipped ? tr('破棄 {n}', { n: n.skipped }) : '',
+  ].filter(Boolean));
   const active = c.subtasks.items.filter((x) => x.state === 'running' || x.state === 'review').map((x) => {
     const [mark, label] = subStateInfo(subItemState(c, x));
     return `<li><span class="td-mark" title="${esc(label)}">${mark}</span><span class="td-text">${esc(x.title)}</span> <span class="muted small">${esc(label)}</span></li>`;
@@ -1305,7 +1328,7 @@ function subBoardHtml(c) {
       const k = x.cardId && x.state === 'running' ? card(x.cardId) : null;
       const info = [];
       if (x.issue) info.push(`<a class="issue-chip" data-url="${esc(x.issue.url)}">#${x.issue.number}</a>`);
-      if (x.after && x.after.length) info.push(tr('<span class="muted small" title="自動で進めるときの順番です。サブタスクだけ開始するときは、順番に関係なく始められます">{v} のあと（目安）</span>', { v: (x.after.map((a) => `「${esc(title.get(a) || a)}」`).join('・')) }));
+      if (x.after && x.after.length) info.push(tr('<span class="muted small" title="自動で進めるときの順番です。サブタスクだけ開始するときは、順番に関係なく始められます">{v} のあと（目安）</span>', { v: quoteNames(x.after.map((a) => esc(title.get(a) || a))) }));
       if (x.manual) info.push(tr('<span class="muted small">個別に開始</span>'));
       if (k) info.push(`<span class="rf-agent">${personaIcon(k.persona, agentOf(k))}${esc(whoShort(agentOf(k), k.persona))}</span>`);
       else if (x.agent) info.push(`<span class="rf-agent">${esc(agentShort(x.agent))}</span>`);
@@ -1384,10 +1407,10 @@ function openSubtaskDetail(p, x, { editing = false } = {}) {
   const startable = x.state === 'pending' && p.status !== 'running' && p.status !== 'queued' && p.status !== 'done' && !p.conflict;
   const rows = [tr('<dt>状態</dt><dd><span class="rf-state">{label}</span></dd>', { label: (esc(label)) })];
   if (x.issue) rows.push(`<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(x.issue.url)}">#${x.issue.number}</a> ${esc(x.issue.title || '')}</dd>`);
-  if (x.after && x.after.length) rows.push(tr('<dt>順番（目安）</dt><dd>{v} のあと</dd>', { v: (x.after.map((a) => `「${esc(title.get(a) || a)}」`).join('・')) }));
+  if (x.after && x.after.length) rows.push(tr('<dt>順番（目安）</dt><dd>{v} のあと</dd>', { v: quoteNames(x.after.map((a) => esc(title.get(a) || a))) }));
   if (x.agent) rows.push(tr('<dt>エージェント</dt><dd>{v}</dd>', { v: (esc(agentLabel(x.agent))) }));
   if (x.branch) rows.push(tr('<dt>ブランチ</dt><dd>{branch}</dd>', { branch: (esc(x.branch)) }));
-  if (x.merged) rows.push(tr('<dt>マージ</dt><dd>親のブランチ {v} にマージ済み{v2}</dd>', { v: (esc(p.branch || '')), v2: (x.mergedAt ? `（${hhmm(x.mergedAt)}）` : '') }));
+  if (x.merged) rows.push(tr('<dt>マージ</dt><dd>親のブランチ {v} にマージ済み{v2}</dd>', { v: (esc(p.branch || '')), v2: (x.mergedAt ? tr('（{at}）', { at: esc(hhmm(x.mergedAt)) }) : '') }));
   if (x.costUsd) rows.push(tr('<dt>コスト</dt><dd>${v}</dd>', { v: (x.costUsd.toFixed(3)) }));
   openModal(
     tr('<div class="sub-modal rs-{v}">\n      <div class="d-title-row"><span class="rf-dot" title="{label}">{mark}</span>{v2}<button class="icon" id="subModalClose" title="閉じる">✕</button></div>\n      <p class="muted small">「{title}」のサブタスク{v3}</p>\n      <dl class="d-meta">{v4}</dl>\n      <div class="pg-sec-head"><b>やること</b></div>\n      {v5}\n      {v6}\n      <div class="modal-actions">{v7}</div>\n    </div>', { v: (subItemState(p, x)), label: (esc(label)), mark, v2: (editing ? tr('<input id="subEditTitle" class="sub-edit-title" placeholder="サブタスクの名前" value="{title}" />', { title: (esc(x.title)) }) : `<h2 class="d-title">${esc(x.title)}</h2>`), title: (esc(p.title)), v3: (x.state === 'pending' ? tr('です。まだ始めていません') : tr('です。作業は終わっていて、サブタスクのカードは片付けました')), v4: (rows.join('')), v5: (editing ? tr('<textarea id="subEditPrompt" class="sub-edit-prompt" rows="14" placeholder="このサブタスクでやること（Markdown で書けます）">{v}</textarea>', { v: (esc(x.prompt || '')) }) : x.prompt ? mdHtml(x.prompt) : tr('<p class="muted small">（書かれていません）</p>')), v6: (x.report && !editing ? tr('<div class="pg-sec-head"><b>サブタスクの報告</b></div>{v}', { v: (mdHtml(x.report)) }) : ''), v7: (editing
@@ -1567,7 +1590,7 @@ function progressHtml(c) {
   const [bcls, blabel] = badgeFor(c);
   const rows = [];
   rows.push(tr('<dt>状態</dt><dd><span class="badge b-{bcls}">{blabel}</span>{v}</dd>', { bcls, blabel: (esc(blabel)), v: (c.lastMessage && live ? ` <span class="muted small">${esc(c.lastMessage)}</span>` : '') }));
-  if (c.startedAt && s !== 'todo') rows.push(`<dt>${live ? tr('開始') : tr('最後に開始')}</dt><dd>${hhmm(c.startedAt)}${s === 'running' ? `（<span class="elapsed" data-since="${c.startedAt}">${elapsed(c.startedAt)}</span>）` : ''}</dd>`);
+  if (c.startedAt && s !== 'todo') rows.push(`<dt>${live ? tr('開始') : tr('最後に開始')}</dt><dd>${hhmm(c.startedAt)}${s === 'running' ? tr('（<span class="elapsed" data-since="{since}">{elapsed}</span>）', { since: esc(c.startedAt), elapsed: esc(elapsed(c.startedAt)) }) : ''}</dd>`);
   if (!isChat(c) || c.persona) rows.push(tr('<dt>エージェント</dt><dd>{v}{v2}</dd>', { v: (personaIcon(c.persona, agentOf(c))), v2: (esc(whoLabel(agentOf(c), c.persona))) }));
   const cost = hasSubtasks(c) ? subTotalCost(c) : c.costUsd;
   if (cost) rows.push(tr('<dt>コスト</dt><dd>${v}{v2}</dd>', { v: (cost.toFixed(3)), v2: (hasSubtasks(c) ? tr(' <span class="muted small">サブタスクを含む</span>') : '') }));
@@ -1716,7 +1739,7 @@ function relayWaitHtml(c) {
     const k = state.board.cards.find((x) => x.id === id);
     if (!k) return tr('<li>（削除された枝）</li>');
     const st = k.relay.atJoin ? (r.waiting.merged.includes(k.id) ? tr('マージ済み') : tr('合流待ち')) : badgeFor(k)[1];
-    return `<li><a href="#" data-open-card="${esc(k.id)}">${esc(k.relay.branchOf.label)}</a>（${esc(agentShort(agentOf(k)))}・${esc(st)}）</li>`;
+    return tr('<li><a href="#" data-open-card="{id}">{label}</a>（{who}・{st}）</li>', { id: esc(k.id), label: esc(k.relay.branchOf.label), who: esc(agentShort(agentOf(k))), st: esc(st) });
   });
   return tr('<div class="rf-wait">並列「{v}」の枝を、それぞれ別の worktree で動かしています。すべて終わったら、このブランチにマージして先へ進みます。<ul>{v2}</ul></div>', { v: (esc((n && n.label) || '')), v2: (kids.join('')) });
 }
@@ -1936,7 +1959,7 @@ async function detailAction(e) {
   if (act === 'adopt') {
     const others = competitors(c).filter((x) => x.id !== c.id && x.status !== 'done' && !x.afterDone);
     const msg = others.length
-      ? tr('{v} の案を採用しますか？\nほかの候補（{v2}）は worktree とブランチごと破棄され、元に戻せません。', { v: (agentLabel(agentOf(c))), v2: (others.map((x) => agentShort(agentOf(x))).join('・')) })
+      ? tr('{v} の案を採用しますか？\nほかの候補（{v2}）は worktree とブランチごと破棄され、元に戻せません。', { v: (agentLabel(agentOf(c))), v2: joinMid(others.map((x) => agentShort(agentOf(x)))) })
       : tr('{v} の案を採用しますか？\nほかの候補は完了しているので、破棄せずに残します。', { v: (agentLabel(agentOf(c))) });
     if (confirm(msg)) await runBusy(tr('ほかの候補を破棄しています…'), () => api.adoptCompetitor(c.id), tr('この案を採用しました。マージ（または PR の作成）で取り込めます'));
     return;
