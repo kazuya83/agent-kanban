@@ -32,7 +32,7 @@
 ## 为什么选择 Worktree Kanban
 
 - **用流程图编排代理** — 用自然语言描述或手动绘制流程，代理会沿着分支、循环和并行步骤逐步交接工作。
-- **最终由你决定** — 合并或创建 PR 前可以查看差异。使用 Claude Code 时，还可以在卡片上批准操作。
+- **最终由你决定** — 合并或创建 PR 前可以查看差异。使用 Claude Code、Codex 和 Cursor 时，还可以在卡片上批准操作。
 - **一个任务，一个 worktree** — 每个任务都有自己的 git worktree 和分支，任务之间、任务与你的工作区都不会冲突。
 - **同时处理多个仓库** — 最多可用标签页打开 3 个仓库，切换标签页不会中断任何任务。
 - **沿用你现有的 CLI** — Claude Code、Codex CLI、Antigravity CLI、Gemini CLI、Cursor CLI，登录和设置保持不变。
@@ -55,11 +55,11 @@ flowchart LR
 
 - **1 个任务 = 1 个 worktree = 1 个分支。** 在仓库旁边的 `<repo>.worktrees/<id>` 创建 worktree，并在名为 `agent/<概要>-<id>` 的分支上工作。进行中的任务彼此不会冲突，也不会和你手头的工作树冲突
 - **智能体就是原样启动的 CLI。** Claude Code 以 `claude -p --input-format stream-json --output-format stream-json` 运行，输出作为日志显示在卡片上。登录、模型、`CLAUDE.md` 和技能，与你在终端里使用的是同一套
-- **批准通过 Claude Code 的 `--permission-prompt-tool` 接收。** 只有权限模式或 `--allowedTools` 不会自动允许的操作，才会在卡片上显示为等待批准
+- **批准通过 Claude Code 的 `--permission-prompt-tool`、Codex 的 `codex app-server` 和 Cursor 的 `cursor-agent acp` 接收。** 只有权限模式或 `--allowedTools`（Worktree Kanban 的“允许的工具”设置）不会自动允许的操作，才会在卡片上显示为等待批准
 - **结束后，用合并（`--no-ff`）或创建 PR / MR（GitHub 用 `gh`，GitLab 用 API）把结果收进来。** 可以选择合并到哪条分支，合并之后也可以 push 到 origin
 - 看板状态保存在 Electron 的 userData 文件夹里的 `board.json`。不使用外部服务器
 
-在 Codex / Antigravity / Gemini / Cursor 上，由于 CLI 的限制，不能使用卡片上的批准、选择题提问、btw 和金额显示（详见 [docs/agents.md](docs/agents.md) (English)）。
+在 Codex / Antigravity / Gemini / Cursor 上，由于 CLI 的限制，不能使用选择题提问、btw 和金额显示。卡片上的批准可在 Codex 和 Cursor 上使用，但不能在 Antigravity 和 Gemini 上使用（详见 [docs/agents.md](docs/agents.md) (English)）。
 
 ## 主要功能
 

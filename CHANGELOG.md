@@ -12,6 +12,7 @@ Each release that changes the app raises the last number of the version. There i
 - GitLab merge requests: create them, check conflicts and pipeline results, and detect merges.
 - Slack integration: notifications for completions, failures, and items waiting for you, and starting tasks from Slack for allowed users only. Nobody can start a task by default.
 - An "Integrations" section in Settings. Tokens are encrypted with a key from the OS secure storage.
+- In-card approval for Codex (`codex app-server`) and Cursor (`cursor-agent acp`). Versions that do not support it keep the previous behavior.
 
 ## 0.1.88
 

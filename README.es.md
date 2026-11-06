@@ -32,7 +32,7 @@ Aplicación de escritorio (Electron, Mac / Windows / Linux) que ejecuta en paral
 ## ¿Por qué Worktree Kanban?
 
 - **Agentes en un diagrama de flujo** — describe un flujo en lenguaje natural o dibújalo, y los agentes se pasan el trabajo paso a paso, siguiendo ramas, bucles y pasos en paralelo.
-- **Tú decides** — revisa el diff antes de fusionar o abrir un PR. Con Claude Code, también apruebas las acciones en la tarjeta.
+- **Tú decides** — revisa el diff antes de fusionar o abrir un PR. Con Claude Code, Codex y Cursor, también apruebas las acciones en la tarjeta.
 - **Una tarea, un worktree** — cada tarea tiene su propio worktree de git y su rama, así que no chocan entre sí ni con tu árbol de trabajo.
 - **Varios repositorios a la vez** — abre hasta 3 repositorios en pestañas; cambiar de pestaña no detiene nada.
 - **Las CLI que ya usas** — Claude Code, Codex CLI, Antigravity CLI, Gemini CLI y Cursor CLI, con tu sesión y tu configuración actuales.
@@ -55,11 +55,11 @@ flowchart LR
 
 - **1 tarea = 1 worktree = 1 rama.** Crea un worktree en `<repo>.worktrees/<id>`, junto al repositorio, y trabaja en una rama `agent/<resumen>-<id>`. Las tareas no chocan entre sí ni con el árbol de trabajo que tienes abierto
 - **El agente es la CLI, arrancada tal cual.** Claude Code se ejecuta con `claude -p --input-format stream-json --output-format stream-json`, y su salida se muestra en la tarjeta como registro. El inicio de sesión, el modelo, `CLAUDE.md` y las skills son los mismos que usas en la terminal
-- **La aprobación pasa por `--permission-prompt-tool` de Claude Code.** Solo las acciones que el modo de permisos o `--allowedTools` no autoriza automáticamente aparecen en la tarjeta como espera de aprobación
+- **La aprobación pasa por `--permission-prompt-tool` de Claude Code, `codex app-server` de Codex y `cursor-agent acp` de Cursor.** Solo las acciones que el modo de permisos o `--allowedTools` (el ajuste de herramientas permitidas de Worktree Kanban) no autoriza automáticamente aparecen en la tarjeta como espera de aprobación
 - **Al terminar, incorporas el trabajo con un merge (`--no-ff`) o creando un PR / MR (`gh` en GitHub, la API en GitLab).** Puedes elegir la rama de destino y, después del merge, hacer push a origin
 - El estado del tablero se guarda en `board.json`, en la carpeta userData de Electron. No hay un servidor externo
 
-En Codex / Antigravity / Gemini / Cursor, por los límites de la CLI, no están disponibles la aprobación en la tarjeta, las preguntas de opción múltiple, btw ni el coste (más detalles en [docs/agents.md](docs/agents.md) (English)).
+En Codex / Antigravity / Gemini / Cursor, por los límites de la CLI, no están disponibles las preguntas de opción múltiple, btw ni el coste. La aprobación en la tarjeta funciona en Codex y Cursor, pero no en Antigravity ni Gemini (más detalles en [docs/agents.md](docs/agents.md) (English)).
 
 ## Funciones principales
 

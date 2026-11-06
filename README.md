@@ -32,7 +32,7 @@ A desktop app (Electron, Mac / Windows / Linux) that runs AI coding-agent CLIs (
 ## Why Worktree Kanban?
 
 - **Agents in a flowchart** — describe a flow in plain language or draw it, and agents hand the work over step by step, following branches, loops, and parallel steps.
-- **You stay in charge** — check the diff before you merge or open a PR. With Claude Code, you also approve actions on the card.
+- **You stay in charge** — check the diff before you merge or open a PR. With Claude Code, Codex, and Cursor, you also approve actions on the card.
 - **One task, one worktree** — each task gets its own git worktree and branch, so tasks never collide with each other or with your working tree.
 - **Several repositories at once** — keep up to 3 repositories open as tabs; switching tabs does not stop anything.
 - **The CLIs you already use** — Claude Code, Codex CLI, Antigravity CLI, Gemini CLI, and Cursor CLI, with the sign-in and settings you have today.
@@ -55,11 +55,11 @@ flowchart LR
 
 - **1 task = 1 worktree = 1 branch.** It creates a worktree at `<repo>.worktrees/<id>` next to the repository and works on a branch named `agent/<summary>-<id>`. Tasks do not collide with each other or with the working tree you have open
 - **The agent is the CLI, started as-is.** Claude Code runs as `claude -p --input-format stream-json --output-format stream-json`, and its output is shown on the card as the log. Sign-in, model, `CLAUDE.md`, and skills are the same ones you use in the terminal
-- **Approval goes through Claude Code's `--permission-prompt-tool`.** Only actions that the permission mode or `--allowedTools` does not auto-allow show up on the card as waiting for approval
+- **Approval goes through Claude Code's `--permission-prompt-tool`, Codex's `codex app-server`, and Cursor's `cursor-agent acp`.** Only actions that the permission mode or `--allowedTools` (the allowed tools setting in Worktree Kanban) does not auto-allow show up on the card as waiting for approval
 - **When it finishes, you bring the work in by merging (`--no-ff`) or opening a PR / MR (`gh` for GitHub, the API for GitLab).** You can choose the target branch, and you can push to origin after the merge
 - Board state is stored in `board.json` in Electron's userData folder. There is no external server
 
-On Codex / Antigravity / Gemini / Cursor, in-card approval, multiple-choice questions, btw, and cost display are unavailable because of CLI limits (see [docs/agents.md](docs/agents.md)).
+On Codex / Antigravity / Gemini / Cursor, multiple-choice questions, btw, and cost display are unavailable because of CLI limits. In-card approval works on Codex and Cursor, but not on Antigravity or Gemini (see [docs/agents.md](docs/agents.md)).
 
 ## Features
 

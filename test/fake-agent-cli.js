@@ -11,8 +11,15 @@ const opt = (name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
 };
+// 対応していない版のふりをするときの確かめの起動は、数えない
+const rpcMode = args.includes('app-server') || args.includes('acp');
+if (rpcMode && !process.env.FAKE_RPC) process.exit(1);
 if (process.env.FAKE_ARGS_LOG) fs.appendFileSync(process.env.FAKE_ARGS_LOG, `${JSON.stringify({ kind, args })}\n`);
 
+// 承認のやりとり（codex app-server / cursor-agent acp）
+if (rpcMode) {
+  require('./fake-agent-rpc').run(kind, args);
+} else {
 let prompt = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => (prompt += d));
@@ -139,3 +146,4 @@ process.stdin.on('end', async () => {
   process.stderr.write(`unknown kind ${kind}\n`);
   process.exit(2);
 });
+}
