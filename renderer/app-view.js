@@ -31,10 +31,16 @@
     }
   }
 
+  // Pipeline の並列の枝のカードか。ボードの「サブタスク」ラベルはこれで付ける。
+  // branchOf を subtaskOf にすると、枝のカードがボードから消え、マージの動きも変わる
+  function isPipelineSubtask(c) {
+    return !!(c && c.relay && c.relay.branchOf);
+  }
+
   // タスク詳細に「スケジュール登録」を出すか。
   // 会話・サブタスク・Pipeline の枝は、親や元のタスクの一部として動くので、単独では繰り返さない
   function canSchedule(c) {
-    return !!c && c.kind !== 'chat' && !c.subtaskOf && !(c.relay && c.relay.branchOf);
+    return !!c && c.kind !== 'chat' && !c.subtaskOf && !isPipelineSubtask(c);
   }
 
   // ハンバーガーメニュー。button で開け閉めし、項目（data-view）を選ぶか、Esc・外側のクリックで閉じる
@@ -148,5 +154,5 @@
     return { scrollTo, sync };
   }
 
-  return { VIEWS, DEFAULT_VIEW, VIEW_KEY, SETTINGS_NAV, normalizeView, loadView, saveView, canSchedule, bindNavMenu, settingsNavHtml, activeSection, bindSettingsNav };
+  return { VIEWS, DEFAULT_VIEW, VIEW_KEY, SETTINGS_NAV, normalizeView, loadView, saveView, isPipelineSubtask, canSchedule, bindNavMenu, settingsNavHtml, activeSection, bindSettingsNav };
 });
