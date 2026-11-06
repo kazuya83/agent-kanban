@@ -37,7 +37,7 @@ function boardSrc() {
 
 function ownKeys() {
   const keys = new Set(trKeys(boardSrc()));
-  for (const f of ['renderer/markdown.js', 'renderer/diff-parse.js']) for (const k of trKeys(read(f))) keys.add(k);
+  for (const f of ['renderer/markdown.js', 'renderer/diff-parse.js', 'renderer/diff-comments.js']) for (const k of trKeys(read(f))) keys.add(k);
   return [...keys];
 }
 
