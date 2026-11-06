@@ -132,8 +132,10 @@
         const y = n.y + oy;
         const s = states.get(n.id) || 'pending';
         const info = n.type === 'step' && o.stepInfo ? o.stepInfo(n) || {} : {};
-        const title = info.title || (FM ? FM.labelOf(n) : n.label || n.type);
-        const kind = FM ? FM.TYPE_LABEL[n.type] : n.type;
+        const kindJa = FM ? FM.TYPE_LABEL[n.type] : '';
+        const kind = kindJa ? tr(kindJa) : n.type;
+        let title = info.title || (FM ? FM.labelOf(n) : n.label || n.type);
+        if (!info.title && kindJa && title === kindJa) title = kind;
         const round = n.type === 'start' || n.type === 'end' ? h / 2 : n.type === 'if' ? 14 : 8;
         const cur = o.current && o.current === n.id;
         const mark = marks[s] || '';

@@ -1566,11 +1566,11 @@ api.add({
     "fr": "PR mise à jour",
     "zh": "已更新 PR"
   },
-  " を使う": {
-    "en": " — use",
-    "es": " — usar",
-    "fr": " — utiliser",
-    "zh": "（使用）"
+  "{name} を使う": {
+    "en": "Use {name}",
+    "es": "Usar {name}",
+    "fr": "Utiliser {name}",
+    "zh": "使用 {name}"
   },
   "残しておきたいときは、タブの右の「＋」から開いてください。": {
     "en": "To keep it open, use + on the right of the tabs.",
@@ -1794,11 +1794,11 @@ api.add({
     "fr": "Choisir…",
     "zh": "选择…"
   },
-  "（空なら URL から決めます）": {
-    "en": "(taken from the URL if blank)",
-    "es": "(si está vacío, se decide a partir de la URL)",
-    "fr": "(déduit de l'URL si vide)",
-    "zh": "（留空则根据 URL 决定）"
+  "フォルダ名（空なら URL から決めます）": {
+    "en": "Folder name (taken from the URL if blank)",
+    "es": "Nombre de la carpeta (si está vacío, se decide a partir de la URL)",
+    "fr": "Nom du dossier (déduit de l'URL si vide)",
+    "zh": "文件夹名（留空则根据 URL 决定）"
   },
   "例: my-app": {
     "en": "e.g. my-app",
@@ -2562,6 +2562,18 @@ api.add({
     "fr": "Enregistrer",
     "zh": "登记"
   },
+  "保存（Ctrl/⌘ + Enter）": {
+    "en": "Save (Ctrl/⌘ + Enter)",
+    "es": "Guardar (Ctrl/⌘ + Enter)",
+    "fr": "Enregistrer (Ctrl/⌘ + Entrée)",
+    "zh": "保存（Ctrl/⌘ + Enter）"
+  },
+  "登録（Ctrl/⌘ + Enter）": {
+    "en": "Add (Ctrl/⌘ + Enter)",
+    "es": "Registrar (Ctrl/⌘ + Enter)",
+    "fr": "Enregistrer (Ctrl/⌘ + Entrée)",
+    "zh": "登记（Ctrl/⌘ + Enter）"
+  },
   "元の指定（{name}）は今は選べないので、別のものを選んでいます。確かめてから保存してください。": {
     "en": "The original choice ({name}) cannot be selected now, so another one is selected. Check it before saving.",
     "es": "La elección original ({name}) ya no se puede seleccionar, así que hay otra elegida. Revísala antes de guardar.",
@@ -2918,6 +2930,12 @@ api.add({
     "es": "Descartar este aviso",
     "fr": "Effacer cette notification",
     "zh": "清除此通知"
+  },
+  "{name}（WSL）": {
+    "en": "{name} (WSL)",
+    "es": "{name} (WSL)",
+    "fr": "{name} (WSL)",
+    "zh": "{name}（WSL）"
   },
   "{wsl}（WSL）の中に git が見つかりません。{wsl} のターミナルで sudo apt install git を実行してください。": {
     "en": "git was not found inside {wsl} (WSL). Run sudo apt install git in a {wsl} terminal.",

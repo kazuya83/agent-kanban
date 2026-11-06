@@ -40,10 +40,11 @@
   const MAX_EDGES = 80;
   const MAX_LOOPS_DEFAULT = 3;
   const MAX_LOOPS_LIMIT = 10;
-  // 読むたびに訳す（言語を変えると画面を読み直す。保存済みのラベルはここでは変えない）
+  // エージェントへ渡す文が読む種別名。日本語のまま（画面では typeName と tr(TYPE_LABEL[type]) で訳す）。
+  // 自分のキーだけを見る。toString や valueOf まで種別名にすると、文字列化したときに例外になる
   const TYPE_LABEL = new Proxy(
-    { start: 1, step: 1, if: 1, parallel: 1, join: 1, end: 1 },
-    { get: (t, p) => (p in t ? typeName(p) : undefined) },
+    { start: '開始', step: '工程', if: '分岐', parallel: '並列', join: '合流', end: '終了' },
+    { get: (t, p, receiver) => (Object.hasOwn(t, p) ? t[p] : Reflect.get(t, p, receiver)) },
   );
   const NODE_W = { start: 120, step: 200, if: 170, parallel: 160, join: 160, end: 120 };
 
@@ -294,7 +295,12 @@
     if (!s) return [tr('開始のノードがありません')];
     const steps = flow.nodes.filter((n) => n.type === 'step');
     if (!steps.length) errors.push(tr('工程のノードが1つもありません'));
-    const name = (n) => tr('{type}「{label}」', { type: TYPE_LABEL[n.type], label: labelOf(n) });
+    const name = (n) => {
+      const type = typeName(n.type);
+      const label = labelOf(n);
+      // 種別名そのもの（開始・終了など）は画面の言語にする。labelOf の戻り値は日本語のまま
+      return tr('{type}「{label}」', { type, label: label === TYPE_LABEL[n.type] ? type : label });
+    };
     for (const n of flow.nodes) {
       const outs = outEdges(flow, n.id);
       const ins = inEdges(flow, n.id);

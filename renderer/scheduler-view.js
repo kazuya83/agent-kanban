@@ -231,7 +231,7 @@
         ${row(tr('最終実行日'), esc(fmtDateTime(s.lastRunAt) || tr('未実行')))}
         ${row(tr('エージェント'), esc(agentName(s.agent)) + (s.model ? ` <span class="muted">/ ${esc(s.model)}</span>` : ''))}
         ${row(tr('スキル'), s.skill ? `<code>/${esc(s.skill)}</code>` : tr('なし'))}
-        ${row(tr('動かし方'), [s.readOnly ? tr('ソースを変更しない') : '', s.catchUp ? tr('起動後に1回だけ追いつく') : ''].filter(Boolean).map(esc).join('・') || tr('通常'))}
+        ${row(tr('動かし方'), [s.readOnly ? tr('ソースを変更しない') : '', s.catchUp ? tr('起動後に1回だけ追いつく') : ''].filter(Boolean).map(esc).join(tr('・')) || tr('通常'))}
       </dl>
       ${s.lastStatus === 'failed' && s.lastError ? `<p class="sched-error">${icon('alert')}${esc(s.lastError)}</p>` : ''}
       <h3 class="sched-h3">${tr('指示内容')}</h3>
@@ -354,7 +354,7 @@
        ${ruleFieldsHtml(rule)}
        <label class="check" title="${esc(tr('SQL を作るだけ・調べるだけなど、ソースコードを変えないタスクにします'))}"><input type="checkbox" id="schedReadOnly" ${draft.readOnly ? 'checked' : ''} /> ${tr('ソースを変更しない（調べもの・SQL などの生成だけ）')}</label>
        <label class="check" title="${esc(tr('アプリを閉じていた・スリープしていたなどで10分より遅れたときは、ふつうは見送って次回へ進みます。チェックを付けると、起動してから1回だけ実行します'))}"><input type="checkbox" id="schedCatchUp" ${draft.catchUp ? 'checked' : ''} /> ${tr('時刻を過ぎていたら、起動後に1回だけ追いつく')}</label>
-       <div class="modal-actions"><button class="btn ghost" id="schedCancel">${tr('キャンセル')}</button><button class="btn primary" id="schedOk">${schedule ? tr('保存') : tr('登録')}（Ctrl/⌘ + Enter）</button></div>`,
+       <div class="modal-actions"><button class="btn ghost" id="schedCancel">${tr('キャンセル')}</button><button class="btn primary" id="schedOk">${schedule ? tr('保存（Ctrl/⌘ + Enter）') : tr('登録（Ctrl/⌘ + Enter）')}</button></div>`,
       () => {
         const sel = $('schedAgent');
         // 元の Pipeline が消された・使わない設定になったなどで選べないと、別のものに黙って置き換わるので知らせる

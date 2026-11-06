@@ -1086,7 +1086,7 @@ function relayFlowHtml(c) {
       const n = FlowModel.nodeOf(r.flow, e.to);
       if (!n || n.type === 'end') return '終了';
       if (n.type === 'step') return `工程${r.steps.findIndex((x) => x.id === n.id) + 1}${back.has(e.id) ? 'に戻る' : 'へ'}`;
-      return `${FlowModel.TYPE_LABEL[n.type]}「${FlowModel.labelOf(n)}」へ`;
+      return `${tr(FlowModel.TYPE_LABEL[n.type] || n.type)}「${FlowModel.labelOf(n)}」へ`;
     };
     const result = (i === r.index && r.lastResult) || (prev && prev.result);
     const judgeHtml = judge
@@ -3299,8 +3299,10 @@ $('skillPicker').addEventListener('mousedown', (e) => {
 
 function fmtTime(ms) {
   const d = new Date(ms);
-  const same = new Date().toDateString() === d.toDateString();
-  return same ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const loc = typeof I18n !== 'undefined' ? I18n.locale() : undefined;
+  const time = d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+  if (new Date().toDateString() === d.toDateString()) return time;
+  return d.toLocaleDateString(loc, { month: 'numeric', day: 'numeric' }) + ' ' + time;
 }
 
 // 「新しい会話」か「既存の会話を引き継ぐ」を選ぶ欄
@@ -3643,7 +3645,7 @@ async function openPr(c) {
 function agentConfigHtml(a, s, body) {
   const on = enabledAgents(s).includes(a);
   return `<div class="agent-cfg ${on ? 'on' : ''}" data-agent="${a}">
-    <label class="check agent-cfg-head"><input type="checkbox" class="sUse" value="${a}" ${on ? 'checked' : ''} /> ${agentIcon(a)}<b>${esc(agentLabel(a))}</b>${tr(' を使う')}</label>
+    <label class="check agent-cfg-head"><input type="checkbox" class="sUse" value="${a}" ${on ? 'checked' : ''} /> ${tr('{name} を使う', { name: `${agentIcon(a)}<b>${esc(agentLabel(a))}</b>` })}</label>
     <div class="agent-cfg-body" ${on ? '' : 'hidden'}>${body}</div></div>`;
 }
 
@@ -4761,11 +4763,11 @@ async function repoSetupModal(mode, distros = []) {
   openModal(
     `<h2>${clone ? tr('URL からクローンする') : tr('新しく作る')}</h2>
      ${clone ? `<label class="field"><span>${tr('リポジトリの URL')}</span><input id="rsUrl" class="mono" placeholder="${esc(tr('https://github.com/owner/repo または owner/repo'))}" autocomplete="off" spellcheck="false" /></label>` : ''}
-     ${distros.length ? `<label class="field"><span>${tr('作る場所')}</span><select id="rsWhere"><option value="">${tr('このパソコン')}</option>${distros.map((d) => `<option value="${esc(d)}">${esc(d)}（WSL）</option>`).join('')}</select></label>` : ''}
+     ${distros.length ? `<label class="field"><span>${tr('作る場所')}</span><select id="rsWhere"><option value="">${tr('このパソコン')}</option>${distros.map((d) => `<option value="${esc(d)}">${esc(tr('{name}（WSL）', { name: d }))}</option>`).join('')}</select></label>` : ''}
      <label class="field"><span>${tr('置き場所（この中にフォルダを作ります）')}</span>
        <div class="input-row"><input id="rsParent" class="mono" spellcheck="false" /><button class="btn" id="rsBrowse">${tr('選ぶ…')}</button></div></label>
      <div id="rsHostBrowser" class="dir-browser-inline hidden"></div>
-     <label class="field"><span>${tr('フォルダ名')}${clone ? tr('（空なら URL から決めます）') : ''}</span><input id="rsName" class="mono" spellcheck="false" autocomplete="off" placeholder="${clone ? 'repo' : esc(tr('例: my-app'))}" /></label>
+     <label class="field"><span>${clone ? tr('フォルダ名（空なら URL から決めます）') : tr('フォルダ名')}</span><input id="rsName" class="mono" spellcheck="false" autocomplete="off" placeholder="${clone ? 'repo' : esc(tr('例: my-app'))}" /></label>
      ${clone ? '' : `<label class="field"><span>${tr('ソース管理')}</span><select id="rsGit"><option value="git">${tr('git で管理する（タスクごとに worktree で作業し、マージ・PR で取り込む）')}</option><option value="none">${tr('git で管理しない（フォルダだけ作る。動画づくりなど、コード以外の作業に）')}</option></select><small>${tr('git で管理しないフォルダでは、タスクはそのフォルダの中で直接動きます。差分・worktree・マージ・PR は使えず、終わったら「完了にする」で完了にします')}</small></label>`}
      ${clone ? '' : `<label class="field" id="rsGhWrap"><span>GitHub</span><select id="rsGh"><option value="">${tr('作らない（手元だけ）')}</option><option value="private">${tr('GitHub にも作る（非公開）')}</option><option value="public">${tr('GitHub にも作る（公開）')}</option></select><small>${tr('GitHub にも作るときは、gh（GitHub CLI）にログインしている必要があります')}</small></label>`}
      <p class="muted small" id="rsPreview"></p>

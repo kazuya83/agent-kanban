@@ -6,6 +6,7 @@ const path = require('path');
 const I18n = require('../renderer/i18n.js');
 const ScheduleModel = require('../renderer/schedule-model');
 const FlowModel = require('../renderer/flow-model');
+const FlowView = require('../renderer/flow-view');
 
 const LANGS = ['en', 'es', 'fr', 'zh'];
 const at = (y, mo, d, h = 0, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime();
@@ -137,10 +138,189 @@ test('フローとスケジュールの確かめ文が各言語になり、失�
   assert.deepStrictEqual(FlowModel.validateFlow(null), ['フローがありません']);
 });
 
+test('フォルダ名と「を使う」は、4言語で語順の通った1文になる', () => {
+  const use = {
+    ja: 'Claude を使う',
+    en: 'Use Claude',
+    es: 'Usar Claude',
+    fr: 'Utiliser Claude',
+    zh: '使用 Claude',
+  };
+  const folder = {
+    ja: 'フォルダ名（空なら URL から決めます）',
+    en: 'Folder name (taken from the URL if blank)',
+    es: 'Nombre de la carpeta (si está vacío, se decide a partir de la URL)',
+    fr: 'Nom du dossier (déduit de l\'URL si vide)',
+    zh: '文件夹名（留空则根据 URL 决定）',
+  };
+  const wsl = {
+    ja: 'Ubuntu（WSL）',
+    en: 'Ubuntu (WSL)',
+    es: 'Ubuntu (WSL)',
+    fr: 'Ubuntu (WSL)',
+    zh: 'Ubuntu（WSL）',
+  };
+  const save = {
+    ja: '保存（Ctrl/⌘ + Enter）',
+    en: 'Save (Ctrl/⌘ + Enter)',
+    es: 'Guardar (Ctrl/⌘ + Enter)',
+    fr: 'Enregistrer (Ctrl/⌘ + Entrée)',
+    zh: '保存（Ctrl/⌘ + Enter）',
+  };
+  const add = {
+    ja: '登録（Ctrl/⌘ + Enter）',
+    en: 'Add (Ctrl/⌘ + Enter)',
+    es: 'Registrar (Ctrl/⌘ + Enter)',
+    fr: 'Enregistrer (Ctrl/⌘ + Entrée)',
+    zh: '登记（Ctrl/⌘ + Enter）',
+  };
+  const how = {
+    ja: 'ソースを変更しない・起動後に1回だけ追いつく',
+    en: 'Do not change source, Catch up once after launch',
+    es: 'No cambiar el código, Ponerse al día una vez al abrir',
+    fr: 'Ne pas modifier le code, Rattraper une fois après le lancement',
+    zh: '不修改源代码、启动后补跑一次',
+  };
+  for (const lang of ['ja', ...LANGS]) {
+    withLanguage(lang, () => {
+      assert.strictEqual(I18n.tr('{name} を使う', { name: 'Claude' }), use[lang], lang);
+      assert.strictEqual(I18n.tr('フォルダ名（空なら URL から決めます）'), folder[lang], lang);
+      assert.strictEqual(I18n.tr('{name}（WSL）', { name: 'Ubuntu' }), wsl[lang], lang);
+      assert.strictEqual(I18n.tr('保存（Ctrl/⌘ + Enter）'), save[lang], lang);
+      assert.strictEqual(I18n.tr('登録（Ctrl/⌘ + Enter）'), add[lang], lang);
+      assert.strictEqual([I18n.tr('ソースを変更しない'), I18n.tr('起動後に1回だけ追いつく')].join(I18n.tr('・')), how[lang], lang);
+      if (lang === 'en' || lang === 'es' || lang === 'fr') {
+        assert.match(folder[lang], / \(/);
+        assert.doesNotMatch(use[lang], / — /);
+        assert.match(how[lang], /, /);
+      }
+    });
+  }
+  withLanguage('en', () => {
+    assert.strictEqual(I18n.tr('{name} を使う', {}), 'Use {name}');
+    assert.strictEqual(I18n.tr('{name} を使う', { name: '' }), 'Use ');
+    assert.strictEqual(I18n.tr('{name} を使う', { name: 0 }), 'Use 0');
+    assert.strictEqual(I18n.tr('{name}（WSL）', { name: '' }), ' (WSL)');
+    assert.strictEqual(I18n.tr('{name}（WSL）', { extra: 1 }), '{name} (WSL)');
+  });
+  const root = path.join(__dirname, '..', 'renderer');
+  const renderer = fs.readFileSync(path.join(root, 'renderer.js'), 'utf8');
+  const sched = fs.readFileSync(path.join(root, 'scheduler-view.js'), 'utf8');
+  const editor = fs.readFileSync(path.join(root, 'flow-editor.js'), 'utf8');
+  assert.match(renderer, /tr\('\{name\} を使う'/);
+  assert.doesNotMatch(renderer, /tr\(' を使う'\)/);
+  assert.match(renderer, /tr\('フォルダ名（空なら URL から決めます）'\)/);
+  assert.doesNotMatch(renderer, /tr\('（空なら URL から決めます）'\)/);
+  assert.match(renderer, /tr\('\{name\}（WSL）'/);
+  assert.doesNotMatch(renderer, /（WSL）<\/option>/);
+  assert.match(sched, /join\(tr\('・'\)\)/);
+  assert.match(sched, /tr\('保存（Ctrl\/⌘ \+ Enter）'\)/);
+  assert.match(sched, /tr\('登録（Ctrl\/⌘ \+ Enter）'\)/);
+  assert.doesNotMatch(sched, /\}（Ctrl\/⌘ \+ Enter）/);
+  assert.match(editor, /tr\('\{icon\}\{name\}（\{agent\}\{model\}）\{off\}'/);
+  assert.doesNotMatch(editor, /\$\{ca\.name\}（/);
+});
+
+test('言語が英語でもプロンプト用の種別名は日本語のままで、文字列化できる', () => {
+  const flow = {
+    nodes: [
+      { id: 'start', type: 'start', x: 0, y: 0 },
+      { id: 's1', type: 'step', x: 0, y: 100, agent: 'claude', label: '実装', instruction: 'do' },
+      { id: 'end', type: 'end', x: 0, y: 200 },
+      { id: 'br', type: 'if', x: 40, y: 300, label: 'レビュー' },
+    ],
+    edges: [{ id: 'e1', from: 'start', to: 's1' }],
+  };
+  withLanguage('en', () => {
+    assert.strictEqual(FlowModel.TYPE_LABEL.if, '分岐');
+    assert.strictEqual(FlowModel.TYPE_LABEL.start, '開始');
+    assert.strictEqual(FlowModel.TYPE_LABEL.end, '終了');
+    assert.strictEqual(FlowModel.TYPE_LABEL.nope, undefined);
+    assert.strictEqual(FlowModel.labelOf({ type: 'if', label: 'レビュー' }), 'レビュー');
+    assert.strictEqual(FlowModel.labelOf({ type: 'if' }), '分岐');
+    assert.strictEqual(FlowModel.labelOf({ type: 'end' }), '終了');
+    assert.strictEqual(FlowModel.labelOf(null), '');
+    assert.strictEqual(`${FlowModel.TYPE_LABEL.if}「${FlowModel.labelOf({ type: 'if', label: '判定' })}」へ進みます`, '分岐「判定」へ進みます');
+    let text = '';
+    assert.doesNotThrow(() => {
+      text = String(FlowModel.TYPE_LABEL);
+    });
+    assert.strictEqual(typeof text, 'string');
+    assert.strictEqual(text, '[object Object]');
+    assert.strictEqual(typeof FlowModel.TYPE_LABEL.toString, 'function');
+    const errs = FlowModel.validateFlow(flow);
+    const endErr = errs.find((e) => e.includes('End'));
+    assert.ok(endErr, errs.join('\n'));
+    assert.doesNotMatch(endErr, /終了|分岐/);
+    assert.ok(errs.every((e) => !e.includes('分岐')), errs.join('\n'));
+    const svg = FlowView.html(flow, new Map());
+    assert.match(svg, />Start/);
+    assert.match(svg, />End/);
+    assert.match(svg, /Branch/);
+    assert.match(svg, /レビュー/);
+    assert.doesNotMatch(svg, />開始/);
+  });
+  withLanguage('ja', () => {
+    const errs = FlowModel.validateFlow(flow);
+    assert.ok(errs.some((e) => e.includes('終了「終了」に入る線がありません')), errs.join('\n'));
+    assert.strictEqual(FlowModel.TYPE_LABEL.if, '分岐');
+  });
+  withLanguage('fr', () => {
+    const svg = FlowView.html(flow, new Map());
+    assert.match(svg, /Début/);
+    assert.match(svg, /Fin/);
+    assert.strictEqual(FlowModel.TYPE_LABEL.if, '分岐');
+  });
+});
+
+test('fmtTime と同じ日付表示は I18n.locale() を渡す', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf8');
+  const m = src.match(/function fmtTime\(ms\) \{([\s\S]*?)\n\}/);
+  assert.ok(m, 'fmtTime がある');
+  assert.match(m[1], /I18n\.locale\(\)/);
+  assert.match(m[1], /toLocaleTimeString\(loc,/);
+  assert.match(m[1], /toLocaleDateString\(loc,/);
+  const fmtTime = new Function('I18n', `return function fmtTime(ms) {${m[1]}\n}`)(I18n);
+  const optsD = { month: 'numeric', day: 'numeric' };
+  const optsT = { hour: '2-digit', minute: '2-digit' };
+  const past = new Date(2020, 0, 2, 15, 4);
+  const composed = (loc) => past.toLocaleDateString(loc, optsD) + ' ' + past.toLocaleTimeString(loc, optsT);
+  withLanguage('en', () => {
+    assert.strictEqual(I18n.locale(), 'en-US');
+    assert.strictEqual(fmtTime(past.getTime()), composed(I18n.locale()));
+    assert.strictEqual(fmtTime(past.getTime()), composed('en-US'));
+  });
+  withLanguage('ja', () => {
+    assert.strictEqual(fmtTime(past.getTime()), composed('ja-JP'));
+  });
+  withLanguage('zh', () => {
+    assert.strictEqual(fmtTime(past.getTime()), composed('zh-CN'));
+  });
+  const enText = composed('en-US');
+  const jaText = composed('ja-JP');
+  if (enText !== jaText) {
+    withLanguage('en', () => assert.notStrictEqual(fmtTime(past.getTime()), jaText));
+    withLanguage('ja', () => assert.notStrictEqual(fmtTime(past.getTime()), enText));
+  } else {
+    assert.fail('en-US と ja-JP の日付表示が同じなので、ロケールの違いを確かめられません');
+  }
+  const now = new Date();
+  withLanguage('fr', () => {
+    assert.strictEqual(fmtTime(now.getTime()), now.toLocaleTimeString('fr-FR', optsT));
+  });
+  withLanguage('es', () => {
+    const bad = new Date(NaN);
+    const expect = bad.toLocaleDateString('es-ES', optsD) + ' ' + bad.toLocaleTimeString('es-ES', optsT);
+    assert.strictEqual(fmtTime(NaN), expect);
+  });
+  const bare = new Function('I18n', `return function fmtTime(ms) {${m[1]}\n}`)(undefined);
+  assert.strictEqual(bare(past.getTime()), composed(undefined));
+});
+
 test('担当範囲の tr() は4言語すべてにあり、差し込み名が一致する', () => {
   const root = path.join(__dirname, '..', 'renderer');
   const files = [
-    ['renderer.js', [2900, 3647], [4543, 4844], [4948, 5164]],
+    ['renderer.js', [2900, 3650], [4543, 4844], [4948, 5164]],
     ['flow-editor.js'],
     ['flow-view.js'],
     ['flow-model.js'],
