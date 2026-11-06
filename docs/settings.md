@@ -1,93 +1,95 @@
-# 設定
+[English](settings.md) · [日本語](settings.ja.md)
 
-トップバーの左端のメニューボタン（三本線）から **「設定」** を選ぶと、トップバーの下いっぱいに設定の画面が開きます。
+# Settings
 
-左に項目の一覧、右にすべての項目が縦に並びます。左の項目を押すと、その節までスクロールします。右をスクロールすると、左の青いバーも今見ている項目に動きます。
+Choose **"Settings"** from the menu button (three lines) at the left end of the top bar, and the settings screen opens across the whole area below the top bar.
 
-| グループ | 項目 |
+The list of sections is on the left, and all sections run down the right side. Press a section on the left to scroll to it. As you scroll on the right, the blue bar on the left follows the section you are viewing.
+
+| Group | Sections |
 | --- | --- |
-| （見出しなし） | [全般](#全般)、[アプリの更新](#アプリの更新) |
-| このプロジェクト | [ブランチと取り込み](#ブランチと取り込み)、[Issue 連携](#issue-連携)、[権限](#権限)、[タスクの既定](#タスクの既定) |
-| エージェント | [使うエージェント](#使うエージェント)、[カスタムエージェント](#カスタムエージェント)、[オーケストレーション](#オーケストレーション) |
+| (no heading) | [General](#general), [App updates](#app-updates) |
+| This project | [Branches and landing](#branches-and-landing), [Issue sync](#issue-sync), [Permissions](#permissions), [Task defaults](#task-defaults) |
+| Agent | [Agents to use](#agents-to-use), [Custom agents](#custom-agents), [Orchestration](#orchestration) |
 
-## 保存のしかた
+## How saving works
 
-- 変更は、下の **「保存」** でまとめて保存します。保存しても画面はそのまま開いています
-- **「元に戻す」** は、保存していない変更を捨てて、保存済みの値に戻します
-- Pipeline の一覧の変更だけは、その場で保存します
-- 保存しないまま別の画面やタブに移ると、変更は確認なしで捨てられます
-- 起動したときは設定の画面ではなく、前に開いていたカンバン管理かタスクスケジューラに戻ります
+- Changes are saved together with **"Save"** at the bottom. The screen stays open after saving
+- **"Undo"** throws away unsaved changes and returns to the saved values
+- Only changes to the list of Pipelines are saved on the spot
+- If you move to another screen or tab without saving, your changes are discarded without asking
+- When the app starts, it returns to whichever of Kanban or Task scheduler you had open, not to the settings screen
 
-「このプロジェクト」の項目と、下で「プロジェクトごと」と書いた項目は、プロジェクト（リポジトリ）ごとに覚えます。上部のタブを切り替えると、そのプロジェクトの設定に変わります。裏で動いているほかのプロジェクトのタスクも、そのプロジェクトの設定で動きます。初めて開いたプロジェクトは初期値から始まります。ほかの項目は、どのプロジェクトでも同じです。
+Sections under "This project", and items marked "per project" below, are remembered for each project (repository). Switching tabs at the top switches to that project's settings. Tasks of other projects running in the background also use their own project's settings. A project opened for the first time starts from the defaults. All other items are the same across projects.
 
-この版より前から使っていたプロジェクトは、それまでの設定（取り込み方も含む）をそのまま引き継ぎます。
+Projects that were in use before this version keep their existing settings (including how they land changes).
 
-## 全般
+## General
 
-| 項目 | 説明 |
+| Item | Description |
 | --- | --- |
-| 同時に動かす数 | 1〜10 |
-| 似た作業が続いたらスキルにしないか聞く | タスクが完了したとき、前に完了したタスクと似た作業が続いていたら通知で聞きます（右上のベル） |
-| マージしたら会話を消す | マージして完了にしたタスク（PR がマージされたときも）が作業に使った Claude Code の会話を消します。引き継いだ元の会話は残します（初期値はオン） |
+| How many run at once | 1 to 10 |
+| Offer to make a skill when similar work keeps coming up | When a task finishes, if similar work keeps appearing among earlier finished tasks, a notification asks you (the bell at the top right) |
+| Delete conversations after a merge | Deletes the Claude Code conversations used for work by a task finished with a merge (also when its PR is merged). The original conversation it continued from is kept (on by default) |
 
-## アプリの更新
+## App updates
 
-今の版と、新しい版があるかが出ます。左上の版の横に出る更新の知らせを押しても、ここが開きます。くわしくは [install.md](install.md) を見てください。
+Shows the current version and whether a new one is available. You can also open this by pressing the update notice next to the version at the top left. See [install.md](install.md) for details.
 
-## ブランチと取り込み
+## Branches and landing
 
-| 項目 | 説明 |
+| Item | Description |
 | --- | --- |
-| ベースブランチ | worktree の作成元。マージ先の初期値にもなります。空ならチェックアウト中のブランチ |
-| レビュー後の取り込み方 | **PR を作成する**（初期値）か **直接マージする** か。origin がない・GitHub でないリポジトリと、git で管理していないフォルダは「直接マージする」から始まります |
-| ブランチの命名規則 | 自然言語で書いた規則に沿って、エージェントがブランチ名を考えます |
+| Base branch | Where worktrees are created from. It is also the default merge target. If empty, the checked-out branch is used |
+| How to land after review | **Create a PR** (default) or **Merge directly**. Repositories with no origin or not on GitHub, and folders not managed by git, start with "Merge directly" |
+| Branch naming rule | The agent comes up with branch names that follow a rule written in plain language |
 
-マージのダイアログで選んだ「マージしたあと origin に push する」も、プロジェクトごとに覚えます。
+"After merging, push to origin", chosen in the merge dialog, is also remembered per project.
 
-## Issue 連携
+## Issue sync
 
-| 項目 | 説明 |
+| Item | Description |
 | --- | --- |
-| Issue のステータスを自動で変える | GitHub Projects の Status を、タスクの列に合わせて変えます（変える項目・選択肢の名前も、プロジェクトごと） |
+| Update Issue status automatically | Changes the Status in GitHub Projects to match the task's column (the field and option names are also per project) |
 
-くわしくは [usage.md](usage.md#issue-のステータスを自動で変える) を見てください。
+See [usage.md](usage.md#update-issue-status-automatically) for details.
 
-## 権限
+## Permissions
 
-| 項目 | 説明 |
+| Item | Description |
 | --- | --- |
-| 権限モード | `acceptEdits`（ファイル編集は自動、コマンドは承認）がおすすめ。`default` にすると、すべての操作をカードで承認します |
-| Claude Code に最初から許可しておくツール | `--allowedTools` に渡します。例: `Bash(npm test:*), WebSearch` |
+| Permission mode | `acceptEdits` (file edits are automatic, commands need approval) is recommended. With `default`, every action is approved on the card |
+| Tools to allow Claude Code from the start | Passed to `--allowedTools`. Example: `Bash(npm test:*), WebSearch` |
 
-## タスクの既定
+## Task defaults
 
-| 項目 | 説明 |
+| Item | Description |
 | --- | --- |
-| 新しいタスクで最初から選んでおくスキル | 「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに選ばれているスキル |
-| 仕様を詰める | 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントが質問して仕様を詰めます（初期値はオン） |
-| サブタスクが終わったら | 自動で親のブランチにマージするか、確かめてからマージするかの既定。タスクごとに開始前に変えられます |
+| Skill selected by default on a new task | The skill already selected when you open "+ New task" (for both plain language and Issues) |
+| Pin down the spec | If a new task is not specific enough, the agent asks questions to pin down the spec before development starts (on by default) |
+| When a subtask finishes | The default for whether to merge into the parent branch automatically or after you check it. Each task can change this before it starts |
 
-## 使うエージェント
+## Agents to use
 
-| 項目 | 説明 |
+| Item | Description |
 | --- | --- |
-| 使うエージェント | Claude Code / Codex CLI / Gemini CLI / Cursor CLI のうち、使うものにチェックを付けます。チェックを付けたものだけ、下の項目を設定でき、タスク・会話・Pipeline・競争で選べます |
-| （エージェントごと）コマンドのパス | Finder などから起動してコマンドが見つからないときに、フルパスを指定します |
-| （エージェントごと）モデル | `--model` / `-m` に渡します。空なら既定のモデル |
-| 最初から選んでおくエージェント | 新しいタスク・会話を開いたときに選ばれているエージェント（使うエージェントの中から1つ。オーケストレーションで Pipeline・競争を選んでいれば、タスクではそちらが選ばれます） |
+| Agents to use | Check the ones you use out of Claude Code / Codex CLI / Gemini CLI / Cursor CLI. Only checked agents can have the items below set, and only they can be chosen for tasks, conversations, Pipeline, and competition |
+| (per agent) Command path | Set the full path when the command is not found after launching from Finder or the like |
+| (per agent) Model | Passed to `--model` / `-m`. If empty, the default model is used |
+| Agent selected by default | The agent already selected when you open a new task or conversation (one of the agents to use; if Pipeline or competition is chosen under orchestration, that is selected for tasks instead) |
 
-## カスタムエージェント
+## Custom agents
 
-元にするエージェント（CLI）とモデルに、名前・アイコンと色・説明・振る舞いの指示を持たせます（プロジェクトごと。[agents.md](agents.md)）。
+Give a base agent (CLI) and model a name, icon and color, description, and behavior instructions (per project; see [agents.md](agents.md)).
 
-## オーケストレーション
+## Orchestration
 
-Pipeline・競争の設定です。Pipeline は「フローチャートを編集」で、工程・分岐（if）・ループ・並列・合流をつないだフローチャートを組みます（プロジェクトごとにいくつでも作れて、タスクを作るときに選びます。`.json`・zip でのエクスポート・インポートもここから。くわしくは [agents.md](agents.md)）。
+Settings for Pipeline and competition. For Pipeline, use "Edit flowchart" to build a flowchart that connects steps, branches (if), loops, parallel paths, and joins (each project can have any number of them, and you choose one when creating a task; `.json` and zip export and import are here too; see [agents.md](agents.md) for details).
 
-## ここにない設定
+## Settings found elsewhere
 
-遠隔操作（RC）の設定は、メニューの設定ではなく、上部の **「RC設定」** にあります（[remote.md](remote.md)）。
+Remote control (RC) settings are not in the Settings menu. They are under **"RC settings"** at the top ([remote.md](remote.md)).
 
 ---
 
-[← README に戻る](../README.md)
+[← Back to README](../README.md)

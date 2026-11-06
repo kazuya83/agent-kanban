@@ -140,9 +140,9 @@ function missingAnchors(md) {
 function agentsProblems(md) {
   const text = String(md || '');
   const problems = [];
-  const links = [...text.matchAll(/\]\(usage\.md#([^)]+)\)/g)].map((m) => decodeURIComponent(m[1]));
+  const links = [...text.matchAll(/\]\(usage(?:\.ja)?\.md#([^)]+)\)/g)].map((m) => decodeURIComponent(m[1]));
   if (links.length !== 1 || links[0] !== HEADING) problems.push('link');
-  const line = text.split(/\r?\n/).find((row) => /\]\(usage\.md#/.test(row)) || '';
+  const line = text.split(/\r?\n/).find((row) => /\]\(usage(?:\.ja)?\.md#/.test(row)) || '';
   if (!line.startsWith('- ') || /取り消せます|あとの変更は残します|金額は戻ります/.test(line)) problems.push('bullet');
   if (!/ファイル/.test(line)) problems.push('files');
   if (!/進み具合/.test(line)) problems.push('progress');
@@ -282,10 +282,10 @@ test('Pipeline の1行は、usage の節へ1つだけつながる', () => {
 });
 
 test('usage と agents の説明は、戻せないときと会話の違いを仕様どおり書く', () => {
-  const usage = read('docs/usage.md');
+  const usage = read('docs/usage.ja.md');
   const section = h2Section(usage, HEADING);
   assert.deepEqual(sectionProblems(section), []);
   assert.equal(section.includes('反映済み'), false);
   assert.deepEqual(missingAnchors(usage), []);
-  assert.deepEqual(agentsProblems(read('docs/agents.md')), []);
+  assert.deepEqual(agentsProblems(read('docs/agents.ja.md')), []);
 });

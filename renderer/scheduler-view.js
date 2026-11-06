@@ -16,9 +16,11 @@
     return vars ? String(key).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : key;
   }
   const WEEKDAYS = ScheduleModel.WEEKDAY_NAMES;
-  const RULE_KINDS = ['once', 'hourly', 'daily', 'weekly', 'monthly'];
+  const RULE_KINDS = ScheduleModel.RULE_KINDS;
+  const DEFAULT_INTERVAL = 15; // Issue の監視を選んだときの、確認の間隔の初期値
   function ruleKindLabel(kind) {
     if (kind === 'once') return tr('1回だけ');
+    if (kind === 'interval') return tr('N分おき');
     if (kind === 'hourly') return tr('毎時');
     if (kind === 'daily') return tr('毎日');
     if (kind === 'weekly') return tr('毎週');
@@ -86,6 +88,13 @@
       if (at <= now && toLocalInput(f.prevAt) !== f.at) return { error: tr('実行する日時に、過去の日時は指定できません') };
       return { rule: { kind: 'once', at } };
     }
+    if (f.kind === 'interval') {
+      const v = String(f.minutes ?? '').trim();
+      if (!/^\d{1,4}$/.test(v) || Number(v) < ScheduleModel.INTERVAL_MIN || Number(v) > ScheduleModel.INTERVAL_MAX) {
+        return { error: tr('間隔は {min}〜{max} の数字で入れてください', { min: ScheduleModel.INTERVAL_MIN, max: ScheduleModel.INTERVAL_MAX }) };
+      }
+      return { rule: { kind: 'interval', minutes: Number(v) } };
+    }
     if (f.kind === 'hourly') {
       const m = String(f.minute ?? '').trim();
       if (!/^\d{1,2}$/.test(m) || Number(m) > 59) return { error: tr('分は 0〜59 の数字で入れてください') };
@@ -109,7 +118,7 @@
   function defaultRule(now = Date.now()) {
     const d = new Date(now);
     d.setHours(d.getHours() + 1, 0, 0, 0);
-    return { kind: 'daily', hour: 9, minute: 0, weekdays: [new Date(now).getDay()], day: new Date(now).getDate(), at: d.getTime() };
+    return { kind: 'daily', hour: 9, minute: 0, minutes: DEFAULT_INTERVAL, weekdays: [new Date(now).getDay()], day: new Date(now).getDate(), at: d.getTime() };
   }
 
   // 1回だけのスケジュールは、日時が過ぎていると再開しても動かない
@@ -126,6 +135,14 @@
     return [...list].sort((a, b) => !!b.enabled - !!a.enabled || next(a) - next(b) || toTime(a.createdAt) - toTime(b.createdAt));
   }
   const ruleText = (s) => (s.rule ? ScheduleModel.describeRule(s.rule) : '');
+
+  // Issue の監視の対象を、画面に出す言葉にする
+  function issueTargetText(w) {
+    const parts = [];
+    if (w.labels.length) parts.push(tr('ラベル: {labels}', { labels: w.labels.join(', ') }));
+    if (w.author) parts.push(tr('作成者: {author}', { author: w.author }));
+    return parts.join(tr('・')) || tr('開いている Issue すべて');
+  }
 
   // スケジュールのエージェントの指定を、画面に出す名前にする
   function agentName(ref) {
@@ -146,6 +163,7 @@
 
   function cardHtml(s) {
     const tags = [];
+    if (s.issues) tags.push(`<span class="sched-tag">${tr('Issue の監視')}</span>`);
     if (!s.enabled) tags.push(`<span class="sched-tag off">${tr('停止中')}</span>`);
     if (s.lastStatus === 'failed') tags.push(`<span class="sched-tag err">${icon('alert')}${tr('前回は失敗')}</span>`);
     return `<button type="button" class="sched-card ${s.enabled ? '' : 'off'}" data-sched-id="${esc(s.id)}">
@@ -229,13 +247,16 @@
         ${row(tr('繰り返し'), esc(ruleText(s)))}
         ${row(tr('次回の実行'), esc(nextRunText(s)))}
         ${row(tr('最終実行日'), esc(fmtDateTime(s.lastRunAt) || tr('未実行')))}
+        ${s.issues ? row(tr('対象の Issue'), esc(issueTargetText(s.issues))) : ''}
+        ${s.issues ? row(tr('カードの扱い'), esc(s.issues.autoStart ? tr('自動で開始する') : tr('Todo に置くだけ'))) : ''}
+        ${s.issues ? row(tr('最終確認'), esc(fmtDateTime(s.issues.lastCheckedAt) || tr('未確認'))) : ''}
         ${row(tr('エージェント'), esc(agentName(s.agent)) + (s.model ? ` <span class="muted">/ ${esc(s.model)}</span>` : ''))}
         ${row(tr('スキル'), s.skill ? `<code>/${esc(s.skill)}</code>` : tr('なし'))}
-        ${row(tr('動かし方'), [s.readOnly ? tr('ソースを変更しない') : '', s.catchUp ? tr('起動後に1回だけ追いつく') : ''].filter(Boolean).map(esc).join(tr('・')) || tr('通常'))}
+        ${row(tr('動かし方'), [s.readOnly ? tr('ソースを変更しない') : '', s.catchUp && !s.issues ? tr('起動後に1回だけ追いつく') : ''].filter(Boolean).map(esc).join(tr('・')) || tr('通常'))}
       </dl>
       ${s.lastStatus === 'failed' && s.lastError ? `<p class="sched-error">${icon('alert')}${esc(s.lastError)}</p>` : ''}
-      <h3 class="sched-h3">${tr('指示内容')}</h3>
-      <pre class="sched-prompt">${esc(s.prompt)}</pre>
+      ${s.issues && !s.prompt ? '' : `<h3 class="sched-h3">${s.issues ? tr('追加の指示') : tr('指示内容')}</h3>
+      <pre class="sched-prompt">${esc(s.prompt)}</pre>`}
       <h3 class="sched-h3">${tr('実行履歴')}</h3>
       ${(s.runs || []).length ? `<ul class="sched-runs">${s.runs.map(runRowHtml).join('')}</ul>` : `<p class="muted small">${tr('まだ実行していません')}</p>`}
       <div class="modal-actions sched-actions">
@@ -244,8 +265,10 @@
         <button class="btn ghost" data-sched-do="close">${tr('閉じる')}</button>
         <button class="btn ghost" data-sched-do="edit">${tr('編集')}</button>
         ${toggle}
-        <button class="btn ghost" data-sched-do="task" title="${esc(tr('カンバンにタスクを作ります。開始はしません'))}">${tr('タスクだけ作成')}</button>
-        <button class="btn primary" data-sched-do="run" title="${esc(tr('カンバンにタスクを作って、すぐに開始します'))}">${tr('今すぐ実行')}</button>
+        ${s.issues
+          ? `<button class="btn primary" data-sched-do="check" title="${esc(tr('新しい Issue があるかを、次回を待たずに確かめます'))}">${tr('今すぐ確認')}</button>`
+          : `<button class="btn ghost" data-sched-do="task" title="${esc(tr('カンバンにタスクを作ります。開始はしません'))}">${tr('タスクだけ作成')}</button>
+        <button class="btn primary" data-sched-do="run" title="${esc(tr('カンバンにタスクを作って、すぐに開始します'))}">${tr('今すぐ実行')}</button>`}
       </div>`;
   }
 
@@ -282,7 +305,12 @@
     if (act === 'close') closeModal();
     else if (act === 'edit') openEditor({ schedule: s });
     else if (act === 'run') await runBusy(tr('タスクを作って開始しています…'), () => api.runSchedule({ id: s.id, start: true }), tr('タスクを作って開始しました'));
-    else if (act === 'task') await runBusy(tr('タスクを作成しています…'), () => api.runSchedule({ id: s.id, start: false }), tr('カンバンにタスクを作成しました'));
+    else if (act === 'check') {
+      await runBusy(tr('Issue を確認しています…'), async () => {
+        const ids = await api.runSchedule({ id: s.id });
+        toast(ids.length ? tr('新しい Issue のタスクを {n} 件作りました', { n: ids.length }) : tr('新しい Issue はありません'));
+      });
+    } else if (act === 'task') await runBusy(tr('タスクを作成しています…'), () => api.runSchedule({ id: s.id, start: false }), tr('カンバンにタスクを作成しました'));
     else if (act === 'toggle') await runBusy(tr('保存しています…'), () => api.updateSchedule({ id: s.id, enabled: !s.enabled }), s.enabled ? tr('停止しました') : tr('再開しました'));
     else if (act === 'delete') {
       if (!confirm(tr('スケジュール「{title}」を削除しますか？\n作成済みのタスクは残ります。', { title: s.title }))) return;
@@ -303,6 +331,7 @@
     const days = WEEKDAYS.map((w, i) => `<label class="sched-wd"><input type="checkbox" id="schedWd${i}" ${on.has(i) ? 'checked' : ''} /><span>${w}</span></label>`).join('');
     return `<label class="field"><span>${tr('繰り返し')}</span><select id="schedKind">${RULE_KINDS.map((k) => `<option value="${k}" ${k === r.kind ? 'selected' : ''}>${ruleKindLabel(k)}</option>`).join('')}</select></label>
       <label class="field" id="schedAtBox"><span>${tr('実行する日時')}</span><input type="datetime-local" id="schedAt" value="${esc(toLocalInput(r.at))}" /></label>
+      <label class="field" id="schedIntervalBox"><span>${tr('何分おきに実行するか（{min}〜{max}）', { min: ScheduleModel.INTERVAL_MIN, max: ScheduleModel.INTERVAL_MAX })}</span><input type="number" id="schedMinutes" min="${ScheduleModel.INTERVAL_MIN}" max="${ScheduleModel.INTERVAL_MAX}" value="${esc(r.minutes ?? DEFAULT_INTERVAL)}" /></label>
       <label class="field" id="schedMinuteBox"><span>${tr('毎時の何分に実行するか（0〜59）')}</span><input type="number" id="schedMinute" min="0" max="59" value="${esc(r.minute ?? 0)}" /></label>
       <div class="field" id="schedWeekBox"><span>${tr('曜日（複数選べます）')}</span><div class="sched-wds">${days}</div></div>
       <label class="field" id="schedDayBox"><span>${tr('毎月の何日に実行するか（1〜31）')}</span><input type="number" id="schedDay" min="1" max="31" value="${esc(r.day ?? 1)}" /><small>${tr('月の日数より大きいときは、その月の末日に実行します')}</small></label>
@@ -310,7 +339,7 @@
   }
   function showRuleFields() {
     const k = $('schedKind').value;
-    const show = { schedAtBox: k === 'once', schedMinuteBox: k === 'hourly', schedWeekBox: k === 'weekly', schedDayBox: k === 'monthly', schedTimeBox: k === 'daily' || k === 'weekly' || k === 'monthly' };
+    const show = { schedAtBox: k === 'once', schedIntervalBox: k === 'interval', schedMinuteBox: k === 'hourly', schedWeekBox: k === 'weekly', schedDayBox: k === 'monthly', schedTimeBox: k === 'daily' || k === 'weekly' || k === 'monthly' };
     for (const [id, on] of Object.entries(show)) $(id).classList.toggle('hidden', !on);
   }
   function readRule(prevAt) {
@@ -318,11 +347,26 @@
       kind: $('schedKind').value,
       at: $('schedAt').value,
       time: $('schedTime').value,
+      minutes: $('schedMinutes').value,
       minute: $('schedMinute').value,
       day: $('schedDay').value,
       weekdays: WEEKDAYS.flatMap((_, i) => ($(`schedWd${i}`).checked ? [i] : [])),
       prevAt,
     });
+  }
+
+  // Issue の監視の入力欄
+  function issueFieldsHtml(w) {
+    return `<div id="schedIssueBox">
+      <label class="field"><span>${tr('対象のラベル（カンマ区切り。全部付いている Issue だけ。空なら絞らない）')}</span><input id="schedLabels" placeholder="agent" value="${esc(w.labels.join(', '))}" /></label>
+      <label class="field"><span>${tr('対象の作成者（空なら絞らない。@me は gh のログインユーザー）')}</span><input id="schedAuthor" placeholder="@me" value="${esc(w.author)}" /></label>
+      <label class="field"><span>${tr('作ったカードの扱い')}</span><select id="schedAutoStart">
+        <option value="" ${w.autoStart ? '' : 'selected'}>${tr('Todo に置くだけ（人が見てから開始する）')}</option>
+        <option value="1" ${w.autoStart ? 'selected' : ''}>${tr('自動で開始する')}</option>
+      </select></label>
+      <p id="schedAutoWarn" class="field-note warn hidden">${tr('Issue の本文とコメントが、そのままエージェントへの指示になります。public リポジトリでは誰でも書けるので、ラベルや作成者で対象を絞ってください。')}</p>
+      <p class="field-note">${tr('登録した時点ですでにある Issue は対象にしません。登録のあとに作られた Issue を、1回の確認で {n} 件までカードにします。', { n: ScheduleModel.ISSUE_BATCH })}</p>
+    </div>`;
   }
 
   // ソースを変更しないタスクで使えない組み合わせは、無人で失敗する前にここで止める
@@ -340,20 +384,25 @@
   function openEditor({ fromCard, schedule } = {}) {
     if (!state.board.settings.repoPath) return chooseRepo();
     const base = defaultRule();
-    const draft = schedule || (fromCard ? draftFromCard(fromCard) : { title: '', prompt: '', skill: state.board.settings.defaultSkill || null, agent: undefined, model: '', readOnly: false });
+    const draft = schedule || (fromCard ? draftFromCard(fromCard) : { issues: null, title: '', prompt: '', skill: state.board.settings.defaultSkill || null, agent: undefined, model: '', readOnly: false });
     const rule = { ...base, ...(schedule ? schedule.rule : {}) };
     const files = fromCard ? (fromCard.attachments || []).length : 0;
     openModal(
       `<h2>${icon('calendar')}${schedule ? tr('スケジュールを編集') : tr('新しいスケジュール')}</h2>
        ${fromCard ? `<p class="muted small">${tr('タスク「{title}」の内容をコピーして登録します。元のタスクはそのまま残ります。', { title: esc(fromCard.title) })}${files ? tr('添付ファイル（{n} 件）はコピーしません。', { n: files }) : ''}</p>` : ''}
-       <label class="field"><span>${tr('タスク名（省略すると指示の1行目）')}</span><input id="schedTitle" value="${esc(draft.title)}" /></label>
+       <label class="field"><span>${tr('種類')}</span><select id="schedType">
+         <option value="" ${draft.issues ? '' : 'selected'}>${tr('タスクを実行する')}</option>
+         <option value="issues" ${draft.issues ? 'selected' : ''}>${tr('Issue の監視（新しい Issue ごとにカードを作る）')}</option>
+       </select></label>
+       ${issueFieldsHtml(draft.issues || { labels: [], author: '', autoStart: false })}
+       <label class="field"><span id="schedTitleLabel"></span><input id="schedTitle" value="${esc(draft.title)}" /></label>
        ${agentFieldHtml('sched', draft.agent)}
        <p id="schedAgentLost" class="field-note warn hidden"></p>
        ${modelFieldHtml('sched', draft.model || '')}
-       <div class="field"><span>${tr('エージェントへの指示')}</span><div id="schedSkill" class="skill-slot"></div><textarea id="schedPrompt" rows="8" placeholder="${esc(tr('毎回エージェントに頼むことを具体的に書いてください。'))}">${esc(draft.prompt)}</textarea></div>
+       <div class="field"><span id="schedPromptLabel"></span><div id="schedSkill" class="skill-slot"></div><textarea id="schedPrompt" rows="8">${esc(draft.prompt)}</textarea></div>
        ${ruleFieldsHtml(rule)}
        <label class="check" title="${esc(tr('SQL を作るだけ・調べるだけなど、ソースコードを変えないタスクにします'))}"><input type="checkbox" id="schedReadOnly" ${draft.readOnly ? 'checked' : ''} /> ${tr('ソースを変更しない（調べもの・SQL などの生成だけ）')}</label>
-       <label class="check" title="${esc(tr('アプリを閉じていた・スリープしていたなどで10分より遅れたときは、ふつうは見送って次回へ進みます。チェックを付けると、起動してから1回だけ実行します'))}"><input type="checkbox" id="schedCatchUp" ${draft.catchUp ? 'checked' : ''} /> ${tr('時刻を過ぎていたら、起動後に1回だけ追いつく')}</label>
+       <label class="check" id="schedCatchUpBox" title="${esc(tr('アプリを閉じていた・スリープしていたなどで10分より遅れたときは、ふつうは見送って次回へ進みます。チェックを付けると、起動してから1回だけ実行します'))}"><input type="checkbox" id="schedCatchUp" ${draft.catchUp ? 'checked' : ''} /> ${tr('時刻を過ぎていたら、起動後に1回だけ追いつく')}</label>
        <div class="modal-actions"><button class="btn ghost" id="schedCancel">${tr('キャンセル')}</button><button class="btn primary" id="schedOk">${schedule ? tr('保存（Ctrl/⌘ + Enter）') : tr('登録（Ctrl/⌘ + Enter）')}</button></div>`,
       () => {
         const sel = $('schedAgent');
@@ -369,10 +418,30 @@
         drawSkill();
         $('schedKind').onchange = showRuleFields;
         showRuleFields();
+        const watching = () => $('schedType').value === 'issues';
+        const showType = () => {
+          const on = watching();
+          $('schedIssueBox').classList.toggle('hidden', !on);
+          $('schedCatchUpBox').classList.toggle('hidden', on); // 監視は遅れても必ず確認する
+          $('schedAutoWarn').classList.toggle('hidden', !on || !$('schedAutoStart').value);
+          $('schedTitleLabel').textContent = on ? tr('スケジュール名（省略できます）') : tr('タスク名（省略すると指示の1行目）');
+          $('schedPromptLabel').textContent = on ? tr('追加の指示（省略できます。Issue の内容に加えてエージェントに伝えます）') : tr('エージェントへの指示');
+          $('schedPrompt').placeholder = on ? '' : tr('毎回エージェントに頼むことを具体的に書いてください。');
+        };
+        $('schedType').onchange = () => {
+          showType();
+          // 新しく作るときは、監視に向いた間隔を最初から選んでおく
+          if (watching() && !schedule) {
+            $('schedKind').value = 'interval';
+            showRuleFields();
+          }
+        };
+        $('schedAutoStart').onchange = showType;
+        showType();
         const leave = () => (schedule ? openDetail(schedule.id) : closeModal());
         const submit = async () => {
           const prompt = $('schedPrompt').value.trim();
-          if (!prompt) return toast(tr('エージェントへの指示を入れてください'));
+          if (!prompt && !watching()) return toast(tr('エージェントへの指示を入れてください'));
           const { rule: nextRule, error } = readRule(schedule && schedule.rule ? schedule.rule.at : undefined);
           if (error) return toast(error);
           const agent = sel.value;
@@ -388,6 +457,7 @@
             readOnly,
             catchUp: $('schedCatchUp').checked,
             rule: nextRule,
+            issues: watching() ? { labels: $('schedLabels').value, author: $('schedAuthor').value, autoStart: !!$('schedAutoStart').value } : null,
           };
           let done = false;
           await runBusy(tr('スケジュールを保存しています…'), async () => {

@@ -1,14 +1,16 @@
-# 開発者向け（ソースから動かす・ビルド・しくみ）
+[English](development.md) · [日本語](development.ja.md)
 
-## ソースから動かす
+# For developers (running from source, building, how it works)
 
-### 必要なもの
+## Run from source
 
-- Node.js 22 以上（24 推奨）
+### Requirements
+
+- Node.js 22 or later (24 recommended)
 - git
-- 使うエージェントの CLI をインストールし、ログインしておく（[Claude Code](https://docs.claude.com/en/docs/claude-code) の `claude`、Codex CLI の `codex`、Gemini CLI の `gemini`、[Cursor CLI](https://cursor.com/cli) の `cursor-agent` のどれか）
+- The CLI of the agent you use, installed and signed in (one of `claude` from [Claude Code](https://docs.claude.com/en/docs/claude-code), `codex` from Codex CLI, `gemini` from Gemini CLI, or `cursor-agent` from [Cursor CLI](https://cursor.com/cli))
 
-### 起動
+### Start
 
 ```bash
 npm install
@@ -18,13 +20,13 @@ npm install
 npm start
 ```
 
-1. 「リポジトリを選ぶ」から、作業させたい git リポジトリを選びます（コミットが1つ以上必要です）
-   - 手元にまだないときは、同じ画面の **URL からクローンする**（`https://github.com/owner/repo`・`git@github.com:owner/repo.git`・`owner/repo`）か **新しく作る**（README.md だけの最初のコミットまで作ります。gh にログインしていれば GitHub にも作って push できます）を選べます
-2. 「＋ 新しいタスク」から指示を書いて作成します
-3. 承認待ちになったら、カードの「許可」を押します
-4. レビュー列に移ったら、差分を確認して「マージ」（マージ先のブランチを選びます）か「破棄」を押します
+1. Under "Choose a repository", choose the git repository you want worked on (it needs at least one commit)
+   - If you do not have it locally yet, the same screen offers **Clone from a URL** (`https://github.com/owner/repo`, `git@github.com:owner/repo.git`, or `owner/repo`) or **Create new** (creates up to a first commit containing only README.md; if you are signed in to gh, it can also create the repository on GitHub and push)
+2. Write an instruction under "+ New task" and create it
+3. When the card is waiting for approval, press "Allow" on it
+4. When it moves to the Review column, check the diff, then press "Merge" (and choose the target branch) or "Discard"
 
-### アプリをビルドする
+### Build the app
 
 ```bash
 npm run dist:mac
@@ -38,97 +40,97 @@ npm run dist:win
 npm run dist:linux
 ```
 
-`dist/` に出力されます。
+The output goes to `dist/`.
 
-### 3つの OS をまとめてビルドする・リリースする（Mac で）
+### Build and release for all three OSes (on a Mac)
 
-GitHub Actions はテストだけを動かします（`.github/workflows/build.yml`）。**ビルドとリリースは手元の Mac で行います。** Claude Code では `/build-apps` スキルで同じことができます。
+GitHub Actions runs only the tests (`.github/workflows/build.yml`). **Builds and releases are done on a local Mac.** In Claude Code, the `/build-apps` skill does the same thing.
 
 ```bash
 scripts/build-all.sh
 ```
 
-テスト → install.sh / install.ps1 の書き方の確認 → Mac（dmg）・Windows（exe / zip）・Linux（AppImage）のビルドをまとめて行います（レビューのとき）。Apple Silicon の Mac では **Rosetta 2** が必要です（Windows のインストーラーと AppImage を作る道具が Intel 用のため）。
+This runs the tests → a syntax check of install.sh / install.ps1 → the Mac (dmg), Windows (exe / zip), and Linux (AppImage) builds in one go (for reviews). On an Apple Silicon Mac, **Rosetta 2** is required (the tools that make the Windows installer and the AppImage are Intel binaries).
 
 ```bash
 softwareupdate --install-rosetta --agree-to-license
 ```
 
-main にマージしたら、次でリリースします。
+After merging to main, release with:
 
 ```bash
 scripts/release-local.sh
 ```
 
-- 最新のリリースからアプリの中身が変わっていれば、版の番号を1つ上げて（例: v0.1.8 → v0.1.9）ビルドし、GitHub Release を作ります。`package.json` を書き換える必要はありません
-- README・docs やテストだけの変更では、リリースしません
-- Release の説明は `scripts/release-notes.js` が、前の版からのコミットを「新機能・改善」「不具合の修正」「ドキュメント」「開発・ビルドまわり」に分けて Markdown でまとめます（OS ごとのダウンロードの表と、比較のリンクも付けます）。`/release`（マージ後の自動ビルド）でも同じ説明になります
-- 0.2.0 のように大きく上げたいときは、`package.json` の `version` をその番号にして main に入れてから実行します
-- `--dry-run` を付けると、次の版とリリースするかどうかだけを出します
+- If the app's contents have changed since the latest release, it bumps the version by one (for example v0.1.8 → v0.1.9), builds, and creates a GitHub Release. You do not need to edit `package.json`
+- Changes to only the README, docs, or tests are not released
+- `scripts/release-notes.js` writes the Release description in Markdown, grouping the commits since the previous version into new features and improvements, bug fixes, documentation, and development and build (it also adds a download table per OS and a compare link). `/release` (the automatic post-merge build) produces the same description
+- To make a bigger jump such as 0.2.0, set `version` in `package.json` to that number, get it into main, then run the script
+- With `--dry-run`, it only prints the next version and whether it would release
 
-インストール用のコマンドは、いつも最新の Release を入れます。
+The install commands always install the latest Release.
 
-### マージしたあとに自動でビルドする
+### Build automatically after a merge
 
-次を1回実行しておきます。そうすると、Worktree Kanban でタスクを main にマージするたびに（マージのメッセージが `Merge agent task:` で始まるとき）、`/build-apps` が裏で動きます。
+Run this once. After that, each time Worktree Kanban merges a task into main (when the merge message starts with `Merge agent task:`), `/build-apps` runs in the background.
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-- `.githooks/post-merge` が `scripts/after-merge-build.sh` を裏で走らせます。マージ自体はすぐに終わります
-- マージしたあとの main から一時的な worktree（ブランチ `build-apps/<sha>`）を作り、`claude -p "/build-apps review"` でテストと3つの OS のビルドをします。落ちたときは、install.sh / install.ps1 などを Claude が直します
-- できたファイルは、main をチェックアウトしているフォルダの `dist/` に写して残します
-- 直したところがあれば、コミットしてからもう一度ビルドして確かめます。通れば main にマージして `origin/main` に push します。直したところがなければ、マージも push もしません
-- **ビルドが通ったら、そのまま GitHub Release を公開します。** できたファイルをそのまま使うので、もう一度ビルドはしません。版の番号とリリースするかどうかは `scripts/release-local.sh` と同じく `scripts/next-version.js` で決めます（README・docs・テストだけの変更では出しません）
-  - ビルドしたコミットがまだ `origin/main` にない（push していない）とき・その版がもう公開されているときは、出しません
-  - 出したくないときは `AFTER_MERGE_NO_RELEASE=1` を付けます。`gh` にログインしておく必要があります
-- 失敗したとき・コンフリクトしたとき・main に未コミットの変更があるときは、自動ではマージも公開もしません。macOS の通知で知らせ、ブランチと worktree を残します
-- 一度に1つだけ動きます。動いている間に次のマージが入ったら、終わったあとにもう一度動きます
-- **進み具合**: 「1/4 テストとビルドを始めました」→「2/4 直したところがあったので、もう一度ビルドしています」（直したときだけ）→「3/4 ビルド OK」→「4/4 Release を出すか確かめています」→「終わりました: …（公開した Release の URL か、出さなかった理由）」の順に、macOS の通知で知らせます
-  - `scripts/after-merge-build.sh --status` で、動いているかどうか・今の段階・これまでの結果（新しい 10 件）を見られます（中身は `.git/build-apps/status` と `.git/build-apps/history.log`）
-- 細かいログは `.git/build-apps/logs/` に出ます。手で動かすときは `scripts/after-merge-build.sh` を実行します（同じ main で前に動かしたことがあっても動かすときは `--force`）
-- Claude Code で `/release`（または `/build-apps release`）と頼むと、確認したうえでこの流れ（ビルド → 直す → マージ・push → Release）をその場で動かします
-- 止めたいときは `git config --unset core.hooksPath` を実行します
+- `.githooks/post-merge` runs `scripts/after-merge-build.sh` in the background. The merge itself finishes right away
+- It creates a temporary worktree (branch `build-apps/<sha>`) from the merged main and asks an agent to run `/build-apps review` (the tests and the three OS builds). If something fails, the agent fixes install.sh / install.ps1 and the like. It uses the first of `claude`, `codex`, `gemini`, `cursor-agent` that it finds (set `AFTER_MERGE_AGENT` to choose; agents other than Claude Code run without permission prompts)
+- The built files are copied to `dist/` in the folder where main is checked out
+- If anything was fixed, it commits and builds again to confirm. If that passes, it merges into main and pushes to `origin/main`. If nothing was fixed, it neither merges nor pushes
+- **When the build passes, it publishes a GitHub Release right away.** It uses the built files as they are and does not build again. The version number and whether to release are decided by `scripts/next-version.js`, the same as `scripts/release-local.sh` (changes to only the README, docs, or tests are not released)
+  - It does not release if the built commit is not on `origin/main` yet (not pushed), or if that version is already published
+  - Set `AFTER_MERGE_NO_RELEASE=1` to skip releasing. You need to be signed in to `gh`
+- If something fails, conflicts, or main has uncommitted changes, it neither merges nor publishes automatically. It tells you with a macOS notification and leaves the branch and worktree in place
+- Only one runs at a time. If another merge comes in while it is running, it runs once more when it finishes
+- **Progress**: macOS notifications tell you in this order: "1/4 Started tests and build" → "2/4 Something was fixed, so building again" (only if something was fixed) → "3/4 Build OK" → "4/4 Checking whether to publish a Release" → "Finished: …" (the URL of the published Release, or why it was not published). The notification text itself is in Japanese
+  - `scripts/after-merge-build.sh --status` shows whether it is running, the current stage, and past results (the latest 10; the data is in `.git/build-apps/status` and `.git/build-apps/history.log`)
+- Detailed logs go to `.git/build-apps/logs/`. To run it by hand, run `scripts/after-merge-build.sh` (add `--force` to run it even if it has already run on the same main)
+- In Claude Code, asking for `/release` (or `/build-apps release`) runs this flow on the spot after confirming with you (build → fix → merge and push → Release)
+- To stop it, run `git config --unset core.hooksPath`
 
-## しくみ
+## How it works
 
 ```
-Electron メインプロセス
- ├─ AgentManager … カードごとに git worktree を作り、claude -p --output-format stream-json を起動
- │                  stdout の JSON を読んで、ログ・状態・コストを更新
- └─ PermissionServer（127.0.0.1・トークン付き HTTP）
+Electron main process
+ ├─ AgentManager … creates a git worktree per card and starts claude -p --output-format stream-json
+ │                  reads the JSON on stdout and updates logs, state, and cost
+ └─ PermissionServer (HTTP on 127.0.0.1, with a token)
         ▲
-        │ 承認を問い合わせる（ユーザーが押すまで待つ）
- permission-mcp.js（stdio の MCP サーバー）
+        │ asks for approval (waits until the user presses a button)
+ permission-mcp.js (stdio MCP server)
         ▲
         │ --permission-prompt-tool mcp__agent_kanban__approve
- claude（各 worktree の中で動く）
+ claude (runs inside each worktree)
 ```
 
-- 承認は Claude Code の `--permission-prompt-tool` で受けています。権限モードや `--allowedTools` で自動的に許可されない操作だけが、アプリに問い合わされます
-- 承認を待つ間にタイムアウトしないよう、`MCP_TOOL_TIMEOUT` を長くしてあります
-- エージェントが終わると、worktree の変更は自動でそのブランチにコミットされます
-- ボードのデータは Electron の userData フォルダの `board.json` に保存されます
+- Approvals are received through Claude Code's `--permission-prompt-tool`. Only actions not allowed automatically by the permission mode or `--allowedTools` reach the app
+- `MCP_TOOL_TIMEOUT` is set long so that waiting for approval does not time out
+- When an agent finishes, the changes in its worktree are committed to its branch automatically
+- Board data is stored in `board.json` in Electron's userData folder
 
-## 開発
+## Development
 
 ```bash
 npm test
 ```
 
-テストでは、偽の claude（`test/fake-claude.js`）を使います。worktree の作成、承認（MCP 経由）、同時実行数の制限、追加指示、マージ、破棄、停止を通しで確かめます。
+The tests use a fake claude (`test/fake-claude.js`). They run through worktree creation, approval (via MCP), the concurrency limit, follow-up instructions, merging, discarding, and stopping.
 
-## 名前を変えたときに残しているもの
+## What keeps the old name
 
-Agent Kanban から Worktree Kanban へ改名しても、今のユーザーがそのまま使えるように、次は前の名前のままにしています。
+After the rename from Agent Kanban to Worktree Kanban, the following keep the previous name so that existing users can carry on as they are.
 
-- データの場所（userData の `agent-kanban` フォルダ。`main.js` で固定）、SSH の鍵（`agent-kanban_ed25519`）、Pipeline のファイル形式、appId
-- Release の前の名前のファイル（`agent-kanban-<版>-…`）。改名前の版は、このファイルがないと自分を更新できません（`scripts/legacy-assets.sh`）
-- インストーラの `AGENT_KANBAN_VERSION` の指定と、Linux の `~/.local/bin/agent-kanban`（改名前の版が更新のあとに起動するため）
+- The data location (the `agent-kanban` folder in userData, fixed in `main.js`), the SSH key (`agent-kanban_ed25519`), the Pipeline file format, and the appId
+- Release files under the previous name (`agent-kanban-<version>-…`). Versions from before the rename cannot update themselves without these files (`scripts/legacy-assets.sh`)
+- The installer's `AGENT_KANBAN_VERSION` setting and Linux's `~/.local/bin/agent-kanban` (versions from before the rename launch through it after updating)
 
-画面の画像とデモ GIF の撮り直しは [scripts/capture/README.md](../scripts/capture/README.md) を見てください。
+To retake the screenshots and GIFss, see [scripts/capture/README.md](../scripts/capture/README.md).
 
 ---
 
-[← README に戻る](../README.md)
+[← Back to README](../README.md)

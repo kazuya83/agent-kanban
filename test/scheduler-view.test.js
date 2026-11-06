@@ -73,7 +73,14 @@ function setup({ schedules = [], settings = { repoPath: '/repo' }, cards = [], a
     $: (id) => doc.els.get(id) || null,
     esc: (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]),
     icon: (n) => `[${n}]`,
-    ScheduleModel: { describeRule: (r) => `rule:${r.kind}`, WEEKDAY_NAMES: ['日', '月', '火', '水', '木', '金', '土'] },
+    ScheduleModel: {
+      describeRule: (r) => `rule:${r.kind}`,
+      WEEKDAY_NAMES: ['日', '月', '火', '水', '木', '金', '土'],
+      RULE_KINDS: ['once', 'interval', 'hourly', 'daily', 'weekly', 'monthly'],
+      INTERVAL_MIN: 1,
+      INTERVAL_MAX: 1440,
+      ISSUE_BATCH: 10,
+    },
     RELAY_PREFIX: 'relay:',
     CUSTOM_PREFIX: 'custom:',
     isRelayRef: (v) => typeof v === 'string' && v.startsWith('relay:'),
@@ -293,9 +300,51 @@ test('作成: 入力した内容で登録する', async () => {
   el('schedWd1').checked = true;
   el('schedWd5').checked = true;
   await el('schedOk').onclick();
-  assert.deepStrictEqual(plain(calls), [['create', { title: '週次', prompt: '集計して', skill: null, agent: 'claude', model: '', readOnly: false, catchUp: false, rule: { kind: 'weekly', hour: 8, minute: 30, weekdays: [1, 5] }, enabled: true }]]);
+  assert.deepStrictEqual(plain(calls), [['create', { title: '週次', prompt: '集計して', skill: null, agent: 'claude', model: '', readOnly: false, catchUp: false, rule: { kind: 'weekly', hour: 8, minute: 30, weekdays: [1, 5] }, issues: null, enabled: true }]]);
   assert.strictEqual(toasts[0][0], 'ok');
   assert.strictEqual(doc.modalOpen, false);
+});
+
+test('Issue の監視: 欄を切り替え、指示なしで登録できる', async () => {
+  const { ctx, doc, calls } = setup();
+  ctx.SchedulerView.openEditor();
+  const el = (id) => doc.els.get(id);
+  assert.strictEqual(el('schedIssueBox').classList.contains('hidden'), true);
+  el('schedType').value = 'issues';
+  el('schedType').onchange();
+  assert.strictEqual(el('schedIssueBox').classList.contains('hidden'), false);
+  assert.strictEqual(el('schedCatchUpBox').classList.contains('hidden'), true);
+  assert.strictEqual(el('schedKind').value, 'interval');
+  assert.strictEqual(el('schedIntervalBox').classList.contains('hidden'), false);
+  assert.strictEqual(el('schedAutoWarn').classList.contains('hidden'), true);
+  el('schedAutoStart').value = '1';
+  el('schedAutoStart').onchange();
+  assert.strictEqual(el('schedAutoWarn').classList.contains('hidden'), false);
+  el('schedLabels').value = 'agent';
+  await el('schedOk').onclick();
+  const [name, data] = calls[0];
+  assert.strictEqual(name, 'create');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(data.issues)), { labels: 'agent', author: '', autoStart: true });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(data.rule)), { kind: 'interval', minutes: 15 });
+});
+
+test('Issue の監視: 詳細に対象を出し、今すぐ確認で結果を知らせる', async () => {
+  const s = { id: 's1', title: '監視', prompt: '', enabled: true, rule: { kind: 'interval', minutes: 5 }, runs: [], issues: { labels: ['agent'], author: '', autoStart: false, lastCheckedAt: null } };
+  const { ctx, doc, toasts } = setup({ schedules: [s], apiOverride: { runSchedule: async () => ['c1', 'c2'] } });
+  ctx.SchedulerView.render();
+  doc.els.get('schedulerView').onclick({ target: { closest: (q) => (q === '[data-sched-id]' ? { dataset: { schedId: 's1' } } : null) } });
+  const wrap = doc.els.get('schedDetail');
+  assert.match(wrap.innerHTML, /ラベル: agent/);
+  assert.match(wrap.innerHTML, /Todo に置くだけ/);
+  assert.doesNotMatch(wrap.innerHTML, /タスクだけ作成/);
+  await wrap.onclick({ target: { closest: (q) => (q === '[data-sched-do]' ? { dataset: { schedDo: 'check' } } : null) } });
+  assert.ok(toasts.some((x) => JSON.stringify(x).includes('新しい Issue のタスクを 2 件作りました')), JSON.stringify(toasts));
+});
+
+test('ruleFromForm: N分おき', () => {
+  const { ctx } = setup();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(ctx.SchedulerView.ruleFromForm({ kind: 'interval', minutes: '30' }).rule)), { kind: 'interval', minutes: 30 });
+  for (const minutes of ['0', '1441', 'x', '']) assert.match(ctx.SchedulerView.ruleFromForm({ kind: 'interval', minutes }).error, /間隔は/);
 });
 
 test('作成: 種類に合う欄だけを出す', () => {
@@ -422,7 +471,7 @@ test('編集: 今の内容を出して保存し、詳細に戻る', async () => 
   assert.strictEqual(el('schedCatchUp').checked, true);
   el('schedTitle').value = '月次2';
   await el('schedOk').onclick();
-  assert.deepStrictEqual(plain(calls), [['update', { id: 's1', title: '月次2', prompt: '依存を更新', skill: 'release', agent: 'codex', model: 'gpt-5', readOnly: false, catchUp: true, rule: { kind: 'monthly', hour: 23, minute: 59, day: 31 } }]]);
+  assert.deepStrictEqual(plain(calls), [['update', { id: 's1', title: '月次2', prompt: '依存を更新', skill: 'release', agent: 'codex', model: 'gpt-5', readOnly: false, catchUp: true, rule: { kind: 'monthly', hour: 23, minute: 59, day: 31 }, issues: null }]]);
   assert.ok(el('schedDetail'), '保存後は詳細に戻る');
   assert.strictEqual(doc.modalOpen, true);
 });

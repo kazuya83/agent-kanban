@@ -245,12 +245,25 @@ function badgeFor(c) {
   if ((c.permissions || []).length) return ['waiting', tr('承認待ち')];
   if (c.conflict && !c.conflict.resolving && c.status !== 'running' && c.status !== 'queued') return ['conflict', tr('コンフリクト')];
   if (isSpecPending(c)) return ['spec', tr('仕様の確認')];
+  if (c.prState === 'OPEN' && c.prChecks?.state === 'FAILURE' && (c.status === 'review' || c.status === 'failed')) return ['conflict', tr('CI 失敗')];
   if (hasSubtaskProposal(c)) return ['spec', tr('サブタスクの提案')];
   if (subtasksRunning(c) && (c.status === 'review' || c.status === 'failed')) return subNeedsYou(c) ? ['awaiting', tr('サブタスクが対応待ち')] : ['running', tr('サブタスク実行中')];
   if (c.subtaskOf && subtaskNeedsCheck(c)) return ['awaiting', tr('確認待ち')];
   if (c.relay && c.relay.waiting && c.status === 'review') return ['queued', tr('並列の枝を待機中')];
   if (c.awaitingReply && (c.status === 'review' || c.status === 'failed')) return ['awaiting', tr('回答待ち')];
   return [c.status, (isChat(c) ? CHAT_STATUS_LABEL : STATUS_LABEL)[c.status]];
+}
+// PR の CI の結果のバッジ（結果がまだ来ていない・チェックがないときは出さない）
+function ciBadgeHtml(c, s) {
+  const ch = c.prState === 'OPEN' ? c.prChecks : null;
+  if (!ch || ch.state === 'NONE') return '';
+  if (ch.state === 'SUCCESS') return ` <span class="badge b-ci-ok">${tr('CI 成功')}</span>`;
+  if (ch.state === 'PENDING') return ` <span class="badge b-ci-wait">${tr('CI 実行中')}</span>`;
+  if (ch.state === 'ATTENTION') return ` <span class="badge b-ci-wait">${tr('CI 要確認')}</span>`;
+  const fixing = c.ciFix && c.ciFix.running;
+  const links = ch.failed.map((x) => (x.url ? `<a class="issue-chip" data-url="${esc(x.url)}">${esc(x.name)}</a>` : esc(x.name))).join(' ');
+  const canFix = c.worktreePath && !c.conflict && (s === 'review' || s === 'failed');
+  return ` <span class="badge b-conflict">${tr('CI 失敗')}</span>${fixing ? ` <span class="muted small">${tr('自動で修正中')}</span>` : ''}${!fixing && canFix ? ` <button class="btn small" data-act="ciFix">${tr('直してもらう')}</button>` : ''}<div class="ci-failed">${links}</div>`;
 }
 function needsYou(c) {
   if (subtasksRunning(c) && subNeedsYou(c)) return true;
@@ -678,6 +691,8 @@ function renderBoard() {
   const { settings, cards } = state.board;
   renderInterruptBanner();
   renderRemoteInfo();
+  // Claude Code を使わない設定なら、Claude Code の会話の一覧は出さない
+  $('sessionsBtn').classList.toggle('hidden', !enabledAgents(settings).includes('claude'));
   // 会話は同時実行数に数えない
   const running = cards.filter((c) => c.status === 'running' && !isChat(c)).length;
   renderNotifications();
@@ -925,11 +940,11 @@ async function select(id, { subFrom = null } = {}) {
   // サブタスクを親の「サブタスク」タブから開いたときは、閉じると親に戻る
   state.subFrom = subFrom && card(subFrom) ? subFrom : null;
   if (state.chatListOpen) closeModal();
-  // 会話と、親の「サブタスク」タブから開いたサブタスクは、ボードの横ではなく、画面の中央にモーダルで開く
+  // 会話と、親の「サブタスク」タブから開いたサブタスクは、右からのスライドではなく、画面の中央にモーダルで開く
   const chatModal = isChat(card(id)) || !!state.subFrom;
   $('detail').classList.toggle('as-modal', chatModal);
   $('detailBackdrop').classList.toggle('hidden', !chatModal);
-  $('detail').classList.remove('hidden');
+  $('detail').classList.remove('hidden', 'closing');
   $('followInput').value = '';
   followAttach.clear();
   state.followSkill = null;
@@ -981,8 +996,11 @@ function setTab(tab) {
 function closeDetail() {
   state.selected = null;
   state.subFrom = null;
-  $('detail').classList.add('hidden');
-  $('detail').classList.remove('as-modal');
+  const panel = $('detail');
+  // スライドで開いているパネルは右へ抜けてから隠す（animationend で hidden にする）。モーダルはすぐ閉じる
+  if (panel.classList.contains('as-modal')) panel.classList.add('hidden');
+  else if (!panel.classList.contains('hidden')) panel.classList.add('closing');
+  panel.classList.remove('as-modal');
   $('detailBackdrop').classList.add('hidden');
   renderBoard();
 }
@@ -1936,7 +1954,7 @@ function competeBoxHtml(c) {
 function renderDetailHead() {
   const c = card(state.selected);
   if (!c) return closeDetailOrBack();
-  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch]), relayKidsSig(c), c.subtasks, c.subtaskProposal, c.subtaskOf, subKidsSig(c)]);
+  const sig = JSON.stringify([c.conflict, c.conflictResolved, c.status, c.title, c.error, c.branch, c.worktreePath, c.costUsd, c.permissions, c.alwaysAllow, c.mergedInto, c.pushedTo, c.prUrl, c.prBase, c.prState, c.prMergeable, c.prChecks, c.ciFix, state.board.settings.integration, c.sessionId, c.forkNext, c.sessions, c.questions, c.awaitingReply, c.specState, c.specQuestions, c.interrupted, c.agent, c.relay, c.compete, competitors(c).map((x) => [x.id, x.status, x.branch]), relayKidsSig(c), c.subtasks, c.subtaskProposal, c.subtaskOf, subKidsSig(c)]);
   if (sig === state.headSig) return;
   state.headSig = sig;
   const s = c.status;
@@ -1991,7 +2009,7 @@ function renderDetailHead() {
 function detailMetaHtml(c) {
   const s = c.status;
   const chat = isChat(c);
-  return tr('<dl class="d-meta">\n      {v}\n      {v2}\n      <dt>モデル</dt><dd>{v3}</dd>\n      {v4}\n      {v5}\n      {v6}\n      {v7}\n      {v8}\n      {v9}\n      {v10}\n      {v11}\n      {v12}\n      {v13}\n    </dl>', { v: (c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''), v2: (!chat || c.persona ? tr('<dt>エージェント</dt><dd>{v}{v2}{v3}</dd>', { v: (personaIcon(c.persona, agentOf(c))), v2: (esc(whoLabel(agentOf(c), c.persona))), v3: (c.persona && c.persona.description ? ` <span class="muted small">${esc(c.persona.description)}</span>` : '') }) : ''), v3: (c.model ? esc(c.model) : settingsModel(agentOf(c)) ? tr('{v} <span class="muted small">（設定の既定）</span>', { v: (esc(settingsModel(agentOf(c)))) }) : tr('<span class="muted small">CLI の既定</span>')), v4: (sessionRowHtml(c)), v5: (chat ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（worktree は作りません）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v6: (!chat && c.readOnly ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（ソースを変更しないタスク。worktree は作らず、ファイルを書き換えるツールを止めて、このフォルダで動かします。作ったものはチャットに出ます）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v7: (!chat && isNoGit(c) && !c.readOnly ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（git で管理していないフォルダ。worktree は作らず、このフォルダで直接動かします）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v8: (c.branch ? tr('<dt>ブランチ</dt><dd>{branch} ← {baseBranch}</dd>', { branch: (esc(c.branch)), baseBranch: (esc(c.baseBranch)) }) : ''), v9: (c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''), v10: (c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}${c.prState === 'MERGED' ? tr('（マージ済み）') : c.prState === 'CLOSED' ? tr('（閉じられました）') : ''}${c.prState === 'OPEN' && c.prMergeable === 'CONFLICTING' ? tr(' <span class="badge b-conflict">コンフリクト</span>{v}', { v: (c.worktreePath && !c.conflict && (s === 'review' || s === 'failed') ? tr(' <button class="btn small" data-act="prConflict">解消する</button>') : '') }) : ''}</dd>` : ''), v11: ((c.mergedInto || []).length ? tr('<dt>マージ済み</dt><dd>{v}</dd>', { v: (c.mergedInto.map((b) => esc(b) + ((c.pushedTo || []).includes(b) ? tr('（origin にも push 済み）') : '')).join(', ')) }) : ''), v12: (c.costUsd ? tr('<dt>コスト</dt><dd>${v}</dd>', { v: (c.costUsd.toFixed(3)) }) : ''), v13: ((c.alwaysAllow || []).length ? tr('<dt>常に許可</dt><dd>{v}</dd>', { v: (c.alwaysAllow.map(esc).join(', ')) }) : '') });
+  return tr('<dl class="d-meta">\n      {v}\n      {v2}\n      <dt>モデル</dt><dd>{v3}</dd>\n      {v4}\n      {v5}\n      {v6}\n      {v7}\n      {v8}\n      {v9}\n      {v10}\n      {v11}\n      {v12}\n      {v13}\n    </dl>', { v: (c.issue ? `<dt>Issue</dt><dd><a class="issue-chip" data-url="${esc(c.issue.url)}">#${c.issue.number}</a> ${esc(c.issue.url)}</dd>` : ''), v2: (!chat || c.persona ? tr('<dt>エージェント</dt><dd>{v}{v2}{v3}</dd>', { v: (personaIcon(c.persona, agentOf(c))), v2: (esc(whoLabel(agentOf(c), c.persona))), v3: (c.persona && c.persona.description ? ` <span class="muted small">${esc(c.persona.description)}</span>` : '') }) : ''), v3: (c.model ? esc(c.model) : settingsModel(agentOf(c)) ? tr('{v} <span class="muted small">（設定の既定）</span>', { v: (esc(settingsModel(agentOf(c)))) }) : tr('<span class="muted small">CLI の既定</span>')), v4: (sessionRowHtml(c)), v5: (chat ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（worktree は作りません）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v6: (!chat && c.readOnly ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（ソースを変更しないタスク。worktree は作らず、ファイルを書き換えるツールを止めて、このフォルダで動かします。作ったものはチャットに出ます）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v7: (!chat && isNoGit(c) && !c.readOnly ? tr('<dt>場所</dt><dd class="mono">{repoPath} <span class="muted small">（git で管理していないフォルダ。worktree は作らず、このフォルダで直接動かします）</span></dd>', { repoPath: (esc(c.repoPath)) }) : ''), v8: (c.branch ? tr('<dt>ブランチ</dt><dd>{branch} ← {baseBranch}</dd>', { branch: (esc(c.branch)), baseBranch: (esc(c.baseBranch)) }) : ''), v9: (c.worktreePath ? `<dt>worktree</dt><dd class="mono">${esc(c.worktreePath)}</dd>` : ''), v10: (c.prUrl ? `<dt>PR</dt><dd><a class="issue-chip" data-url="${esc(c.prUrl)}">${esc(c.prUrl)}</a>${c.prBase ? ` → ${esc(c.prBase)}` : ''}${c.prState === 'MERGED' ? tr('（マージ済み）') : c.prState === 'CLOSED' ? tr('（閉じられました）') : ''}${c.prState === 'OPEN' && c.prMergeable === 'CONFLICTING' ? tr(' <span class="badge b-conflict">コンフリクト</span>{v}', { v: (c.worktreePath && !c.conflict && (s === 'review' || s === 'failed') ? tr(' <button class="btn small" data-act="prConflict">解消する</button>') : '') }) : ''}${ciBadgeHtml(c, s)}</dd>` : ''), v11: ((c.mergedInto || []).length ? tr('<dt>マージ済み</dt><dd>{v}</dd>', { v: (c.mergedInto.map((b) => esc(b) + ((c.pushedTo || []).includes(b) ? tr('（origin にも push 済み）') : '')).join(', ')) }) : ''), v12: (c.costUsd ? tr('<dt>コスト</dt><dd>${v}</dd>', { v: (c.costUsd.toFixed(3)) }) : ''), v13: ((c.alwaysAllow || []).length ? tr('<dt>常に許可</dt><dd>{v}</dd>', { v: (c.alwaysAllow.map(esc).join(', ')) }) : '') });
 }
 
 function renderInfo(c) {
@@ -2131,6 +2149,7 @@ async function detailAction(e) {
   }
   if (act === 'pr') openPr(c);
   if (act === 'prConflict') run(() => api.reopenPrConflict(c.id));
+  if (act === 'ciFix') run(() => api.fixCi(c.id));
   if (act === 'toTask') newTask({ fromChat: c });
   if (act === 'fixTask') newTask({ fromChat: c });
   if (act === 'adopt') {
@@ -2393,7 +2412,7 @@ const DIFF_BIG = 600; // これより行数が多いファイルは最初は折�
 // 折りたたみ・表示状態（更新しても保つ）
 // split: 左右に並べて表示する（次に開いたときも同じ表示にする）。full: 画面に大きくモーダルで出す
 const DIFF_SPLIT_KEY = 'agent-kanban.diffSplit';
-const diffUi = { cardId: null, collapsedDirs: new Set(), collapsedFiles: new Set(), openedBig: new Set(), tree: true, active: null, split: localStorage.getItem(DIFF_SPLIT_KEY) === '1', full: false };
+const diffUi = { cardId: null, collapsedDirs: new Set(), collapsedFiles: new Set(), openedBig: new Set(), tree: true, active: null, split: localStorage.getItem(DIFF_SPLIT_KEY) === '1', full: false, files: [], comments: new Map(), form: null, nextComment: 1, sending: false };
 
 function diffTreeHtml(node, depth) {
   const pad = (d) => `style="padding-left:${8 + d * 14}px"`;
@@ -2412,19 +2431,137 @@ function diffTreeHtml(node, depth) {
 }
 
 // 左右に並べた表示（左が元、右が変更後）
+// ---- 行コメント: カードごとの下書き。送るまで貯めて、まとめて追加指示にする（アプリを閉じると消える） ----
+// form: 今開いている入力欄（{ path, side, line, code, id, text }。id があれば既存のコメントの編集）
+const diffComments = () => diffUi.comments.get(diffUi.cardId) || [];
+
+function diffCommentBtn(l) {
+  const { side, line } = DiffComments.lineRef(l);
+  return `<button class="dv-cadd" type="button" data-side="${side}" data-line="${line}" title="${tr('この行にコメント')}" aria-label="${tr('この行にコメント')}">+</button>`;
+}
+
+function diffCommentFormHtml(f) {
+  return `<div class="dv-cbox dv-cform"><textarea id="diffCommentInput" rows="3" placeholder="${tr('コメントを書く（Ctrl/⌘ + Enter で追加）')}">${esc(f.text)}</textarea>
+    <div class="dv-cacts"><button class="btn small ghost" type="button" data-dc="cancel">${tr('キャンセル')}</button><button class="btn small primary" type="button" data-dc="save">${f.id ? tr('保存') : tr('コメントを追加')}</button></div></div>`;
+}
+
+function diffCommentBoxHtml(x) {
+  return `<div class="dv-cbox" data-cid="${x.id}"><div class="dv-ctext">${esc(x.text)}</div>
+    <div class="dv-cacts"><button class="btn small ghost" type="button" data-dc="edit">${tr('編集')}</button><button class="btn small ghost" type="button" data-dc="delete">${tr('削除')}</button></div></div>`;
+}
+
+// その行の下に出す行（書いたコメントと、開いている入力欄）
+function diffCommentRows(path, l, colspan) {
+  const key = DiffComments.keyOf(path, DiffComments.lineRef(l));
+  const f = diffUi.form;
+  const here = f && DiffComments.keyOf(f.path, f) === key ? f : null;
+  const boxes = diffComments()
+    .filter((x) => DiffComments.keyOf(x.path, x) === key && x.code === l.text)
+    .map((x) => (here && here.id === x.id ? diffCommentFormHtml(here) : diffCommentBoxHtml(x)));
+  if (here && !here.id) boxes.push(diffCommentFormHtml(here));
+  return boxes.length ? `<tr class="dv-crow"><td colspan="${colspan}">${boxes.join('')}</td></tr>` : '';
+}
+
+function drawDiffCommentBar(c) {
+  const bar = $('diffCommentBar');
+  if (!bar) return;
+  const list = diffComments();
+  bar.classList.toggle('hidden', !list.length);
+  if (!list.length) {
+    bar.innerHTML = '';
+    return;
+  }
+  const can = canSendFollow(c);
+  const lost = DiffComments.orphans(diffUi.files, list);
+  const lostHtml = lost.length
+    ? `<div class="dv-corphans"><b>${tr('差分から消えた行へのコメント（このまま送れます）')}</b>${lost
+        .map((x) => `<div class="dv-corphan" data-cid="${x.id}"><code>${esc(`${x.path}:${x.line}`)}</code><span>${esc(x.text)}</span><button class="btn small ghost" type="button" data-dc="delete">${tr('削除')}</button></div>`)
+        .join('')}</div>`
+    : '';
+  bar.innerHTML = `<div class="dv-cbar-row"><span>${tr('コメント {n} 件', { n: list.length })}</span>${can ? '' : `<small class="muted">${tr('エージェントの作業中は送れません')}</small>`}<span class="spacer"></span>
+    <button class="btn small primary" type="button" data-dc="send" ${can ? '' : 'disabled'}>${icon('send')}${tr('エージェントに送る')}</button></div>${lostHtml}`;
+}
+
+async function sendDiffComments(c, rerender) {
+  const list = diffComments();
+  if (!list.length || diffUi.sending) return;
+  diffUi.sending = true;
+  const ok = await run(() => api.send(c.id, DiffComments.buildMessage(list), null).then(() => true));
+  diffUi.sending = false;
+  if (!ok) return; // 送れなかったら、下書きは残す
+  diffUi.comments.delete(c.id);
+  if (diffUi.form && diffUi.form.id) diffUi.form = null;
+  if (diffUi.cardId === c.id && state.tab === 'diff') rerender();
+}
+
+function saveDiffCommentForm(rerender) {
+  const f = diffUi.form;
+  if (!f || !f.text.trim()) return;
+  const list = diffComments();
+  const text = f.text.trim();
+  const next = f.id
+    ? list.map((x) => (x.id === f.id ? { ...x, text } : x))
+    : [...list, { id: diffUi.nextComment++, path: f.path, side: f.side, line: f.line, code: f.code, text }];
+  diffUi.comments.set(diffUi.cardId, next);
+  diffUi.form = null;
+  rerender();
+}
+
+function focusDiffCommentForm() {
+  const input = $('diffCommentInput');
+  if (!input) return;
+  input.scrollIntoView({ block: 'nearest' });
+  input.focus();
+}
+
+function onDiffCommentClick(e, c, files, rerender) {
+  const add = e.target.closest('.dv-cadd');
+  if (add) {
+    // 書きかけの入力欄があるときは、消さずにそちらへ戻す
+    if (diffUi.form && diffUi.form.text.trim()) return focusDiffCommentForm();
+    const path = add.closest('.dv-fileblock').dataset.path;
+    const ref = { side: add.dataset.side, line: Number(add.dataset.line) };
+    const l = DiffComments.findLine(files.find((f) => f.path === path), ref);
+    if (!l) return;
+    diffUi.form = { path, ...ref, code: l.text, id: 0, text: '' };
+    rerender();
+    return focusDiffCommentForm();
+  }
+  const act = e.target.closest('[data-dc]')?.dataset.dc;
+  if (!act) return;
+  const id = Number(e.target.closest('[data-cid]')?.dataset.cid);
+  if (act === 'send') return sendDiffComments(c, rerender);
+  if (act === 'save') return saveDiffCommentForm(rerender);
+  if (act === 'cancel') diffUi.form = null;
+  if (act === 'edit') diffUi.form = { ...diffComments().find((x) => x.id === id) };
+  if (act === 'delete') {
+    const rest = diffComments().filter((x) => x.id !== id);
+    if (rest.length) diffUi.comments.set(diffUi.cardId, rest);
+    else diffUi.comments.delete(diffUi.cardId);
+  }
+  rerender();
+  if (act === 'edit') focusDiffCommentForm();
+}
+
 function diffSplitHtml(file) {
   const side = (l, kind) => {
     if (!l) return '<td class="ln empty"></td><td class="code empty"></td>';
     const cls = l.type === 'ctx' ? '' : kind;
     const no = kind === 'del' ? l.oldNo : l.newNo;
-    return `<td class="ln ${cls}">${no ?? ''}</td><td class="code ${cls}">${esc(l.text)}</td>`;
+    // 変わっていない行は左右で同じ行なので、右だけからコメントできるようにする
+    const btn = kind === 'add' || l.type === 'del' ? diffCommentBtn(l) : '';
+    return `<td class="ln ${cls}">${btn}${no ?? ''}</td><td class="code ${cls}">${esc(l.text)}</td>`;
   };
   const rows = [];
   for (const h of file.hunks) {
     rows.push(`<tr class="dv-hunk"><td class="ln"></td><td class="code" colspan="3">${esc(h.header)}</td></tr>`);
     for (const r of DiffParse.splitRows(h)) {
       if (r.type === 'meta') rows.push(`<tr class="dv-meta"><td class="ln"></td><td class="code" colspan="3">${esc(r.text)}</td></tr>`);
-      else rows.push(`<tr>${side(r.left, 'del')}${side(r.right, 'add')}</tr>`);
+      else {
+        rows.push(`<tr>${side(r.left, 'del')}${side(r.right, 'add')}</tr>`);
+        if (r.left && r.left.type === 'del') rows.push(diffCommentRows(file.path, r.left, 4));
+        if (r.right) rows.push(diffCommentRows(file.path, r.right, 4));
+      }
     }
   }
   return `<table class="dv-tbl dv-split"><colgroup><col class="c-ln"><col><col class="c-ln"><col></colgroup><tbody>${rows.join('')}</tbody></table>`;
@@ -2446,7 +2583,8 @@ function diffLinesHtml(file) {
         continue;
       }
       const sign = l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' ';
-      rows.push(`<tr class="dv-${l.type}"><td class="ln">${l.oldNo ?? ''}</td><td class="ln">${l.newNo ?? ''}</td><td class="code"><span class="sg">${sign}</span>${esc(l.text)}</td></tr>`);
+      rows.push(`<tr class="dv-${l.type}"><td class="ln">${diffCommentBtn(l)}${l.oldNo ?? ''}</td><td class="ln">${l.newNo ?? ''}</td><td class="code"><span class="sg">${sign}</span>${esc(l.text)}</td></tr>`);
+      rows.push(diffCommentRows(file.path, l, 3));
     }
   }
   return `<table class="dv-tbl"><tbody>${rows.join('')}</tbody></table>`;
@@ -2476,9 +2614,15 @@ function diffHtml(text, files) {
   return tr('<div class="dv {v}">\n    <div class="diff-stat"><button class="btn small ghost" id="toggleDiffTree" title="ファイルツリーの表示を切り替えます">{v2}</button>\n      <span><b>{length}</b> ファイル <span class="add">+{add}</span> <span class="del">-{del}</span></span>\n      <span class="spacer"></span>\n      <span class="dv-mode" role="group" aria-label="差分の並べ方"><button class="btn small ghost {v3}" data-diff-mode="unified" title="変更前と変更後を上下に並べます">上下</button><button class="btn small ghost {v4}" data-diff-mode="split" title="変更前を左、変更後を右に並べます">左右</button></span>\n      <button class="btn small ghost" id="diffExpandAll">すべて開く</button><button class="btn small ghost" id="diffCollapseAll">すべて閉じる</button>\n      <button class="btn small ghost" id="refreshDiff">更新</button>\n      <button class="btn small ghost" id="toggleDiffFull" title="{v5}">{v6}</button></div>\n    <div class="dv-main">\n      <nav class="dv-tree" id="diffTree"><ul>{v7}</ul></nav>\n      <div class="dv-files" id="diffFiles">{v8}</div>\n    </div></div>', { v: (diffUi.tree ? '' : 'no-tree'), v2: (icon('sidebar')), length: (files.length), add, del, v3: (diffUi.split ? '' : 'on'), v4: (diffUi.split ? 'on' : ''), v5: (diffUi.full ? tr('大きな表示を閉じます（Esc）') : tr('画面に大きく表示します')), v6: (diffUi.full ? icon('minimize') : icon('maximize')), v7: (diffTreeHtml(tree, 0)), v8: (order.map((i) => diffFileHtml(files[i], i)).join('')) });
 }
 
-function bindDiff(body, files, rerender) {
+function bindDiff(body, c, files, rerender) {
   const filesEl = $('diffFiles');
   if (!filesEl) return;
+  // 大きなファイルは開いたときに中身を入れ直すので、行コメントの操作は外側でまとめて受ける
+  $('diffCommentBar').onclick = filesEl.onclick = (e) => onDiffCommentClick(e, c, files, rerender);
+  filesEl.oninput = (e) => {
+    if (e.target.id === 'diffCommentInput' && diffUi.form) diffUi.form.text = e.target.value;
+  };
+  onSendKey(filesEl, () => saveDiffCommentForm(rerender));
   $('toggleDiffTree').onclick = () => {
     diffUi.tree = !diffUi.tree;
     body.querySelector('.dv').classList.toggle('no-tree', !diffUi.tree);
@@ -2562,6 +2706,7 @@ async function renderDiff(c) {
     diffUi.collapsedDirs.clear();
     diffUi.collapsedFiles.clear();
     diffUi.openedBig.clear();
+    diffUi.form = null;
   }
   const prev = same ? $('diffFiles') : null;
   if (!prev) diffUi.full = false; // 別のタスク・別のタブから来たときは、普通の表示で開く
@@ -2571,6 +2716,7 @@ async function renderDiff(c) {
   if (state.selected !== c.id || state.tab !== 'diff') return;
   const text = d || '';
   const files = DiffParse.parseDiff(text);
+  diffUi.files = files;
   let first = true;
   const draw = () => {
     const keep = first || !$('diffFiles') ? top : $('diffFiles').scrollTop;
@@ -2579,7 +2725,10 @@ async function renderDiff(c) {
     applyDiffFull(body, draw);
     const r = $('refreshDiff');
     if (r) r.onclick = () => renderDiff(card(c.id) || c);
-    bindDiff(body, files, draw);
+    const stat = body.querySelector('.diff-stat');
+    if (stat) stat.insertAdjacentHTML('afterend', '<div class="dv-cbar hidden" id="diffCommentBar"></div>');
+    bindDiff(body, c, files, draw);
+    drawDiffCommentBar(card(c.id) || c);
     if ($('diffFiles')) $('diffFiles').scrollTop = keep;
   };
   draw();
@@ -2669,6 +2818,7 @@ function worktreeHtml(c, data) {
           : tr('worktree が見つかりません（削除された可能性があります）。');
     return `<div class="wt-toolbar"><span class="muted">${esc(why)}</span>${refresh}</div>${c.branch ? tr('<div class="pad small muted">ブランチ: <code>{branch}</code></div>', { branch: (esc(c.branch)) }) : ''}${others}`;
   }
+  const scripts = '<div id="wtScripts"></div>';
   const s = data.status;
   const live = c.status === 'running' || c.status === 'queued';
   const cs = sumChanges(s.committed);
@@ -2689,7 +2839,7 @@ function worktreeHtml(c, data) {
   }
   nodes.reverse(); // 新しいものを上に
 
-  return tr('<div class="wt-toolbar">\n      <span class="wt-sum"><b>{length}</b> コミット · <b>{length2}</b> ファイル(コミット済み) · <b>{length3}</b> ファイル(未コミット)</span>\n      {v}{refresh}</div>\n    <div class="pad wt">\n      <dl class="wt-meta">\n        <dt>場所</dt><dd><code>{path}</code></dd>\n        <dt>ブランチ</dt><dd><code>{branch}</code> ← <code>{v2}</code></dd>\n        <dt>HEAD</dt><dd><code>{short}</code> {subject}</dd>\n      </dl>\n      <h4>流れ</h4>\n      <ul class="wt-graph">{v3}</ul>\n      <h4>未コミットの変更 <span class="muted small">{v4}</span></h4>\n      {v5}\n      {v6}\n      <h4>コミット済みの変更（ベースから） <span class="muted small">{v7}</span></h4>\n      {v8}\n    </div>{others}', { length: (s.commits.length), length2: (s.committed.length), length3: (s.uncommitted.length), v: (live ? tr('<span class="muted small">自動で更新中</span>') : ''), refresh, path: (esc(s.path)), branch: (esc(s.branch)), v2: (esc(s.baseBranch || s.base.short)), short: (esc(s.head.short)), subject: (esc(s.head.subject)), v3: (nodes.join('')), v4: (s.uncommitted.length ? `+${us.add} -${us.del}` : ''), v5: (fileListHtml(s.uncommitted, { showTime: true })), v6: (s.untrackedTruncated ? tr('<div class="muted small">ほか {untrackedTruncated} 個の新規ファイルは省略しました</div>', { untrackedTruncated: (s.untrackedTruncated) }) : ''), v7: (s.committed.length ? `+${cs.add} -${cs.del}` : ''), v8: (fileListHtml(s.committed)), others });
+  return scripts + tr('<div class="wt-toolbar">\n      <span class="wt-sum"><b>{length}</b> コミット · <b>{length2}</b> ファイル(コミット済み) · <b>{length3}</b> ファイル(未コミット)</span>\n      {v}{refresh}</div>\n    <div class="pad wt">\n      <dl class="wt-meta">\n        <dt>場所</dt><dd><code>{path}</code></dd>\n        <dt>ブランチ</dt><dd><code>{branch}</code> ← <code>{v2}</code></dd>\n        <dt>HEAD</dt><dd><code>{short}</code> {subject}</dd>\n      </dl>\n      <h4>流れ</h4>\n      <ul class="wt-graph">{v3}</ul>\n      <h4>未コミットの変更 <span class="muted small">{v4}</span></h4>\n      {v5}\n      {v6}\n      <h4>コミット済みの変更（ベースから） <span class="muted small">{v7}</span></h4>\n      {v8}\n    </div>{others}', { length: (s.commits.length), length2: (s.committed.length), length3: (s.uncommitted.length), v: (live ? tr('<span class="muted small">自動で更新中</span>') : ''), refresh, path: (esc(s.path)), branch: (esc(s.branch)), v2: (esc(s.baseBranch || s.base.short)), short: (esc(s.head.short)), subject: (esc(s.head.subject)), v3: (nodes.join('')), v4: (s.uncommitted.length ? `+${us.add} -${us.del}` : ''), v5: (fileListHtml(s.uncommitted, { showTime: true })), v6: (s.untrackedTruncated ? tr('<div class="muted small">ほか {untrackedTruncated} 個の新規ファイルは省略しました</div>', { untrackedTruncated: (s.untrackedTruncated) }) : ''), v7: (s.committed.length ? `+${cs.add} -${cs.del}` : ''), v8: (fileListHtml(s.committed)), others });
 }
 
 // 同じリポジトリで並列に動いている worktree の一覧
@@ -2731,7 +2881,80 @@ async function renderWorktree(c, { quiet } = {}) {
   const r = $('refreshWt');
   if (r) r.onclick = () => renderWorktree(card(c.id) || c);
   body.querySelectorAll('.wt-list li[data-card]').forEach((li) => (li.onclick = () => select(li.dataset.card)));
+  if (scriptView.id !== c.id) scriptView = { id: c.id, data: null, top: null };
+  paintScripts();
+  loadScripts(c.id);
 }
+
+// ---------- worktree のスクリプト（セットアップ・片付け・実行） ----------
+
+const SCRIPT_LABEL = { run: tr('実行'), setup: tr('セットアップ'), teardown: tr('片付け') };
+let scriptView = { id: null, data: null, top: null }; // top: 出力を手で遡っているときのスクロール位置
+
+function scriptResultText(r) {
+  const label = SCRIPT_LABEL[r.kind];
+  if (r.running) return tr('{label} を実行中です…', { label });
+  if (r.stopped) return tr('{label} を止めました', { label });
+  if (r.timedOut) return tr('{label} は時間切れで止めました', { label });
+  if (r.code === 0) return tr('{label} が終わりました', { label });
+  return tr('{label} が失敗しました（{reason}）', { label, reason: r.error ? esc(r.error) : tr('終了コード {code}', { code: r.code === null ? '?' : r.code }) });
+}
+
+function scriptPortsHtml(data) {
+  if (!data.port) return '';
+  return `<div class="wt-script-bar muted small">${tr('このタスクのポート: {first}〜{last}（環境変数 WORKTREE_KANBAN_PORT と PORT は {first}）', { first: data.port, last: data.port + data.portCount - 1 })}</div>`;
+}
+
+function scriptPanelHtml(data) {
+  return scriptPortsHtml(data) + scriptButtonsHtml(data);
+}
+
+function scriptButtonsHtml(data) {
+  if (!Object.values(data.scripts).some(Boolean)) return tr('<div class="wt-script-bar muted small">設定の「ブランチと取り込み」にスクリプトを書くと、ここから動かせます。</div>');
+  const r = data.run;
+  const busy = !!(r && r.running);
+  const buttons = ['run', 'setup', 'teardown'].filter((k) => data.scripts[k]).map((k) => `<button class="btn small ${k === 'run' ? 'primary' : 'ghost'}" data-script="${k}" ${busy ? 'disabled' : ''}>${SCRIPT_LABEL[k]}</button>`);
+  const stop = busy ? `<button class="btn small danger" data-script="stop">${tr('スクリプトを止める')}</button>` : '';
+  const output = r ? `<pre class="wt-script-out">${esc(r.output) || tr('（まだ出力はありません）')}</pre>` : '';
+  return `<div class="wt-script-bar">${buttons.join('')}${stop}${r ? `<span class="muted small">${scriptResultText(r)}</span>` : ''}</div>${output}`;
+}
+
+function paintScripts() {
+  const box = $('wtScripts');
+  if (!box || !scriptView.data) return;
+  const { id } = scriptView;
+  box.innerHTML = scriptPanelHtml(scriptView.data);
+  const pre = box.querySelector('pre');
+  if (pre) {
+    pre.scrollTop = scriptView.top === null ? pre.scrollHeight : scriptView.top;
+    pre.onscroll = () => (scriptView.top = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30 ? null : pre.scrollTop);
+  }
+  box.querySelectorAll('[data-script]').forEach((b) => {
+    b.onclick = async () => {
+      const kind = b.dataset.script;
+      if (kind === 'teardown' && !confirm(tr('片付けスクリプトを実行しますか？ worktree は消しません。'))) return;
+      const data = await run(() => (kind === 'stop' ? api.stopScript(id) : api.runScript(id, kind)));
+      if (data && scriptView.id === id) {
+        scriptView.data = data;
+        scriptView.top = null;
+        paintScripts();
+      }
+    };
+  });
+}
+
+async function loadScripts(id) {
+  const data = await api.scripts(id).catch(() => null);
+  if (!data || scriptView.id !== id || state.selected !== id || state.tab !== 'worktree') return;
+  scriptView.data = data;
+  paintScripts();
+}
+
+// スクリプトが動いているあいだは、出力を追いかける
+setInterval(() => {
+  const r = scriptView.data && scriptView.data.run;
+  if (r && r.running && state.tab === 'worktree' && state.selected === scriptView.id && !document.hidden) loadScripts(scriptView.id);
+}, 1000);
 
 // 実行中は worktree タブを自動で更新する
 setInterval(() => {
@@ -3129,9 +3352,9 @@ function firstAgentOf(v) {
   const s = state.board.settings;
   if (isRelayRef(v)) {
     const first = relayFlowInfo((pipelineOfRef(v, s) || {}).flow).first;
-    return first ? stepWho(first).agent : 'claude';
+    return first ? stepWho(first).agent : '';
   }
-  if (v === 'compete') return (s.competeAgents || []).includes('claude') ? 'claude' : '';
+  if (v === 'compete') return (s.competeAgents || []).includes('claude') && enabledAgents(s).includes('claude') ? 'claude' : '';
   if (isCustomRef(v)) return (findCustomAgent(v) || {}).agent || '';
   return v;
 }
@@ -4083,7 +4306,17 @@ function renderSettingsView() {
         <small>${tr('レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。')}</small></label>
       <label class="field">${tr('<span>ブランチの命名規則（自然言語で書けます）</span>')}
         <textarea id="sBranchRule" rows="2" placeholder="${tr('例: feature/<Issue番号>-<内容を表す短い英語> にする。Issue がないときは feature/<内容を表す短い英語>')}">${esc(s.branchNamingRule || '')}</textarea>
-        <small>${tr('書いておくと、タスクの開始時にそのタスクのエージェントがこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。')}</small></label>`,
+        <small>${tr('書いておくと、タスクの開始時にそのタスクのエージェントがこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。')}</small></label>
+      <label class="field">${tr('<span>セットアップスクリプト（worktree を作った直後に動かす）</span>')}
+        <textarea id="sSetupScript" class="mono" rows="3" spellcheck="false" placeholder="${tr('例: npm install')}">${esc(s.setupScript || '')}</textarea>
+        <small>${tr('エージェントを始める前に、worktree の中で動かします。失敗するとエージェントは始めず、タスクはエラーになります。')}</small></label>
+      <label class="field">${tr('<span>片付けスクリプト（worktree を消す直前に動かす）</span>')}
+        <textarea id="sTeardownScript" class="mono" rows="3" spellcheck="false" placeholder="${tr('例: docker compose down')}">${esc(s.teardownScript || '')}</textarea>
+        <small>${tr('マージ・破棄などで worktree を消す前に動かします。失敗してもログに警告を残して worktree は消します。5分で打ち切ります。')}</small></label>
+      <label class="field">${tr('<span>実行スクリプト（詳細の worktree タブのボタンで動かす）</span>')}
+        <textarea id="sRunScript" class="mono" rows="3" spellcheck="false" placeholder="${tr('例: npm run dev')}">${esc(s.runScript || '')}</textarea>
+        <small>${tr('開発サーバーなど、タスクの変更を手で確かめるためのコマンドです。worktree タブから動かす・止めることができ、セットアップと片付けも手で動かせます。')}</small></label>
+      <small class="muted s-note">${tr('スクリプトは macOS・Linux・WSL では sh / bash で動き、途中の行が失敗するとそこで止まります。Windows では各行を && でつないで cmd で動かします。環境変数 WORKTREE_KANBAN_ROOT（リポジトリ）、WORKTREE_KANBAN_WORKTREE、WORKTREE_KANBAN_BRANCH、WORKTREE_KANBAN_BASE_BRANCH、WORKTREE_KANBAN_TASK_ID が使えます。WORKTREE_KANBAN_PORT と PORT にはタスクごとに分けたポートが入り、そこから連続する10個を使えます（並列で動かしてもぶつかりません）。')}</small>`,
     issue: `<div class="field">
         <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> ${tr('Issue のステータスを自動で変える（GitHub Projects）')}</label>
         <small>${tr('Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。')}</small>
@@ -4104,6 +4337,7 @@ function renderSettingsView() {
         <textarea id="sAllowed" rows="2" placeholder="${tr('例: Bash(npm test:*), Bash(git status), WebSearch')}">${esc(s.allowedTools)}</textarea></label>`,
     task: `<div class="field">${tr('<span>新しいタスクで最初から選んでおくスキル</span>')}<div id="sSkill" class="skill-slot"></div>
         <small>${tr('「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。')}</small></div>
+      <label class="check"><input type="checkbox" id="sCiAutoFix" ${s.ciAutoFix !== false ? 'checked' : ''} /> ${tr('PR の CI が失敗したら、エージェントに直してもらって push する（続けて 3 回まで）')}</label>
       <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> ${tr('新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める')}</label>
       <small class="muted s-note">${tr('仕様を詰めるときに、分けたほうがよい大きなタスクなら、エージェントがサブタスクに分けることを提案します（「サブタスクでやる」と答えたら分けます）。開始前のタスクには、進捗タブから手動でサブタスクを足せます（足したあとは「サブタスク」タブで見られます）。')}</small>
       <label class="field">${tr('<span>サブタスクが終わったら（既定。タスクごとに開始前に変えられます）</span>')}<select id="sSubtaskMerge"><option value="auto"${s.subtaskMerge !== 'review' ? ' selected' : ''}>${tr('自動で親のブランチにマージする')}</option><option value="review"${s.subtaskMerge === 'review' ? ' selected' : ''}>${tr('確かめてからマージする')}</option></select></label>`,
@@ -4183,6 +4417,8 @@ function renderSettingsView() {
   const drawAgents = () => {
     const on = using();
     const list = on.length ? on : ['claude'];
+    // Claude Code だけの設定は、使うときだけ出す
+    for (const id of ['sAllowed', 'sDeleteSessions']) $(id)?.closest('label')?.classList.toggle('hidden', !on.includes('claude'));
     // 最初から選んでおくエージェント
     const dsel = $('sDefaultAgent');
     const cur = dsel.value || defaultAgent(s);
@@ -4344,7 +4580,7 @@ function renderSettingsView() {
       enabled: using(),
       customAgents: cas,
       modelSuggest: MODEL_SUGGEST,
-      defaultAgent: $('sDefaultAgent').value || 'claude',
+      defaultAgent: $('sDefaultAgent').value || using()[0],
       generate: (request, flow, agent) => api.generateFlow({ request, flow, agent, enabled: using(), customAgents: cas }),
       onSave: async (flow) => {
         // 工程で選んだカスタムエージェントも一緒に保存する（この画面で追加したばかりのものを使えるように）
@@ -4579,6 +4815,9 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
         baseBranch: $('sBase').value,
         integration: $('sIntegration').value,
         branchNamingRule: $('sBranchRule').value.trim(),
+        setupScript: $('sSetupScript').value,
+        teardownScript: $('sTeardownScript').value,
+        runScript: $('sRunScript').value,
         permissionMode: $('sMode').value,
         allowedTools: $('sAllowed').value,
         maxParallel: $('sMax').value,
@@ -4603,6 +4842,7 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
         suggestSkillsOnDone: $('sSuggestSkills').checked,
         deleteSessionsOnMerge: $('sDeleteSessions').checked,
         specCheck: $('sSpecCheck').checked,
+        ciAutoFix: $('sCiAutoFix').checked,
         subtaskMerge: $('sSubtaskMerge').value,
         statusFieldName: $('sStatusField').value.trim(),
         statusMapping: { inProgress: $('sMapProgress').value.trim(), inReview: $('sMapReview').value.trim(), done: $('sMapDone').value.trim() },
@@ -4939,6 +5179,11 @@ async function repoSetupModal(mode, distros = []) {
 $('newBtn').onclick = () => newTask();
 $('chatBtn').onclick = openChats;
 $('detailBackdrop').addEventListener('mousedown', closeDetailOrBack);
+$('detail').addEventListener('animationend', (e) => {
+  if (e.target !== e.currentTarget || e.animationName !== 'detail-slide-out') return;
+  e.currentTarget.classList.add('hidden');
+  e.currentTarget.classList.remove('closing');
+});
 $('sessionsBtn').onclick = openSessionManager;
 $('rcBtn').onclick = openRemoteSettings;
 
@@ -5188,6 +5433,7 @@ api.onBoard((board) => {
       }
       state.wtStatus = `${c.id}:${c.status}:${c.worktreePath || ''}`;
       if (state.tab === 'progress' || state.tab === 'subtasks') scheduleProgress();
+      if (state.tab === 'diff') drawDiffCommentBar(c); // 「送る」を押せるかは、タスクの状態で変わる
       if (state.tab === 'btw') {
         const list = $('btwList');
         if (list) list.innerHTML = btwListHtml(c);

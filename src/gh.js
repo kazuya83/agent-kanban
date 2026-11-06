@@ -170,15 +170,66 @@ async function createPullRequest({ cwd, head, base, title, body, repo, gh: ghPat
   return { url, number: m ? Number(m[1]) : null, created: true };
 }
 
+const CHECK_PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
+const CHECK_FAILED = new Set(['FAILURE', 'ERROR', 'TIMED_OUT', 'STARTUP_FAILURE']);
+
+// 1つのチェックを passed / failed / pending / attention（取り消しなど、人が見る必要があるもの）に分ける
+function checkBucket(item) {
+  if (item.__typename === 'StatusContext' || (item.context && !item.status)) {
+    const s = String(item.state || '').toUpperCase();
+    if (s === 'SUCCESS') return 'passed';
+    return CHECK_FAILED.has(s) ? 'failed' : 'pending'; // PENDING / EXPECTED
+  }
+  if (String(item.status || '').toUpperCase() !== 'COMPLETED') return 'pending';
+  const c = String(item.conclusion || '').toUpperCase();
+  if (CHECK_PASSED.has(c)) return 'passed';
+  return CHECK_FAILED.has(c) ? 'failed' : 'attention';
+}
+
+/**
+ * gh の statusCheckRollup を、カードに載せる形にまとめる
+ * @param {Array<object>|null|undefined} rollup
+ * @param {string|null} [sha] 結果を取ったコミット
+ * @returns {{ state: 'NONE'|'PENDING'|'SUCCESS'|'FAILURE'|'ATTENTION', sha: string|null, total: number, passed: number, pending: number, failed: Array<{ name: string, url: string|null }> }|null}
+ */
+function summarizeChecks(rollup, sha = null) {
+  if (!Array.isArray(rollup)) return null;
+  // 実行し直したチェックは、同じ名前で古い結果も並ぶので、新しいほうだけを見る
+  const latest = new Map();
+  for (const item of rollup) {
+    if (!item) continue;
+    const name = [item.workflowName, item.name || item.context].filter(Boolean).join(' / ') || '?';
+    const prev = latest.get(name);
+    if (!prev || String(item.startedAt || '') >= String(prev.item.startedAt || '')) latest.set(name, { name, item });
+  }
+  const out = { state: 'NONE', sha: sha || null, total: latest.size, passed: 0, pending: 0, failed: [] };
+  let attention = 0;
+  for (const { name, item } of latest.values()) {
+    const bucket = checkBucket(item);
+    if (bucket === 'failed') out.failed.push({ name, url: item.detailsUrl || item.targetUrl || null });
+    else if (bucket === 'attention') attention++;
+    else out[bucket]++;
+  }
+  if (out.failed.length) out.state = 'FAILURE';
+  else if (out.pending) out.state = 'PENDING';
+  else if (attention) out.state = 'ATTENTION';
+  else if (out.total) out.state = 'SUCCESS';
+  return out;
+}
+
 /**
  * プルリクエストの今の状態を GitHub に聞く
  * @param {{ url: string, cwd?: string, gh?: string }} p
- * @returns {Promise<{ state: 'OPEN'|'CLOSED'|'MERGED', mergedAt: string|null, headRefOid: string|null, baseRefName: string|null, mergeable: 'MERGEABLE'|'CONFLICTING'|'UNKNOWN'|null }>}
+ * @returns {Promise<{ state: 'OPEN'|'CLOSED'|'MERGED', mergedAt: string|null, headRefOid: string|null, baseRefName: string|null, mergeable: 'MERGEABLE'|'CONFLICTING'|'UNKNOWN'|null, checks: ReturnType<typeof summarizeChecks> }>}
  */
 async function pullRequestState({ url, cwd, gh: ghPath }) {
   const gh = ghPath || resolveCommand('gh');
   if (!gh) throw new Error(tr('PR の状態を確かめるには GitHub CLI（gh）が必要です'));
-  const r = await run(gh, ['pr', 'view', url, '--json', 'state,mergedAt,headRefOid,baseRefName,mergeable'], { cwd, timeout: 30000 });
+  const view = (fields) => run(gh, ['pr', 'view', url, '--json', fields], { cwd, timeout: 30000 });
+  const fields = 'state,mergedAt,headRefOid,baseRefName,mergeable';
+  let r = await view(`${fields},statusCheckRollup`);
+  // チェックを読む権限がないトークンでも、PR のマージの見張りは止めない
+  if (r.code !== 0) r = await view(fields);
   if (r.code !== 0) {
     const msg = (r.stderr || r.stdout).trim();
     if (/auth login|not logged/i.test(msg)) throw new Error(tr('GitHub にログインしていません'));
@@ -197,6 +248,7 @@ async function pullRequestState({ url, cwd, gh: ghPath }) {
     baseRefName: d.baseRefName || null,
     // MERGEABLE / CONFLICTING / UNKNOWN（GitHub が計算中のときは UNKNOWN）
     mergeable: d.mergeable ? String(d.mergeable).toUpperCase() : null,
+    checks: summarizeChecks(d.statusCheckRollup, d.headRefOid),
   };
 }
 
@@ -205,4 +257,4 @@ function cancel() {
   if (c && c.exitCode === null) c.kill();
 }
 
-module.exports = { status, install, login, addProjectScope, cancel, createPullRequest, pullRequestState, DOWNLOAD_URL, DEVICE_URL };
+module.exports = { status, install, login, addProjectScope, cancel, createPullRequest, pullRequestState, summarizeChecks, DOWNLOAD_URL, DEVICE_URL };

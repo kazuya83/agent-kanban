@@ -1,304 +1,363 @@
-# 画面と使い方
+[English](usage.md) · [日本語](usage.ja.md)
 
-それぞれの機能の、詳しい使い方です。エージェントの選び方と Pipeline・競争は [agents.md](agents.md)、設定の項目は [settings.md](settings.md) にあります。
+# Screen and usage
 
-## 複数のリポジトリをタブで行き来する
-左上のリポジトリ欄はタブになっていて、リポジトリを **3つまで** 開いておけます。
+This is the detailed guide to each feature. How to choose agents, and Pipeline and competition, are in [agents.md](agents.md). Settings items are in [settings.md](settings.md).
 
-- タブをクリックすると、そのリポジトリのボードに切り替わります
-- 右の「＋」で、新しいタブにリポジトリを開きます（最近開いたもの・フォルダ・クローン・新規作成から選べます）。3つ開いているときは、タブを閉じてから開きます
-- 今のタブをもう一度クリックすると、そのタブのリポジトリを別のものに置き換えられます
-- タブの「×」で閉じます。閉じたり切り替えたりしても、そのリポジトリで動いているタスクは止まりません。ほかのタブには、動いているタスク（青）と対応を待っているタスク（黄）の数が出ます
-- ベースブランチの設定はリポジトリごとに覚えておき、タブを切り替えると戻ります。開いていたタブは、次に起動したときも残っています
+## Move between repositories with tabs
+The repository area at the top left is a set of tabs, and you can keep **up to 3** repositories open.
 
-## git で管理していないフォルダで使う（動画づくりなど）
-コード以外の作業（動画・資料づくりなど）のために、git で管理していないフォルダもそのまま開けます。
+- Click a tab to switch to that repository's board
+- The "+" on the right opens a repository in a new tab (choose from recently opened, a folder, a clone, or a new repository). If 3 are open, close a tab first
+- Click the current tab again to replace its repository with another
+- Close a tab with its "×". Closing or switching does not stop tasks running in that repository. Other tabs show the number of running tasks (blue) and tasks waiting for you (yellow)
+- The base branch setting is remembered per repository and comes back when you switch tabs. Open tabs are still there at the next launch
 
-- 「リポジトリを選ぶ」で、git リポジトリではないフォルダを選ぶと、git なしのフォルダとして開きます（このパソコンに git が入っていなくても開けます）。遠隔操作のホストのフォルダや WSL のフォルダでも同じです
-- 「新しく作る」の「ソース管理」で「git で管理しない」を選ぶと、`git init` をせずに空のフォルダだけを作ります（GitHub には作れません）
-- タスクは worktree を作らず、**そのフォルダの中で直接** 動きます。同時に動かす数の上限まで並列に動くので、同じファイルを触るタスクを同時に動かすと変更がぶつかることがあります
-- 差分・worktree のタブ、マージ・PR・コンフリクトの解消は出ません。終わったらフォルダの中身を確かめて「完了にする」を押します。「完了にする」は、レビュー列のカード・詳細の上・チャットとログの最後に出ます（質問や仕様の確認に答えている途中は出ません）。「破棄」してもフォルダのファイルは元に戻りません
-- 競争（同じタスクを複数のエージェントで解く）は、候補ごとに作業場所を分けられないので使えません。Pipeline は使えます
+## Use a folder not managed by git (video production and so on)
+For work that is not code (making videos or documents, for example), you can open a folder that is not managed by git as it is.
 
-## ソースを変更しないタスク（SQL を作るだけなど）
-MySQL の SQL を作るだけ・調べるだけなど、ソースコードを変えずに終わるタスクも作れます。
+- If you choose a folder that is not a git repository under "Choose a repository", it opens as a folder without git (this works even if git is not installed on the PC). The same goes for folders on a remote control host and in WSL
+- If you choose "not managed by git" under "Source control" in "Create new", only an empty folder is created, without `git init` (it cannot be created on GitHub)
+- Tasks do not create a worktree and run **directly in that folder**. They run in parallel up to the concurrency limit, so tasks touching the same files at the same time can collide
+- The Diff and worktree tabs, merge, PR, and conflict resolution do not appear. When a task is finished, check the folder's contents and press "Mark done". "Mark done" appears on the card in the Review column, at the top of the detail panel, and at the end of the chat and log (it does not appear while you are in the middle of answering a question or spec check). "Discard" does not restore the folder's files
+- Competition (several agents solving the same task) cannot be used, because the candidates cannot have separate working locations. Pipeline can be used
 
-- 「新しいタスク」で「**ソースを変更しない（調べもの・SQL などの生成だけ）**」にチェックを付けて作ります。カードには「ソース変更なし」と出ます
-- worktree とブランチは作らず、リポジトリのフォルダでそのまま動きます（コードを読んで調べられます）
-- エージェントには「ソースを変えないこと」「作ったものは返事にコードブロックで書くこと」を伝えます。Claude Code はファイルを書き換えるツール（Edit / Write など）を止めて動かし、コマンドは設定の権限モードに関係なく毎回カードで確かめます（「計画だけ」ならそれに従います）。Codex / Gemini / Cursor は、読み取りだけの計画モードで動かします
-- 作った SQL などは「チャット」タブの返事に出ます。確かめたら「完了にする」を押します（git で管理していないフォルダのタスクと同じです）。差分・マージ・PR は出ません
-- 競争と、並列のある Pipeline は使えません。サブタスクにも分けられません
+## Tasks that do not change source (just generating SQL, for example)
+You can also create tasks that end without changing source code, such as only writing MySQL SQL or only looking something up.
 
-## カードの列をドラッグで動かす
-ボードのカードは、ドラッグ&ドロップで列（状態）を変えられます。マージや PR を待たずに、状態だけを変えられます。
+- Under "New task", check "**Do not change source (lookup or generating SQL only)**". The card shows "No source changes"
+- No worktree or branch is created; the task runs in the repository folder as it is (it can read the code to look things up)
+- The agent is told not to change source and to write what it produces in a code block in its reply. Claude Code runs with its file-editing tools (Edit, Write, and so on) blocked, and commands are confirmed on the card every time regardless of the permission mode in Settings (with "Plan only", that mode applies). Codex / Gemini / Cursor run in a read-only plan mode
+- The SQL or other output appears in the reply on the "Chat" tab. Once you have checked it, press "Mark done" (the same as tasks in a folder not managed by git). Diff, merge, and PR do not appear
+- Competition and Pipelines with parallel paths cannot be used. The task cannot be split into subtasks either
 
-- Todo → 実行中: タスクを開始します
-- レビュー → 完了: マージせずに完了にします（worktree とブランチは残すので、あとで戻して続けられます。Issue の Projects の Status は Done になります）
-- 完了 → レビュー: 完了にしたタスクを戻します（マージ・PR で worktree を片付けたタスクは戻せないので、「修正タスクを作る」を使います）
-- 実行中のタスク・会話・サブタスクが残っている親のタスクは動かせません。マージや PR のマージで完了になるのは、これまでどおりです
+## Drag cards between columns
+You can change a card's column (state) by drag and drop on the board. This changes only the state, without waiting for a merge or PR.
 
-## カード上で承認する
-承認待ちのカードは黄色く光ります。実行しようとしているコマンドを確かめて、その場で「許可 / 拒否 / 常に許可」を押せます。
+- Todo → Running: starts the task
+- Review → Done: marks it done without merging (the worktree and branch are kept, so you can bring it back later and continue; the Issue's Status in Projects becomes Done)
+- Done → Review: brings back a task you marked done (a task whose worktree was cleaned up by a merge or PR cannot be brought back; use "Create a fix task" instead)
+- Running tasks, conversations, and parent tasks with subtasks remaining cannot be moved. Merges and PR merges mark tasks done as before
 
-## 詳細パネル（承認待ち）
-カードをクリックすると開きます。入力の全文を確かめたり、拒否の理由を書いて Claude に伝えたりできます。ログはリアルタイムに流れます。
+## Approve on the card
+A card waiting for approval glows yellow. Check the command it is about to run and press "Allow / Deny / Always allow" right there.
 
-## 詳細パネル（差分・マージ）
-レビュー列のカードでは、ベースブランチからの差分を見てからマージできます。マージ先は、好きなブランチを選べます（新しく作ることもできます）。
+## Detail panel (waiting for approval)
+Opens when you click a card. You can check the full input and write a reason for denying to pass on to Claude. The log streams in real time.
 
-## エージェントからの質問に答える
-選択肢の質問は、その場で選んで答えられます（複数選択・その他の自由入力にも対応）。
+## Worktree scripts (setup, cleanup, run)
 
-文章で質問されたときは「回答待ち」になり、下の欄から答えられます。
+Under "Branches and landing" in Settings, you can write three scripts per project. They are saved only on this machine and are not added to the repository. All of them run in the worktree folder, and nothing happens if they are empty.
 
-![回答待ち](images/ja/awaiting.png)
+- **Setup**: runs right after the worktree is created, before the agent starts (`npm install`, copying `.env`, and so on). If it fails, the agent does not start and the task ends in an error. If you fix it and retry, it runs again from setup. While it is running, you can stop it with "Pause"
+- **Cleanup**: runs just before a worktree is removed by a merge, PR, or discard. If it fails, or has not finished after 5 minutes, a warning is logged and the worktree is removed anyway
+- **Run**: a command for checking by hand, such as a development server. It never starts automatically
 
-## 内容が詰まっていないタスクは、対話で仕様を詰める
-新しいタスク（手で書いたもの・Issue から作ったもの）を始めると、エージェントはまず指示とリポジトリを読んで、開発を始められるくらい仕様が詰まっているかを判断します。
+The buttons on the "worktree" tab in the detail panel start and stop the run script, and let you run setup and cleanup by hand (running cleanup by hand does not remove the worktree). Output appears there too. Only one script can run at a time per task. The run script is stopped when the worktree is removed and when the app quits.
 
-- 詰まっていれば、そのまま開発を始めます
-- 詰まっていなければ、ファイルを変えずに止まり、カードが水色の「**仕様の確認**」になって「内容が詰まっていないので、開発を開始できません」と表示されます（🔔 とデスクトップ通知も出ます）。詳細画面にエージェントの質問が出るので、下の欄から答えます
-- 答えるたびにエージェントがもう一度判断し、まだ足りなければ続きの質問をします。詰まったら「決まった仕様」をまとめてから、同じ会話の続きで開発を始めます
-- 仕様の確認中は、Issue の Projects の Status をレビューにしません（In progress のまま）
-- 設定の「新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める」で切れます
+Scripts run in sh / bash on macOS, Linux, and WSL, and stop at the first line that fails. On Windows, the lines are joined with `&&` and run in cmd. The following environment variables are available.
 
-## 決めた日時にタスクを動かす（タスクスケジューラ）
-
-トップバーの左端のメニューボタン（三本線）を押すと、「カンバン管理」「タスクスケジューラ」「設定」を切り替えられます。カンバン管理はこれまでのボードです。設定は [settings.md](settings.md) を見てください。
-
-タスクスケジューラには、今開いているリポジトリのスケジュールがカードで並びます。カードにはタスク名と最終実行日（まだ動いていなければ「未実行」）が出ます。カードを開くと、繰り返しの設定、次回の実行日時、指示内容、エージェント、スキル、実行履歴が見られます。履歴の「カードを開く」で、そのとき作ったカンバンのカードへ移動できます。
-
-**登録のしかた**は2つあります。
-
-- タスクスケジューラの「新しいスケジュール」から、新しく登録する
-- カンバンのタスク詳細の「スケジュール登録」から、そのタスクの内容（タイトル・指示・スキル・エージェント・モデル）をコピーして登録する。Pipeline・競争・カスタムエージェントの指定も引き継ぎます。添付ファイルはコピーしません。元の Pipeline などがなくなっていて選べないときは、編集画面に注意が出ます
-
-**繰り返し**は、1回だけ、毎時、毎日、毎週（曜日は複数選べます）、毎月から選びます。時刻はアプリを動かしている PC のローカル時刻です。毎月で 31 日のように、その月にない日を選ぶと、その月の末日に実行します。
-
-**カードを開いてできること:**
-
-| ボタン | 動き |
-|---|---|
-| 今すぐ実行 | カンバンにタスクを作って、すぐに開始します。次回の予定は変わりません |
-| タスクだけ作成 | カンバンにタスクを作ります。開始はしません。そのカードが Todo に残っているあいだ、次の定期実行は見送られます |
-| 編集 | 指示や繰り返しなどを変えます |
-| 停止 / 再開 | 止めているあいだは実行しません。実行済みの「1回だけ」は、「編集」で日時を変えてから再開してください |
-| 削除 | スケジュールを消します。作成済みのタスクは残ります |
-
-時刻になると、ふつうのカードを作って開始します。そのあとの承認、同時に動かす数、レビューは手で作ったタスクと同じです。人が見ていなくても止まらないよう、仕様の確認は行いません。
-
-**動くのはアプリの起動中だけ**です（OS のスケジューラは使いません）。タブで開いていないリポジトリのスケジュールも動きます。遠隔操作のときは、ホストのアプリで動きます。
-
-人が見ていないところで動くので、次のときは実行しません。結果は実行履歴に残ります。
-
-| 場面 | 動き |
-|---|---|
-| 予定から10分より遅れた（アプリを閉じていた・スリープしていた） | 見送って次回へ進みます。「時刻を過ぎていたら、起動後に1回だけ追いつく」にチェックを付けたスケジュールだけ、1回実行します |
-| 前回のカードが Todo・待機中・実行中のまま | 今回は見送ります（同じタスクを積み上げません） |
-| Pipeline が消されたなどで実行できない | 失敗として記録して通知し、次回へ進みます。通知を押すとタスクスケジューラが開きます |
-| リポジトリのフォルダがなくなった | 失敗として記録して通知し、スケジュールを止めます。フォルダが戻ったら、そのリポジトリを開いて「再開」できます |
-
-## サブタスクに分けて進める
-大きなタスクは、いくつかのサブタスクに分けて、別々のエージェントに並列・順番に進めてもらえます。
-
-- **しくみ**: 親のタスクのブランチを1本作り、サブタスクはそのブランチから分けた worktree・ブランチで動きます。サブタスクが終わったら親のブランチにマージし、すべてのサブタスクが「完了」になったら、親のエージェントが全体の仕上げ（つなぎ目の確認・テスト）をしてからレビューに回します（マージしたものが1つもなければ、仕上げはせずにそのままです）。レビュー・マージ・PR は親のタスクで行います
-- **直列か並列か**: サブタスクごとに「先に終わっている必要があるサブタスク」をエージェントが内容を見て決めます。自動で進めるときは、先のサブタスクがマージされたら、そのあとのサブタスクが親のブランチ（先の変更が入ったもの）から始まります。この順番は目安で、サブタスクだけ開始するとき（下）は止めません
-- **サブタスクだけ開始する**: 「サブタスク」タブの「開始」ボタン（または「作業中」の列へドラッグ）で、ほかのサブタスクを動かさずに、そのサブタスクだけを始められます。親が開始前なら、親のブランチだけを作り、親のエージェントは動かしません（順番も決めません）。個別に開始したサブタスクは、終わるとレビューで止まるので、差分を見てから「取り込む」で親のブランチにマージします。残りをまとめて動かしたいときは「残りを自動で進める」を押します
-- **状態はドラッグ&ドロップで変える**: 「サブタスク」タブでは、サブタスクが「未着手 / 作業中 / レビュー / 完了」の列に並び、ドラッグで状態を変えられます。マージは状態を変えるきっかけにしません（個別に開始したものは、取り込んだあともレビューの列に残るので、完了へ動かします）
-  - 未着手 → 作業中: そのサブタスクだけ開始 / 未着手 → 完了: 始めずに完了にする
-  - レビュー → 完了: 取り込んだものは完了に。まだ取り込んでいないものは、取り込まずに完了にします（そのサブタスクの worktree とブランチは消えます）
-  - 完了・取り込み済み → 未着手: やり直す（前にマージした変更は親のブランチに残ります） / 完了 → レビュー: 取り込んだものを戻す
-  - 作業中のサブタスクと、親が動いているあいだは動かせません
-- **エージェントからの提案**: 仕様の確認（上）のときに、分けたほうがよい大きなタスクだとエージェントが判断すると、カードが「**サブタスクの提案**」になります。「チャット」タブの最後で、サブタスクの名前・指示を直してから「サブタスクでやる」か「分けずに進める」を選びます。Issue から作ったタスクなら「GitHub にもサブIssue を作って、親の Issue にぶら下げる」も選べます（確認してから作ります）
-- **手動で決める**: 開始前のタスクの「進捗」タブの「サブタスクを編集」で、サブタスクを足せます。足したあとは「サブタスク」タブで直せます（順番は、開始したときにエージェントが決めます）
-- **GitHub のサブIssue**: Issue から作るとき、その Issue に開いているサブIssue がぶら下がっていれば、それぞれをサブタスクにします。PR の本文には、親の Issue と、マージしたサブIssue の `Closes #…` が入ります
-- **マージの仕方**: 「終わったら自動で親のブランチにマージする」か「確かめてからマージする」を、開始前（サブタスクの編集欄・提案のフォーム）に選べます。確かめるときは、サブタスクが終わると「確認待ち」になるので、差分を見てから「取り込む」を押します。既定はメニューの設定の「タスクの既定」で変えられます
-- **コンフリクト**: サブタスク同士の変更がぶつかったら、親のエージェントが自動で解消して先へ進みます（解消しきれなかったときは、ふだんのコンフリクトと同じく「コンフリクト」の欄から頼み直すか、自分で直します）
-- **進み具合**: ボードには親のカードだけが出て、「サブタスク 2/4 完了」とサブタスクの数だけ区切ったバーで進み具合が分かります。サブタスクを動かしているあいだ、親は「実行中」の列に出ます。詳細の「進捗」タブには、全体の進み具合（完了の割合・完了 / 作業中 / 未着手の数・今動いているサブタスク・親のタスクとサブタスクを合わせたコスト）が出ます。サブタスクがあるタスクには「サブタスク」タブが出て、サブタスクごとの状態・担当・金額・マージしたものの報告を見られます。「サブタスク」タブのカードをクリックすると、そのサブタスクの詳細をモーダルで開きます。動いている（作業中・レビューの）サブタスクは、タスクの詳細と同じもの（チャット・ログ・差分・進捗と TODO・質問への回答・追加指示）で、閉じると親のタスクの「サブタスク」タブに戻ります。まだ始めていない・終わったサブタスクは、やること・報告・マージしたかを見られます（未着手なら、そこから開始もできます。「編集」で名前とやることを変えられ、開始するとその内容でサブタスクが動きます）
-- Pipeline・競争・git で管理していないフォルダのタスクは、サブタスクに分けられません
-- Pipeline の並列で自動で作られた枝のカードには、ボード上で「サブタスク」のラベルが付きます（工程の名前に「サブタスク」がなくても付きます）
-
-## スキルを選ぶ
-「⚡ スキルを選ぶ」を押すと、使えるスキルがカードで並びます。1つだけ選べます。選んだスキルは、入力欄の上にラベルで出ます。
-
-![スキルをカードから選ぶ](images/ja/skill-picker.png)
-
-## 指示にファイルを添付する
-「新しいタスク」と「会話」（始めるときと、続きのメッセージ）の入力欄には、画像・PDF・テキストなどのファイルを添付できます。
-
-- 付け方は3つあります: 入力欄への **貼り付け**（⌘V / Ctrl+V。スクリーンショットもそのまま貼れます）、**ドラッグ＆ドロップ**、入力欄の下の「ファイルを添付」ボタン
-- 付けたファイルは入力欄の下に並びます（× で外せます）。10 個まで、合わせて 20MB まで付けられます
-- 添付は、作業フォルダ（worktree・リポジトリ）の外にあるアプリのフォルダに保存します。指示の最後には保存した場所を書き足すので、どのエージェントもそこから読めます
-  - Claude Code には、画像（PNG / JPEG / GIF / WebP、3.5MB まで）をメッセージにそのまま付けて渡します
-  - Codex / Gemini / Cursor と、画像以外のファイルは、保存した場所を見て読んでもらいます
-- 遠隔操作のクライアントから付けたファイルは、ホストに送ってホストに保存します
-- 付けた画像とファイルの名前は、ログの「あなたの指示」に出ます。開始する前のタスクでは、「進捗」タブの編集欄にも出ます。タスクを破棄すると、添付も消します
-
-## GitHub Issue から作成
-「＋ 新しいタスク」を押し、上のタブで「GitHub Issue から作成」を選んで、Issue 番号と会話（セッション）を選びます。複数の番号を入れると、それぞれ1枚のカードになって並列で動きます。
-
-## コンフリクトを解消する
-マージでコンフリクトが起きたら、エージェントに解消してもらうか、自分で直すかを選べます。PR を作ったあとでマージ先が進んで PR がコンフリクトしたときも、同じようにアプリの中で解消して PR を更新できます。
-
-## タスクを作らずにエージェントと話す（💬 会話）
-上部の「💬 会話」を押すと、タスクに紐づかない会話を始められます（このリポジトリについての質問・調べもの・相談など）。話すエージェントは、使う設定のものから選べます。会話はボードの列には並ばず、「💬 会話」ボタンから一覧を開けます（ボタンの数字は会話の数。返事を待っている会話があると黄色で件数を出します）。会話を選ぶと画面の中央にモーダルで開き、下の欄から続きを話せます。
-
-ログのエージェントの返事やあなたの指示は Markdown として整えて表示します（見出し・リスト・表・コードブロックなど）。
-
-- worktree やブランチは作らず、リポジトリのフォルダでそのまま動きます。コミット・マージ・PR はしません
-- 手元の作業中のファイルで動くので、ファイルの変更やコマンドは毎回カードで確かめます（設定の権限モードが「計画だけ」「すべて自動で許可」のときはそれに従います）
-- 同時実行数の上限には数えないので、タスクが詰まっていてもすぐに返事が来ます
-- 作業してほしくなったら「📝 タスクにする」を押すと、会話の続きとして worktree で動くタスクを作れます（会話そのものはそのまま残ります）。Claude Code どうしなら会話そのものを引き継ぎ、それ以外（Codex / Gemini / Cursor の会話や、別のエージェントのタスク）は会話のやりとりを最初の指示に添えて渡します
-
-## 会話（セッション）を切り替える
-詳細画面の「会話」で、次の実行にどの会話を使うかを選べます。既存の会話から引き継いだときは、どこから引き継いだかが表示されます。
-
-## 進捗を見る
-詳細の「進捗」タブで、タスクが今どこまで進んでいるかを見られます。
-
-- 状態・開始した時刻と経過時間・エージェント・コスト
-- エージェントが作った TODO（Claude Code の TodoWrite、Codex・Gemini・Cursor の TODO リスト）を、完了・作業中・これからに分けて、完了した割合のバーと一緒に出します。Pipelineでは今の工程の TODO を、並列の枝を待っているあいだは枝ごとの TODO を出します
-- Pipelineでは、設定のフローチャートをそのまま描き、終わった工程（緑）・今動いている工程（青）・止まっている工程（橙）・これからの工程を色分けします。通った線は緑、今の工程へ向かう線は青で動きます。フローチャートは右上のボタンか、⌘（Ctrl）＋スクロール・ピンチで拡大・縮小できます（「全体」で枠の幅に収めます）。その下に、工程ごとの時間・金額・判定・次の工程へ渡した報告が出ます。レビューや失敗で止まっているときは、工程の「ここからやり直す」で、その工程の最初の回の直前へ戻せます（[途中の状態に戻す](#途中の状態に戻す)）
-- 最近の作業（ツールの呼び出し・返事）を新しい順に出します。くわしくは「ログ」で見られます
-- 開始する前のタスクでは、ここでタイトルと最初の指示を編集できます（開始したあとの指示は「チャット」の上で見られます）
-
-競争のタスクでは、候補の一覧と「採用」「比べてもらう」もここに出ます。サブタスクのタスクでは、親のタスクとマージのしかたが出ます。サブタスクに分けたタスクでは全体の進み具合が出て、サブタスクごとの状態と操作は「サブタスク」タブに出ます。
-
-## 途中の状態に戻す
-カードを列のあいだで動かす「戻す」（完了からレビューへ）とは別です。ここでは、作業そのものを、記録した時点まで戻します。
-
-戻せるのは **Pipeline の工程** と **エージェントが動いた回** の両方で、どちらも同じ操作です。時点は、その回が始まる直前です。工程の「ここからやり直す」は、その工程の最初の回の直前へ戻します。戻したあとは、そのときの指示をもう一度送って、すぐに動き始めます。
-
-戻るのは **ファイル**、**Pipeline の進み具合**、**会話** です。戻す時点よりあとの変更は残さず捨てます。戻した操作は取り消せません。それまでに使った金額は戻りません。その時点以降のログは消え、戻した時点とそれよりあとの履歴も消えます（動き始めると、新しく記録されます）。`node_modules` など、git が無視しているファイルは残ります。手で直した未コミットの変更は、次にエージェントが動く直前の時点に含まれます。
-
-時点は、エージェントを起動する直前に1件ずつ記録します（古い順で最大100件。それを超えると古いものから消えます）。次の実行は記録しません。
-
-- 完了したあとの会話
-- コンフリクトを解消するための実行
-- 中断したタスクの再開
-- git で管理していないフォルダのタスク
-
-### どこから戻すか
-- 詳細のワークフローでは、その工程の最初の実行があるときに「ここからやり直す」が出ます
-- 「進捗」タブの「履歴」には、各回が新しい順に並び、「ここに戻す」でその回の直前へ戻ります
-- 確認のダイアログには「あとの変更は捨てられ、元に戻せません」と「すぐに動き始めます」と出ます
-- 戻せないときは、ボタンは無効になり、理由が出ます
-
-### 戻せないとき
-次のときは戻せません。ファイルを戻す途中で失敗したときは、カードは変えずにエラーになります（記録したファイルの時点がないときも同じです）。
-
-- レビューと失敗以外の状態（実行中・待機中・完了など）
-- 並列の枝の完了を待っている、またはコンフリクトがある
-- 開始したサブタスクを持っている
-- 完了済み、マージ済み、または worktree がない
-- PR を作ってある
-- 並列の枝で、親のタスクがすでにマージした
-- git で管理していないフォルダ（ファイルを戻せないため）
-
-並列の枝の工程は、合流したあとは親のタスクから戻せません（枝のカードは片付いているため）。親の時点だけが表示されます。
-
-### 会話の扱い
-会話の戻し方は、エージェントで違います。
-
-- その時点の会話がないとき: 新しい会話で始めます。Pipeline の工程の最初の回は、いつもこれです
-- 別の会話を引き継ぐ直前だったとき: 引き継いだ元の会話は変えません。どの会話を使うかだけを、その時点に戻します
-- Claude Code: ほかのカードがその会話を使っておらず、会話のファイルがその時点の大きさ以上で、区切りが行の境目なら、ファイルをその大きさに切り詰めて、同じ会話の続きから始めます。条件に合わなければ、次の扱いと同じく新しい会話にします
-- Codex / Gemini / Cursor（条件に合わなかった Claude Code も含む）: 新しい会話で始め、ログの指示と返事から作った引き継ぎ文（8,000字まで）を、指示の前に付けます
-
-## btw（実行中にメッセージを送る）
-実行中のカードの「btw」タブから、作業を止めずに Claude へメッセージを送れます。受け取られると「反映済み」になります。
-
-![btw タブ](images/ja/btw.png)
-
-## マージ先を選ぶ
-「マージ…」を押すと、マージ先のブランチを選べます。新しいブランチを作ったり、マージしたあともタスクを続けたりもできます。
-
-![マージ先のブランチを選ぶダイアログ](images/ja/merge-dialog.png)
-
-## 直接マージか PR 作成かを選ぶ
-設定の「レビュー後の取り込み方」で、**PR を作成する**（origin に push して `gh pr create`。初期値）か **直接マージする**（ローカルで `git merge`）かを、プロジェクトごとに選べます。初めて開いたプロジェクトは「PR を作成する」から始まります（origin がない・GitHub でないリポジトリと、git で管理していないフォルダは「直接マージする」から）。PR にすると、レビュー中のカードのボタンが「PR を作成…」になり、base ブランチ・タイトル・本文を決めて PR を作れます（Issue から作ったタスクには `Closes #番号` が入ります）。追加指示で直したあとにもう一度押すと、同じ PR に push して更新します。PR の作成には gh のインストールとログインが必要です。
-
-作った PR は、アプリが1分ごとに GitHub で状態を確かめます。**PR がマージされると、タスクは自動で「完了」になります**（worktree とローカルのブランチも片付けます）。ただし worktree に PR に入っていない変更（未コミットの変更や、push していないコミット）が残っているときは、消さずにレビュー中のまま残します。
-
-## Issue のステータスを自動で変える
-Issue から作ったタスクは、カードの列に合わせて、Issue が入っている **GitHub Projects の Status** を自動で変えます。
-
-| カード | Status |
+| Environment variable | Contents |
 | --- | --- |
-| 実行中・待機中 | In progress |
-| レビュー（エラーを含む） | In review |
-| マージして完了 | Done |
+| `WORKTREE_KANBAN_ROOT` | The repository folder (for example `cp "$WORKTREE_KANBAN_ROOT/.env" .`) |
+| `WORKTREE_KANBAN_WORKTREE` | This task's worktree folder |
+| `WORKTREE_KANBAN_BRANCH` | This task's branch |
+| `WORKTREE_KANBAN_BASE_BRANCH` | The base branch |
+| `WORKTREE_KANBAN_TASK_ID` | The task's ID |
+| `WORKTREE_KANBAN_PORT` | This task's port (see "Ports per task" below) |
+| `PORT` | The same number as `WORKTREE_KANBAN_PORT` |
 
-- PR を作ったとき（まだマージしていない）は In review のままです。PR がマージされたのをアプリが見つけると、タスクを完了にして Done にします
-- Status の選択肢は、名前で探します（`In Progress` `🏗 In progress` `in-progress` `進行中` なども同じものとして扱います）。当てはまる選択肢がない Project は変えません
-- メニューの設定の「Issue 連携」で、**変える項目の名前**（空なら `Status`）と、**列ごとに使う選択肢の名前**（例: レビュー → `QA`、完了 → `Released, Shipped`）を指定できます。指定した列はその名前の選択肢だけを使い、空の列はこれまでどおり名前から自動で探します
-- gh に **project の権限** が必要です。同じ「Issue 連携」の「Projects の権限を追加」を押すと、ブラウザで追加できます（ターミナルなら `gh auth refresh -h github.com -s project`）
-- 設定の「Issue のステータスを自動で変える」で切ることもできます
+### Ports per task
 
-## 通知（右上の 🔔）
+A worktree only separates files, so running the same development server in parallel would normally make the ports collide. When a worktree is created, each task therefore gets 10 consecutive ports from the 20000–29999 range (`WORKTREE_KANBAN_PORT` through +9). Ports used by other apps are avoided. The number stays the same across app restarts and is freed when the worktree is removed. The current number is shown on the "worktree" tab in the detail panel.
 
-承認待ち・質問・回答待ち・レビュー待ち・失敗・完了などの出来事は、右上のベルに貯まります（デスクトップ通知も出ます）。未読の数がベルに出て、通知を押すとそのタスクの詳細を開きます。「すべて既読」「すべて消す」もできます。
+The agent receives the same environment variables as the scripts, so a server that reads `PORT` does not collide when the agent starts it either. Servers that read `PORT` (Next.js, Express, and so on) work as they are. For servers that do not, pass the number in the run script.
 
-## 完了したあとも会話を続ける・スキルを提案してもらう
-マージ（または PR 作成）して「完了」になったタスクにも、下の欄からメッセージを送って、そのタスクについて話せます（質問・調べもの・相談など）。タスクは **完了のまま** で、レビュー列には戻らず、マージのボタンも出ません。worktree は作り直さずにリポジトリのフォルダで、ファイルを変えない **計画モード** で答えます（タスクの指示とやりとりを渡して新しい会話で始め、2 回目からはその続きになります）。
+```sh
+# Vite (a second server uses +1)
+npm run dev -- --port "$WORKTREE_KANBAN_PORT" --strictPort &
+API_PORT=$((WORKTREE_KANBAN_PORT + 1)) npm run api
+```
 
-修正が必要なときは、完了したタスクの「🛠 修正タスクを作る」から別のタスクを作ってください。元のタスクのやりとり（完了後の会話も含む）を引き継いだ新しいタスクになります。
+In cmd on Windows, write `%WORKTREE_KANBAN_PORT%`.
 
-タスクが「完了」に入ったとき、前に完了したタスクの中に **似た作業のタスク** があれば（同じような作業が続いていれば）、右上の 🔔 通知に「似たタスクが続いています。スキルにしませんか？」が届きます（設定でオフにできます）。完了のたびに毎回届くわけではありません。似ているかは、同じリポジトリの完了したタスクのタイトルと指示を手元で見比べて決めます（Issue の決まり文句は除きます。修正タスクとその元のタスク、すでにスキルの提案に使ったタスクは数えません）。通知の「💡 スキルを提案してもらう」を押すと、元のタスクのカードは使い回さずに、新しい会話のカード（「💡 スキルの提案: タスク名」）を作ります。元のタスクの指示・やりとり・結果と、似ている過去のタスクをその会話に渡すので、元のタスクのエージェント（使わない設定なら、最初から選んでおくエージェント）が繰り返している作業を中心に振り返って、スキル（`SKILL.md`）として残しておくとよいものを1〜3個提案し、「どれを追加しますか？」と聞いてきます。下の欄から答えると、そのままスキルを作ってくれます。
+## Detail panel (diff and merge)
+For a card in the Review column, you can look at the diff from the base branch before merging. You can merge into any branch you choose (or create a new one).
+
+## Answer questions from the agent
+Multiple-choice questions can be answered on the spot (multiple selection and free text under "Other" are supported).
+
+When a question comes as text, the card becomes "Waiting for an answer", and you can answer in the box below.
+
+![Waiting for an answer](images/en/awaiting.png)
+
+## Pin down the spec through dialogue when a task is not specific enough
+When you start a new task (written by hand or created from an Issue), the agent first reads the instructions and the repository, and judges whether the spec is settled enough to start development.
+
+- If it is, development starts right away
+- If not, it stops without changing files. The card turns light blue with "**Spec check**" and shows that development cannot start because the spec is not settled (🔔 and desktop notifications also appear). The agent's questions appear in the detail panel, and you answer in the box below
+- Each time you answer, the agent judges again and asks further questions if needed. Once the spec is settled, it summarizes the decided spec and starts development in the same conversation
+- During the spec check, the Issue's Status in Projects does not move to review (it stays In progress)
+- You can turn this off with "If a new task is not specific enough, talk with the agent to pin down the spec before development starts" in Settings
+
+## Run tasks at a set time (Task scheduler)
+
+Press the menu button (three lines) at the left end of the top bar to switch between "Kanban", "Task scheduler", and "Settings". Kanban is the usual board. For Settings, see [settings.md](settings.md).
+
+Task scheduler shows the schedules of the repository you have open as cards. Each card shows the task name and the last run date ("Not run yet" if it has not run). Open a card to see the repeat setting, next run time, instructions, agent, skill, and run history. "Open card" in the history takes you to the kanban card created at that time.
+
+**There are two ways to register a schedule.**
+
+- Register a new one from "New schedule" in Task scheduler
+- From "Add to schedule" in a kanban task's detail panel, register by copying that task's contents (title, instructions, skill, agent, model). Pipeline, competition, and custom agent choices carry over too. Attachments are not copied. If the original Pipeline or the like no longer exists and cannot be chosen, the edit screen shows a warning
+
+**Repeat** can be once, every N minutes (1–1440), hourly, daily, weekly (several weekdays can be chosen), or monthly. Times are local to the PC running the app. If you choose a day that does not exist in a month, such as the 31st with monthly, it runs on the last day of that month.
+
+**What you can do from an open card:**
+
+| Button | What it does |
+|---|---|
+| Run now | Creates a task on the kanban and starts it right away. The next scheduled run does not change |
+| Create the task only | Creates a task on the kanban without starting it. While that card stays in Todo, the next scheduled runs are skipped |
+| Edit | Changes the instructions, repeat setting, and so on |
+| Pause / Resume | Nothing runs while it is paused. For a "Once" schedule that has already run, change the date and time with "Edit" before resuming |
+| Delete | Deletes the schedule. Tasks already created remain |
+
+At the set time, it creates an ordinary card and starts it. Approvals, the concurrency limit, and review after that are the same as for a task you created by hand. So that it does not stop when nobody is watching, no spec check is done.
+
+**Schedules run only while the app is running** (the OS scheduler is not used). Schedules of repositories not open in a tab also run. During remote control, they run in the host app.
+
+Because they run unattended, they do not run in the following cases. The outcome is kept in the run history.
+
+| Situation | What happens |
+|---|---|
+| More than 10 minutes late (the app was closed or the PC was asleep) | Skips to the next run. Only schedules with "If the time has passed, catch up once after launch" checked run once |
+| The previous card is still in Todo, queued, or running | Skips this run (the same task does not pile up) |
+| It cannot run, for example because its Pipeline was deleted | Recorded as a failure with a notification, and moves to the next run. Pressing the notification opens Task scheduler |
+| The repository folder is gone | Recorded as a failure with a notification, and the schedule is paused. When the folder is back, open that repository and "Resume" |
+
+### Create a card for each new Issue (Issue watch)
+
+Choose "Issue watch" under "Type" in a schedule, and at each repeat it checks the open GitHub Issues and creates one card per new Issue. "Repeat" sets how often it checks ("Every N minutes", or hourly, daily, and so on). This uses `gh`. Without `gh`, it reads through the GitHub API (public repositories only).
+
+| Setting | What it does |
+|---|---|
+| Labels | Comma-separated. Only Issues with all of them are included. Leave empty for no filter |
+| Author | Only Issues created by this person are included. `@me` is the user signed in to `gh`. Leave empty for no filter |
+| What to do with created cards | Choose "Just place them in Todo" or "Start automatically" |
+| Additional instructions | Optional. Sent to the agent along with the Issue |
+
+- **Which Issues count**: Issues that already exist at registration are not included. Only Issues created afterward become cards (including ones that receive the target label later)
+- **One card per Issue**: an Issue that already became a card, or that already has a card, does not get another. Deleting a card does not recreate it
+- **Cards per check**: up to 10 cards per check. The rest are created next time, oldest first
+- **Spec check**: cards placed in Todo get the usual spec check when started. Cards started automatically do not
+- **When a check is late**: Issues created while the app was closed or the schedule was paused are picked up at the next check
+- **Run history**: only card creation and failures are kept. A check with no new Issues only updates "Last checked" in the detail view. If reading keeps failing, you are notified only the first time
+- **Check now**: "Check now" in the detail view checks without waiting. Cards are handled according to the schedule's setting
+
+> The Issue body and comments become instructions to the agent as they are. Anyone can write them in a public repository, so narrow the target by label or author when you choose "Start automatically". Only people with write access can add labels.
+
+## Split work into subtasks
+A large task can be split into several subtasks that separate agents work on in parallel or in order.
+
+- **How it works**: one branch is created for the parent task, and subtasks run in worktrees and branches split from it. A finished subtask is merged into the parent branch. When all subtasks are "Done", the parent agent does the final pass (checking the seams and running tests), then sends the task to review (if nothing was merged, it skips the final pass and leaves things as they are). Review, merge, and PR happen on the parent task
+- **In order or in parallel**: for each subtask, the agent looks at the contents and decides which subtasks must finish first. When running automatically, once the earlier subtasks are merged, the following ones start from the parent branch (with the earlier changes in it). This order is a guideline and does not block starting a single subtask (below)
+- **Start a single subtask**: the "Start" button on the "Subtasks" tab (or dragging to the "Working" column) starts just that subtask without running the others. If the parent has not started, only the parent branch is created and the parent agent does not run (no order is decided either). A subtask started individually stops at review when it finishes, so check the diff and press "Merge in" to merge it into the parent branch. To run all the rest, press "Run the rest automatically"
+- **Change state by drag and drop**: on the "Subtasks" tab, subtasks are arranged in "Not started / Working / Review / Done" columns, and you can drag them to change state. A merge does not by itself change the state (one started individually stays in the Review column even after being merged in, so move it to Done)
+  - Not started → Working: starts just that subtask / Not started → Done: marks it done without starting
+  - Review → Done: one already merged in becomes done. One not yet merged in is marked done without merging (that subtask's worktree and branch are removed)
+  - Done or merged in → Not started: redo it (changes merged earlier stay on the parent branch) / Done → Review: bring back a merged one
+  - A subtask that is working cannot be moved, and none can be moved while the parent is running
+- **Proposals from the agent**: during the spec check (above), if the agent decides a task is large enough to split, the card becomes "**Subtask proposal**". At the end of the "Chat" tab, edit the subtasks' names and instructions, then choose to use subtasks or to continue without splitting. A task created from an Issue can also choose to create sub-issues on GitHub under the parent Issue (after a confirmation)
+- **Decide by hand**: on the "Progress" tab of a task that has not started, add subtasks with "Edit subtasks". After that, edit them on the "Subtasks" tab (the agent decides the order when the task starts)
+- **GitHub sub-issues**: when you create a task from an Issue that has open sub-issues, each becomes a subtask. The PR body includes the parent Issue and `Closes #…` for the merged sub-issues
+- **How to merge**: before starting (in the subtask editor or the proposal form), choose "Merge into the parent branch automatically" or "Merge after I check it". If you choose to check, a finished subtask becomes "Waiting for review", so look at the diff and press "Merge in". The default can be changed under "Task defaults" in Settings
+- **Conflicts**: if subtasks' changes collide, the parent agent resolves them automatically and moves on (if it cannot, ask again from the "Conflict" area or fix it yourself, as with an ordinary conflict)
+- **Progress**: only the parent card appears on the board, showing something like "Subtasks 2/4 done" and a bar divided by the number of subtasks. While subtasks are running, the parent appears in the "Running" column. The "Progress" tab in the detail panel shows overall progress (the share done; the numbers done, working, and not started; the subtasks running now; and the cost of the parent and subtasks combined). A task with subtasks gets a "Subtasks" tab showing each subtask's state, assignee, cost, and the report for merged ones. Click a card on the "Subtasks" tab to open that subtask's details in a modal. A running subtask (Working or Review) shows the same contents as a task's detail panel (chat, log, diff, progress and TODO, answering questions, follow-up instructions), and closing it returns you to the parent's "Subtasks" tab. A subtask that has not started or has finished shows what to do, the report, and whether it was merged (one not started can also be started from there, and "Edit" changes its name and contents; the subtask then runs with those contents)
+- Pipeline, competition, and tasks in folders not managed by git cannot be split into subtasks
+- Cards for branches created automatically by a Pipeline's Parallel get a "Subtasks" label on the board (even if the step's name does not include "subtask")
+
+## Choose a skill
+Press "⚡ Choose a skill" to see the available skills as cards. You can choose one. The chosen skill appears as a label above the input box.
+
+![Choosing a skill from cards](images/en/skill-picker.png)
+
+## Attach files to instructions
+The input boxes for "New task" and "Conversation" (both when starting and for later messages) accept images, PDFs, text, and other files.
+
+- There are three ways to attach: **paste** into the box (⌘V / Ctrl+V; screenshots can be pasted directly), **drag and drop**, and the "Attach files" button below the box
+- Attached files are listed below the box (remove them with ×). Up to 10 files, 20 MB in total
+- Attachments are saved in an app folder outside the working folder (worktree or repository). The saved location is added at the end of the instruction, so any agent can read them from there
+  - Claude Code receives images (PNG / JPEG / GIF / WebP, up to 3.5 MB) directly attached to the message
+  - Codex / Gemini / Cursor, and files other than images, are read from the saved location
+- Files attached from a remote control client are sent to the host and saved there
+- The names of attached images and files appear in the log under your instruction. For a task that has not started, they also appear in the editor on the "Progress" tab. Discarding a task also deletes its attachments
+
+## Create from a GitHub Issue
+Press "+ New task", choose "Create from a GitHub Issue" in the tabs at the top, and choose an Issue number and a conversation (session). If you enter several numbers, each becomes a card and they run in parallel.
+
+## Resolve conflicts
+When a merge conflicts, you can ask the agent to resolve it or fix it yourself. If the merge target moves on after a PR is created and the PR conflicts, you can resolve it the same way in the app and update the PR.
+
+## Talk to an agent without a task (💬 Conversation)
+Press "💬 Conversation" at the top to start a conversation not tied to a task (questions about this repository, lookups, advice, and so on). You can choose which of your agents to talk to. Conversations do not appear in board columns; open the list from the "💬 Conversation" button (the number on the button is the number of conversations, and a yellow count appears when any are waiting for your reply). Choose a conversation to open it in a modal at the center of the screen, and continue in the box below.
+
+The agent's replies and your instructions in the log are rendered as Markdown (headings, lists, tables, code blocks, and so on).
+
+- No worktree or branch is created; it runs in the repository folder as it is. It does not commit, merge, or create PRs
+- Because it works on your local working files, file changes and commands are confirmed on the card every time (when the permission mode in Settings is "Plan only" or "Allow everything automatically", that mode applies)
+- It does not count toward the concurrency limit, so you get a reply right away even when tasks are backed up
+- When you want work done, press "📝 Make a task" to create a task that runs in a worktree as a continuation of the conversation (the conversation itself stays). Between Claude Code agents the conversation itself carries over. In other cases (a Codex / Gemini / Cursor conversation, or a task on a different agent), the exchange is passed along with the first instruction
+
+## Switch conversations (sessions)
+Under "Conversation" in the detail panel, choose which conversation the next run uses. If a task continued from an existing conversation, it shows where it came from.
+
+## See progress
+The "Progress" tab in the detail panel shows how far a task has come.
+
+- State, start time and elapsed time, agent, and cost
+- TODOs written by the agent (TodoWrite on Claude Code, TODO lists on Codex, Gemini, and Cursor), grouped into done, in progress, and upcoming, with a bar showing the share done. A Pipeline shows the current step's TODOs, and shows each branch's TODOs while waiting for parallel branches
+- For a Pipeline, the flowchart from Settings is drawn as is, with steps colored as finished (green), running (blue), stopped (orange), and upcoming. Lines already passed are green, and the line toward the current step animates in blue. Zoom the flowchart with the buttons at the top right, or with ⌘ (Ctrl) + scroll or a pinch ("Fit" fits it to the frame's width). Below it are each step's time, cost, judgment, and the report passed to the next step. When the task is stopped in review or has failed, "Restart from here" on a step returns to just before that step's first run ([Restore an earlier point](#restore-an-earlier-point))
+- Recent work (tool calls and replies), newest first. See "Log" for details
+- For a task that has not started, you can edit the title and first instruction here (after it starts, the instruction can be seen at the top of "Chat")
+
+For a competition task, the list of candidates, "Adopt", and "Compare" also appear here. For a subtask, the parent task and how it merges appear. For a task split into subtasks, overall progress appears, and each subtask's state and actions are on the "Subtasks" tab.
+
+## Restore an earlier point
+This is separate from moving a card between columns ("Move back", from Done to Review). Here, the work itself returns to a recorded point.
+
+You can restore both a **Pipeline step** and a **run of the agent**, with the same action. The point is just before that run started. "Restart from here" on a step returns to just before that step's first run. After restoring, the instruction from that point is sent again and the task starts right away.
+
+What returns is the **files**, the **Pipeline progress**, and the **conversation**. Changes after that point are discarded and not kept. The restore cannot be undone. Money already spent is not refunded. Logs after that point disappear, and the history from that point onward disappears too (it is recorded again once work starts). Files git ignores, such as `node_modules`, stay. Uncommitted changes you made by hand are included in the point taken just before the agent next starts.
+
+A point is recorded each time, just before the agent starts (up to 100, oldest first; older ones are dropped past that). The following runs are not recorded:
+
+- A conversation after the task is done
+- A run that resolves a conflict
+- Resuming an interrupted task
+- A task in a folder not managed by git
+
+### Where to restore from
+- In the workflow in the detail panel, "Restart from here" appears when that step has a first run
+- The "History" on the Progress tab lists each run newest first, and "Return here" goes back to just before that run
+- The confirmation dialog says that later changes are discarded and cannot be undone, and that work starts right away
+- When you cannot restore, the button is disabled and the reason is shown
+
+### When you cannot restore
+You cannot restore in the following cases. If restoring the files fails partway, the card stays as it is and an error is shown (the same happens when the recorded point has no files to restore).
+
+- Any state other than review or failed (running, queued, done, and so on)
+- Waiting for parallel branches to finish, or a conflict is present
+- The task has subtasks that have started
+- The task is done, already merged, or has no worktree
+- A PR has been created
+- On a parallel branch, the parent task has already merged it
+- A folder not managed by git (the files cannot be restored)
+
+Steps on a parallel branch cannot be restored from the parent task after the join (the branch card has been cleaned up). Only the parent's points are shown.
+
+### How the conversation is handled
+How the conversation is restored differs by agent.
+
+- When that point has no conversation: a new conversation starts. The first run of a Pipeline step is always this
+- When the run was about to continue another conversation: the source conversation is left unchanged. Only which conversation is used returns to that point
+- Claude Code: if no other card is using that conversation, the conversation file is at least as large as it was at that point, and the boundary is a line break, the file is truncated to that size and the same conversation continues. If those conditions are not met, a new conversation starts, as in the next case
+- Codex / Gemini / Cursor (and Claude Code when the conditions are not met): a new conversation starts, and a handoff built from the instructions and replies in the log (up to 8,000 characters) is placed before the instruction
+
+## btw (send a message while running)
+From the "btw" tab of a running card, you can send a message to Claude without stopping its work. Once received, it shows "Delivered".
+
+![btw tab](images/en/btw.png)
+
+## Choose the merge target
+Press "Merge…" to choose the target branch. You can also create a new branch, or keep working on the task after the merge.
+
+![Dialog for choosing the merge target branch](images/en/merge-dialog.png)
+
+## Choose a direct merge or a PR
+Under "How to land after review" in Settings, choose per project between **Create a PR** (push to origin and `gh pr create`; the default) and **Merge directly** (local `git merge`). A project opened for the first time starts with "Create a PR" (repositories with no origin or not on GitHub, and folders not managed by git, start with "Merge directly"). With PRs, the button on a card in review becomes "Create PR…", where you set the base branch, title, and body (a task created from an Issue gets `Closes #number`). If you press it again after changes from a follow-up instruction, it pushes to the same PR and updates it. Creating a PR requires gh to be installed and signed in.
+
+The app checks the state of created PRs on GitHub every minute. **When a PR is merged, the task becomes "Done" automatically** (the worktree and local branch are also cleaned up). However, if the worktree has changes not in the PR (uncommitted changes or unpushed commits), nothing is removed and the task stays in review.
+
+## Update Issue status automatically
+A task created from an Issue automatically changes the **Status in GitHub Projects** for that Issue to match the card's column.
+
+| Card | Status |
+| --- | --- |
+| Running or queued | In progress |
+| Review (including errors) | In review |
+| Merged and done | Done |
+
+- When a PR has been created (and not merged yet), it stays In review. When the app finds that the PR was merged, it marks the task done and sets Done
+- Status options are found by name (`In Progress`, `🏗 In progress`, `in-progress`, `進行中`, and so on are treated as the same). A Project with no matching option is left unchanged
+- Under "Issue sync" in Settings, you can set the **name of the field to change** (`Status` if empty) and the **option name to use for each column** (for example Review → `QA`, Done → `Released, Shipped`). A column you set uses only options with those names, and an empty column is found automatically by name as usual
+- gh needs the **project scope**. Press "Add the Projects scope" under the same "Issue sync" to add it in the browser (or run `gh auth refresh -h github.com -s project` in a terminal)
+- You can also turn this off with "Update Issue status automatically" in Settings
+
+## Notifications (🔔 at the top right)
+
+Events such as waiting for approval, questions, waiting for an answer, waiting for review, failures, and completions collect in the bell at the top right (desktop notifications also appear). The bell shows the unread count, and pressing a notification opens that task's detail panel. "Mark all read" and "Clear all" are available too.
+
+## Keep talking after a task is done, and get skill suggestions
+You can send a message from the box below to a task that is "Done" after a merge (or PR creation) and talk about it (questions, lookups, advice, and so on). The task **stays Done**: it does not go back to the Review column and no merge button appears. Without recreating the worktree, the agent answers in the repository folder in **plan mode**, which does not change files (a new conversation starts with the task's instructions and exchange passed to it, and later messages continue that conversation).
+
+If a fix is needed, create a separate task with "🛠 Create a fix task" on the finished task. The new task carries over the original task's exchange (including conversation after it was done).
+
+When a task enters "Done", if there are **tasks with similar work** among earlier finished tasks (similar work keeps coming up), the 🔔 notifications at the top right offer "Similar tasks keep coming up. Turn this into a skill?" (this can be turned off in Settings). This does not happen every time a task finishes. Similarity is decided locally by comparing the titles and instructions of finished tasks in the same repository (Issue boilerplate is excluded; a fix task and its original, and tasks already used for a skill suggestion, are not counted). Pressing "💡 Ask for a skill suggestion" in the notification does not reuse the original task's card. It creates a new conversation card ("💡 Skill suggestion: task name"). The original task's instructions, exchange, and result, plus the similar past tasks, are passed to that conversation. The original task's agent (or the agent selected by default, if that agent is unchecked) reviews the repeated work, suggests 1 to 3 things worth keeping as skills (`SKILL.md`), and asks which to add. Answer in the box below and it creates the skill for you.
 
 
-## できること
+## What you can do
 
-- **カードを作るとすぐに動き出す**: ブランチ `agent/<名前>-<id>` と worktree（`<リポジトリ>.worktrees/<id>`）を自動で作り、その中でエージェントの CLI（`claude -p` / `codex exec` / `gemini` / `cursor-agent -p`）を起動します
-  - 設定の「ブランチの命名規則」に、`feature/<Issue番号>-<内容を表す短い英語> にする` のように自然言語で書いておくと、タスクの開始時にそのタスクのエージェントがその規則に従ってブランチ名を考えます（同じ名前がもうあれば `-2` などを付けます。決められなかったときはいつもの名前になります）
-- **タスク・会話ごとにモデルを選ぶ**: 「＋ 新しいタスク」（Issue から作るときも）と「💬 会話」を始める画面の「モデル」の欄で、そのタスク・会話だけ使うモデルを選べます（例: Claude Code なら `opus` / `sonnet` / `haiku`）。入力欄には選んだエージェントでよく使うモデルを候補に出します。空なら設定のエージェントごとの既定のモデルを使います。Pipeline・競争はエージェントが複数動くので、設定のモデルを使います。使っているモデルは詳細の「情報」タブで見られます
-- **GitHub Issue からタスクを作る**: 「＋ 新しいタスク」で「GitHub Issue から作成」のタブを選び、番号を入れるだけで、Issue のタイトル・本文・ラベル・コメントからエージェントへの指示を作ります。`12, 15, 18` のように複数入れると、1つの Issue が1枚のカードになって並列で動きます
-  - ブランチは `agent/issue-12-…`、コミットメッセージには `(#12)` が付きます。カードの `#12` を押すと Issue のページが開きます
-  - 同じ画面で、会話（セッション）と追加の指示も選べます
-  - Issue は **gh（GitHub CLI）** で読み込みます。gh が入っていなければ、同じ画面の「gh をインストールする」から入れられます（Mac は Homebrew、Windows は winget）。ログインしていなければ「GitHub にログイン」を押すと、ブラウザが開いて確認コードが表示されるので、それを入力するだけです
-  - public リポジトリなら、gh がなくても読み込めます
-- **エージェントからの質問に答える**:
-  - 選択肢の質問（Claude Code の AskUserQuestion）が来ると、カードが紫の「質問」になり、回答フォームが出ます。1つ選ぶ質問はラジオボタン、複数選べる質問はチェックボックスで、どちらにも自由に書ける「その他」があります。1問だけの質問は、ボードのカードの上でボタンを押すだけで答えられます。「答えずに続ける」を押すと、Claude が妥当な方法で進めます
-  - Claude が文章で質問して返事を終えたときは、カードが「回答待ち」になり、詳細画面に質問が表示されます。下の欄に答えを書くと、同じ会話の続きから進めます
-  - どちらもデスクトップ通知が出ます。画面右上には「あなたの対応待ち」の数が出ます
-- **スキルを選ぶ**: タスクを作るとき（手で書く / Issue から）と、詳細画面で追加指示を送るときに、Claude Code のスキルを1つ選べます。スキルはカードの一覧から選び、選んだスキルは入力欄の上にラベルで表示されます（× で外せます）
-  - 選んだスキルは、指示の先頭に `/スキル名` として付けて Claude に渡します
-  - 一覧には、このリポジトリの `.claude/skills/`、自分用の `~/.claude/skills/`、インストール済みのプラグインのスキルが出ます
-  - メニューの設定の「タスクの既定」で「新しいタスクで最初から選んでおくスキル」を決めておけます
-- **会話（セッション）を選ぶ**: タスクを作るときに、過去の Claude Code の会話（ターミナルで話していたものなど）を選ぶと、その続きとしてタスクを始めます。元の会話はそのまま残ります（`--fork-session`）
-  - 詳細画面の「会話」で、次の追加指示を「今の会話の続き」「新しい会話」「このカードの前の会話」「ほかの既存の会話」のどれで動かすか切り替えられます
-- **会話（セッション）を消す**: 上部の「セッション」から、Claude Code の会話の記録を一覧して、選んで消せます（タスクとは関係なく消せます。出るのはこのリポジトリとタスク用 worktree の会話だけです）
-  - 実行中・待機中のタスクが使っている会話は消せません。ほかのタスクが使っている会話を消すと、そのタスクは次から新しい会話で始めます
-  - タスクをマージして完了にすると、そのタスクが作業に使った会話を自動で消します（引き継いだ元の会話と、完了後に話した会話は残します）。メニューの設定の「全般」の「マージして完了したら、そのタスクの作業に使った Claude Code の会話（セッション）を消す」でオフにできます
-- **btw（実行中にメッセージを送る）**: 詳細パネルの「btw」タブから、エージェントの作業を止めずにメッセージを送れます（例:「テストも書いて」「その API は使わないで」）。Claude は作業の途中で読んで反映し、受け取ったら「反映済み」になります。待機中のタスクに送ると、開始するときの指示に付け足します
-- **列は自動で移動**: Todo → 実行中（待機中を含む）→ レビュー（エラーを含む）→ 完了
-- **カード上で承認**: 許可が必要な操作は、カードに「承認待ち」として表示されます。その場で **許可 / 拒否 / このタスクでは常に許可** を選べます。デスクトップ通知も出ます
-- **詳細パネル**: カードをクリックすると開きます。左端をドラッグすると幅を変えられます（幅は覚えておきます。ダブルクリックで元の幅に戻ります）。中身は次のとおりです
-  - 上の2行: 1行目はタイトル（1行に入りきらないときは「…」で省略し、マウスを重ねると全文が出ます）、2行目はボタン（開始・停止・マージ・破棄など）。高さは固定です。Pipeline・全体の進み具合と競争の候補は「進捗」タブに、サブタスクの一覧は「サブタスク」タブに、中断・エラー・コンフリクト・サブタスクの提案は「チャット」タブの最後に出ます
-  - ログ: エージェントの発言、ツールの呼び出しと結果がリアルタイムに流れます
-  - worktree: worktree の作業状況。ベース → コミット → 未コミット（作業中）の流れ、触ったファイルの一覧（最後に編集した順・増減のバー）、ベースブランチがその後何コミット進んだか、同じリポジトリで並列に動いている worktree の一覧を表示します（実行中は自動で更新）
-  - 差分: ベースブランチからの変更を、GitHub のようにファイルツリー（フォルダ）＋ファイルごとの差分（行番号つき）で表示
-  - 指示: 最初の指示（開始前なら編集できます）
-  - 追加指示: 同じセッションの続きとして動きます（`--resume`）
-- **マージ / 破棄**: 好きなブランチにマージ（`--no-ff`）するか、worktree とブランチをまとめて削除します
-  - マージ先は一覧から選ぶか、その場で新しいブランチを作れます（初期値はベースブランチ）
-  - マージ先をどこにもチェックアウトしていなければ、一時的な worktree の中でマージするので、手元の作業フォルダは変わりません
-  - 「マージ後もタスクを続ける」を選ぶと、worktree とブランチを残したままにします。たとえば `develop` に入れて確かめてから、あとで `main` にもマージできます
-  - 「マージしたあと origin に push する」を選ぶと、origin の最新を取り込んでからマージして、`origin/<マージ先>` に push します（GitHub にも反映されます）。ローカルと origin が別々に進んでいるときは、壊さないように止めて知らせます。push の認証は、ふだんの git と同じ設定（キーチェーン・SSH など）を使います
-  - 完了したタスクは削除できません（記録としてボードに残ります）
-- **コンフリクトの解消**: マージでコンフリクトが起きると、カードが「コンフリクト」になり、コンフリクトしたファイルが表示されます
-  - 「○○ に解消してもらう」: マージ先のブランチをタスクのブランチに取り込み、タスクのエージェントが両方の変更の意図を残して解消します
-  - 「自分で解消する」: コンフリクトした状態の worktree を開くので、エディタで直して「解消した」を押します。「取り込みを中止」もできます
-  - `<<<<<<<` などの印が残っているうちは完了にしません。解消できたら「もう一度マージ」を押すだけです
-  - **PR のコンフリクト**: 作った PR を見張っているあいだに、GitHub で PR がマージ先とコンフリクトしていると分かったら、カードが「コンフリクト」になって通知します。上と同じく「○○ に解消してもらう」か「自分で解消する」を選ぶと、`origin/<マージ先>` をタスクのブランチに取り込んで解消します。解消できたら「PR を更新（push）」を押すと、PR のコンフリクトがなくなります。案内を閉じても、詳細の PR の行の「解消する」からもう一度始められます（PR を作って worktree を片付けたタスクは、GitHub 上で解消してください）
-- **同時実行数の上限**: 上限を超えたカードは待機中になり、空きができると順番に起動します
+- **A card starts working as soon as you create it**: a branch `agent/<name>-<id>` and a worktree (`<repository>.worktrees/<id>`) are created automatically, and the agent's CLI (`claude -p` / `codex exec` / `gemini` / `cursor-agent -p`) starts inside it
+  - If you write a rule in plain language under "Branch naming rule" in Settings, such as "use `feature/<Issue number>-<short English description>`", the task's agent comes up with the branch name following that rule when the task starts (if the name already exists, `-2` or the like is added; if it cannot decide, the usual name is used)
+- **Choose a model per task or conversation**: in the "Model" field of the screens that start "+ New task" (including from an Issue) and "💬 Conversation", choose the model for just that task or conversation (for example `opus` / `sonnet` / `haiku` on Claude Code). The field suggests models often used with the chosen agent. If empty, the default model for that agent in Settings is used. Pipeline and competition run several agents, so they use the models in Settings. The model in use can be seen on the "Info" tab in the detail panel
+- **Create tasks from GitHub Issues**: choose the "Create from a GitHub Issue" tab under "+ New task" and just enter a number. The agent's instruction is built from the Issue's title, body, labels, and comments. Enter several, like `12, 15, 18`, and each Issue becomes one card, running in parallel
+  - The branch is `agent/issue-12-…`, and commit messages get `(#12)`. Press `#12` on the card to open the Issue page
+  - The same screen also lets you choose a conversation (session) and additional instructions
+  - Issues are read with **gh (GitHub CLI)**. If gh is not installed, you can install it with "Install gh" on the same screen (Homebrew on Mac, winget on Windows). If you are not signed in, press "Sign in to GitHub"; a browser opens and shows a verification code, which is all you need to enter
+  - Public repositories can be read without gh
+- **Answer questions from the agent**:
+  - When a multiple-choice question arrives (AskUserQuestion on Claude Code), the card turns purple with "Question" and an answer form appears. Single-choice questions use radio buttons and multiple-choice ones use checkboxes, and both have a free-text "Other". A single question can be answered by pressing a button on the board's card. "Continue without answering" lets Claude proceed in a reasonable way
+  - When Claude ends its reply with a question in text, the card becomes "Waiting for an answer" and the question appears in the detail panel. Write your answer in the box below and it continues the same conversation
+  - Both show desktop notifications. The top right of the screen shows how many items are waiting for you
+- **Choose a skill**: when creating a task (by hand or from an Issue) and when sending a follow-up instruction in the detail panel, you can choose one Claude Code skill. Skills are chosen from a list of cards, and the chosen skill appears as a label above the input box (remove it with ×)
+  - The chosen skill is passed to Claude as `/skill-name` at the start of the instruction
+  - The list shows skills from this repository's `.claude/skills/`, your own `~/.claude/skills/`, and installed plugins
+  - You can preset "Skill selected by default on a new task" under "Task defaults" in Settings
+- **Choose a conversation (session)**: when creating a task, choose a past Claude Code conversation (one from the terminal, for example) to start the task as its continuation. The original conversation stays as it is (`--fork-session`)
+  - Under "Conversation" in the detail panel, you can switch the next follow-up instruction between continuing the current conversation, a new conversation, this card's previous conversation, or another existing conversation
+- **Delete conversations (sessions)**: from "Sessions" at the top, list Claude Code's conversation records, choose some, and delete them (independently of tasks; only conversations from this repository and its task worktrees appear)
+  - Conversations used by running or queued tasks cannot be deleted. If you delete a conversation used by another task, that task starts a new conversation from then on
+  - When a task is merged and done, the conversations it used for work are deleted automatically (the original conversation it continued from, and conversations after it was done, are kept). You can turn this off with "When a merge completes the task, delete the Claude Code conversations (sessions) it used for work" under "General" in Settings
+- **btw (send a message while running)**: from the "btw" tab of the detail panel, send a message without stopping the agent's work (for example "write tests too" or "don't use that API"). Claude reads it partway through its work and applies it, and it shows "Delivered" once received. A message sent to a queued task is added to the instruction used when it starts
+- **Columns move automatically**: Todo → Running (including Queued) → Review (including errors) → Done
+- **Approve on the card**: actions that need permission appear on the card as "Waiting for approval". Choose **Allow / Deny / Always allow for this task** right there. Desktop notifications also appear
+- **Detail panel**: opens when you click a card. Drag its left edge to change the width (the width is remembered; double-click to restore it). Its contents are as follows
+  - The top two rows: the first is the title (shortened with "…" if it does not fit on one line; hover for the full text), and the second has buttons (start, stop, merge, discard, and so on). The height is fixed. The Pipeline, overall progress, and competition candidates are on the "Progress" tab, the list of subtasks is on the "Subtasks" tab, and interruptions, errors, conflicts, and subtask proposals appear at the end of the "Chat" tab
+  - Log: the agent's remarks and tool calls and results stream in real time
+  - worktree: the state of the worktree. It shows the flow from base → commits → uncommitted (in progress), a list of touched files (most recently edited first, with change bars), how many commits the base branch has moved since, and the list of worktrees running in parallel in the same repository (updated automatically while running)
+  - Diff: changes from the base branch, shown GitHub-style as a file tree (folders) plus per-file diffs with line numbers. Hover over a line and press "+" to write a comment. Comments collect as drafts (you can edit and delete them), and "Send to agent" at the top sends them together as a follow-up instruction, with the file name, line number, and line attached. While the agent is working you can only write them; you can send when follow-up instructions can be sent. Drafts disappear when the app closes
+  - Instruction: the first instruction (editable before starting)
+  - Follow-up instruction: runs as a continuation of the same session (`--resume`)
+- **Merge / Discard**: merge into any branch you like (`--no-ff`), or delete the worktree and branch together
+  - Choose the merge target from the list or create a new branch on the spot (the default is the base branch)
+  - If the merge target is not checked out anywhere, the merge happens in a temporary worktree, so your local working folder does not change
+  - "Keep working on the task after the merge" leaves the worktree and branch in place. For example, you can merge into `develop` to check, then merge into `main` later
+  - "After merging, push to origin" pulls in the latest origin, merges, and pushes to `origin/<target>` (so it also shows up on GitHub). If local and origin have diverged, it stops and tells you rather than breaking anything. Push authentication uses your usual git setup (keychain, SSH, and so on)
+  - Done tasks cannot be deleted (they stay on the board as a record)
+- **Conflict resolution**: when a merge conflicts, the card becomes "Conflict" and the conflicting files are shown
+  - "Ask ○○ to resolve it": brings the merge target branch into the task's branch, and the task's agent resolves it while preserving the intent of both changes
+  - "Resolve it myself": opens the worktree in its conflicted state. Fix it in an editor and press "Resolved". You can also abort the merge
+  - It does not count as finished while markers such as `<<<<<<<` remain. Once it is resolved, just press "Merge again"
+  - **PR conflicts**: if GitHub reports a conflict between a PR being watched and its merge target, the card becomes "Conflict" and notifies you. As above, choose "Ask ○○ to resolve it" or "Resolve it myself" to bring `origin/<target>` into the task's branch and resolve it. Then press "Update PR (push)" and the PR's conflict goes away. If you close the notice, you can start again from "Resolve" on the PR row in the detail panel (for a task whose worktree was cleaned up after creating a PR, resolve it on GitHub)
+- **Concurrency limit**: cards over the limit become queued and start in order as slots free up
 
-## 注意
+## Notes
 
-- マージ先のブランチをどこかでチェックアウトしている場合は、そのフォルダに未コミットの変更がない状態にしておいてください。コンフリクトしたらマージを中止して、そのことを知らせます
-- 実行中・待機中のタスクがあるときにアプリを終了しようとすると、確認のダイアログが出ます。「中断して終了」を選ぶと、エージェントを止めてそれまでの変更をタスクのブランチにコミットしてから終了します
-- 次に起動したとき、中断されたタスクには「中断」のバッジが付き、ボードの上に「▶ すべて再開」が出ます。タスクごとの「▶ 再開」でも、同じ会話の続きから作業を続けられます（待機中だったタスクは、その指示をそのまま渡し直します）。別の指示で続けたいときは追加指示を送ってください。アプリが落ちたときも同じように再開できます
+- If the merge target branch is checked out somewhere, keep that folder free of uncommitted changes. If there is a conflict, the merge is aborted and you are told
+- If you try to quit the app with running or queued tasks, a confirmation dialog appears. "Stop and quit" stops the agents, commits the changes so far to the task branches, and quits
+- At the next launch, interrupted tasks get an "Interrupted" badge, and "▶ Resume all" appears above the board. "▶ Resume" on each task also continues work from the same conversation (a task that was queued has its instruction passed again as is). To continue with different instructions, send a follow-up instruction. You can resume the same way after an app crash
 
 ---
 
-[← README に戻る](../README.md)
+[← Back to README](../README.md)

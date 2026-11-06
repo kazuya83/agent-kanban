@@ -1,4 +1,4 @@
-// README 用の画面と、デモ GIF を言語ごとに撮る（使い方は README.md）
+// README 用の画面と、デモ GIF・機能ごとの GIF を言語ごとに撮る（使い方は README.md）
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -6,6 +6,7 @@ const { _electron: electron } = require('playwright-core');
 const { buildFixtures, HOST_IP } = require('./fixtures');
 const scenesFor = require('./scenes');
 const demo = require('./demo');
+const { features: gifFeatures, FEATURE_SIZE } = require('./features');
 
 const ROOT = path.join(__dirname, '..', '..');
 const LANGS = ['en', 'ja', 'es', 'fr', 'zh'];
@@ -20,6 +21,8 @@ const langs = opt('lang') || LANGS;
 const only = opt('only');
 const noGif = args.includes('--no-gif');
 const onlyGif = args.includes('--gif-only');
+const feats = opt('feature');
+const demoOnly = args.includes('--demo');
 
 // preload.js にあるチャンネルをすべて差し替える（エージェントや外部サービスを動かさないため）
 function channels() {
@@ -57,6 +60,8 @@ async function launch(lang) {
     for (const ch of list) {
       ipcMain.removeHandler(ch);
       ipcMain.handle(ch, async (_e, arg) => {
+        const wait = global.__mock.__delay && global.__mock.__delay[ch];
+        if (wait) await new Promise((r) => setTimeout(r, wait));
         const v = global.__mock[ch];
         const byId = v && typeof v === 'object' && v.__byId;
         return { ok: true, data: (byId ? v[arg] : v) ?? null };
@@ -111,6 +116,7 @@ async function launch(lang) {
     },
     async reset() {
       await page.evaluate(() => {
+        setView('kanban');
         closeModal();
         $('skillPicker').classList.add('hidden');
         $('notifPanel').classList.add('hidden');
@@ -125,17 +131,29 @@ async function launch(lang) {
       await page.waitForTimeout(ms);
     },
     mock: (p) => setMock(app, p),
+    async check(name) {
+      assertClean(lang, name, await page.evaluate(screenText));
+    },
   };
   return { ctx, dir };
 }
 
+const screenText = () => document.body.innerText + [...document.querySelectorAll('input,textarea')].map((e) => e.value).join(' ');
+// 設定の言語の一覧は、どの言語でもそれぞれの言葉で出る
+const LANGUAGE_NAMES = new Set(['日本語', '简体中文']);
+const warned = new Set();
+const warnOnce = (msg) => {
+  if (!warned.has(msg)) console.warn(msg);
+  warned.add(msg);
+};
+
 function assertClean(lang, name, text) {
   const bad = ['kazuya', 'Agent Kanban', 'gmail.com', 'Mac-mini'].filter((x) => text.includes(x));
-  if (bad.length) console.warn(`  ! ${lang}/${name}: ${bad.join(', ')}`);
+  if (bad.length) warnOnce(`  ! ${lang}/${name}: ${bad.join(', ')}`);
   // 訳されていない日本語が画面に残っていないか
   if (lang !== 'ja') {
     const re = lang === 'zh' ? /[\u3040-\u30ff]/ : /[\u3040-\u30ff\u4e00-\u9fff]/;
-    for (const line of text.split('\n')) if (re.test(line)) console.warn(`  ! ${lang}/${name}: ${line.trim().slice(0, 100)}`);
+    for (const line of text.split('\n')) if (re.test(line) && !LANGUAGE_NAMES.has(line.trim())) warnOnce(`  ! ${lang}/${name}: ${line.trim().slice(0, 100)}`);
   }
 }
 
@@ -146,19 +164,32 @@ async function main() {
     console.log(`== ${lang}`);
     const { ctx, dir } = await launch(lang);
     try {
-      if (!onlyGif) {
+      if (!onlyGif && !feats && !demoOnly) {
         const scenes = scenesFor(ctx);
         for (const [name, run] of Object.entries(scenes)) {
           if (only && !only.includes(name)) continue;
           await ctx.reset();
           await run();
           await ctx.settle();
-          assertClean(lang, name, await ctx.page.evaluate(() => document.body.innerText + [...document.querySelectorAll('input,textarea')].map((e) => e.value).join(' ')));
+          await ctx.check(name);
           await ctx.page.screenshot({ path: path.join(out, `${name}.png`), animations: 'disabled', caret: 'hide' });
           console.log(`  ${name}`);
         }
       }
-      if (!noGif && !only) await demo(ctx, path.join(out, 'demo.gif'));
+      if (!noGif && !only && !feats) {
+        await ctx.reset();
+        await demo(ctx, path.join(out, 'demo.gif'));
+      }
+      if (!noGif && !only && !demoOnly) {
+        const list = gifFeatures(ctx);
+        await ctx.page.setViewportSize(FEATURE_SIZE);
+        for (const [name, run] of Object.entries(list)) {
+          if (feats && !feats.includes(name)) continue;
+          await ctx.reset();
+          await run(path.join(out, `feature-${name}.gif`));
+        }
+        await ctx.page.setViewportSize(SIZE);
+      }
     } finally {
       await ctx.app.close().catch(() => {});
       fs.rmSync(dir, { recursive: true, force: true });

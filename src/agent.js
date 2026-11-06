@@ -19,6 +19,7 @@ const { isNoGitRepo, cleanRelayFlow, pipelineOf } = require('./store');
 const FlowModel = require('../renderer/flow-model');
 const Subtasks = require('./subtasks');
 const Checkpoints = require('./checkpoints');
+const { SCRIPT_KINDS, SCRIPT_SETTINGS, PORT_START, PORT_END, PORT_COUNT, portsFree, cleanScript, appendOutput, startScript } = require('./worktree-scripts');
 const I18n = require('../renderer/i18n');
 const { tr } = I18n;
 
@@ -135,6 +136,23 @@ const AFTER_DONE_NOTE = [
   '- 修正や追加の作業が必要そうなときは、どう直すかの案を書いたうえで、「修正タスクを作る」ボタンから別のタスクにするようユーザーに伝えてください',
 ].join('\n');
 // 完了したタスクで最初に話すときの指示。worktree はもうないので新しい会話で始め、元のタスクの中身を渡す
+// CI の失敗を続けて自動で直す回数の上限（通ったら数え直す）
+const CI_FIX_MAX_ATTEMPTS = 3;
+
+function buildCiFixPrompt(c, ch) {
+  return [
+    `この PR（${c.prUrl}）の CI が失敗しました（コミット ${String(ch.sha).slice(0, 7)}）。`,
+    '',
+    '失敗したチェック:',
+    ...ch.failed.map((x) => `- ${x.name}${x.url ? `: ${x.url}` : ''}`),
+    '',
+    '原因をログで確かめてから直してください。GitHub Actions のチェックは `gh run view <run id> --log-failed` でログを読めます（run id は URL の /runs/ のあとの数字です）。',
+    'テストを消す・スキップする、CI の設定を緩めるといった方法で通すのはやめてください。コードで直せない原因（CI の環境や秘密の値など）なら、変更せずにその理由を書いてください。',
+    '直したらテストを実行して確かめてください。コミットと push はアプリが行うので、しなくてかまいません。',
+    '最後に、原因とどう直したかを短くまとめてください。',
+  ].join('\n');
+}
+
 function buildAfterDonePrompt(c, message) {
   const lines = [AFTER_DONE_NOTE, '', `## 完了したタスク「${c.title}」`, '', '### タスクの指示', truncate(c.prompt, 3000), ''];
   const picked = talkExcerpt(c);
@@ -700,6 +718,19 @@ function userLogExtra(skill, atts, parsed) {
   return Object.keys(extra).length ? extra : undefined;
 }
 
+const TEARDOWN_TIMEOUT_MS = 5 * 60 * 1000; // 片付けが止まらなくても、マージや破棄を待たせ続けない
+
+function scriptPassed(run) {
+  return run.code === 0 && !run.stopped && !run.timedOut;
+}
+
+function scriptFailReason(run) {
+  if (run.stopped) return tr('止めました');
+  if (run.timedOut) return tr('時間切れ');
+  if (run.error) return run.error;
+  return run.code === null ? tr('シグナル {signal}', { signal: run.signal || '?' }) : tr('終了コード {code}', { code: run.code });
+}
+
 function killTree(child) {
   if (!child || child.exitCode !== null) return;
   if (child.viaWsl) {
@@ -727,6 +758,7 @@ class AgentManager extends EventEmitter {
     this.store = store;
     this.opts = opts;
     this.procs = new Map(); // cardId -> child process
+    this.scriptRuns = new Map(); // cardId -> 最後に動かしたスクリプト（セットアップ・片付け・実行）
     this.pending = new Map(); // permission request id -> { cardId, toolName, input, resolve }
     this.rewinding = new Set(); // 戻しているカード。そのあいだ send / merge / PR / 移動 / 破棄は受け付けない
     this.permission = null; // { port, token }
@@ -833,13 +865,15 @@ class AgentManager extends EventEmitter {
     this.shuttingDown = true;
     this.unwatchPullRequests();
     const runs = [...(this.runs || new Map()).values()];
+    // スクリプトは別のプロセスグループで動くので、止めないとアプリの終了後も残る
+    const scripts = [...this.scriptRuns.values()].filter((r) => r.running).map((r) => r.handle.stop());
     for (const [id, child] of this.procs) {
       const c = this.store.card(id);
       if (c) this.log(c, 'system',tr('アプリを終了するため中断しました。次に起動したときに「再開」できます'));
       this.denyAllPending(id, tr('アプリを終了します'));
       killTree(child);
     }
-    const done = Promise.all(runs.map((r) => r.done));
+    const done = Promise.all([...runs.map((r) => r.done), ...scripts]);
     await Promise.race([done, new Promise((r) => setTimeout(r, timeoutMs).unref())]);
     this.store.flush();
   }
@@ -1243,7 +1277,7 @@ class AgentManager extends EventEmitter {
       card.readOnly = true;
     }
     if (issue) card.issue = { number: issue.number, title: issue.title, url: issue.url };
-    card.agent = agent || 'claude';
+    card.agent = agent || providers.defaultAgentOf(s);
     if (model && !relay) card.model = cleanModel(model);
     if (persona && !relay) card.persona = persona;
     if (relay) card.relay = relay;
@@ -1788,7 +1822,8 @@ class AgentManager extends EventEmitter {
         // 親はまだ開始前: 親のブランチだけ作って、親のエージェントは動かさない（順番は決めずに、手で進める）
         this.log(p, 'user', p.prompt, userLogExtra(p.skill, p.attachments, p.attachmentsParsed));
         delete p.attachmentsParsed;
-        await this.prepareWorktree(p);
+        if (p.worktreePath && fs.existsSync(p.worktreePath)) await this.ensureSetup(p); // 前回セットアップが失敗した
+        else await this.prepareWorktree(p);
         if (!this.store.card(id)) return;
         p.status = 'review';
         p.startedAt = Date.now();
@@ -2059,9 +2094,7 @@ class AgentManager extends EventEmitter {
       try {
         const issue = await this.fetchIssue(s.repoPath, n);
         if (issue.state && issue.state !== 'open') errors.push(tr('#{n} はクローズ済みですが、タスクを作りました', { n }));
-        const made = this.createTask({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue, session, skill, agent, model });
-        cards.push(...made);
-        if (made.length === 1 && this.canHaveSubtasks(made[0])) await this.addSubIssuesAsSubtasks(made[0], issue);
+        cards.push(...(await this.cardsFromIssue(issue, extra, { session, skill, agent, model })));
       } catch (err) {
         errors.push(`#${n}: ${err.message}`);
       }
@@ -2070,9 +2103,25 @@ class AgentManager extends EventEmitter {
     return { cards, errors };
   }
 
+  // 読み込んだ Issue から、カードを作る（サブIssue があればサブタスクにする）。opts は createTask に渡す
+  async cardsFromIssue(issue, extra, opts) {
+    const made = this.createTask({ ...opts, title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue });
+    if (made.length === 1 && this.canHaveSubtasks(made[0])) await this.addSubIssuesAsSubtasks(made[0], issue);
+    return made;
+  }
+
+  // スケジュールの Issue の監視から呼ぶ。開いていないリポジトリにも作れる
+  async createFromWatchedIssue(repoPath, number, extra, opts) {
+    return this.cardsFromIssue(await this.fetchIssue(repoPath, number), extra, { ...opts, repoPath });
+  }
+
   // テストで差し替えられるようにメソッドにしておく
   fetchIssue(repoPath, n, opts) {
     return github.fetchIssue(repoPath, n, opts);
+  }
+
+  listIssues(repoPath, filter) {
+    return github.listIssues(repoPath, filter);
   }
 
   fetchSubIssues(repoPath, n) {
@@ -2413,7 +2462,15 @@ class AgentManager extends EventEmitter {
       return;
     }
     const child = this.procs.get(id);
-    if (!child) throw new Error(tr('実行中ではありません'));
+    if (!child) {
+      // エージェントの開始前にセットアップスクリプトが動いているところ
+      const run = this.scriptRuns.get(id);
+      if (run?.running && run.auto) {
+        run.handle.stop();
+        return;
+      }
+      throw new Error(tr('実行中ではありません'));
+    }
     c.stopRequested = true;
     this.denyAllPending(id, tr('停止されました'));
     killTree(child);
@@ -2474,12 +2531,135 @@ class AgentManager extends EventEmitter {
       c.prMergedAt = null;
       c.prCheckError = null;
       c.prMergeable = null;
+      c.prChecks = null;
+      c.ciFix = null;
       c.finalDiff = null;
       delete c.reopenBase;
       delete c.reopenFrom;
     }
     this.log(c, 'system',tr('worktree を作成しました: {wt}（ブランチ {branch} / ベース {base}）', { wt, branch, base }));
+    await this.ensureDevPort(c);
+    c.setupPending = !!this.scriptOf(c, 'setup');
     this.changed(c);
+    await this.ensureSetup(c);
+  }
+
+  // ---------- worktree のスクリプト（セットアップ・片付け・実行） ----------
+
+  scriptOf(c, kind) {
+    return cleanScript(this.store.repoSettings(c.repoPath)[SCRIPT_SETTINGS[kind]]);
+  }
+
+  scriptEnv(c) {
+    const p = (dir) => (wsl.isWslPath(dir) ? wsl.toLinux(dir) : dir);
+    return {
+      WORKTREE_KANBAN_ROOT: p(c.repoPath),
+      WORKTREE_KANBAN_WORKTREE: p(c.worktreePath),
+      WORKTREE_KANBAN_BRANCH: c.branch || '',
+      WORKTREE_KANBAN_BASE_BRANCH: c.baseBranch || '',
+      WORKTREE_KANBAN_TASK_ID: c.id,
+      ...this.portEnv(c),
+    };
+  }
+
+  // ---------- タスクごとのポート（worktree はファイルしか分けないので、開発サーバーがぶつからないように分ける） ----------
+
+  portEnv(c) {
+    if (!c.devPort) return {};
+    return { WORKTREE_KANBAN_PORT: String(c.devPort), PORT: String(c.devPort) };
+  }
+
+  // 空いているポートの組をタスクに割り当てる。一度決めたら、worktree を消すまで変えない
+  async ensureDevPort(c) {
+    const taken = (port) => this.store.cards.some((o) => o.devPort === port);
+    for (let port = PORT_START; port + PORT_COUNT <= PORT_END && !c.devPort; port += PORT_COUNT) {
+      if (taken(port) || !(await portsFree(port))) continue;
+      // 確かめているあいだに、同じ番号を別のタスクが取っていることがある
+      if (!c.devPort && !taken(port)) c.devPort = port;
+    }
+    if (!c.devPort) this.log(c, 'error', tr('開発サーバーのポートに空きがないので、PORT を渡さずに動かします'));
+  }
+
+  // 1つのタスクで同時に動かすスクリプトは1つだけ（出力の表示も1つ）
+  execScript(c, kind, script, { auto = false, timeoutMs = 0 } = {}) {
+    const run = { kind, auto, running: true, output: '', startedAt: Date.now(), endedAt: null, code: null, signal: null, stopped: false, timedOut: false, error: null };
+    run.handle = startScript({ cwd: c.worktreePath, script, env: this.scriptEnv(c), timeoutMs, onOutput: (text) => (run.output = appendOutput(run.output, text)) });
+    this.scriptRuns.set(c.id, run);
+    return run.handle.done.then((r) => {
+      Object.assign(run, r, { running: false, endedAt: Date.now() });
+      return run;
+    });
+  }
+
+  async stopRunningScript(id) {
+    const run = this.scriptRuns.get(id);
+    if (run?.running) await run.handle.stop();
+  }
+
+  // セットアップが済んでいなければ動かす。失敗したら throw して、エージェントを始めない（タスクはエラーになる）
+  async ensureSetup(c) {
+    if (!c.setupPending) return;
+    const script = this.scriptOf(c, 'setup');
+    if (!script) {
+      delete c.setupPending;
+      return;
+    }
+    await this.stopRunningScript(c.id);
+    await this.ensureDevPort(c);
+    this.log(c, 'system', tr('セットアップスクリプトを実行します'));
+    this.changed(c);
+    const run = await this.execScript(c, 'setup', script, { auto: true });
+    if (!scriptPassed(run)) throw new Error(tr('セットアップスクリプトが失敗したので、エージェントは開始していません（{reason}）。\n{output}', { reason: scriptFailReason(run), output: run.output.slice(-2000).trim() }));
+    delete c.setupPending;
+    this.log(c, 'system', tr('セットアップスクリプトが終わりました'));
+    this.changed(c);
+  }
+
+  // 片付けスクリプトを動かしてから worktree を消す。片付けが失敗しても worktree は消す
+  async removeWorktreeOf(c, top) {
+    await this.stopRunningScript(c.id);
+    const script = this.scriptOf(c, 'teardown');
+    if (script && fs.existsSync(c.worktreePath)) {
+      this.log(c, 'system', tr('片付けスクリプトを実行します'));
+      const run = await this.execScript(c, 'teardown', script, { auto: true, timeoutMs: this.opts.teardownTimeoutMs || TEARDOWN_TIMEOUT_MS });
+      if (scriptPassed(run)) this.log(c, 'system', tr('片付けスクリプトが終わりました'));
+      else this.log(c, 'error', tr('片付けスクリプトが失敗しましたが、worktree は消します（{reason}）。\n{output}', { reason: scriptFailReason(run), output: run.output.slice(-2000).trim() }));
+    }
+    await git.removeWorktree(top, c.worktreePath);
+    this.scriptRuns.delete(c.id);
+    delete c.devPort; // 次のタスクが使えるように返す
+  }
+
+  scriptState(id) {
+    const c = this.must(id);
+    const scripts = Object.fromEntries(SCRIPT_KINDS.map((k) => [k, !!this.scriptOf(c, k)]));
+    const r = this.scriptRuns.get(id);
+    const run = r ? { kind: r.kind, auto: r.auto, running: r.running, output: r.output, startedAt: r.startedAt, endedAt: r.endedAt, code: r.code, stopped: r.stopped, timedOut: r.timedOut, error: r.error } : null;
+    return { scripts, run, port: c.devPort || null, portCount: PORT_COUNT };
+  }
+
+  // 画面のボタンから動かす。終わるのは待たない（出力と結果は scriptState で見る）
+  async startScriptNow(id, kind) {
+    const c = this.must(id);
+    if (!SCRIPT_KINDS.includes(kind)) throw new Error(tr('スクリプトの種類が正しくありません'));
+    if (isChat(c) || isNoGit(c) || !c.worktreePath || !fs.existsSync(c.worktreePath)) throw new Error(tr('worktree がありません'));
+    const script = this.scriptOf(c, kind);
+    if (!script) throw new Error(tr('スクリプトが設定されていません'));
+    await this.ensureDevPort(c); // この機能より前に作った worktree には、まだ割り当てがない
+    if (this.merging?.has(id)) throw new Error(tr('処理中です'));
+    if (this.scriptRuns.get(id)?.running) throw new Error(tr('ほかのスクリプトが動いています'));
+    this.execScript(c, kind, script).then((run) => {
+      if (kind !== 'setup' || !scriptPassed(run) || !this.store.card(id)) return;
+      // 手で直してセットアップが通ったら、再開したときにもう一度は動かさない
+      delete c.setupPending;
+      this.changed(c);
+    });
+    return this.scriptState(id);
+  }
+
+  async stopScriptNow(id) {
+    await this.stopRunningScript(this.must(id).id);
+    return this.scriptState(id);
   }
 
   /**
@@ -2821,6 +3001,10 @@ class AgentManager extends EventEmitter {
     if (inFolder) {
       if (!c.repoPath || !fs.existsSync(c.repoPath)) throw new Error(isNoGit(c) ? tr('フォルダが見つかりません: {path}', { path: c.repoPath }) : tr('リポジトリのフォルダが見つかりません: {path}', { path: c.repoPath }));
     } else if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
+    else {
+      await this.ensureDevPort(c); // この機能より前に作った worktree には、まだ割り当てがない
+      await this.ensureSetup(c); // 前回セットアップが失敗したタスクをやり直すとき
+    }
     const cwd = inFolder ? c.repoPath : c.worktreePath;
     // 起動直前の状態を記録する。pendingPrompt を消す前、会話の引き継ぎを変える前
     await this.recordCheckpoint(c, recorded);
@@ -2869,7 +3053,7 @@ class AgentManager extends EventEmitter {
     for (const m of c.btw || []) if (m.state === 'queued') m.state = 'delivered';
     if (agent !== 'claude') this.log(c, 'system', c.sessionId ? tr('{label} で動かします（会話 {id} の続き）', { label, id: c.sessionId.slice(0, 8) }) : tr('{label} で動かします', { label }));
     // 承認待ちの MCP ツール呼び出しがタイムアウトしないようにする
-    const child = await this.spawnAgent(agent, cwd, args, { MCP_TOOL_TIMEOUT: '86400000' });
+    const child = await this.spawnAgent(agent, cwd, args, { MCP_TOOL_TIMEOUT: '86400000', ...this.portEnv(c) });
     const cmd = child.agentCmd;
     this.procs.set(c.id, child);
     // sent: stdin に書いたメッセージ（acked = claude が受け取ったことをリプレイで確認済み）
@@ -3021,6 +3205,7 @@ class AgentManager extends EventEmitter {
       if (c.status === 'failed') this.notify(c, 'failed', tr('失敗: {title}', { title: c.title }), c.error);
       // 停止・失敗したときは、予約した btw を勝手に送らない（停止したのにまた動き出さないように）
       const keepFollow = !c.stopRequested && c.status !== 'failed';
+      if (!keepFollow && c.ciFix?.running) c.ciFix.running = false;
       // 会話の返事（またはエラー）が来たら、開いて読むまで「未読」にする（自分で止めたときは除く）
       if (isChat(c) && !c.stopRequested) c.unread = true;
       c.stopRequested = false;
@@ -3028,6 +3213,10 @@ class AgentManager extends EventEmitter {
       this.changed(c);
       // Claude 以外で予約した btw は、終わったあとに追加指示として送る
       if (keepFollow ? this.flushFollowBtw(c) : this.dropFollowBtw(c)) return;
+      if (c.ciFix?.running) {
+        c.ciFix.running = false;
+        if (!c.awaitingReply) this.pushCiFix(c);
+      }
       if (relayNext) return relayTo.parallel ? this.forkParallel(c, relayTo.parallel) : this.advanceRelay(c, relayTo.to);
       if (c.relay && c.relay.waiting) this.tryJoin(c.id);
       const relayParent = this.relayParentOf(c);
@@ -3607,7 +3796,7 @@ class AgentManager extends EventEmitter {
         this.changed(c);
         return { merged: true };
       }
-      await git.removeWorktree(top, c.worktreePath);
+      await this.removeWorktreeOf(c, top);
       await git.deleteBranch(top, c.branch);
       c.finalDiff = truncate(finalDiff, 300000);
       c.worktreePath = null;
@@ -3686,15 +3875,16 @@ class AgentManager extends EventEmitter {
       c.prState = 'OPEN';
       c.prMergedAt = null;
       c.prCheckError = null;
-      // push したので、コンフリクトしているかは GitHub でもう一度確かめる
+      // push したので、コンフリクトしているかと CI の結果は GitHub でもう一度確かめる
       c.prMergeable = null;
+      c.prChecks = null;
       if (c.conflictResolved && c.conflictResolved.pr) c.conflictResolved = null;
       if (c.conflict && c.conflict.pr) c.conflict = null;
 
       const finalDiff = await git.diff(c.worktreePath, c.baseCommit);
       if (opts.keep === false) {
         // ブランチは origin に残っているので、ローカルの worktree とブランチは片付ける
-        await git.removeWorktree(top, c.worktreePath);
+        await this.removeWorktreeOf(c, top);
         await git.deleteBranch(top, c.branch);
         c.finalDiff = truncate(finalDiff, 300000);
         c.worktreePath = null;
@@ -3774,7 +3964,9 @@ class AgentManager extends EventEmitter {
         changed = true;
       }
       if (this.updatePrConflict(c, pr)) changed = true;
+      if (this.updatePrChecks(c, pr)) changed = true;
       if (changed) this.changed(c);
+      await this.handleCiFailure(c);
       return false;
     }
 
@@ -3801,7 +3993,15 @@ class AgentManager extends EventEmitter {
       }
       const top = c.repoPath;
       const finalDiff = await git.diff(c.worktreePath, c.baseCommit).catch(() => '');
-      await git.removeWorktree(top, c.worktreePath);
+      // 片付けスクリプトのあいだに、次の見回りが同じタスクを片付けないようにする
+      this.merging = this.merging || new Set();
+      this.merging.add(c.id);
+      try {
+        await this.removeWorktreeOf(c, top);
+      } finally {
+        this.merging.delete(c.id);
+      }
+      if (!this.store.card(c.id)) return false;
       await git.deleteBranch(top, c.branch);
       c.finalDiff = truncate(finalDiff, 300000);
       c.worktreePath = null;
@@ -3848,6 +4048,104 @@ class AgentManager extends EventEmitter {
       changed = true;
     }
     return changed;
+  }
+
+  /**
+   * PR の CI の結果をカードに載せる。通ったら、自動修正の回数を数え直す
+   * @returns {boolean} カードを変えたら true
+   */
+  updatePrChecks(c, pr) {
+    const now = pr.state === 'OPEN' ? pr.checks || null : null;
+    if (JSON.stringify(c.prChecks || null) === JSON.stringify(now)) return false;
+    c.prChecks = now;
+    if (now && now.state === 'SUCCESS' && c.ciFix) {
+      if (c.ciFix.attempts > 0) {
+        this.log(c, 'system', tr('CI が通りました: {url}', { url: c.prUrl }));
+        this.notify(c, 'review', tr('CI が通りました: {title}', { title: c.title }), c.prUrl);
+      }
+      c.ciFix = null;
+    }
+    return true;
+  }
+
+  // CI の失敗を、コミットごとに1回だけ扱う。チェックがすべて終わってから、自動で直すか知らせるかを決める
+  async handleCiFailure(c) {
+    const ch = c.prChecks;
+    if (!ch || ch.state !== 'FAILURE' || ch.pending > 0 || !ch.sha) return;
+    if (c.ciFix && c.ciFix.sha === ch.sha) return;
+    const blocked = await this.ciAutoFixBlock(c, ch);
+    if (!this.store.card(c.id) || c.prChecks !== ch || (c.ciFix && c.ciFix.sha === ch.sha)) return;
+    const names = ch.failed.map((x) => x.name).join(', ');
+    c.ciFix = { sha: ch.sha, attempts: c.ciFix?.attempts || 0, running: false };
+    if (!blocked) {
+      this.log(c, 'error', tr('CI が失敗したので、自動で直します（{n}/{max} 回目）: {names}', { n: c.ciFix.attempts + 1, max: CI_FIX_MAX_ATTEMPTS, names }));
+      this.startCiFix(c);
+      return;
+    }
+    this.log(c, 'error', blocked === 'limit'
+      ? tr('CI の自動修正を {max} 回試しましたが、まだ失敗しています（{names}）: {url}', { max: CI_FIX_MAX_ATTEMPTS, names, url: c.prUrl })
+      : tr('CI が失敗しました（{names}）: {url}', { names, url: c.prUrl }));
+    this.notify(c, 'failed', tr('CI が失敗しました: {title}', { title: c.title }), names);
+    this.changed(c);
+  }
+
+  // 自動で直してはいけないときは、その理由（'limit' / 'off' / 'busy'）を返す
+  async ciAutoFixBlock(c, ch) {
+    if (this.store.repoSettings(c.repoPath).ciAutoFix === false) return 'off';
+    if ((c.ciFix?.attempts || 0) >= CI_FIX_MAX_ATTEMPTS) return 'limit';
+    if (!c.worktreePath || c.status !== 'review' || c.awaitingReply || c.conflict || c.prMergeable === 'CONFLICTING') return 'busy';
+    if (this.merging?.has(c.id) || c.relay?.waiting || c.subtasks?.phase === 'run') return 'busy';
+    try {
+      // 手元に PR に入っていない作業があるときは、勝手に混ぜて push しない
+      if ((await git.revParse(c.worktreePath, 'HEAD')) !== ch.sha || (await git.isDirty(c.worktreePath))) return 'busy';
+    } catch {
+      return 'busy';
+    }
+    return null;
+  }
+
+  startCiFix(c) {
+    const ch = c.prChecks;
+    c.ciFix = { sha: ch.sha, attempts: (c.ciFix?.attempts || 0) + 1, running: true };
+    const prompt = buildCiFixPrompt(c, ch);
+    this.log(c, 'user', prompt);
+    this.enqueue(c, prompt);
+  }
+
+  // 「直してもらう」ボタン。自動修正を切っているとき・上限に達したときも、ここからは頼める
+  fixCi(id) {
+    const c = this.must(id);
+    if (!c.prUrl || c.prState !== 'OPEN' || c.prChecks?.state !== 'FAILURE') throw new Error(tr('CI は失敗していません'));
+    if (!c.worktreePath) throw new Error(tr('worktree がないので、アプリの中では直せません。GitHub 上で直してください'));
+    if (!['review', 'failed'].includes(c.status)) throw new Error(tr('実行中は直し始められません'));
+    if (c.conflict) throw new Error(tr('コンフリクトを解消してから直してください'));
+    if (this.merging?.has(id)) throw new Error(tr('処理中です'));
+    this.assertNotInRelayJoin(c);
+    this.startCiFix(c);
+  }
+
+  // CI を直す実行が終わったら、PR のブランチに push して、もう一度 CI を動かす
+  async pushCiFix(c) {
+    if (!c.worktreePath || !c.prUrl || this.merging?.has(c.id)) return;
+    this.merging = this.merging || new Set();
+    this.merging.add(c.id);
+    try {
+      if ((await git.revParse(c.worktreePath, 'HEAD')) === c.ciFix?.sha) {
+        this.log(c, 'error', tr('CI を直す変更はありませんでした。内容を確かめてください: {url}', { url: c.prUrl }));
+        this.notify(c, 'failed', tr('CI を自動で直せませんでした: {title}', { title: c.title }), c.lastText || c.prUrl);
+        return;
+      }
+      await git.push(c.worktreePath, 'origin', c.branch, true);
+      this.log(c, 'system', tr('CI の修正を push しました。結果を確かめます: {url}', { url: c.prUrl }));
+      c.prChecks = null;
+      c.prMergeable = null;
+      this.changed(c);
+    } catch (err) {
+      this.log(c, 'error', tr('CI の修正を push できませんでした: {message}', { message: err.message }));
+      this.notify(c, 'failed', tr('CI の修正を push できませんでした: {title}', { title: c.title }), err.message);
+    } finally {
+      this.merging.delete(c.id);
+    }
   }
 
   raisePrConflict(c, base) {
@@ -4102,7 +4400,9 @@ class AgentManager extends EventEmitter {
       killTree(child);
       await new Promise((r) => (child.exitCode !== null ? r() : child.once('close', r)));
     }
-    if (c.worktreePath) await git.removeWorktree(c.repoPath, c.worktreePath);
+    if (c.worktreePath) await this.removeWorktreeOf(c, c.repoPath);
+    else await this.stopRunningScript(id);
+    this.scriptRuns.delete(id);
     if (c.branch && c.status !== 'done' && !c.afterDone) await git.deleteBranch(c.repoPath, c.branch);
     fs.rmSync(path.join(this.opts.mcpDir, `${id}.json`), { force: true });
     attachments.removeCardAttachments(this.attachRoot, id);

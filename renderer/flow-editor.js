@@ -78,7 +78,7 @@
     let closed = false;
     const agentName = (a) => (opts.agents.find((x) => x[0] === a) || [a, a])[1];
     // 新しい工程と、文章からフローを作るときに使うエージェント
-    const baseAgent = opts.enabled.includes(opts.defaultAgent) ? opts.defaultAgent : opts.enabled[0] || 'claude';
+    const baseAgent = opts.enabled.includes(opts.defaultAgent) ? opts.defaultAgent : opts.enabled[0] || opts.defaultAgent;
     const customs = Array.isArray(opts.customAgents) ? opts.customAgents : [];
     const customOf = (id) => customs.find((x) => x.id === id) || null;
     // 工程を動かすエージェント（カスタムエージェントなら、その元の CLI）

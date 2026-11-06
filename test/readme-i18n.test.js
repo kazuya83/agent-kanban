@@ -11,7 +11,7 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 
 const README_FILES = ['README.md', 'README.ja.md', 'README.es.md', 'README.fr.md', 'README.zh-CN.md'];
 const LANG_LINKS = ['README.md', 'README.ja.md', 'README.es.md', 'README.fr.md', 'README.zh-CN.md'];
-const NOTE = ' (Japanese)';
+const NOTE = ' (English)';
 
 // コードブロックの中の見出しやリンクは、本文の構成に数えない
 function stripFences(md) {
@@ -114,8 +114,8 @@ function sameShape(a, b) {
   const hb = headingLevels(b);
   if (ha.length === 0 || hb.length === 0) return false;
   if (ha.join(',') !== hb.join(',')) return false;
-  // 画像は言語ごとのフォルダにあるので、言語の部分は比べない
-  const target = (x) => x.target.replace(/^docs\/images\/[a-z]+\//, 'docs/images/');
+  // 画像は言語ごとのフォルダ、日本語の文書は .ja.md にあるので、言語の部分は比べない
+  const target = (x) => x.target.replace(/^docs\/images\/[a-z]+\//, 'docs/images/').replace(/^(docs\/[^/]+)\.ja\.md$/, '$1.md').replace(/\.ja\.html$/, '.html');
   const la = links(a).map(target);
   const lb = links(b).map(target);
   if (la.length === 0 || la.length !== lb.length) return false;
@@ -127,7 +127,7 @@ function hasLangLinks(md) {
   return LANG_LINKS.every((t) => targets.has(t));
 }
 
-// docs/*.md へのリンクの直後に (Japanese) があるか。画像や # 付きの URL は対象外
+// docs/*.md へのリンクの直後に (English) があるか。画像や # 付きの URL は対象外
 function docNoteProblems(md, wantNote) {
   const found = links(md).filter((x) => !x.image && /^docs\/[^)\s]+\.md$/.test(x.target));
   return found.filter((x) => x.body.slice(x.at + x.raw.length).startsWith(NOTE) !== wantNote).map((x) => x.target);
@@ -148,7 +148,7 @@ const sample = [
   '',
   '# Title',
   '',
-  'See [usage](docs/usage.md) (Japanese).',
+  'See [usage](docs/usage.md) (English).',
   '',
   '![board](docs/board.png)',
   '',
@@ -196,7 +196,7 @@ test('言語リンクが揃っているかを判定する', () => {
 test('docs へのリンク注記は、付けたいときと付けないときを区別する', () => {
   assert.deepEqual(docNoteProblems(sample, true), []);
   assert.deepEqual(docNoteProblems(sample, false), ['docs/usage.md']);
-  const bare = sample.replace(' (Japanese)', '');
+  const bare = sample.replace(' (English)', '');
   assert.deepEqual(docNoteProblems(bare, true), ['docs/usage.md']);
   assert.deepEqual(docNoteProblems(bare, false), []);
   // 画像と、.md で終わらない URL は注記の対象にしない
@@ -301,7 +301,7 @@ test('5つの README は見出しとリンク先が一致し、言語リンク�
   for (let i = 1; i < texts.length; i++) {
     assert.equal(sameShape(texts[0], texts[i]), true, README_FILES[i]);
   }
-  assert.deepEqual(headingLevels(texts[0]), [1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2]);
+  assert.deepEqual(headingLevels(texts[0]), [1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2]);
 });
 
 test('冒頭の太字・承認・自動更新は、5言語で同じ事実を言う', () => {
@@ -313,20 +313,44 @@ test('冒頭の太字・承認・自動更新は、5言語で同じ事実を言�
   assert.deepEqual(meaningProblems(read('README.md'), undefined), ['intro', 'approval', 'update']);
 });
 
-test('英語・西・仏の README は本文が翻訳され、docs には (Japanese) が付く', () => {
+test('英語・西・仏の README は本文が翻訳され、docs の言語の案内が合っている', () => {
   for (const file of ['README.md', 'README.es.md', 'README.fr.md']) {
     const body = read(file).replace(/^.*\[English\]\(README\.md\).*$/m, '');
     assert.equal(hasJapanese(body), false, file);
-    assert.deepEqual(docNoteProblems(read(file), true), [], file);
+    assert.doesNotMatch(body, /\(Japanese\)/, file);
   }
+  assert.deepEqual(docNoteProblems(read('README.md'), false), []);
+  for (const file of ['README.es.md', 'README.fr.md']) assert.deepEqual(docNoteProblems(read(file), true), [], file);
   const ja = read('README.ja.md');
   assert.equal(hasJapanese(ja), true);
   assert.deepEqual(docNoteProblems(ja, false), []);
   assert.ok(docNoteProblems(ja, true).length > 0);
+  const jaDocs = links(ja).filter((x) => !x.image && /^docs\/[^)\s]+\.md$/.test(x.target));
+  assert.ok(jaDocs.length > 0);
+  for (const x of jaDocs) assert.match(x.target, /\.ja\.md$/);
   const zh = read('README.zh-CN.md').replace(/^.*\[English\]\(README\.md\).*$/m, '');
   assert.equal(hasJapanese(zh), true);
   assert.deepEqual(docNoteProblems(read('README.zh-CN.md'), true), []);
 });
+
+for (const name of ['agents', 'development', 'install', 'remote', 'settings', 'usage']) {
+  test(`docs/${name}: 英語と日本語が対で、見出しの段が同じで、たがいにリンクしている`, () => {
+    const en = read(`docs/${name}.md`);
+    const ja = read(`docs/${name}.ja.md`);
+    const langs = `[English](${name}.md) · [日本語](${name}.ja.md)`;
+    assert.equal(en.split('\n')[0], langs);
+    assert.equal(ja.split('\n')[0], langs);
+    assert.ok(headingLevels(en).length > 0);
+    assert.deepEqual(headingLevels(en), headingLevels(ja));
+    // 言語リンクと、日本語の例を見せるコードの部分を除くと、英語版に日本語は残らない
+    assert.equal(hasJapanese(en.split('\n').slice(1).join('\n').replace(/`[^`\n]*`/g, '')), false);
+    assert.equal(hasJapanese(ja.split('\n').slice(1).join('\n')), true);
+    assert.ok(en.endsWith('[← Back to README](../README.md)\n'));
+    assert.ok(ja.endsWith('[← README に戻る](../README.ja.md)\n'));
+    // 日本語版から文書へのリンクは、日本語版へ向ける
+    assert.doesNotMatch(ja.split('\n').slice(1).join('\n'), /\]\((?:agents|development|install|remote|settings|usage)\.md[#)]/);
+  });
+}
 
 test('画像の alt は空でなく、言語ごとに別の文になっている', () => {
   const alts = README_FILES.map((file) => links(read(file)).filter((x) => x.image).map((x) => x.text));

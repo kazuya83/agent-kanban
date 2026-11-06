@@ -4,14 +4,14 @@
 
 # Worktree Kanban
 
-<strong>AI コーディングエージェントを並列に動かし、別の PC から操作する。</strong><br />
-Mac と Windows を相互に遠隔操作できます。
+<strong>複数の AI エージェントをフローチャートで組み、要所は人が決めるボード。</strong><br />
+Codex で実装して Claude でレビューし、直すところがあれば差し戻す。マージするかは人が決めます。
 
 [紹介ページ](https://kazuya83.github.io/worktree-kanban/) · [ダウンロード](https://github.com/kazuya83/worktree-kanban/releases/latest)
 
 [![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
-[![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
+[![Pipeline](https://img.shields.io/badge/pipeline-Codex%20%E2%86%92%20Claude%20%E2%86%92%20you-0891B2)](docs/images/en/feature-pipeline.gif)
 [![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
 
@@ -21,7 +21,7 @@ Mac と Windows を相互に遠隔操作できます。
 
 <div align="center">
 
-![デモ: タスクを作り、カードが並列に動き、承認し、差分を確かめてマージし、ボードを遠隔操作する](docs/images/ja/demo.gif)
+![デモ: 文章でフローを組み、Codex の実装を Claude がレビューして差し戻し、人がコマンドを承認し、差分を確かめてマージする](docs/images/ja/demo.gif)
 
 </div>
 
@@ -31,11 +31,12 @@ AI コーディングエージェントの CLI（Claude Code / Codex CLI / Gemin
 
 ## Worktree Kanban を選ぶ理由
 
-- **Mac と Windows を相互に遠隔操作** — エージェントを動かす PC のボードを、別の PC からそのまま操作できます。承認、質問への回答、追加の指示、マージもできます。
+- **エージェントをフローチャートで組む** — 文章で書くか手で描いたフローのとおりに、分岐・ループ・並列をたどりながら、工程ごとにエージェントが作業を引き継ぎます。
+- **最後は人が決める** — マージや PR の前に差分を確かめられます。Claude Code なら、操作の承認もカードで行えます。
 - **1 タスクに 1 つの worktree** — タスクごとに別々の git worktree とブランチで動くので、タスク同士や手元の作業ツリーとぶつかりません。
 - **複数のリポジトリを同時に** — 最大 3 つのリポジトリをタブで開けます。タブを切り替えても、ほかのタスクは止まりません。
 - **いつもの CLI をそのまま** — Claude Code、Codex CLI、Gemini CLI、Cursor CLI を、今のログインや設定のまま使えます。
-- **最後は人が決める** — マージや PR の前に差分を確かめられます。Claude Code なら、操作の承認もカードで行えます。
+- **Mac と Windows を相互に遠隔操作** — エージェントを動かす PC のボードを、別の PC からそのまま操作できます。承認、質問への回答、追加の指示、マージもできます。
 - **手元で完結** — ボードの状態はこの PC に保存します。外部のサーバーは使いません。
 
 ## しくみ
@@ -58,12 +59,14 @@ flowchart LR
 - **終わったら、マージ（`--no-ff`）か PR の作成（`gh`）で取り込みます**。マージ先のブランチは選べ、マージしたあとに origin へ push することもできます
 - ボードの状態は Electron の userData フォルダの `board.json` に保存します。外部のサーバーは使いません
 
-Codex / Gemini / Cursor では、CLI の制約から、カードでの承認・選択肢の質問・btw・金額の表示が使えません（詳しくは [docs/agents.md](docs/agents.md)）。
+Codex / Gemini / Cursor では、CLI の制約から、カードでの承認・選択肢の質問・btw・金額の表示が使えません（詳しくは [docs/agents.ja.md](docs/agents.ja.md)）。
 
 ## 主な機能
 
 ### 別の PC から操作する（RC）
 エージェントを動かしている PC（ホスト）のボードを、別の PC（クライアント）の Worktree Kanban から操作できます。Mac と Windows のどちらがホストでも、どちらがクライアントでもかまいません。クライアントでは、承認・質問への回答・追加の指示・マージなどを、ホストの画面と同じように使えます。
+
+![別の PC からつなぎ、ホストのボードで承認する](docs/images/ja/feature-remote.gif)
 
 - ホストのアプリは `127.0.0.1` だけで待ち受けます。クライアントのアプリが `ssh -N -L` でトンネルを張ってつなぐので、ホストで必要なのは SSH サーバーだけです。外出先からつなぐときは Tailscale などを使います
 - SSH は鍵で入ります。クライアントの「RC設定」で ed25519 の鍵（`~/.ssh/agent-kanban_ed25519`）を作り、公開鍵をホストの「RC設定」で登録します
@@ -73,23 +76,39 @@ Codex / Gemini / Cursor では、CLI の制約から、カードでの承認・�
 
 ![クライアントから、ホストのボードを操作しているところ（上部に「遠隔操作中 → SSH 100.101.102.103」）](docs/images/ja/rc-client.png)
 
-手順と、つながらないときの直し方は [docs/remote.md](docs/remote.md) にあります。
+手順と、つながらないときの直し方は [docs/remote.ja.md](docs/remote.ja.md) にあります。
 
-このほか、大きなタスクをサブタスクに分けて並列・順番に進める機能（親のブランチから分けて、終わったものから親のブランチにマージします。サブタスクだけ開始することもできます。GitHub のサブIssue にも対応）、カードの状態（列）のドラッグ&ドロップでの変更、実行中のエージェントへのメッセージ（btw）、画像・ファイルの添付、Pipeline と競争（複数のエージェントの組み合わせ）、Windows での WSL のリポジトリにも対応しています。使い方は [docs/usage.md](docs/usage.md) にまとめています。
+このほか、カードの状態（列）のドラッグ&ドロップでの変更、実行中のエージェントへのメッセージ（btw）、画像・ファイルの添付、競争（複数のエージェントに同じタスクを解かせる）、Windows での WSL のリポジトリにも対応しています。使い方は [docs/usage.ja.md](docs/usage.ja.md) にまとめています。
+
+### Pipeline: 文章でフローを組み、それに沿ってタスクを動かす
+「Codex で実装して Claude でレビューし、直すところがあれば実装に戻す」のように文章で書くと、エージェントがフローチャートを組み立てます。タスクを作るときにその Pipeline を選ぶと、分岐やループのとおりに、工程ごとにエージェントが作業を引き継ぎます。フローチャートは手で直すこともできます。
+
+![文章でフローを組み、新しいタスクで選んで、レビューの結果で実装に戻りながら工程が進む](docs/images/ja/feature-pipeline.gif)
+
+くわしくは [docs/agents.ja.md](docs/agents.ja.md) を見てください。
+
+### サブタスク
+大きなタスクは、エージェントがサブタスクに分けることを提案します。親のブランチから分けて並列・順番に進め、終わったものから親のブランチにマージします。
+
+![分ける提案を受け入れ、サブタスクが動いてマージされていく](docs/images/ja/feature-subtasks.gif)
 
 ### 複数のリポジトリを並列に動かす
 リポジトリはタブで開きます（3 つまで）。タブを切り替えても、ほかのリポジトリのタスクは止まらずに動き続けます。開いていないタブには、**動いているタスクの数**（青）と、**承認・質問などであなたの対応を待っているタスクの数**（橙）が出るので、どのリポジトリで手が必要かがタブだけで分かります。同時に動かすタスクの数の上限（設定の「同時に動かす数」）は、すべてのリポジトリで共有します。
+
+![リポジトリのタブを切り替える。ほかのタブのタスクは動き続ける](docs/images/ja/feature-repos.gif)
 
 ![3 つのリポジトリをタブで開いているところ。開いていないタブに、動いているタスクの数と、対応を待っているタスクの数が出ている](docs/images/ja/repo-tabs.png)
 
 タブの「＋」か、開いているタブを押すと、最近開いたリポジトリから選べます。URL からのクローンや、新しいリポジトリの作成もここからできます。
 
-git で管理していないフォルダ（動画づくりなど、コード以外の作業）も開けます。そのときは worktree を作らずにフォルダの中で直接タスクを動かし、終わったら「完了にする」で完了にします（詳しくは [docs/usage.md](docs/usage.md)）。
+git で管理していないフォルダ（動画づくりなど、コード以外の作業）も開けます。そのときは worktree を作らずにフォルダの中で直接タスクを動かし、終わったら「完了にする」で完了にします（詳しくは [docs/usage.ja.md](docs/usage.ja.md)）。
 
 ![リポジトリを選ぶダイアログ（最近開いたリポジトリと、タブで開いているもの）](docs/images/ja/repo-switch.png)
 
 ### 承認
 許可が必要な操作は、実行しようとしているコマンドと入力の全文をカードと詳細パネルで確かめてから、許可・拒否・このタスクでは常に許可、のどれかを選べます。拒否するときは、理由をエージェントに返せます。
+
+![コマンドの全文を確かめて承認する](docs/images/ja/feature-approval.gif)
 
 <details>
 <summary>画面を見る</summary>
@@ -101,6 +120,8 @@ git で管理していないフォルダ（動画づくりなど、コード以�
 ### GitHub Issue からタスクを作る
 「新しいタスク」の「GitHub Issue から作成」タブに番号（`21, 22, 24` など）を入れると、Issue のタイトル・本文・コメントから指示を作り、1 Issue につき 1 枚のカードを作ります。ブランチ名は `agent/issue-21-…` になり、PR の本文には `Closes #21` が入ります。`gh` を使います。
 
+![Issue の番号を入れて、Issue ごとのカードを作る](docs/images/ja/feature-issue.gif)
+
 <details>
 <summary>画面を見る</summary>
 
@@ -111,6 +132,8 @@ git で管理していないフォルダ（動画づくりなど、コード以�
 ### エージェントからの質問
 Claude Code が `AskUserQuestion` で質問すると、カードが「質問」になり、回答フォームが出ます。複数選択と自由入力（その他）にも対応しています。
 
+![エージェントの質問に選択肢で答える](docs/images/ja/feature-question.gif)
+
 <details>
 <summary>画面を見る</summary>
 
@@ -120,6 +143,8 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 
 ### worktree と差分
 「worktree」タブには、ブランチのコミット、未コミットの変更、ベースとの関係、同じリポジトリのほかの worktree が出ます。「差分」タブでは、変わったファイルをフォルダごとのツリーで選んで、ファイルごとに差分を見られます。
+
+![差分を確かめてマージする](docs/images/ja/feature-merge.gif)
 
 <details>
 <summary>画面を見る</summary>
@@ -133,6 +158,8 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 ### 会話
 「会話」では、タスク（worktree）を作らずに、リポジトリについてエージェントに質問できます。返事は Markdown で表示します。作業させたくなったら「タスクにする」で、その会話の続きとしてタスクにできます。
 
+![タスクを作らずに相談し、続きをタスクにする](docs/images/ja/feature-chat.gif)
+
 <details>
 <summary>画面を見る</summary>
 
@@ -142,6 +169,8 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 
 ### 通知
 承認待ち・質問・回答待ち・レビュー待ち・完了は、右上のベルのアイコンに通知が溜まり、デスクトップ通知も出ます。通知を押すと、そのタスクが開きます。
+
+![通知から、対応が必要なカードを開く](docs/images/ja/feature-notifications.gif)
 
 <details>
 <summary>画面を見る</summary>
@@ -153,6 +182,8 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 ### コンフリクトの解消
 マージでコンフリクトが起きると、カードが「コンフリクト」になります。ベースのブランチをタスクのブランチに取り込んだうえで、エージェントに解消させるか、自分でエディタで直すかを選べます。どちらの方法でも、ベースのブランチはマージするまで変わりません。
 
+![コンフリクトをエージェントに解消してもらい、マージする](docs/images/ja/feature-conflict.gif)
+
 <details>
 <summary>画面を見る</summary>
 
@@ -163,6 +194,8 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 ### スキルと過去の会話
 タスクを作るときに、Claude Code のスキルを 1 つ選べます（`/スキル名` として渡します）。過去の Claude Code の会話（セッション）を選んで、その続きから始めることもできます。
 
+![スキルと過去の会話を選んでタスクを作る](docs/images/ja/feature-skills.gif)
+
 <details>
 <summary>画面を見る</summary>
 
@@ -172,7 +205,9 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 
 ### タスクスケジューラ
 
-トップバーのメニューから「タスクスケジューラ」に切り替えると、決めた日時（1回だけ・毎時・毎日・毎週・毎月）にタスクを作って動かすスケジュールを、カードで管理できます。カンバンのタスクからそのままスケジュールに登録でき、スケジュールから今すぐタスクを作ることもできます。アプリを起動しているあいだだけ動きます（詳しくは [docs/usage.md](docs/usage.md)）。
+トップバーのメニューから「タスクスケジューラ」に切り替えると、決めた日時（1回だけ・毎時・毎日・毎週・毎月）にタスクを作って動かすスケジュールを、カードで管理できます。カンバンのタスクからそのままスケジュールに登録でき、スケジュールから今すぐタスクを作ることもできます。アプリを起動しているあいだだけ動きます（詳しくは [docs/usage.ja.md](docs/usage.ja.md)）。
+
+![毎朝の依存関係チェックを登録し、今すぐ実行して、結果をボードで確かめる](docs/images/ja/feature-scheduler.gif)
 
 ## 必要なもの
 
@@ -194,7 +229,7 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/insta
 irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex
 ```
 
-同じコマンドで、最新版へのアップデートもできます。アプリの「設定」→「アプリの更新」の「新しいバージョンに更新」からも更新でき、「新しい版が出たら自動で更新する」にチェックを付けると、タスクが動いていないときに自動で入れ替えて起動し直します。バージョンの指定・アンインストール・ファイルからのインストール・初回起動の警告は [docs/install.md](docs/install.md) を見てください。
+同じコマンドで、最新版へのアップデートもできます。アプリの「設定」→「アプリの更新」の「新しいバージョンに更新」からも更新でき、「新しい版が出たら自動で更新する」にチェックを付けると、タスクが動いていないときに自動で入れ替えて起動し直します。バージョンの指定・アンインストール・ファイルからのインストール・初回起動の警告は [docs/install.ja.md](docs/install.ja.md) を見てください。
 
 ## 使い方
 
@@ -207,12 +242,13 @@ irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 
 
 | ドキュメント | 内容 |
 | --- | --- |
-| [画面と使い方](docs/usage.md) | 承認・質問・仕様の確認・タスクスケジューラ・スキル・会話・btw・マージ / PR・Issue のステータス・通知・コンフリクトなど、機能ごとの使い方 |
-| [エージェントとオーケストレーション](docs/agents.md) | Claude Code / Codex / Gemini / Cursor の違い、Pipeline・競争 |
-| [設定](docs/settings.md) | トップバーのメニューから開く設定の画面と項目 |
-| [遠隔操作](docs/remote.md) | 別の PC から SSH トンネルでボードを操作する手順と、つながらないときの直し方 |
-| [インストール](docs/install.md) | インストール・アップデート・アンインストール、Windows で WSL のリポジトリを使う |
-| [開発者向け](docs/development.md) | ソースから動かす・ビルド・リリース・アプリのしくみ・テスト |
+| [画面と使い方](docs/usage.ja.md) | 承認・質問・仕様の確認・タスクスケジューラ・スキル・会話・btw・マージ / PR・Issue のステータス・通知・コンフリクトなど、機能ごとの使い方 |
+| [エージェントとオーケストレーション](docs/agents.ja.md) | Claude Code / Codex / Gemini / Cursor の違い、Pipeline・競争 |
+| [設定](docs/settings.ja.md) | トップバーのメニューから開く設定の画面と項目 |
+| [遠隔操作](docs/remote.ja.md) | 別の PC から SSH トンネルでボードを操作する手順と、つながらないときの直し方 |
+| [インストール](docs/install.ja.md) | インストール・アップデート・アンインストール、Windows で WSL のリポジトリを使う |
+| [開発者向け](docs/development.ja.md) | ソースから動かす・ビルド・リリース・アプリのしくみ・テスト |
+| [Vibe Kanban から移る方法](https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.ja.html) | Vibe Kanban に起きたこと・引き継げるもの・移行の手順 |
 
 ## ライセンス
 

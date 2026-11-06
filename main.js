@@ -33,6 +33,7 @@ const git = require('./src/git');
 const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
+const { cleanScript } = require('./src/worktree-scripts');
 const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, routeSide, stripRouting, stripLocalSettings, droppedSettingKeys, droppedSettingsMessage, composeTabs, VIEW_CHANNELS, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory, restoreLocalLanguage } = require('./src/remote');
 const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
 const sshKey = require('./src/ssh-key');
@@ -470,6 +471,8 @@ app.whenReady().then(async () => {
   // Store のコンストラクタでは setLanguage しない。新規の既定フローを選んだ言語で作るため、先に決める
   I18n.setLanguage(languageForBoardFile(boardFile));
   store = new Store(boardFile);
+  // 初めて起動したときは、インストールされているエージェントを使う設定にする
+  store.adoptAgents(providers.AGENT_IDS.filter((a) => resolveCommand(providers.agentCommand(store.settings, a))));
   agents = new AgentManager(store, {
     // パッケージ後は asar の外に出した MCP スクリプトを使う
     mcpScript: path.join(__dirname, 'src', 'permission-mcp.js').replace('app.asar', 'app.asar.unpacked'),
@@ -894,12 +897,14 @@ app.whenReady().then(async () => {
     return { branches, current, hasOrigin };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'deleteSessionsOnMerge', 'specCheck', 'subtaskMerge', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'relayFlow', 'relayFlows', 'relayFlowId', 'competeAgents', 'competeCustomAgents', 'customAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'deleteSessionsOnMerge', 'specCheck', 'ciAutoFix', 'subtaskMerge', 'branchNamingRule', 'setupScript', 'teardownScript', 'runScript', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'relayFlow', 'relayFlows', 'relayFlowId', 'competeAgents', 'competeCustomAgents', 'customAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
     if (patch && 'branchNamingRule' in patch) patch = { ...patch, branchNamingRule: String(patch.branchNamingRule || '').trim() };
+    for (const k of ['setupScript', 'teardownScript', 'runScript']) if (patch && k in patch) patch = { ...patch, [k]: cleanScript(patch[k]) };
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     if (patch && 'suggestSkillsOnDone' in patch) patch = { ...patch, suggestSkillsOnDone: !!patch.suggestSkillsOnDone };
     if (patch && 'deleteSessionsOnMerge' in patch) patch = { ...patch, deleteSessionsOnMerge: !!patch.deleteSessionsOnMerge };
     if (patch && 'specCheck' in patch) patch = { ...patch, specCheck: !!patch.specCheck };
+    if (patch && 'ciAutoFix' in patch) patch = { ...patch, ciAutoFix: !!patch.ciAutoFix };
     if (patch && 'weeklyResetDay' in patch) patch = { ...patch, weeklyResetDay: /^[0-6]$/.test(String(patch.weeklyResetDay)) ? String(patch.weeklyResetDay) : '' };
     if (patch && 'weeklyResetTime' in patch) patch = { ...patch, weeklyResetTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(String(patch.weeklyResetTime)) ? String(patch.weeklyResetTime) : '00:00' };
     if (patch && 'issueStatusSync' in patch) patch = { ...patch, issueStatusSync: !!patch.issueStatusSync };
@@ -908,7 +913,10 @@ app.whenReady().then(async () => {
       if (b) git.assertSafeRef(b, tr('ベースブランチ名'));
       patch = { ...patch, baseBranch: b };
     }
-    if (patch && 'enabledAgents' in patch) patch = { ...patch, enabledAgents: providers.cleanEnabledAgents(patch.enabledAgents) };
+    if (patch && 'enabledAgents' in patch) {
+      patch = { ...patch, enabledAgents: providers.cleanEnabledAgents(patch.enabledAgents) };
+      delete store.settings.agentsUnset; // ユーザーが決めたので、起動したときに選び直さない
+    }
     if (patch && 'defaultAgent' in patch && !providers.isAgent(patch.defaultAgent)) patch = { ...patch, defaultAgent: 'claude' };
     for (const k of ['codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel']) if (patch && k in patch) patch = { ...patch, [k]: String(patch[k] || '').trim() };
     if (patch && 'relaySteps' in patch) patch = { ...patch, relaySteps: providers.cleanRelaySteps(patch.relaySteps) };
@@ -939,7 +947,7 @@ app.whenReady().then(async () => {
   });
   // 文章の指示から Pipeline のフローチャートを作る・直す（保存はしない。編集画面で確かめてから保存してもらう）
   handle('flow:generate', ({ request, flow, agent, enabled, customAgents } = {}) => {
-    const use = providers.isAgent(agent) ? agent : 'claude';
+    const use = providers.isAgent(agent) ? agent : providers.defaultAgentOf(store.settings);
     const cwd = store.settings.repoPath || require('os').homedir();
     const ask = (prompt) => agents.askOnce(use, cwd, prompt, undefined, 300000);
     return require('./src/flow-ai').generateFlow(ask, { request, flow, defaultAgent: use, enabled: providers.cleanEnabledAgents(enabled), customAgents: providers.cleanCustomAgents(customAgents) });
@@ -1067,6 +1075,9 @@ app.whenReady().then(async () => {
   handle('card:logs', (id) => agents.logs(id));
   handle('card:diff', (id) => agents.diff(id));
   handle('card:worktree', (id) => agents.worktree(id));
+  handle('card:scripts', (id) => agents.scriptState(id));
+  handle('card:runScript', ({ id, kind }) => agents.startScriptNow(id, kind));
+  handle('card:stopScript', (id) => agents.stopScriptNow(id));
   handle('card:merge', async ({ id, target, createNew, keep, push }) => {
     // push するかどうかはプロジェクトごとに覚えておき、次のマージでも同じにする
     const card = store.card(id);
@@ -1082,6 +1093,7 @@ app.whenReady().then(async () => {
   handle('conflict:abort', (id) => agents.abortConflict(id));
   handle('conflict:dismiss', (id) => agents.dismissConflict(id));
   handle('conflict:fromPr', (id) => agents.reopenPrConflict(id));
+  handle('ci:fix', (id) => agents.fixCi(id));
   handle('card:permission', ({ id, reqId, decision, message }) => agents.answerPermission(id, reqId, decision, message));
   handle('card:answer', ({ id, reqId, answers }) => agents.answerQuestion(id, reqId, answers));
   handle('card:open', async (id) => {

@@ -1,5 +1,7 @@
 // 撮影用の架空のボード・ログ・差分。すべて作りものの値で、実在のリポジトリや人の情報は入れない
 const content = require('./content');
+const featureContent = require('./feature-content');
+const FlowModel = require('../../renderer/flow-model');
 
 const ROOT = '/Users/dev/work';
 const SHOP = `${ROOT}/shop-app`;
@@ -12,7 +14,7 @@ const SHA = { base: '530cb3e', head: '1e4a41c' };
 const wt = (repo, id) => `${repo}.worktrees/${id}`;
 
 function buildFixtures(lang, tr, now = Date.now()) {
-  const t = content[lang];
+  const t = { ...content[lang], ...featureContent[lang] };
   const ago = (s) => now - s * 1000;
   const base = { agent: 'claude', baseBranch: 'main', repoPath: SHOP, createdAt: ago(300), logs: [] };
   const issue = (number) => ({ number, url: `https://github.com/acme/shop-app/issues/${number}` });
@@ -95,6 +97,42 @@ function buildFixtures(lang, tr, now = Date.now()) {
     ],
     csv: [{ kind: 'user', text: t.tCsv, t: T }, ...start('97cc633a', 'agent/issue-18-97cc633a', T)],
   };
+
+  // Pipeline のデモのタスク（在庫の引き当てを決済のあとにする）の差分
+  const stockDiff = `diff --git a/src/api/orders.js b/src/api/orders.js
+index 7c41e0a..b93d2f6 100644
+--- a/src/api/orders.js
++++ b/src/api/orders.js
+@@ -11,8 +11,15 @@ export async function placeOrder(cart, payment) {
+   const order = await createOrder(cart);
+-  await reserveStock(order.items);
+-  const charge = await payments.capture(payment);
++  const hold = await holdStock(order.items);
++  let charge;
++  try {
++    charge = await payments.capture(payment);
++  } catch (err) {
++    await hold.release();
++    throw err;
++  }
++  await hold.commit();
+   await markPaid(order, charge);
+   return order;
+ }
+diff --git a/tests/orders.test.js b/tests/orders.test.js
+index 2e8fa11..c07b5d3 100644
+--- a/tests/orders.test.js
++++ b/tests/orders.test.js
+@@ -40,3 +40,9 @@ test('places an order', async () => {
+   expect(order.status).toBe('paid');
+ });
++
++test('releases held stock when capture fails', async () => {
++  payments.capture.mockRejectedValue(new Error('declined'));
++  await expect(placeOrder(cart, payment)).rejects.toThrow('declined');
++  expect(stock.held(cart.items)).toBe(0);
++});
+`;
 
   const diff = `diff --git a/src/components/LoginForm.jsx b/src/components/LoginForm.jsx
 index 3f1a9c2..8d2e7b4 100644
@@ -220,8 +258,37 @@ index 0000000..55ee66f
     { path: API, attention: 1, running: 2 },
   ];
 
+  // 文章から組み立てた形の Pipeline: 実装 → レビュー → 直すところがあれば実装へ戻る
+  const pipelineFlow = FlowModel.autoLayout({
+    nodes: [
+      { id: 'start', type: 'start' },
+      { id: 'impl', type: 'step', agent: 'codex', label: t.plImpl, instruction: t.plImplDo },
+      { id: 'review', type: 'step', agent: 'claude', label: t.plReview, instruction: t.plReviewDo },
+      { id: 'judge', type: 'if', label: t.plJudge, question: t.plJudgeQ },
+      { id: 'end', type: 'end' },
+    ],
+    edges: [
+      { id: 'e1', from: 'start', to: 'impl' },
+      { id: 'e2', from: 'impl', to: 'review' },
+      { id: 'e3', from: 'review', to: 'judge' },
+      { id: 'e4', from: 'judge', to: 'end', value: 'pass', when: t.plPass },
+      { id: 'e5', from: 'judge', to: 'impl', value: 'fail', when: t.plFail, maxLoops: 3 },
+    ],
+  });
+  const flowErrors = FlowModel.validateFlow(pipelineFlow);
+  if (flowErrors.length) throw new Error(`撮影用の Pipeline に直すところがあります: ${flowErrors.join(' / ')}`);
+  // 文章で組み立てる前のフロー（工程が1つだけ）
+  const pipelineStart = FlowModel.autoLayout({
+    nodes: [{ id: 'start', type: 'start' }, { id: 'impl', type: 'step', agent: 'claude', label: t.plImpl, instruction: t.plImplDo }, { id: 'end', type: 'end' }],
+    edges: [{ id: 'e1', from: 'start', to: 'impl' }, { id: 'e2', from: 'impl', to: 'end' }],
+  });
+  const pipeline = {
+    id: 'implement-review', name: t.plName, flow: pipelineFlow,
+    steps: pipelineFlow.nodes.filter((n) => n.type === 'step').map(({ id, agent, label, instruction }) => ({ id, agent, label, instruction })),
+  };
+
   return {
-    t, cards, adminCards, logs, diff, worktree, notifications, keyStatus, remote, remoteClient, tabs,
+    t, pipeline, pipelineStart, stockDiff, cards, adminCards, logs, diff, worktree, notifications, keyStatus, remote, remoteClient, tabs,
     paths: { SHOP, ADMIN, API, MOBILE },
     skills: [
       { name: 'db-migration', source: 'project', description: t.skDb },
