@@ -944,9 +944,15 @@ async function select(id, { subFrom = null } = {}) {
   if (!state.logs.has(id)) {
     // 読み込みのあいだに logsVersion が進んでも、古いログを新しい版だと扱わない
     const seen = card(id) ? card(id).logsVersion : undefined;
-    const logs = await run(() => api.logs(id));
-    state.logs.set(id, logs || []);
-    state.logsVersion.set(id, seen);
+    const logs = await readLogs(id, seen);
+    // 新しい読みに引き継がれたら、捨てた結果では保存も描画もしない
+    if (logs === 'superseded') return;
+    // 配列が返ったときだけ保存する。失敗はマップに置かず、次に開いたときに読み直す。
+    // 先に成功した読みを、あとから届いた失敗や古い結果で消さない
+    if (Array.isArray(logs) && (!state.logs.has(id) || state.logsVersion.get(id) === seen)) {
+      state.logs.set(id, logs);
+      state.logsVersion.set(id, seen);
+    }
   }
   if (card(id)) await ensureLogsFresh(card(id));
   // 読み直しているあいだに別のカードを開いていたら、そちらの描画を上書きしない
@@ -1149,17 +1155,40 @@ function rewindHistoryHtml(c) {
   }).join('');
   return tr('<section class="pg-sec pg-history"><div class="pg-sec-head"><b>{v}履歴</b> <span class="muted small">新しい順</span></div>{note}<ul class="pg-rewind">{rows}</ul></section>', { v: icon('clock'), note, rows });
 }
-// logsVersion が変わっていたら、読み込み済みのログを取り直す。失敗したときは今のログを残す
+// 同じ版の api.logs は1本だけ。run() は使わない（失敗のたびにトーストを出さない）。
+// 失敗や配列でない結果は fail。別の版の読みが始まったあとの結果は superseded。
+function readLogs(id, version) {
+  const cur = state.logsLoading.get(id);
+  if (cur && cur.version === version) return cur.promise;
+  let done;
+  const promise = new Promise((resolve) => { done = resolve; });
+  const flight = { version, promise };
+  state.logsLoading.set(id, flight);
+  (async () => {
+    let logs;
+    try {
+      logs = await api.logs(id);
+    } catch {
+      logs = undefined;
+    }
+    // 版が進んで別の読みに替わったときだけ、この結果は使わない
+    if (state.logsLoading.get(id) !== flight) {
+      done('superseded');
+      return;
+    }
+    state.logsLoading.delete(id);
+    done(Array.isArray(logs) ? logs : 'fail');
+  })();
+  return promise;
+}
+// logsVersion が変わっていたら、読み込み済みのログを取り直す。
+// 同じ版の読みが既にあれば、その Promise を待つ。失敗したときはログも版も変えず、次の更新で静かにやり直す。
 async function ensureLogsFresh(c) {
   if (!c || !state.logs.has(c.id)) return;
   if (state.logsVersion.get(c.id) === c.logsVersion) return;
   const version = c.logsVersion;
-  const token = {};
-  state.logsLoading.set(c.id, token);
-  const logs = await run(() => api.logs(c.id));
-  if (state.logsLoading.get(c.id) !== token) return;
-  state.logsLoading.delete(c.id);
-  if (!Array.isArray(logs)) return;
+  const logs = await readLogs(c.id, version);
+  if (logs === 'superseded' || !Array.isArray(logs)) return;
   const now = card(c.id);
   if (!now || now.logsVersion !== version) {
     if (now) await ensureLogsFresh(now);

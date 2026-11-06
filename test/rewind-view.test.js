@@ -28,14 +28,18 @@ function hhmm(t) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-const NAMES = ['esc', 'rewindView', 'rewindStepPoint', 'rewindButtonHtml', 'rewindStepHtml', 'rewindFlowNote', 'rewindConfirmMessage', 'rewindCard', 'rewindHistoryHtml', 'ensureLogsFresh'];
+const NAMES = ['esc', 'rewindView', 'rewindStepPoint', 'rewindButtonHtml', 'rewindStepHtml', 'rewindFlowNote', 'rewindConfirmMessage', 'rewindCard', 'rewindHistoryHtml', 'readLogs', 'ensureLogsFresh'];
 const body = NAMES.map(fnSource).join('\n');
-const create = new Function('tr', 'agentShort', 'hhmm', 'icon', 'confirm', 'isBusy', 'runBusy', 'api', 'state', 'card', 'run', 'afterLogsReloaded', `${body}\nreturn { rewindView, rewindStepPoint, rewindStepHtml, rewindFlowNote, rewindHistoryHtml, rewindConfirmMessage, rewindCard, ensureLogsFresh };`);
+const create = new Function('tr', 'agentShort', 'hhmm', 'icon', 'confirm', 'isBusy', 'runBusy', 'api', 'state', 'card', 'run', 'afterLogsReloaded', `${body}\nreturn { rewindView, rewindStepPoint, rewindStepHtml, rewindFlowNote, rewindHistoryHtml, rewindConfirmMessage, rewindCard, readLogs, ensureLogsFresh };`);
 const createAfter = new Function('state', 'renderDetailBody', 'scheduleProgress', '$', `${fnSource('afterLogsReloaded')}\nreturn afterLogsReloaded;`);
+const createSelect = new Function(
+  'setView', 'state', 'card', 'closeModal', 'isChat', '$', 'followAttach', 'hasChatActions', 'hasLogActions', 'setTab', 'renderBoard', 'renderDetailHead', 'updateBtwTab', 'updateTabsFor', 'markSeenIfOpen', 'readLogs', 'ensureLogsFresh', 'renderDetailBody',
+  `${fnSource('select')}\nreturn select;`,
+);
 
 function harness({ tr = identityTr, confirm = () => true, busy = false, logs = async () => [], rewind = async () => 'ok' } = {}) {
   const state = { logs: new Map(), logsVersion: new Map(), logsLoading: new Map(), selected: null, tab: 'log', board: { cards: [] }, body: null };
-  const calls = { confirm: [], rewind: [], reloaded: [], logs: 0, rendered: 0, scheduled: 0 };
+  const calls = { confirm: [], rewind: [], reloaded: [], logs: 0, rendered: 0, scheduled: 0, run: 0, toasts: [] };
   const impl = { logs, rewind };
   let cardOf = (id) => state.board.cards.find((c) => c.id === id) || null;
   const afterLogsReloaded = createAfter(
@@ -77,10 +81,12 @@ function harness({ tr = identityTr, confirm = () => true, busy = false, logs = a
     state,
     (id) => cardOf(id),
     async (fn) => {
+      calls.run += 1;
       try {
         return await fn();
       } catch (err) {
         calls.logsError = err;
+        calls.toasts.push(err.message);
         return undefined;
       }
     },
@@ -98,6 +104,31 @@ function harness({ tr = identityTr, confirm = () => true, busy = false, logs = a
     setCard: (c) => { state.board.cards = c ? [c] : []; },
     setCards: (list) => { state.board.cards = list; },
     useCard: (fn) => { cardOf = fn; },
+    bindSelect() {
+      const detail = { n: 0 };
+      const el = () => ({ classList: { toggle() {}, remove() {}, add() {} }, value: '' });
+      const select = createSelect(
+        () => {},
+        state,
+        (id) => state.board.cards.find((c) => c.id === id) || null,
+        () => {},
+        () => false,
+        () => el(),
+        { clear() {} },
+        () => false,
+        () => false,
+        () => {},
+        () => {},
+        () => {},
+        () => {},
+        () => {},
+        () => {},
+        fns.readLogs,
+        fns.ensureLogsFresh,
+        () => { detail.n += 1; },
+      );
+      return { select, detail };
+    },
   };
 }
 
@@ -349,6 +380,13 @@ test('logsVersion が変わったときだけログを読み直し、失敗や�
   assert.deepStrictEqual(bad.state.logs.get(c3.id), [{ text: '残す' }]);
   assert.strictEqual(bad.state.logsVersion.get(c3.id), 3);
   assert.deepStrictEqual(bad.calls.reloaded, []);
+  assert.strictEqual(bad.calls.run, 0, '失敗でトーストを出さない');
+  assert.deepStrictEqual(bad.calls.toasts, []);
+  bad.impl.logs = async () => [{ text: 'やり直した' }];
+  await bad.ensureLogsFresh(c3);
+  assert.deepStrictEqual(bad.state.logs.get(c3.id), [{ text: 'やり直した' }]);
+  assert.strictEqual(bad.state.logsVersion.get(c3.id), 4);
+  assert.strictEqual(bad.calls.run, 0);
 
   const obj = harness({ logs: async () => ({ not: 'array' }) });
   const c4 = card(null, { id: 'card4', logsVersion: 2 });
@@ -375,6 +413,48 @@ test('読み直しているあいだに版が変わったら、古い結果は�
   assert.deepStrictEqual(h.state.logs.get(c.id), [{ text: 'v3' }]);
   assert.strictEqual(h.state.logsVersion.get(c.id), 3);
   assert.deepStrictEqual(h.calls.reloaded, [c.id]);
+});
+
+test('同じ版のボード更新が重なっても、ログの読みは1回で、その結果が残る', async () => {
+  let release;
+  const h = harness({ logs: () => new Promise((res) => { release = res; }) });
+  const c = card(null, { logsVersion: 2 });
+  h.setCard(c);
+  h.state.logs.set(c.id, [{ text: 'old' }]);
+  h.state.logsVersion.set(c.id, 1);
+  const p1 = h.ensureLogsFresh(c);
+  const p2 = h.ensureLogsFresh(c);
+  const p3 = h.ensureLogsFresh(c);
+  assert.strictEqual(h.calls.logs, 1);
+  release([{ text: 'kept' }]);
+  await Promise.all([p1, p2, p3]);
+  assert.strictEqual(h.calls.logs, 1);
+  assert.deepStrictEqual(h.state.logs.get(c.id), [{ text: 'kept' }]);
+  assert.strictEqual(h.state.logsVersion.get(c.id), 2);
+  assert.deepStrictEqual(h.calls.reloaded, [c.id, c.id, c.id]);
+  assert.strictEqual(h.calls.run, 0);
+
+  let releaseFail;
+  const fail = harness({ logs: () => new Promise((_, rej) => { releaseFail = rej; }) });
+  const cf = card(null, { id: 'cf', logsVersion: 4 });
+  fail.setCard(cf);
+  fail.state.logs.set(cf.id, [{ text: '残す' }]);
+  fail.state.logsVersion.set(cf.id, 3);
+  const f1 = fail.ensureLogsFresh(cf);
+  const f2 = fail.ensureLogsFresh(cf);
+  assert.strictEqual(fail.calls.logs, 1);
+  releaseFail(new Error('読めません'));
+  await Promise.all([f1, f2]);
+  assert.deepStrictEqual(fail.state.logs.get(cf.id), [{ text: '残す' }]);
+  assert.strictEqual(fail.state.logsVersion.get(cf.id), 3);
+  assert.deepStrictEqual(fail.calls.reloaded, []);
+  assert.deepStrictEqual(fail.calls.toasts, []);
+  assert.strictEqual(fail.calls.run, 0);
+  fail.impl.logs = async () => [{ text: '次の更新' }];
+  await fail.ensureLogsFresh(cf);
+  assert.strictEqual(fail.calls.logs, 2);
+  assert.deepStrictEqual(fail.state.logs.get(cf.id), [{ text: '次の更新' }]);
+  assert.strictEqual(fail.state.logsVersion.get(cf.id), 4);
 });
 
 test('重なった読み直しでは、あとから来た結果だけを残す', async () => {
@@ -434,6 +514,112 @@ test('読み直したあとは、開いているログと進捗を描き直す',
   assert.strictEqual(h.calls.scheduled, 2);
 });
 
+test('select が失敗したときは空のログとして覚えず、次に開いたら読み直す', async () => {
+  const boom = harness({ logs: async () => { throw new Error('読めません'); } });
+  const c = card(null, { logsVersion: 3 });
+  boom.setCard(c);
+  boom.state.tab = 'diff';
+  const open = boom.bindSelect();
+  await open.select(c.id);
+  assert.strictEqual(boom.state.logs.has(c.id), false);
+  assert.strictEqual(boom.state.logsVersion.has(c.id), false);
+  assert.strictEqual(boom.calls.logs, 1);
+  assert.strictEqual(boom.calls.run, 0);
+  assert.deepStrictEqual(boom.calls.toasts, []);
+  assert.strictEqual(open.detail.n, 1, '失敗でも画面は開く');
+
+  const weird = harness({ logs: async () => ({ not: 'array' }) });
+  const cw = card(null, { id: 'cw', logsVersion: 1 });
+  weird.setCard(cw);
+  weird.state.tab = 'diff';
+  const openW = weird.bindSelect();
+  await openW.select(cw.id);
+  assert.strictEqual(weird.state.logs.has(cw.id), false);
+  assert.strictEqual(weird.state.logsVersion.has(cw.id), false);
+
+  boom.impl.logs = async () => [{ text: '読めた' }];
+  await open.select(c.id);
+  assert.deepStrictEqual(boom.state.logs.get(c.id), [{ text: '読めた' }]);
+  assert.strictEqual(boom.state.logsVersion.get(c.id), 3);
+  assert.strictEqual(boom.calls.logs, 2);
+  assert.strictEqual(open.detail.n, 2);
+});
+
+test('select の古い応答が新しい成功のあとでも、空や古いログで上書きしない', async () => {
+  const pending = [];
+  const h = harness({
+    logs: () => new Promise((res, rej) => { pending.push({ res, rej }); }),
+  });
+  const c = card(null, { logsVersion: 1 });
+  h.setCard(c);
+  h.state.tab = 'diff';
+  const open = h.bindSelect();
+  const first = open.select(c.id);
+  c.logsVersion = 2;
+  const second = open.select(c.id);
+  assert.strictEqual(h.calls.logs, 2);
+  pending[1].res([{ text: '新しい' }]);
+  await second;
+  assert.deepStrictEqual(h.state.logs.get(c.id), [{ text: '新しい' }]);
+  assert.strictEqual(h.state.logsVersion.get(c.id), 2);
+  const drawn = open.detail.n;
+  assert.ok(drawn >= 1);
+  pending[0].res([{ text: '古い' }]);
+  await first;
+  assert.deepStrictEqual(h.state.logs.get(c.id), [{ text: '新しい' }]);
+  assert.strictEqual(h.state.logsVersion.get(c.id), 2);
+  assert.strictEqual(open.detail.n, drawn, '捨てた結果の時点では描かない');
+
+  const pending2 = [];
+  const h2 = harness({
+    logs: () => new Promise((res, rej) => { pending2.push({ res, rej }); }),
+  });
+  const c2 = card(null, { id: 'card2', logsVersion: 1 });
+  h2.setCard(c2);
+  h2.state.tab = 'diff';
+  const open2 = h2.bindSelect();
+  const oldRead = open2.select(c2.id);
+  c2.logsVersion = 4;
+  const newRead = open2.select(c2.id);
+  pending2[1].res([]);
+  await newRead;
+  assert.deepStrictEqual(h2.state.logs.get(c2.id), []);
+  assert.strictEqual(h2.state.logsVersion.get(c2.id), 4);
+  const drawn2 = open2.detail.n;
+  pending2[0].rej(new Error('遅い失敗'));
+  await oldRead;
+  assert.deepStrictEqual(h2.state.logs.get(c2.id), []);
+  assert.strictEqual(h2.state.logsVersion.get(c2.id), 4);
+  assert.strictEqual(open2.detail.n, drawn2);
+  assert.deepStrictEqual(h2.calls.toasts, []);
+});
+
+test('select は、いちばん新しい読みが終わってから描く', async () => {
+  const pending = [];
+  const h = harness({
+    logs: () => new Promise((res) => { pending.push(res); }),
+  });
+  const c = card(null, { logsVersion: 1 });
+  h.setCard(c);
+  h.state.tab = 'diff';
+  const open = h.bindSelect();
+  const done = open.select(c.id);
+  assert.strictEqual(open.detail.n, 0);
+  c.logsVersion = 2;
+  pending[0]([{ text: '古い' }]);
+  for (let i = 0; i < 20 && pending.length < 2; i++) await Promise.resolve();
+  assert.strictEqual(pending.length, 2);
+  assert.strictEqual(open.detail.n, 0, '古い結果の時点では描かない');
+  assert.deepStrictEqual(h.state.logs.get(c.id), [{ text: '古い' }]);
+  assert.strictEqual(h.state.logsVersion.get(c.id), 1);
+  pending[1]([{ text: '新しい' }]);
+  await done;
+  assert.deepStrictEqual(h.state.logs.get(c.id), [{ text: '新しい' }]);
+  assert.strictEqual(h.state.logsVersion.get(c.id), 2);
+  assert.strictEqual(open.detail.n, 1);
+  assert.strictEqual(h.calls.run, 0);
+});
+
 test('カードが消えていたら、届いたログは捨てる', async () => {
   let release;
   const h = harness({ logs: () => new Promise((res) => { release = res; }) });
@@ -459,6 +645,12 @@ test('工程と履歴と、ログの読み直しが画面に繋がっている',
   assert.match(act, /rewindCard\(c, btn\.dataset\.cp\)/);
   assert.match(fnSource('select'), /logsVersion\.set\(id, seen\)/);
   assert.match(fnSource('select'), /ensureLogsFresh\(card\(id\)\)/);
+  assert.match(fnSource('select'), /readLogs\(id, seen\)/);
+  assert.match(fnSource('select'), /logs === 'superseded'/);
+  assert.match(fnSource('ensureLogsFresh'), /readLogs\(c\.id, version\)/);
+  assert.doesNotMatch(fnSource('ensureLogsFresh'), /\brun\s*\(/);
+  assert.doesNotMatch(fnSource('readLogs'), /\brun\s*\(/);
+  assert.doesNotMatch(fnSource('select'), /\brun\s*\(/);
   const onBoard = src.slice(src.indexOf('api.onBoard'));
   assert.match(onBoard, /ensureLogsFresh\(c\)/);
   assert.match(fnSource('afterLogsReloaded'), /state\.tab === 'log' \|\| state\.tab === 'chat'/);
