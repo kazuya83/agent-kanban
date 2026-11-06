@@ -17,7 +17,7 @@ Besides GitHub, you can connect GitLab, Linear, Jira, and Slack. GitHub works as
 
 Linear and Jira only handle issues. You create the PR or MR on the repository's host (`gh` for GitHub, the API for GitLab) or merge directly.
 
-Slack is not an issue tracker. It is for posting notifications and starting tasks from Slack ([below](#slack)).
+Slack is not an issue tracker. It is for posting notifications, starting tasks from Slack, and approving and answering ([below](#slack)).
 
 These work the same way for every service.
 
@@ -84,7 +84,7 @@ Works with Jira Cloud and Jira Data Center.
 
 ## Slack
 
-Slack is for posting notifications and starting tasks from Slack. Receiving uses Socket Mode, so you need no public server and no open port. **It works only while the app is open.** While the app is closed, it posts no notifications and starts no tasks.
+Slack is for posting notifications, starting tasks from Slack, and approving and answering with buttons on notifications. Receiving uses Socket Mode, so you need no public server and no open port. **It works only while the app is open.** While the app is closed, none of this works.
 
 The steps to create the Slack app also appear under "How to set up" in the Slack entry in "Integrations".
 
@@ -92,7 +92,8 @@ The steps to create the Slack app also appear under "How to set up" in the Slack
 2. Turn on "Socket Mode" and create an App-Level Token with the `connections:write` scope
 3. Under "OAuth & Permissions", add `app_mentions:read` and `chat:write` to Bot Token Scopes. Add `commands` too if you use a slash command
 4. Turn on "Event Subscriptions" and add `app_mention` to Bot Events. To use a slash command, create it under "Slash Commands" (no Request URL is needed)
-5. Install the app to the workspace and invite the bot to the channels you use
+5. To approve and answer with buttons on notifications, turn on "Interactivity & Shortcuts" (no Request URL needed)
+6. Install the app to the workspace and invite the bot to the channels you use
 
 | Item | Description |
 | --- | --- |
@@ -100,14 +101,19 @@ The steps to create the Slack app also appear under "How to set up" in the Slack
 | App-Level Token | A token starting with `xapp-` |
 | Channel ID for notifications | In the form `C0123456789`. Nothing is posted if it is empty |
 | Notify on completion, failure, and waiting | Each kind can be turned off (all on by default) |
-| Slack user IDs that can start tasks | In the form `U0123456789, U0987654321`. **If this is empty, nobody can start a task** |
+| Slack user IDs that can start tasks, approve, and answer | In the form `U0123456789, U0987654321`. **If this is empty, nobody can start or approve anything** |
 | Channels and projects | One line each, in the form `C0123456789 /path/to/project`. Tasks can start only from the channels listed here |
 
 - **Kinds of notification**: failures include failed schedules. Waiting covers spec checks, permission checks, questions, waiting for an answer, waiting for review, and conflicts
 - **Starting a task**: in a listed channel, mention the bot or use the slash command and write the instructions. Only allowed users are accepted, and anyone else gets a refusal
 - **After it starts**: it behaves like any other task. If the instructions are not detailed enough, it stops at the spec check. The project's permission settings apply
 - **Updates**: updates on a task requested from Slack go to its thread, whatever the notification settings are
-- **Not supported**: you cannot approve or answer questions from Slack; use the app for those. Only the text of the message that mentions the bot becomes instructions. The rest of the thread and attached files are not read. Tasks cannot be started from direct messages
+- **Approving**: permission notifications show the tool input with Allow and Deny buttons. If the input is too long to show in full, only Deny appears. "Always allow" stays in the app
+- **Answering**: notifications for agent questions, spec checks, and waiting for an answer have an Answer button that opens a form. Spec questions you leave blank are sent as "decide for me"
+- **Who can press the buttons**: only the people on the list above. Anyone else gets a refusal only they can see. If the list is empty or there is no App-Level Token, no buttons appear
+- **After answering**: whether you answer in Slack or the app, the buttons disappear from the notification, and the result and who answered stay there and in the card's log. After the app restarts, buttons on earlier notifications no longer work; answer in the app instead
+- **What gets posted**: permission notifications include up to 4,000 characters of tool input. Everyone in the channel can read it, so use a channel limited to people who may see it
+- **Not supported**: merging and reviewing stay in the app. Only the text of the message that mentions the bot becomes instructions. The rest of the thread and attached files are not read. Tasks cannot be started from direct messages
 
 ## Tokens and connections
 

@@ -603,3 +603,267 @@ test('本物の createTask: 頼んだ人を残し、仕様の確認で止まれ�
   // renderer から来る card:create の経路では slack を受け取らない（頼んだ人を偽れない）
   assert.ok(!/handle\('card:create',[^\n]*slack/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')));
 });
+
+// ---------- ボタンとモーダルでの承認・回答 ----------
+
+// 本物の AgentManager に確認を出させて、Slack のボタンで答える
+async function realBridge(t, f, config = { allowedUsers: ALICE, notifyChannel: 'C0NOTIFY' }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-slack-repo-'));
+  const repo = path.join(dir, 'repo');
+  fs.mkdirSync(repo);
+  const store = new Store(path.join(dir, 'board.json'));
+  Object.assign(store.settings, { repoPath: repo, noGitRepos: [repo] });
+  const agents = new AgentManager(store, {});
+  const secrets = new SecretStore({ file: path.join(dir, 'secrets.json'), safeStorage });
+  const trackers = new trackersMod.Trackers({ store, secrets });
+  trackers.save('slack', { config, secrets: { botToken: BOT, appToken: APP } });
+  FakeWS.made = [];
+  const bridge = new SlackBridge({ trackers, agents, store, WebSocketImpl: FakeWS });
+  t.after(() => bridge.stop());
+  const ws = await connected({ bridge });
+  const card = agents.createTask({ prompt: 'テスト', repoPath: repo, skipSpecCheck: true })[0];
+  await until(() => bridge.status().state === 'connected');
+  return { agents, store, trackers, bridge, ws, card, f };
+}
+
+const actionsOf = (post) => post.body.blocks.find((b) => b.type === 'actions').elements;
+let envelope = 0;
+function press(s, post, actionId, { user = ALICE, value } = {}) {
+  envelope += 1;
+  const el = actionsOf(post).find((x) => x.action_id === actionId) || actionsOf(post)[0];
+  s.ws.receive({
+    type: 'interactive',
+    envelope_id: `env-a${envelope}`,
+    payload: { type: 'block_actions', user: { id: user, username: 'alice' }, trigger_id: `trig-${envelope}`, response_url: 'https://hooks.slack.com/actions/T/1/x', channel: { id: post.body.channel }, message: { ts: post.ts }, actions: [{ action_id: actionId, value: value || el.value }] },
+  });
+}
+function submit(s, view, values, { user = ALICE } = {}) {
+  envelope += 1;
+  const id = `env-v${envelope}`;
+  s.ws.receive({ type: 'interactive', envelope_id: id, payload: { type: 'view_submission', user: { id: user, username: 'alice' }, view: { ...view, state: { values } } } });
+  return s.ws.sent.filter((x) => x.envelope_id === id).at(-1);
+}
+// 最後の投稿（ts は mockFetch が振る順番）
+const lastPost = (f) => {
+  const posts = f.posts();
+  return { ...posts.at(-1), ts: `900.${posts.length}` };
+};
+
+test('承認: 許可された人が「許可」を押すと進み、通知のボタンが消える', async (t) => {
+  const f = mockFetch(t);
+  const s = await realBridge(t, f);
+  const p = s.agents.requestPermission({ cardId: s.card.id, toolName: 'Bash', input: { command: 'npm test <!channel>' } });
+  await until(() => f.posts().length === 1);
+  const post = lastPost(f);
+  assert.deepStrictEqual(actionsOf(post).map((x) => x.action_id), ['kanban_allow', 'kanban_deny']);
+  const detail = post.body.blocks.find((b) => b.text && b.text.type === 'plain_text');
+  assert.match(detail.text.text, /npm test <!channel>/, '全文を書式なしで見せる');
+  assert.ok(!post.body.text.includes('<!channel>'));
+  assert.ok(!post.body.text.includes('画面で確かめて'));
+  press(s, post, 'kanban_allow');
+  assert.strictEqual((await p).behavior, 'allow');
+  await until(() => f.calls.find((c) => c.method === 'chat.update'));
+  const update = f.calls.find((c) => c.method === 'chat.update');
+  assert.strictEqual(update.body.ts, post.ts);
+  assert.ok(!update.body.blocks.some((b) => b.type === 'actions'), 'ボタンは消える');
+  assert.match(JSON.stringify(update.body.blocks), new RegExp(`<@${ALICE}>`));
+  assert.ok(s.card.logs.some((l) => /Slack の @alice が許可しました/.test(JSON.stringify(l))));
+});
+
+test('承認: 許可されていない人が押しても進まず、本人にだけ断る', async (t) => {
+  const f = mockFetch(t);
+  const s = await realBridge(t, f);
+  const p = s.agents.requestPermission({ cardId: s.card.id, toolName: 'Bash', input: { command: 'ls' } });
+  await until(() => f.posts().length === 1);
+  press(s, lastPost(f), 'kanban_allow', { user: MALLORY });
+  await until(() => f.calls.some((c) => c.host === 'hooks.slack.com'));
+  assert.strictEqual(s.card.permissions.length, 1);
+  const refusal = f.calls.find((c) => c.host === 'hooks.slack.com');
+  assert.deepStrictEqual([refusal.body.response_type, refusal.body.replace_original], ['ephemeral', false]);
+  assert.match(refusal.body.text, /許可された人だけ/);
+  press(s, lastPost(f), 'kanban_deny');
+  assert.strictEqual((await p).behavior, 'deny');
+});
+
+test('承認: 許可の一覧が空か App-Level Token がなければ、ボタンを出さない', async (t) => {
+  const f = mockFetch(t);
+  const s = await realBridge(t, f, { allowedUsers: '', notifyChannel: 'C0NOTIFY' });
+  s.agents.requestPermission({ cardId: s.card.id, toolName: 'Bash', input: { command: 'ls' } });
+  await until(() => f.posts().length === 1);
+  assert.strictEqual(f.posts()[0].body.blocks, undefined);
+  assert.match(f.posts()[0].body.text, /画面で確かめて/);
+  s.trackers.save('slack', { config: { allowedUsers: ALICE, notifyChannel: 'C0NOTIFY' }, secrets: {} });
+  assert.ok(s.bridge.promptFor({ kind: 'permission', reqId: s.card.permissions[0].id }, s.card), '両方そろえば出す');
+  s.trackers.hasSecret = (id, name) => name !== 'appToken';
+  assert.strictEqual(s.bridge.promptFor({ kind: 'permission', reqId: s.card.permissions[0].id }, s.card), null);
+});
+
+test('承認: 全文を出せない入力は拒否だけ。古いボタンの値や別の通知の値では動かない', async (t) => {
+  const f = mockFetch(t);
+  const s = await realBridge(t, f);
+  s.agents.requestPermission({ cardId: s.card.id, toolName: 'Bash', input: { command: `true ${'x'.repeat(5000)}; rm -rf /` } });
+  await until(() => f.posts().length === 1);
+  const post = lastPost(f);
+  assert.deepStrictEqual(actionsOf(post).map((x) => x.action_id), ['kanban_deny']);
+  assert.ok(post.body.blocks.every((b) => !b.text || b.text.text.length <= 3000));
+  press(s, post, 'kanban_allow');
+  await until(() => f.calls.some((c) => c.host === 'hooks.slack.com'));
+  assert.strictEqual(s.card.permissions.length, 1, '作った値でも許可できない');
+  press(s, { ...post, ts: '1.1' }, 'kanban_deny');
+  await until(() => f.calls.filter((c) => c.host === 'hooks.slack.com').length === 2);
+  assert.strictEqual(s.card.permissions.length, 1, '別のメッセージからは動かない');
+});
+
+test('承認: アプリの画面で答えたら、Slack のボタンが消える。あとから押しても何も起きない', async (t) => {
+  const f = mockFetch(t);
+  const s = await realBridge(t, f);
+  s.agents.requestPermission({ cardId: s.card.id, toolName: 'Bash', input: { command: 'ls' } });
+  await until(() => f.posts().length === 1);
+  const post = lastPost(f);
+  s.agents.answerPermission(s.card.id, s.card.permissions[0].id, 'deny');
+  await until(() => f.calls.some((c) => c.method === 'chat.update'));
+  assert.match(JSON.stringify(f.calls.find((c) => c.method === 'chat.update').body.blocks), /拒否/);
+  press(s, post, 'kanban_allow');
+  await until(() => f.calls.some((c) => c.host === 'hooks.slack.com'));
+  assert.match(f.calls.find((c) => c.host === 'hooks.slack.com').body.text, /もう終わっています/);
+});
+
+test('承認: 投稿の途中で答えが出ても、投稿のあとでボタンを消す', async (t) => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const f = mockFetch(t);
+  const s = await realBridge(t, f);
+  const mocked = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).endsWith('chat.postMessage')) await gate;
+    return mocked(url, opts);
+  };
+  t.after(() => { globalThis.fetch = mocked; });
+  s.agents.requestPermission({ cardId: s.card.id, toolName: 'Bash', input: { command: 'ls' } });
+  s.agents.answerPermission(s.card.id, s.card.permissions[0].id, 'allow');
+  await tick();
+  assert.strictEqual(f.calls.filter((c) => c.method === 'chat.update').length, 0);
+  release();
+  await until(() => f.calls.some((c) => c.method === 'chat.update'));
+  assert.strictEqual(f.calls.find((c) => c.method === 'chat.update').body.ts, '900.1');
+});
+
+test('質問: 「回答する」でモーダルを開き、選択肢と自由入力で答える', async (t) => {
+  const f = mockFetch(t);
+  const s = await realBridge(t, f);
+  const long = 'L'.repeat(120);
+  const input = { questions: [
+    { question: 'どの案？', header: '案', multiSelect: false, options: [{ label: long, description: 'd'.repeat(100) }, { label: 'B' }] },
+    { question: '対象は？', header: '対象', multiSelect: true, options: [{ label: 'x' }, { label: 'y' }] },
+  ] };
+  const p = s.agents.requestPermission({ cardId: s.card.id, toolName: 'AskUserQuestion', input });
+  await until(() => f.posts().length === 1);
+  press(s, lastPost(f), 'kanban_answer');
+  await until(() => f.calls.some((c) => c.method === 'views.open'));
+  const open = f.calls.find((c) => c.method === 'views.open');
+  assert.match(open.body.trigger_id, /^trig-/);
+  const { view } = open.body;
+  assert.deepStrictEqual(view.blocks.map((b) => b.block_id), ['q0', 't0', 'q1', 't1']);
+  assert.strictEqual(view.blocks[0].element.type, 'radio_buttons');
+  assert.strictEqual(view.blocks[2].element.type, 'checkboxes');
+  assert.ok(view.blocks[0].element.options[0].text.text.length <= 75);
+  assert.ok(view.blocks[0].element.options[0].description.text.length <= 75);
+  const missing = submit(s, view, { q0: { choice: { selected_option: { value: '1' } } }, t0: { text: { value: '' } }, q1: { choice: { selected_options: [] } }, t1: { text: { value: '' } } });
+  assert.deepStrictEqual(missing.payload, { response_action: 'errors', errors: { t1: '回答を書いてください' } });
+  assert.strictEqual(s.card.questions.length, 1);
+  const refused = submit(s, view, {}, { user: MALLORY });
+  assert.match(JSON.stringify(refused.payload), /許可された人だけ/);
+  const done = submit(s, view, { q0: { choice: { selected_option: { value: '0' } } }, t0: { text: { value: '' } }, q1: { choice: { selected_options: [{ value: '0' }, { value: '1' }] } }, t1: { text: { value: 'z' } } });
+  assert.strictEqual(done.payload, undefined);
+  const res = await p;
+  assert.deepStrictEqual(res.updatedInput.answers, { 'どの案？': long, '対象は？': 'x, y, z' });
+  await until(() => f.calls.some((c) => c.method === 'chat.update'));
+  assert.match(JSON.stringify(submit(s, view, {}).payload), /もう終わっています/);
+});
+
+function awaiting(s, over = {}) {
+  Object.assign(s.card, { status: 'review', awaitingReply: true, lastText: 'どちらにしますか？', ...over });
+  return s.agents.notify(s.card, 'awaiting', `回答待ち: ${s.card.title}`, s.card.lastText);
+}
+
+test('回答待ち: モーダルの文が追加指示になり、ボタンが消える', async (t) => {
+  const f = mockFetch(t);
+  const s = await realBridge(t, f);
+  const sent = [];
+  const send = s.agents.send.bind(s.agents);
+  s.agents.send = (id, message) => {
+    sent.push(message);
+    s.card.awaitingReply = false;
+    s.agents.emit('changed', id);
+  };
+  t.after(() => { s.agents.send = send; });
+  awaiting(s);
+  await until(() => f.posts().length === 1);
+  press(s, lastPost(f), 'kanban_answer');
+  await until(() => f.calls.some((c) => c.method === 'views.open'));
+  const { view } = f.calls.find((c) => c.method === 'views.open').body;
+  assert.match(JSON.stringify(view.blocks[0]), /どちらにしますか/);
+  assert.match(JSON.stringify(submit(s, view, { note: { text: { value: '  ' } } }).payload), /回答を書いてください/);
+  assert.strictEqual(submit(s, view, { note: { text: { value: 'Aで' } } }).payload, undefined);
+  assert.deepStrictEqual(sent, ['Aで']);
+  await until(() => f.calls.some((c) => c.method === 'chat.update'));
+  assert.match(JSON.stringify(f.calls.find((c) => c.method === 'chat.update').body.blocks), new RegExp(`回答しました（<@${ALICE}>）`));
+  assert.strictEqual(f.calls.filter((c) => c.method === 'chat.update').length, 1);
+});
+
+test('回答待ち: 動いている間は送れないので、モーダルにエラーを出す', async (t) => {
+  const f = mockFetch(t);
+  const s = await realBridge(t, f);
+  awaiting(s);
+  await until(() => f.posts().length === 1);
+  press(s, lastPost(f), 'kanban_answer');
+  await until(() => f.calls.some((c) => c.method === 'views.open'));
+  const { view } = f.calls.find((c) => c.method === 'views.open').body;
+  s.card.status = 'running';
+  assert.match(JSON.stringify(submit(s, view, { note: { text: { value: 'A' } } }).payload), /実行中・待機中/);
+  assert.strictEqual(f.calls.filter((c) => c.method === 'chat.update').length, 0);
+});
+
+test('仕様の確認: 質問のフォームで答える。答えていない質問はおまかせにする', async (t) => {
+  const f = mockFetch(t);
+  const s = await realBridge(t, f);
+  const sent = [];
+  s.agents.send = (id, message) => sent.push(message);
+  awaiting(s, { specState: 'pending', specQuestions: [{ question: 'Q1', options: [{ label: 'A' }] }, { question: 'Q2', options: [] }] });
+  await until(() => f.posts().length === 1);
+  press(s, lastPost(f), 'kanban_answer');
+  await until(() => f.calls.some((c) => c.method === 'views.open'));
+  const { view } = f.calls.find((c) => c.method === 'views.open').body;
+  assert.deepStrictEqual(view.blocks.filter((b) => b.type === 'input').map((b) => b.block_id), ['q0', 't0', 't1', 'note']);
+  submit(s, view, { q0: { choice: { selected_option: { value: '0' } } }, note: { text: { value: 'よろしく' } } });
+  assert.deepStrictEqual(sent[0].split('\n'), ['仕様の質問への答えです。', '', '1. Q1', '   → A', '2. Q2', '   → おまかせ（妥当な案で決めてください）', '', '補足: よろしく']);
+});
+
+test('回答待ち: アプリで答えたら閉じる。新しい確認が出たら古いボタンを閉じる', async (t) => {
+  const f = mockFetch(t);
+  const s = await realBridge(t, f);
+  awaiting(s);
+  await until(() => f.posts().length === 1);
+  const first = lastPost(f);
+  awaiting(s);
+  await until(() => f.posts().length === 2 && f.calls.some((c) => c.method === 'chat.update'));
+  assert.strictEqual(f.calls.find((c) => c.method === 'chat.update').body.ts, first.ts);
+  s.card.awaitingReply = false;
+  s.agents.emit('changed', s.card.id);
+  await until(() => f.calls.filter((c) => c.method === 'chat.update').length === 2);
+  assert.strictEqual(s.bridge.prompts.size, 0);
+});
+
+test('受信: 同じボタンの送り直しでは1度しか動かない', async (t) => {
+  const f = mockFetch(t);
+  const s = await realBridge(t, f);
+  s.agents.requestPermission({ cardId: s.card.id, toolName: 'Bash', input: { command: 'ls' } });
+  await until(() => f.posts().length === 1);
+  const envelopeMsg = { type: 'interactive', envelope_id: 'env-dup', payload: { type: 'block_actions', trigger_id: 'dup', user: { id: ALICE }, channel: { id: 'C0NOTIFY' }, message: { ts: lastPost(f).ts }, response_url: 'https://hooks.slack.com/actions/T/1/x', actions: [{ action_id: 'kanban_allow', value: s.card.permissions[0].id }] } };
+  s.ws.receive(envelopeMsg);
+  s.ws.receive({ ...envelopeMsg, envelope_id: 'env-dup-2' });
+  await tick(20);
+  assert.strictEqual(s.ws.sent.filter((x) => String(x.envelope_id).startsWith('env-dup')).length, 2, 'ack は毎回返す');
+  assert.strictEqual(f.calls.filter((c) => c.host === 'hooks.slack.com').length, 0);
+  assert.strictEqual(s.card.logs.filter((l) => /Slack の .* が許可しました/.test(JSON.stringify(l))).length, 1);
+});

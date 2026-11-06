@@ -135,7 +135,7 @@ Les instructions sont construites à partir du titre, du corps et des commentair
 
 - **GitLab** : fonctionne avec gitlab.com et les instances auto-hébergées. Si origin appartient au GitLab connecté, l'application utilise l'API au lieu de `gh` pour créer les MR et vérifier les fusions, les conflits et les résultats de pipeline
 - **Linear et Jira** : ils ne gèrent que les issues. Les PR et MR sont créées sur l'hébergeur du dépôt. Jira fonctionne avec Cloud et Data Center
-- **Slack** : publie les fins de tâche, les échecs et ce qui attend votre confirmation. Les utilisateurs Slack autorisés peuvent lancer une tâche par une mention ou une commande slash dans un canal configuré. Par défaut, personne ne peut en lancer. Socket Mode évite d'ouvrir un port, mais cela ne fonctionne que pendant que l'application est ouverte. Les approbations et les réponses aux questions se font dans l'application
+- **Slack** : publie les fins de tâche, les échecs et ce qui attend votre confirmation. Les utilisateurs Slack autorisés peuvent lancer une tâche par une mention ou une commande slash dans un canal configuré. Ils peuvent aussi approuver et répondre aux questions avec les boutons des notifications. Par défaut, personne ne peut le faire. Socket Mode évite d'ouvrir un port, mais cela ne fonctionne que pendant que l'application est ouverte
 
 Pour configurer :
 

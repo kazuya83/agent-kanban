@@ -1,6 +1,6 @@
 // Slack 連携。課題管理ではないので src/trackers には置かず、ここに通知と受信をまとめる。
 // - provider: 設定の「連携」の欄（src/trackers に登録する）
-// - SlackBridge: 通知の投稿（chat.postMessage）と、Socket Mode の受信
+// - SlackBridge: 通知の投稿（chat.postMessage）と、Socket Mode の受信（メンション・/コマンド・ボタン・モーダル）
 //
 // 受信は Socket Mode（アプリから Slack へ WebSocket でつなぐ）なので、公開サーバーもポートの開放も要らない。
 // Electron の Node の標準の WebSocket を使う。アプリを閉じている間は動かない。
@@ -8,6 +8,8 @@
 // 安全のきまり:
 // - タスクの開始は手元でエージェントがコードを動かすことになる。allowedUsers にある人だけが開始でき、空なら誰も開始できない
 // - チャンネルも channelMap に対応を書いたものだけを受け付ける
+// - 承認と回答も allowedUsers にある人だけができる。押したときと、モーダルを送ったときの両方で確かめる
+// - 入力の全文を Slack に出せない承認は、読まずに許可できないので、拒否だけを出す
 // - 指示にするのは、呼びかけたメッセージの本文だけ（スレッドの中身は読まない）
 // - トークンは投稿の直前に読み、status とエラーの文には入れない
 const { EventEmitter } = require('events');
@@ -25,6 +27,17 @@ const HELLO_TIMEOUT_MS = 30000;
 // （つなぎ直す間のイベントは Slack が送り直す）
 const MAX_CONNECTION_MS = 30 * 60 * 1000;
 const RATE_LIMIT_WAIT_MS = 5000;
+// Block Kit の上限
+const MAX_BLOCK_TEXT = 3000;
+const MAX_LABEL = 2000;
+const MAX_OPTION_TEXT = 75;
+const MAX_OPTIONS = 10;
+const MAX_TITLE = 24;
+
+const ACTION_ALLOW = 'kanban_allow';
+const ACTION_DENY = 'kanban_deny';
+const ACTION_ANSWER = 'kanban_answer';
+const VIEW_ANSWER = 'kanban_answer_view';
 
 // 入れ直してもらうまで直らないエラー（つなぎ直しても無駄なもの）
 const FATAL_CODES = new Set(['invalid_auth', 'not_authed', 'account_inactive', 'token_revoked', 'token_expired', 'not_allowed_token_type', 'missing_scope', 'no_permission']);
@@ -129,6 +142,69 @@ function backoffMs(attempt, { base = RETRY_BASE_MS, max = RETRY_MAX_MS, random =
   return Math.round(ms * (0.75 + random() * 0.5));
 }
 
+// ---------- ボタンとモーダル ----------
+
+const plain = (text, max = MAX_BLOCK_TEXT) => {
+  const s = String(text == null ? '' : text);
+  return { type: 'plain_text', text: s.length > max ? `${s.slice(0, max - 1)}…` : s };
+};
+const textSection = (text) => ({ type: 'section', text: { type: 'mrkdwn', text: String(text).slice(0, MAX_BLOCK_TEXT) } });
+const noteBlock = (text) => ({ type: 'context', elements: [{ type: 'mrkdwn', text: String(text).slice(0, MAX_BLOCK_TEXT) }] });
+const button = (actionId, label, value, style) => ({ type: 'button', action_id: actionId, value, text: plain(label, MAX_TITLE), ...(style ? { style } : {}) });
+
+// エージェントの文や入力はそのまま plain_text で出す（書式にも全員への呼び出しにもならない）
+function plainSections(text) {
+  const s = String(text || '');
+  const out = [];
+  for (let i = 0; i < s.length; i += MAX_BLOCK_TEXT) out.push({ type: 'section', text: { type: 'plain_text', text: s.slice(i, i + MAX_BLOCK_TEXT) } });
+  return out;
+}
+
+// 通知に付ける Block Kit
+function promptBlocks(prompt, text) {
+  const blocks = [textSection(text)];
+  if (prompt.kind === 'permission') {
+    blocks.push(...plainSections(prompt.detail));
+    if (prompt.cut) blocks.push(noteBlock(escapeText(tr('入力が長くて全文を出せないので、Slack からは拒否だけできます。許可はアプリの画面で行います'))));
+    const allow = prompt.cut ? [] : [button(ACTION_ALLOW, tr('許可'), prompt.id, 'primary')];
+    blocks.push({ type: 'actions', elements: [...allow, button(ACTION_DENY, tr('拒否'), prompt.id, 'danger')] });
+  } else {
+    blocks.push({ type: 'actions', elements: [button(ACTION_ANSWER, tr('回答する'), prompt.id, 'primary')] });
+  }
+  return blocks;
+}
+
+// 質問1つ分の入力欄。選択肢の value は番号（Slack の上限より長い選択肢があるので）
+function questionBlocks(q, i) {
+  const options = (q.options || [])
+    .map((o, j) => ({ ...(o.description ? { description: plain(o.description, MAX_OPTION_TEXT) } : {}), text: plain(o.label, MAX_OPTION_TEXT), value: String(j) }))
+    .filter((o) => o.text.text.trim())
+    .slice(0, MAX_OPTIONS);
+  const text = { type: 'plain_text_input', action_id: 'text', multiline: true };
+  if (!options.length) return [{ type: 'input', block_id: `t${i}`, optional: true, label: plain(q.question, MAX_LABEL), element: text }];
+  return [
+    { type: 'input', block_id: `q${i}`, optional: true, label: plain(q.question, MAX_LABEL), element: { type: q.multiSelect ? 'checkboxes' : 'radio_buttons', action_id: 'choice', options } },
+    { type: 'input', block_id: `t${i}`, optional: true, label: plain(tr('自由に書く'), MAX_LABEL), element: text },
+  ];
+}
+
+// モーダルの答えを取り出す（書いた文があれば、ひとつ選ぶ質問ではそちらを使う）
+function readAnswer(values, q, i) {
+  const choice = (values[`q${i}`] || {}).choice || {};
+  const selected = choice.selected_options || (choice.selected_option ? [choice.selected_option] : []);
+  const picked = selected.map((o) => ((q.options || [])[Number(o.value)] || {}).label).filter(Boolean);
+  const text = String(((values[`t${i}`] || {}).text || {}).value || '').trim();
+  return (q.multiSelect ? [...picked, text] : text ? [text] : picked).filter(Boolean).join(', ');
+}
+
+// 仕様の確認の答えを、エージェントに送る文にする（画面の specAnswerMessage と同じ形）
+function specAnswerText(questions, answers, note) {
+  const lines = [tr('仕様の質問への答えです。'), ''];
+  questions.forEach((q, i) => lines.push(`${i + 1}. ${q.question}`, `   → ${answers[i] || tr('おまかせ（妥当な案で決めてください）')}`));
+  if (note) lines.push('', tr('補足: {note}', { note }));
+  return lines.join('\n');
+}
+
 const folderName = (p) => String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
 
 // ---------- 設定の「連携」の欄 ----------
@@ -143,7 +219,7 @@ const provider = {
     { name: 'notifyDone', type: 'checkbox', label: '完了を通知する', default: true },
     { name: 'notifyFailed', type: 'checkbox', label: '失敗を通知する', default: true },
     { name: 'notifyAwaiting', type: 'checkbox', label: '確認待ちを通知する（仕様の確認・権限の確認・回答待ち・レビュー待ち・コンフリクト）', default: true },
-    { name: 'allowedUsers', type: 'textarea', label: 'タスクを開始できる Slack ユーザー ID', placeholder: 'U0123456789, U0987654321', help: '空なら誰も開始できません。タスクの開始は、このマシンでエージェントがコードを動かすことになります' },
+    { name: 'allowedUsers', type: 'textarea', label: 'タスクの開始と承認・回答ができる Slack ユーザー ID', placeholder: 'U0123456789, U0987654321', help: '空なら誰も開始も承認もできません。どちらも、このマシンでエージェントがコードを動かすことにつながります。ここに書いた人は、通知のボタンでツールの実行を許可できます' },
     { name: 'channelMap', type: 'textarea', label: 'チャンネルとプロジェクトの対応', placeholder: 'C0123456789 /path/to/project', help: '1行に「チャンネル ID」と「プロジェクトのフォルダ」を書きます。書いたチャンネルからだけ開始できます' },
   ],
   guide: [
@@ -151,8 +227,9 @@ const provider = {
     '「Socket Mode」を有効にして、App-Level Token（スコープは connections:write）を作り、下の欄に入れます',
     '「OAuth & Permissions」の Bot Token Scopes に app_mentions:read と chat:write を足します。/コマンドも使うなら commands も足します',
     '「Event Subscriptions」を有効にして、Bot Events に app_mention を足します。/コマンドを使うなら「Slash Commands」で作ります（Socket Mode なので Request URL は要りません）',
+    '通知のボタンで承認と回答をするなら「Interactivity & Shortcuts」を有効にします（Socket Mode なので Request URL は要りません）',
     'ワークスペースにインストールして Bot Token を下の欄に入れ、使うチャンネルに Bot を招待します',
-    '動くのはこのアプリを開いている間だけです。閉じている間は、通知の投稿も Slack からの開始も動きません',
+    '動くのはこのアプリを開いている間だけです。閉じている間は、通知の投稿も、Slack からの開始・承認・回答も動きません',
   ],
 
   // 保存の前に確かめる。secrets は今回入力された分だけ
@@ -200,6 +277,7 @@ class SlackBridge extends EventEmitter {
     this.postError = '';
     this.botUserId = '';
     this.seen = new Map();
+    this.prompts = new Map(); // ボタンの付いた通知（ID → 待っている確認）。再起動で消える
     this.queue = Promise.resolve(); // 投稿の順番を、受付 → 完了のように起きた順に保つ
     this.attached = false;
   }
@@ -212,8 +290,12 @@ class SlackBridge extends EventEmitter {
         if (id === provider.id) this.reconnect();
       };
       this.onNotification = (n, c) => this.notify(n, c);
+      this.onSettled = (id, label) => this.settled(id, label);
+      this.onCardChanged = (id) => this.cardChanged(id);
       this.trackers.on('changed', this.onChanged);
       this.agents.on('notification', this.onNotification);
+      this.agents.on('settled', this.onSettled);
+      this.agents.on('changed', this.onCardChanged);
     }
     this.reconnect();
   }
@@ -223,6 +305,8 @@ class SlackBridge extends EventEmitter {
       this.attached = false;
       this.trackers.off('changed', this.onChanged);
       this.agents.off('notification', this.onNotification);
+      this.agents.off('settled', this.onSettled);
+      this.agents.off('changed', this.onCardChanged);
     }
     this.teardown();
     this.setState('off');
@@ -401,6 +485,8 @@ class SlackBridge extends EventEmitter {
       if (fresh) this.track(this.onEvent(m.payload));
     } else if (m.type === 'slash_commands') {
       this.onCommand(m.envelope_id, m.payload, fresh);
+    } else if (m.type === 'interactive') {
+      this.onInteractive(m.envelope_id, m.payload, fresh);
     } else {
       this.ack(m.envelope_id);
     }
@@ -456,7 +542,7 @@ class SlackBridge extends EventEmitter {
       return;
     }
     if (u.protocol !== 'https:' || u.hostname !== 'hooks.slack.com') return;
-    await request(u, { method: 'POST', json: { response_type: 'ephemeral', text }, secrets: [String(url)], label: LABEL });
+    await request(u, { method: 'POST', json: { response_type: 'ephemeral', replace_original: false, text }, secrets: [String(url)], label: LABEL });
   }
 
   refusal(reason) {
@@ -504,26 +590,222 @@ class SlackBridge extends EventEmitter {
     }
   }
 
+  // ---------- ボタンとモーダル ----------
+
+  allowed(user) {
+    return !!user && parseUsers(this.config().allowedUsers).users.has(user);
+  }
+
+  // Slack から答えてもらえる確認なら、その内容。ボタンを押せる人がいない・受信できないときは出さない
+  promptFor(n, c) {
+    if (!c || !parseUsers(this.config().allowedUsers).users.size || !this.trackers.hasSecret(provider.id, 'appToken')) return null;
+    const base = { cardId: c.id };
+    if (n.kind === 'permission') {
+      const req = (c.permissions || []).find((r) => r.id === n.reqId);
+      return req ? { ...base, id: req.id, kind: 'permission', detail: req.detail, cut: !!req.detailCut } : null;
+    }
+    if (n.kind === 'question') {
+      const req = (c.questions || []).find((r) => r.id === n.reqId);
+      return req ? { ...base, id: req.id, kind: 'question', questions: req.questions } : null;
+    }
+    return n.kind === 'awaiting' && c.awaitingReply ? { ...base, id: n.id, kind: 'reply' } : null;
+  }
+
+  // ボタンの付いた通知を投稿する。投稿の途中で終わった確認は、投稿できてからボタンを消す
+  async ask(prompt, channel, text, threadTs) {
+    if (prompt.kind === 'reply') {
+      for (const old of this.prompts.values()) if (old.kind === 'reply' && old.cardId === prompt.cardId) this.close(old, tr('新しい確認が出たので、こちらは閉じました'));
+    }
+    prompt.text = text;
+    this.prompts.set(prompt.id, prompt);
+    try {
+      const res = await this.post(channel, text, threadTs, { blocks: promptBlocks(prompt, text) });
+      prompt.channel = res.channel || channel;
+      prompt.ts = res.ts;
+    } catch (err) {
+      this.prompts.delete(prompt.id);
+      throw err;
+    }
+    if (prompt.result) await this.finish(prompt);
+  }
+
+  // 確認を閉じる。ここからあとはボタンを押しても何も起きない
+  close(prompt, result) {
+    if (prompt.result) return;
+    prompt.result = result;
+    this.prompts.delete(prompt.id);
+    if (prompt.ts) this.track(this.finish(prompt));
+  }
+
+  // 通知からボタンを消して、どうなったかを書く
+  finish(prompt) {
+    const { channel, ts, text, result } = prompt;
+    const line = escapeText(result).replace(/&lt;(@[A-Z0-9]+)&gt;/g, '<$1>');
+    return this.enqueue(() => this.call('chat.update', { channel, ts, text: `${text}\n${line}`.slice(0, MAX_TEXT), blocks: [textSection(text), noteBlock(line)] }));
+  }
+
+  resultOf(label, by) {
+    return by ? `${label}（<@${by}>）` : label;
+  }
+
+  // アプリの画面で答えた・中断された・Slack で答えた（AgentManager の settle）
+  settled(id, label) {
+    const prompt = this.prompts.get(id);
+    if (prompt) this.close(prompt, this.resultOf(label || tr('中断されました'), prompt.by));
+  }
+
+  // 回答待ちは settle を通らないので、カードの変化で見る
+  cardChanged(id) {
+    for (const prompt of this.prompts.values()) {
+      if (prompt.kind !== 'reply' || prompt.cardId !== id) continue;
+      const c = this.store.card(id);
+      if (!c || !c.awaitingReply) this.close(prompt, prompt.by ? this.resultOf(tr('回答しました'), prompt.by) : tr('この確認は終わりました'));
+    }
+  }
+
+  onInteractive(envelopeId, p, fresh) {
+    const payload = p || {};
+    if (payload.type === 'view_submission' && payload.view && payload.view.callback_id === VIEW_ANSWER) {
+      if (fresh) this.onSubmit(envelopeId, payload);
+      else this.ack(envelopeId);
+      return;
+    }
+    this.ack(envelopeId);
+    if (fresh && payload.type === 'block_actions' && this.firstTime(`action:${payload.trigger_id || envelopeId}`)) this.track(this.onAction(payload));
+  }
+
+  // 通知のボタン。断るときは押した本人にだけ見せる
+  async onAction(payload) {
+    const action = (payload.actions || [])[0] || {};
+    const isPermission = action.action_id === ACTION_ALLOW || action.action_id === ACTION_DENY;
+    if (!isPermission && action.action_id !== ACTION_ANSWER) return;
+    const user = (payload.user || {}).id;
+    const say = (text) => this.respond(payload.response_url, text);
+    if (!this.allowed(user)) {
+      await say(tr('承認と回答ができるのは、許可された人だけです'));
+      return;
+    }
+    const prompt = this.prompts.get(action.value);
+    const same = prompt && prompt.ts === (payload.message || {}).ts && prompt.channel === (payload.channel || {}).id;
+    const c = same && this.store.card(prompt.cardId);
+    if (!c || isPermission !== (prompt.kind === 'permission') || (action.action_id === ACTION_ALLOW && prompt.cut)) {
+      await say(tr('この確認はもう終わっています'));
+      return;
+    }
+    if (!isPermission) {
+      try {
+        await slackApi('views.open', this.secret('botToken'), { trigger_id: payload.trigger_id, view: this.answerView(prompt, c) });
+      } catch (err) {
+        await say(tr('回答の画面を開けませんでした: {message}', { message: err.message }));
+      }
+      return;
+    }
+    const allow = action.action_id === ACTION_ALLOW;
+    prompt.by = user;
+    try {
+      this.agents.answerPermission(prompt.cardId, prompt.id, allow ? 'allow' : 'deny');
+    } catch (err) {
+      prompt.by = null;
+      await say(err.message);
+      return;
+    }
+    this.agents.log(c, 'system', tr('Slack の {user} が{action}しました', { user: this.who(payload), action: allow ? tr('許可') : tr('拒否') }));
+  }
+
+  who(payload) {
+    const u = payload.user || {};
+    return u.username || u.name ? `@${u.username || u.name}` : u.id;
+  }
+
+  questionsOf(prompt, c) {
+    if (prompt.kind === 'question') return prompt.questions;
+    return c.specState === 'pending' && Array.isArray(c.specQuestions) && c.specQuestions.length ? c.specQuestions : null;
+  }
+
+  answerView(prompt, c) {
+    const questions = this.questionsOf(prompt, c);
+    const blocks = prompt.kind === 'reply' ? plainSections(String(c.lastText || '').slice(0, MAX_BLOCK_TEXT)) : [];
+    (questions || []).forEach((q, i) => blocks.push(...questionBlocks(q, i)));
+    if (prompt.kind === 'reply') {
+      blocks.push({ type: 'input', block_id: 'note', optional: !!questions, label: plain(questions ? tr('補足（任意）') : tr('回答')), element: { type: 'plain_text_input', action_id: 'text', multiline: true } });
+    }
+    return { type: 'modal', callback_id: VIEW_ANSWER, private_metadata: prompt.id, title: plain('Worktree Kanban', MAX_TITLE), submit: plain(tr('回答して送る'), MAX_TITLE), close: plain(tr('キャンセル'), MAX_TITLE), blocks };
+  }
+
+  // モーダルの送信。問題があれば、ack でモーダルの中にエラーを出す
+  onSubmit(envelopeId, payload) {
+    const view = payload.view;
+    const input = (view.blocks || []).find((b) => b.type === 'input');
+    const refuse = (message, block) => this.ack(envelopeId, { response_action: 'errors', errors: { [block || (input ? input.block_id : 'note')]: message } });
+    const user = (payload.user || {}).id;
+    if (!this.allowed(user)) {
+      refuse(tr('承認と回答ができるのは、許可された人だけです'));
+      return;
+    }
+    const prompt = this.prompts.get(view.private_metadata);
+    const c = prompt && prompt.kind !== 'permission' && this.store.card(prompt.cardId);
+    if (!c) {
+      refuse(tr('この確認はもう終わっています'));
+      return;
+    }
+    const values = (view.state && view.state.values) || {};
+    const questions = this.questionsOf(prompt, c);
+    const answers = (questions || []).map((q, i) => readAnswer(values, q, i));
+    const note = String(((values.note || {}).text || {}).value || '').trim();
+    prompt.by = user;
+    try {
+      if (prompt.kind === 'question') {
+        const empty = answers.findIndex((a) => !a);
+        if (empty >= 0) {
+          prompt.by = null;
+          refuse(tr('回答を書いてください'), `t${empty}`);
+          return;
+        }
+        this.agents.answerQuestion(prompt.cardId, prompt.id, Object.fromEntries(questions.map((q, i) => [q.question, answers[i]])));
+      } else {
+        if (!note && !answers.some(Boolean)) {
+          prompt.by = null;
+          refuse(tr('回答を書いてください'));
+          return;
+        }
+        this.agents.send(prompt.cardId, questions ? specAnswerText(questions, answers, note) : note);
+        this.close(prompt, this.resultOf(tr('回答しました'), user));
+      }
+    } catch (err) {
+      prompt.by = null;
+      refuse(err.message);
+      return;
+    }
+    this.ack(envelopeId);
+    this.agents.log(c, 'system', tr('Slack の {user} が{action}しました', { user: this.who(payload), action: tr('回答') }));
+  }
+
   // ---------- 投稿 ----------
 
-  post(channel, text, threadTs) {
-    const run = () => this.send(channel, text, threadTs);
+  enqueue(run) {
     const done = this.queue.then(run, run);
     this.queue = done.catch(() => {});
     return done;
   }
 
-  async send(channel, text, threadTs) {
+  post(channel, text, threadTs, extra) {
+    return this.enqueue(() => this.send(channel, text, threadTs, extra));
+  }
+
+  async send(channel, text, threadTs, extra) {
+    return this.call('chat.postMessage', { channel, text: String(text).slice(0, MAX_TEXT), unfurl_links: false, unfurl_media: false, ...(threadTs ? { thread_ts: threadTs } : {}), ...extra });
+  }
+
+  async call(method, body) {
     const token = this.secret('botToken');
     if (!token) throw new Error(tr('{label} に接続していません。設定の「連携」で接続してください。', { label: LABEL }));
-    const body = { channel, text: String(text).slice(0, MAX_TEXT), unfurl_links: false, unfurl_media: false, ...(threadTs ? { thread_ts: threadTs } : {}) };
     let res;
     try {
-      res = await slackApi('chat.postMessage', token, body);
+      res = await slackApi(method, token, body);
     } catch (err) {
       if (err.status !== 429) throw err;
       await new Promise((r) => setTimeout(r, this.timing.rateLimitWaitMs));
-      res = await slackApi('chat.postMessage', token, body);
+      res = await slackApi(method, token, body);
     }
     this.setPostError('');
     return res;
@@ -547,10 +829,13 @@ class SlackBridge extends EventEmitter {
     const origin = this.originOf(c);
     const config = this.config();
     if (!origin && (!config.notifyChannel || !config[field])) return null;
-    const hint = field === 'notifyAwaiting' ? `\n${tr('Worktree Kanban の画面で確かめてください')}` : '';
+    const prompt = this.promptFor(n, c);
+    const hint = field === 'notifyAwaiting' && !prompt ? `\n${tr('Worktree Kanban の画面で確かめてください')}` : '';
     const text = `*${escapeText(n.title)}*${n.body ? `\n${escapeText(n.body)}` : ''}${hint}`;
     // 頼んだ人には種類の設定によらず、そのスレッドで知らせる
-    return this.track(origin ? this.post(origin.channel, text, origin.threadTs) : this.post(config.notifyChannel, text));
+    const channel = origin ? origin.channel : config.notifyChannel;
+    const threadTs = origin ? origin.threadTs : undefined;
+    return this.track(prompt ? this.ask(prompt, channel, text, threadTs) : this.post(channel, text, threadTs));
   }
 }
 

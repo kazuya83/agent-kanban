@@ -122,7 +122,7 @@ When an action needs permission, you can read the full command and input on the 
 
 ### Integrations (GitHub, GitLab, Linear, Jira, Slack)
 
-Create tasks from Issues and keep their status in sync. You can also post notifications to Slack and start tasks from Slack.
+Create tasks from Issues and keep their status in sync. You can also post notifications to Slack, and start tasks, approve, and answer from Slack.
 
 | Service | Input for a task | PR / MR body | Status sync | What you need to connect |
 | --- | --- | --- | --- | --- |
@@ -135,7 +135,7 @@ It builds the instructions from the Issue title, body, and comments, and creates
 
 - **GitLab**: works with gitlab.com and self-hosted GitLab. If origin belongs to the connected GitLab, the app uses the API instead of `gh` to create MRs and to check merges, conflicts, and pipeline results
 - **Linear and Jira**: these only handle issues. PRs and MRs are created on the repository's host. Jira works with Cloud and Data Center
-- **Slack**: posts completions, failures, and items waiting for you. Allowed Slack users can start a task with a mention or a slash command in a listed channel. Nobody can start a task by default. It uses Socket Mode, so no port is opened, but it works only while the app is open. Approvals and answers to questions stay in the app
+- **Slack**: posts completions, failures, and items waiting for you. Allowed Slack users can start a task with a mention or a slash command in a listed channel. They can also approve and answer questions with buttons on notifications. Nobody can do any of this by default. It uses Socket Mode, so no port is opened, but it works only while the app is open
 
 To set up:
 
