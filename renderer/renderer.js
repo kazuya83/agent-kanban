@@ -1232,8 +1232,9 @@ function subtaskChipHtml(c) {
   }
   if (AppView.isPipelineSubtask(c)) {
     const p = card(c.relay.branchOf.parent);
-    const title = p ? `「${esc(p.title)}」のサブタスク（Pipeline の並列の枝）` : 'Pipeline の並列の枝のサブタスク';
-    return `<span class="orch-chip sub" title="${title}">${icon('branch')}サブタスク</span>`;
+    return p
+      ? tr('<span class="orch-chip sub" title="「{title}」のサブタスク（Pipeline の並列の枝）">{v}サブタスク</span>', { title: esc(p.title), v: icon('branch') })
+      : tr('<span class="orch-chip sub" title="Pipeline の並列の枝のサブタスク">{v}サブタスク</span>', { v: icon('branch') });
   }
   if (!c.subtasks) return '';
   const n = subCounts(c);
