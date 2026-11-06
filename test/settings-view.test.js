@@ -244,7 +244,38 @@ test('更新バッジはアプリの更新の節を開く', () => {
 test('前のプロジェクトの Pipeline を保存しない', () => {
   const body = fnSource('renderSettingsView');
   const save = body.slice(body.indexOf('const saveFlows ='));
-  assert.ok(save.indexOf('settingsViewKey !== viewKey') < save.indexOf('api.updateSettings'));
+  assert.ok(save.indexOf('isStale()') < save.indexOf('api.updateSettings'));
+});
+
+test('プロジェクトが変わったあとは、前の描画の一覧を描かない（新しい画面を上書きせず、画面を離れていても落ちない）', () => {
+  const body = fnSource('renderSettingsView');
+  assert.match(body, /const isStale = \(\) => settingsViewKey !== viewKey;/);
+  for (const name of ['redrawCustom', 'drawRelay']) {
+    assert.match(body, new RegExp(`const ${name} = \\(\\) => \\{\\n\\s+if \\(isStale\\(\\)\\) return;`), name);
+  }
+});
+
+// Issue ダイアログを閉じたとき、後ろの設定画面の gh の欄を確かめ直すか
+function closeModalWith({ view, open, gh }) {
+  const classes = new Set(open ? [] : ['hidden']);
+  const modal = {
+    classList: { contains: (c) => classes.has(c), add: (c) => classes.add(c) },
+    querySelector: () => (gh ? {} : null),
+    addEventListener() {},
+  };
+  const ctx = { state: { view }, $: () => modal, refreshed: 0 };
+  ctx.refreshGh = () => ctx.refreshed++;
+  vm.createContext(ctx);
+  vm.runInContext(`${fnSource('closeModal')}; closeModal();`, ctx);
+  assert.ok(classes.has('hidden'));
+  return ctx.refreshed;
+}
+
+test('gh の欄があるダイアログを設定画面の上で閉じると、後ろの欄を確かめ直す', () => {
+  assert.strictEqual(closeModalWith({ view: 'settings', open: true, gh: true }), 1);
+  assert.strictEqual(closeModalWith({ view: 'settings', open: true, gh: false }), 0);
+  assert.strictEqual(closeModalWith({ view: 'settings', open: false, gh: true }), 0);
+  assert.strictEqual(closeModalWith({ view: 'kanban', open: true, gh: true }), 0);
 });
 
 // gh の欄

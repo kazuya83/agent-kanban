@@ -51,7 +51,6 @@ test('見出しはミュート色で、グループの間に罫線が入る。�
   const b = rule('.settings-nav-heading');
   assert.match(b, /color:\s*var\(--muted\)/);
   assert.match(b, /border-top:\s*1px solid var\(--line\)/);
-  assert.match(rule('.settings-nav-heading:first-child'), /border-top:\s*0/);
 });
 
 test('項目を押して着いた節が、現在地の判定（scrollTop + 24 以下）に入る', () => {

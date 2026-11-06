@@ -2906,8 +2906,11 @@ function openModal(html, onReady) {
   onReady?.();
 }
 function closeModal() {
+  // 設定画面の上の Issue ダイアログで gh にログインしたかもしれないので、後ろの gh の欄も確かめ直す
+  const ghDialog = state.view === 'settings' && !$('modal').classList.contains('hidden') && $('modal').querySelector('#ghPanel');
   $('modal').classList.add('hidden');
   state.chatListOpen = false;
+  if (ghDialog) refreshGh();
 }
 $('modal').addEventListener('mousedown', (e) => {
   if (e.target === $('modal')) closeModal();
@@ -4082,6 +4085,8 @@ function renderSettingsView() {
       <div class="settings-actions"><button class="btn ghost" id="sCancel">元に戻す</button><button class="btn primary" id="sOk">保存</button></div>
     </div>`;
   settingsViewKey = viewKey;
+  // ダイアログの操作を待つ間に、画面を離れたりプロジェクトが変わったりしたら、この描画の値では保存も描き直しもしない
+  const isStale = () => settingsViewKey !== viewKey;
   settingsNav = AppView.bindSettingsNav({ nav: $('settingsNav'), scroller: $('settingsMain'), section: (id) => $(`settings-${id}`) });
 
   // Pipeline の一覧（追加・編集・削除・インポートは、その場で保存する）
@@ -4145,6 +4150,7 @@ function renderSettingsView() {
     });
   };
   const redrawCustom = () => {
+    if (isStale()) return;
     drawCustomList();
     drawRelay();
     drawAgents();
@@ -4203,7 +4209,7 @@ function renderSettingsView() {
   // ---- Pipeline の一覧 ----
   const saveFlows = async (msg, extra = {}) => {
     // フローチャートの編集中にプロジェクトが変わったら（遠隔操作の切断など）、前のプロジェクトの一覧を保存しない
-    if (settingsViewKey !== viewKey) {
+    if (isStale()) {
       toast('プロジェクトが変わったので保存しませんでした');
       return false;
     }
@@ -4350,6 +4356,7 @@ function renderSettingsView() {
   };
   // Pipelineのフローの要約（工程の並びと、分岐・並列・ループの数）と、Pipeline ごとの操作
   const drawRelay = () => {
+    if (isStale()) return;
     $('sRelayList').innerHTML = flows
       .map(
         (p, i) => `<div class="pl-item ${p.id === flowDefId ? 'is-default' : ''}">
