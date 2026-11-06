@@ -20,6 +20,8 @@
 //   statusLabel: 'GitHub Projects'   状態同期のログに出す名前（無ければ label）
 //   refPlaceholder: '例: ENG-123'   Issue の入力欄の例（日本語の原文で書く）
 //   linkLine(ref) → string   PR / MR の本文に入れる1行（無ければ「キー URL」。ref は fetchIssue の結果）
+//   commentOnEvents: true   タスクの開始・PR の作成・完了を addComment で書き戻す（プロジェクトの設定 issueComments で切れる）
+//   mapsStatusNames: true   setStatus が settings.statusMapping（列ごとの名前の指定）を使う。プロジェクトの設定に欄を出す
 //
 //   課題管理サービスは次を持つ（parseRefs と fetchIssue の両方があるものが、プロジェクトの設定で選べる）
 //   parseRefs(ctx, text) → ref[]   入力の番号や URL から Issue の参照を取り出す。読めない入力は例外にする
@@ -123,6 +125,8 @@ function issueProviderMeta() {
     refPlaceholder: p.refPlaceholder || '',
     canSync: typeof p.setStatus === 'function',
     canSubIssue: typeof p.createSubIssue === 'function',
+    canComment: !!p.commentOnEvents && typeof p.addComment === 'function',
+    canMapStatus: !!p.mapsStatusNames && typeof p.setStatus === 'function',
   }));
 }
 
@@ -291,7 +295,7 @@ class Trackers extends EventEmitter {
 }
 
 // 組み込みのプロバイダ。サービスを足すときは、ここに1行足す
-const BUILTIN = ['./github'];
+const BUILTIN = ['./github', './jira'];
 for (const file of BUILTIN) register(require(file));
 
 module.exports = { Trackers, register, unregister, get, list, issueProviders, isIssueProvider, issueProviderMeta, cleanConfig, secretName };

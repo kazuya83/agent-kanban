@@ -241,6 +241,7 @@ const DEFAULT_SETTINGS = {
   issueProvider: 'github', // このプロジェクトで使う課題管理サービス（src/trackers に登録したプロバイダの ID）
   trackerConfigs: {}, // 連携するサービスの設定（アプリ全体。プロバイダの ID ごと）。トークンは入れない（src/secrets.js に保存する）
   issueStatusSync: true, // Issue から作ったタスクの列に合わせて、サービスの Issue の状態を変える（GitHub なら Projects の Status: In progress / In review / Done）
+  issueComments: true, // タスクの開始・PR の作成・完了を Issue にコメントする（commentOnEvents を持つサービスだけ。GitHub は書かない）
   statusFieldName: '', // Projects で変える項目（単一選択）の名前。空なら「Status」
   statusMapping: { inProgress: '', inReview: '', done: '' }, // 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空なら名前から自動で探す
   customAgents: [], // カスタムエージェント（元にする CLI・モデルと、プロフィール: 名前・アイコンと色・説明・振る舞いの指示）。タスク・会話・Pipeline・競争で選べる
@@ -313,7 +314,7 @@ const MAX_NOTIFICATIONS = 200;
 
 // ---------- プロジェクト（リポジトリ）ごとの設定 ----------
 // リポジトリに関わる設定だけをプロジェクトごとに持つ。コマンドのパス・モデル・同時に動かす数・自動更新などはアプリ全体で1つ
-const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueProvider', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'ciAutoFix', 'subtaskMerge', 'pushAfterMerge', 'relayFlow', 'relayFlows', 'relayFlowId', 'customAgents', 'competeCustomAgents', 'setupScript', 'teardownScript', 'runScript'];
+const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueProvider', 'issueStatusSync', 'issueComments', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'ciAutoFix', 'subtaskMerge', 'pushAfterMerge', 'relayFlow', 'relayFlows', 'relayFlowId', 'customAgents', 'competeCustomAgents', 'setupScript', 'teardownScript', 'runScript'];
 const MAX_REPO_SETTINGS = 200;
 
 // 初めて開いたプロジェクトの設定（初期値。取り込み方は PR を作成。GitHub でないリポジトリは開いたときに直接マージにする）

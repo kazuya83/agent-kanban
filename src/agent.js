@@ -904,7 +904,10 @@ class AgentManager extends EventEmitter {
   changed(card) {
     this.store.save();
     this.emit('changed', card ? card.id : null);
-    if (card) this.queueIssueSync(card);
+    if (card) {
+      this.queueIssueSync(card);
+      this.queueIssueComments(card);
+    }
   }
 
   // ---------- Issue のステータス ----------
@@ -940,13 +943,51 @@ class AgentManager extends EventEmitter {
     c.issueSync = c.issueSync || {};
     if (c.issueSync.wanted === key) return;
     c.issueSync.wanted = key;
+    this.chainIssueWork(c, () => this.runIssueSync(c, key));
+  }
+
+  // 1枚のカードの Issue への書き込みを、順番に動かす
+  chainIssueWork(c, work) {
     this.issueSyncs = this.issueSyncs || new Map();
     const prev = this.issueSyncs.get(c.id) || Promise.resolve();
-    const next = prev.then(() => this.runIssueSync(c, key));
+    const next = prev.then(work);
     this.issueSyncs.set(c.id, next);
     next.then(() => {
       if (this.issueSyncs.get(c.id) === next) this.issueSyncs.delete(c.id);
     });
+  }
+
+  // カードの開始・PR の作成・完了を、Issue にコメントする。それぞれ1回だけ（競争は同じ Issue の候補全体で1回）。
+  // サービスが commentOnEvents を持たないとき（GitHub）と、プロジェクトの設定で切っているときは何もしない
+  queueIssueComments(c) {
+    if (!c.issue || c.afterDone || !this.store.card(c.id) || this.store.repoSettings(c.repoPath).issueComments === false) return;
+    const provider = this.issueProvider(c);
+    if (!provider || !provider.commentOnEvents || typeof provider.addComment !== 'function') return;
+    const peers = this.competitors(c.id);
+    const sent = (event) => peers.some((x) => x.issueCommented && x.issueCommented[event]);
+    const bodies = [];
+    const mark = (event, value, body) => {
+      c.issueCommented = { ...(c.issueCommented || {}), [event]: value };
+      bodies.push(body);
+    };
+    if (c.status === 'running' && !sent('started')) mark('started', true, tr('Worktree Kanban でタスクを開始しました'));
+    if (c.prUrl && (c.issueCommented || {}).pr !== c.prUrl) mark('pr', c.prUrl, tr('PR を作成しました: {url}', { url: c.prUrl }));
+    if (this.issueStatusKey(c) === 'done' && !sent('done')) mark('done', true, tr('Worktree Kanban のタスクが完了しました'));
+    for (const body of bodies) this.chainIssueWork(c, () => this.runIssueComment(c, body));
+  }
+
+  // コメントに失敗してもタスクは止めない。理由はカードのログに出す
+  async runIssueComment(c, body) {
+    if (!this.store.card(c.id)) return;
+    const key = IssueRef.keyOf(c.issue);
+    try {
+      await this.addIssueComment(c, body);
+      this.log(c, 'system', tr('{key} にコメントしました: {body}', { key, body }));
+    } catch (err) {
+      this.log(c, 'error', tr('{key} にコメントできませんでした: {message}', { key, message: err.message }));
+    }
+    this.store.save();
+    this.emit('changed', c.id);
   }
 
   async runIssueSync(c, key) {

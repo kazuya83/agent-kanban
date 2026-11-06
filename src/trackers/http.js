@@ -55,7 +55,9 @@ function detailOf(data) {
   if (!data || typeof data !== 'object') return '';
   const first = (v) => (Array.isArray(v) ? v[0] : v);
   const e = first(data.errors);
-  const picks = [data.message, data.error_description, data.error, first(data.errorMessages), e && e.message, typeof e === 'string' ? e : ''];
+  // Jira は項目ごとのエラーを errors: { summary: '…' } で返す
+  const byField = e && typeof e === 'object' && !Array.isArray(e) ? Object.values(e).find((v) => typeof v === 'string') : '';
+  const picks = [data.message, data.error_description, data.error, first(data.errorMessages), e && e.message, typeof e === 'string' ? e : '', byField];
   const hit = picks.find((v) => typeof v === 'string' && v.trim());
   return hit ? hit.trim().split('\n')[0].slice(0, MAX_DETAIL) : '';
 }
