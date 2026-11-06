@@ -176,6 +176,7 @@ const PROXY_CHANNELS = new Set([
   'conflict:abort',
   'conflict:dismiss',
   'conflict:fromPr',
+  'ci:fix',
   'card:permission',
   'card:answer',
   // チャットを開くと画面が自動で既読にするので、転送しないと遠隔中に毎回エラーが出る

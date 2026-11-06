@@ -619,6 +619,9 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 
 /* コンフリクト */
 .b-conflict { background: color-mix(in srgb, var(--err) 22%, transparent); color: var(--err); font-weight: 600; }
+.b-ci-ok { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); font-weight: 600; }
+.b-ci-wait { background: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--muted); font-weight: 600; }
+.ci-failed { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
 .card.conflicting { border-left-color: var(--err); border-color: color-mix(in srgb, var(--err) 55%, transparent); }
 .cf-box { margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--err) 50%, transparent); background: color-mix(in srgb, var(--err) 7%, var(--panel)); }
 .cf-box.ok { border-color: color-mix(in srgb, var(--ok) 50%, transparent); background: color-mix(in srgb, var(--ok) 7%, var(--panel)); }

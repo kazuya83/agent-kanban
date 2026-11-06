@@ -134,6 +134,23 @@ const AFTER_DONE_NOTE = [
   '- 修正や追加の作業が必要そうなときは、どう直すかの案を書いたうえで、「修正タスクを作る」ボタンから別のタスクにするようユーザーに伝えてください',
 ].join('\n');
 // 完了したタスクで最初に話すときの指示。worktree はもうないので新しい会話で始め、元のタスクの中身を渡す
+// CI の失敗を続けて自動で直す回数の上限（通ったら数え直す）
+const CI_FIX_MAX_ATTEMPTS = 3;
+
+function buildCiFixPrompt(c, ch) {
+  return [
+    `この PR（${c.prUrl}）の CI が失敗しました（コミット ${String(ch.sha).slice(0, 7)}）。`,
+    '',
+    '失敗したチェック:',
+    ...ch.failed.map((x) => `- ${x.name}${x.url ? `: ${x.url}` : ''}`),
+    '',
+    '原因をログで確かめてから直してください。GitHub Actions のチェックは `gh run view <run id> --log-failed` でログを読めます（run id は URL の /runs/ のあとの数字です）。',
+    'テストを消す・スキップする、CI の設定を緩めるといった方法で通すのはやめてください。コードで直せない原因（CI の環境や秘密の値など）なら、変更せずにその理由を書いてください。',
+    '直したらテストを実行して確かめてください。コミットと push はアプリが行うので、しなくてかまいません。',
+    '最後に、原因とどう直したかを短くまとめてください。',
+  ].join('\n');
+}
+
 function buildAfterDonePrompt(c, message) {
   const lines = [AFTER_DONE_NOTE, '', `## 完了したタスク「${c.title}」`, '', '### タスクの指示', truncate(c.prompt, 3000), ''];
   const picked = talkExcerpt(c);
@@ -2441,6 +2458,8 @@ class AgentManager extends EventEmitter {
       c.prMergedAt = null;
       c.prCheckError = null;
       c.prMergeable = null;
+      c.prChecks = null;
+      c.ciFix = null;
       c.finalDiff = null;
       delete c.reopenBase;
       delete c.reopenFrom;
@@ -2833,6 +2852,7 @@ class AgentManager extends EventEmitter {
       if (c.status === 'failed') this.notify(c, 'failed', tr('失敗: {title}', { title: c.title }), c.error);
       // 停止・失敗したときは、予約した btw を勝手に送らない（停止したのにまた動き出さないように）
       const keepFollow = !c.stopRequested && c.status !== 'failed';
+      if (!keepFollow && c.ciFix?.running) c.ciFix.running = false;
       // 会話の返事（またはエラー）が来たら、開いて読むまで「未読」にする（自分で止めたときは除く）
       if (isChat(c) && !c.stopRequested) c.unread = true;
       c.stopRequested = false;
@@ -2840,6 +2860,10 @@ class AgentManager extends EventEmitter {
       this.changed(c);
       // Claude 以外で予約した btw は、終わったあとに追加指示として送る
       if (keepFollow ? this.flushFollowBtw(c) : this.dropFollowBtw(c)) return;
+      if (c.ciFix?.running) {
+        c.ciFix.running = false;
+        if (!c.awaitingReply) this.pushCiFix(c);
+      }
       if (relayNext) return relayTo.parallel ? this.forkParallel(c, relayTo.parallel) : this.advanceRelay(c, relayTo.to);
       if (c.relay && c.relay.waiting) this.tryJoin(c.id);
       const relayParent = this.relayParentOf(c);
@@ -3496,8 +3520,9 @@ class AgentManager extends EventEmitter {
       c.prState = 'OPEN';
       c.prMergedAt = null;
       c.prCheckError = null;
-      // push したので、コンフリクトしているかは GitHub でもう一度確かめる
+      // push したので、コンフリクトしているかと CI の結果は GitHub でもう一度確かめる
       c.prMergeable = null;
+      c.prChecks = null;
       if (c.conflictResolved && c.conflictResolved.pr) c.conflictResolved = null;
       if (c.conflict && c.conflict.pr) c.conflict = null;
 
@@ -3584,7 +3609,9 @@ class AgentManager extends EventEmitter {
         changed = true;
       }
       if (this.updatePrConflict(c, pr)) changed = true;
+      if (this.updatePrChecks(c, pr)) changed = true;
       if (changed) this.changed(c);
+      await this.handleCiFailure(c);
       return false;
     }
 
@@ -3658,6 +3685,104 @@ class AgentManager extends EventEmitter {
       changed = true;
     }
     return changed;
+  }
+
+  /**
+   * PR の CI の結果をカードに載せる。通ったら、自動修正の回数を数え直す
+   * @returns {boolean} カードを変えたら true
+   */
+  updatePrChecks(c, pr) {
+    const now = pr.state === 'OPEN' ? pr.checks || null : null;
+    if (JSON.stringify(c.prChecks || null) === JSON.stringify(now)) return false;
+    c.prChecks = now;
+    if (now && now.state === 'SUCCESS' && c.ciFix) {
+      if (c.ciFix.attempts > 0) {
+        this.log(c, 'system', tr('CI が通りました: {url}', { url: c.prUrl }));
+        this.notify(c, 'review', tr('CI が通りました: {title}', { title: c.title }), c.prUrl);
+      }
+      c.ciFix = null;
+    }
+    return true;
+  }
+
+  // CI の失敗を、コミットごとに1回だけ扱う。チェックがすべて終わってから、自動で直すか知らせるかを決める
+  async handleCiFailure(c) {
+    const ch = c.prChecks;
+    if (!ch || ch.state !== 'FAILURE' || ch.pending > 0 || !ch.sha) return;
+    if (c.ciFix && c.ciFix.sha === ch.sha) return;
+    const blocked = await this.ciAutoFixBlock(c, ch);
+    if (!this.store.card(c.id) || c.prChecks !== ch || (c.ciFix && c.ciFix.sha === ch.sha)) return;
+    const names = ch.failed.map((x) => x.name).join(', ');
+    c.ciFix = { sha: ch.sha, attempts: c.ciFix?.attempts || 0, running: false };
+    if (!blocked) {
+      this.log(c, 'error', tr('CI が失敗したので、自動で直します（{n}/{max} 回目）: {names}', { n: c.ciFix.attempts + 1, max: CI_FIX_MAX_ATTEMPTS, names }));
+      this.startCiFix(c);
+      return;
+    }
+    this.log(c, 'error', blocked === 'limit'
+      ? tr('CI の自動修正を {max} 回試しましたが、まだ失敗しています（{names}）: {url}', { max: CI_FIX_MAX_ATTEMPTS, names, url: c.prUrl })
+      : tr('CI が失敗しました（{names}）: {url}', { names, url: c.prUrl }));
+    this.notify(c, 'failed', tr('CI が失敗しました: {title}', { title: c.title }), names);
+    this.changed(c);
+  }
+
+  // 自動で直してはいけないときは、その理由（'limit' / 'off' / 'busy'）を返す
+  async ciAutoFixBlock(c, ch) {
+    if (this.store.repoSettings(c.repoPath).ciAutoFix === false) return 'off';
+    if ((c.ciFix?.attempts || 0) >= CI_FIX_MAX_ATTEMPTS) return 'limit';
+    if (!c.worktreePath || c.status !== 'review' || c.awaitingReply || c.conflict || c.prMergeable === 'CONFLICTING') return 'busy';
+    if (this.merging?.has(c.id) || c.relay?.waiting || c.subtasks?.phase === 'run') return 'busy';
+    try {
+      // 手元に PR に入っていない作業があるときは、勝手に混ぜて push しない
+      if ((await git.revParse(c.worktreePath, 'HEAD')) !== ch.sha || (await git.isDirty(c.worktreePath))) return 'busy';
+    } catch {
+      return 'busy';
+    }
+    return null;
+  }
+
+  startCiFix(c) {
+    const ch = c.prChecks;
+    c.ciFix = { sha: ch.sha, attempts: (c.ciFix?.attempts || 0) + 1, running: true };
+    const prompt = buildCiFixPrompt(c, ch);
+    this.log(c, 'user', prompt);
+    this.enqueue(c, prompt);
+  }
+
+  // 「直してもらう」ボタン。自動修正を切っているとき・上限に達したときも、ここからは頼める
+  fixCi(id) {
+    const c = this.must(id);
+    if (!c.prUrl || c.prState !== 'OPEN' || c.prChecks?.state !== 'FAILURE') throw new Error(tr('CI は失敗していません'));
+    if (!c.worktreePath) throw new Error(tr('worktree がないので、アプリの中では直せません。GitHub 上で直してください'));
+    if (!['review', 'failed'].includes(c.status)) throw new Error(tr('実行中は直し始められません'));
+    if (c.conflict) throw new Error(tr('コンフリクトを解消してから直してください'));
+    if (this.merging?.has(id)) throw new Error(tr('処理中です'));
+    this.assertNotInRelayJoin(c);
+    this.startCiFix(c);
+  }
+
+  // CI を直す実行が終わったら、PR のブランチに push して、もう一度 CI を動かす
+  async pushCiFix(c) {
+    if (!c.worktreePath || !c.prUrl || this.merging?.has(c.id)) return;
+    this.merging = this.merging || new Set();
+    this.merging.add(c.id);
+    try {
+      if ((await git.revParse(c.worktreePath, 'HEAD')) === c.ciFix?.sha) {
+        this.log(c, 'error', tr('CI を直す変更はありませんでした。内容を確かめてください: {url}', { url: c.prUrl }));
+        this.notify(c, 'failed', tr('CI を自動で直せませんでした: {title}', { title: c.title }), c.lastText || c.prUrl);
+        return;
+      }
+      await git.push(c.worktreePath, 'origin', c.branch, true);
+      this.log(c, 'system', tr('CI の修正を push しました。結果を確かめます: {url}', { url: c.prUrl }));
+      c.prChecks = null;
+      c.prMergeable = null;
+      this.changed(c);
+    } catch (err) {
+      this.log(c, 'error', tr('CI の修正を push できませんでした: {message}', { message: err.message }));
+      this.notify(c, 'failed', tr('CI の修正を push できませんでした: {title}', { title: c.title }), err.message);
+    } finally {
+      this.merging.delete(c.id);
+    }
   }
 
   raisePrConflict(c, base) {

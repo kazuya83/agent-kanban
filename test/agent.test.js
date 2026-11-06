@@ -432,6 +432,96 @@ test('PR がコンフリクトしたら、アプリの中で解消して PR を�
   assert.strictEqual(c.prMergeable, 'MERGEABLE');
 });
 
+test('CI の結果をまとめる: 失敗・実行中・取り消し・実行し直し', () => {
+  const { summarizeChecks } = require('../src/gh');
+  const run = (name, conclusion, status = 'COMPLETED', extra = {}) => ({ __typename: 'CheckRun', name, workflowName: 'Test', status, conclusion, detailsUrl: `https://x/${name}`, ...extra });
+  assert.strictEqual(summarizeChecks(undefined), null);
+  assert.strictEqual(summarizeChecks([], 'a').state, 'NONE');
+  assert.strictEqual(summarizeChecks([run('a', 'SUCCESS'), run('b', 'SKIPPED')]).state, 'SUCCESS');
+  assert.strictEqual(summarizeChecks([run('a', 'SUCCESS'), run('b', '', 'IN_PROGRESS')]).state, 'PENDING');
+  assert.strictEqual(summarizeChecks([run('a', 'CANCELLED')]).state, 'ATTENTION');
+  const mixed = summarizeChecks([run('a', 'FAILURE'), run('b', '', 'QUEUED'), { __typename: 'StatusContext', context: 'ext', state: 'ERROR', targetUrl: 'https://y' }], 'abc');
+  assert.strictEqual(mixed.state, 'FAILURE');
+  assert.strictEqual(mixed.pending, 1);
+  assert.strictEqual(mixed.sha, 'abc');
+  assert.deepStrictEqual(mixed.failed, [{ name: 'Test / a', url: 'https://x/a' }, { name: 'ext', url: 'https://y' }]);
+  // 実行し直して通ったチェックは、古い失敗を数えない
+  const rerun = [run('a', 'FAILURE', 'COMPLETED', { startedAt: '2026-01-01T00:00:00Z' }), run('a', 'SUCCESS', 'COMPLETED', { startedAt: '2026-01-01T01:00:00Z' })];
+  assert.strictEqual(summarizeChecks(rerun).state, 'SUCCESS');
+});
+
+test('CI が失敗したら、エージェントが直して push し、通ったら回数を数え直す', async () => {
+  const { agents, store, c, setPr } = await setupPr('ci fix');
+  const commitIn = (file, text) => {
+    fs.writeFileSync(path.join(c.worktreePath, file), text);
+    execFileSync('git', ['add', file], { cwd: c.worktreePath });
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'task'], { cwd: c.worktreePath });
+  };
+  commitIn('README.md', 'hello from task\n');
+  await agents.createPullRequest(c.id);
+  const head = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: c.worktreePath }).toString().trim();
+  const failed = (sha, pending = 0) => ({ state: 'FAILURE', sha, total: 1 + pending, passed: 0, pending, failed: [{ name: 'Test / test', url: 'https://github.com/o/r/actions/runs/1' }] });
+
+  // まだ動いているチェックがあるうちは待つ
+  setPr({ headRefOid: head(), checks: failed(head(), 1) });
+  await agents.checkPullRequests();
+  assert.strictEqual(c.prChecks.state, 'FAILURE');
+  assert.strictEqual(c.status, 'review');
+
+  // 手元に PR に入っていない変更があるときは、勝手に直さず知らせる
+  const sha = head();
+  fs.writeFileSync(path.join(c.worktreePath, 'README.md'), 'wip\n');
+  setPr({ headRefOid: sha, checks: failed(sha) });
+  await agents.checkPullRequests();
+  assert.strictEqual(c.status, 'review');
+  assert.strictEqual(c.ciFix.attempts, 0);
+  assert.match(agents.logs(c.id).at(-1).text, /CI が失敗しました/);
+  execFileSync('git', ['checkout', 'README.md'], { cwd: c.worktreePath });
+
+  // 同じコミットで2度は扱わない
+  await agents.checkPullRequests();
+  assert.strictEqual(c.status, 'review');
+
+  // 手で頼むと、失敗したチェックを渡して動かし、終わったら push する
+  agents.fixCi(c.id);
+  assert.match(agents.logs(c.id).at(-1).text, /Test \/ test/);
+  await waitFor(() => c.status === 'review' && !c.ciFix.running);
+  await waitFor(() => /CI の修正を push しました/.test(agents.logs(c.id).map((l) => l.text).join('\n')));
+  assert.strictEqual(c.ciFix.attempts, 1);
+  assert.strictEqual(c.prChecks, null);
+  const remoteRepo = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: c.worktreePath }).toString().trim();
+  assert.strictEqual(execFileSync('git', ['rev-parse', c.branch], { cwd: remoteRepo }).toString().trim(), head());
+  assert.notStrictEqual(head(), sha);
+
+  // 新しいコミットでまた失敗すると、自動で直す（設定で切れる）
+  commitIn('a.txt', '1');
+  store.settings.ciAutoFix = false;
+  setPr({ headRefOid: head(), checks: failed(head()) });
+  await agents.checkPullRequests();
+  assert.strictEqual(c.status, 'review');
+  store.settings.ciAutoFix = true;
+  commitIn('b.txt', '2');
+  setPr({ headRefOid: head(), checks: failed(head()) });
+  await agents.checkPullRequests();
+  assert.ok(['queued', 'running', 'review'].includes(c.status));
+  assert.strictEqual(c.ciFix.attempts, 2);
+  await waitFor(() => c.status === 'review' && !c.ciFix.running);
+
+  // 上限に達したら、もう自動では直さない
+  c.ciFix.attempts = 3;
+  commitIn('c.txt', '3');
+  setPr({ headRefOid: head(), checks: failed(head()) });
+  await agents.checkPullRequests();
+  assert.strictEqual(c.status, 'review');
+  assert.match(agents.logs(c.id).at(-1).text, /3 回試しましたが/);
+
+  // 通ったら数え直す
+  setPr({ headRefOid: head(), checks: { state: 'SUCCESS', sha: head(), total: 1, passed: 1, pending: 0, failed: [] } });
+  await agents.checkPullRequests();
+  assert.strictEqual(c.ciFix, null);
+  assert.throws(() => agents.fixCi(c.id), /CI は失敗していません/);
+});
+
 test('PR がコンフリクトしたら、Claude に解消してもらえる', async () => {
   const { agents, c, setPr, g, repo } = await setupPr('pr conflict agent');
   const commitIn = (dir, file, text, msg) => {

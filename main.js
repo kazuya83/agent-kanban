@@ -894,12 +894,13 @@ app.whenReady().then(async () => {
     return { branches, current, hasOrigin };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'deleteSessionsOnMerge', 'specCheck', 'subtaskMerge', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'relayFlow', 'relayFlows', 'relayFlowId', 'competeAgents', 'competeCustomAgents', 'customAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'deleteSessionsOnMerge', 'specCheck', 'ciAutoFix', 'subtaskMerge', 'branchNamingRule', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'relayFlow', 'relayFlows', 'relayFlowId', 'competeAgents', 'competeCustomAgents', 'customAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
     if (patch && 'branchNamingRule' in patch) patch = { ...patch, branchNamingRule: String(patch.branchNamingRule || '').trim() };
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
     if (patch && 'suggestSkillsOnDone' in patch) patch = { ...patch, suggestSkillsOnDone: !!patch.suggestSkillsOnDone };
     if (patch && 'deleteSessionsOnMerge' in patch) patch = { ...patch, deleteSessionsOnMerge: !!patch.deleteSessionsOnMerge };
     if (patch && 'specCheck' in patch) patch = { ...patch, specCheck: !!patch.specCheck };
+    if (patch && 'ciAutoFix' in patch) patch = { ...patch, ciAutoFix: !!patch.ciAutoFix };
     if (patch && 'weeklyResetDay' in patch) patch = { ...patch, weeklyResetDay: /^[0-6]$/.test(String(patch.weeklyResetDay)) ? String(patch.weeklyResetDay) : '' };
     if (patch && 'weeklyResetTime' in patch) patch = { ...patch, weeklyResetTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(String(patch.weeklyResetTime)) ? String(patch.weeklyResetTime) : '00:00' };
     if (patch && 'issueStatusSync' in patch) patch = { ...patch, issueStatusSync: !!patch.issueStatusSync };
@@ -1081,6 +1082,7 @@ app.whenReady().then(async () => {
   handle('conflict:abort', (id) => agents.abortConflict(id));
   handle('conflict:dismiss', (id) => agents.dismissConflict(id));
   handle('conflict:fromPr', (id) => agents.reopenPrConflict(id));
+  handle('ci:fix', (id) => agents.fixCi(id));
   handle('card:permission', ({ id, reqId, decision, message }) => agents.answerPermission(id, reqId, decision, message));
   handle('card:answer', ({ id, reqId, answers }) => agents.answerQuestion(id, reqId, answers));
   handle('card:open', async (id) => {
