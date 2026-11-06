@@ -472,7 +472,8 @@ class Store {
   constructor(file) {
     this.file = file;
     // 言語は main.js が setLanguage したあとに new Store する。ここでは setLanguage しない
-    this.data = { settings: { ...DEFAULT_SETTINGS, relaySteps: defaultRelaySteps(), relayFlow: cloneFlow(defaultRelayFlow()) }, cards: [], removedCost: {}, costLog: [], weeklyResetAt: 0, notifications: [], schedules: [] };
+    // 読めないときの初期 language は、その時点の表示言語（欠けたファイルは en、壊れたファイルは ja）
+    this.data = { settings: { ...DEFAULT_SETTINGS, language: I18n.getLanguage(), relaySteps: defaultRelaySteps(), relayFlow: cloneFlow(defaultRelayFlow()) }, cards: [], removedCost: {}, costLog: [], weeklyResetAt: 0, notifications: [], schedules: [] };
     this.timer = null;
     this.load();
   }
@@ -490,7 +491,7 @@ class Store {
       this.data.schedules = cleanSchedules(raw.schedules);
       migrateSettings(this.data.settings, raw.settings || {}, this.data.cards);
     } catch {
-      /* 初回起動 */
+      /* ファイルが無い、または壊れている。language はコンストラクタで入れた表示言語のまま */
     }
   }
 

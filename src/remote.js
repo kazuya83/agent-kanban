@@ -22,13 +22,32 @@ const SECRET_SETTINGS = ['remotePairTokens', 'remoteClientToken', 'remoteClientH
 // マシンごとの設定。ホストへ転送しない（ホストのエラー文はホストの言語のまま）
 const LOCAL_SETTINGS = ['language'];
 
-// board:get / board:changed などで渡すボードから、秘密の設定を抜く
+// 設定オブジェクトから、秘密とマシンごとの項目を抜いたコピー（元は変えない）
+function withoutMachineSettings(settings) {
+  const out = { ...settings };
+  for (const k of SECRET_SETTINGS) delete out[k];
+  for (const k of LOCAL_SETTINGS) delete out[k];
+  return out;
+}
+
+// board:get / board:changed のボードと、settings:update が返す設定そのものから、秘密とマシンごとの項目を抜く
 function redactForRemote(data) {
-  if (!data || typeof data !== 'object' || !data.settings || typeof data.settings !== 'object') return data;
-  const settings = { ...data.settings };
-  for (const k of SECRET_SETTINGS) delete settings[k];
-  for (const k of LOCAL_SETTINGS) delete settings[k];
-  return { ...data, settings };
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+  if (data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings)) {
+    return { ...data, settings: withoutMachineSettings(data.settings) };
+  }
+  // settings:update の戻り値は設定オブジェクトそのもの（data.settings が無い）
+  if (SECRET_SETTINGS.some((k) => k in data) || LOCAL_SETTINGS.some((k) => k in data)) return withoutMachineSettings(data);
+  return data;
+}
+
+// 操作側が受け取った settings:update の戻り値に、このマシンの言語を入れ直す
+// （ホストは language を載せない。載せてしまっても、手元の言語で上書きする）
+function restoreLocalLanguage(data, localSettings) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+  if (!localSettings || typeof localSettings !== 'object' || Array.isArray(localSettings)) return data;
+  if (!I18n.isLanguage(localSettings.language)) return data;
+  return { ...data, language: localSettings.language };
 }
 
 // ホストへ送る設定の更新から、このマシンだけの項目を外す
@@ -320,7 +339,7 @@ class RemoteHost extends EventEmitter {
             this.pairExpiresAt = 0;
             this.emit('changed');
           }
-          send(socket, { id, type: 'result', ok: false, error: 'ペアリングコードが違うか、期限切れです。ホスト側で新しいコードを出してください' });
+          send(socket, { id, type: 'result', ok: false, error: tr('ペアリングコードが違うか、期限切れです。ホスト側で新しいコードを出してください') });
           return;
         }
         const token = genToken();
@@ -340,7 +359,7 @@ class RemoteHost extends EventEmitter {
         const token = String(msg.token || '');
         const ok = [...this.tokens].some((t) => timingEqual(token, t));
         if (!ok) {
-          send(socket, { id, type: 'result', ok: false, code: 'BAD_TOKEN', error: 'トークンが無効です。もう一度ペアリングしてください' });
+          send(socket, { id, type: 'result', ok: false, code: 'BAD_TOKEN', error: tr('トークンが無効です。もう一度ペアリングしてください') });
           return;
         }
         authed = true;
@@ -351,13 +370,13 @@ class RemoteHost extends EventEmitter {
         return;
       }
       if (!authed) {
-        send(socket, { id, type: 'result', ok: false, error: '先にペアリングまたは認証してください' });
+        send(socket, { id, type: 'result', ok: false, error: tr('先にペアリングまたは認証してください') });
         return;
       }
       if (msg.type === 'invoke') {
         const channel = String(msg.channel || '');
         if (!isProxyChannel(channel)) {
-          send(socket, { id, type: 'result', ok: false, error: `この操作は遠隔では使えません: ${channel}` });
+          send(socket, { id, type: 'result', ok: false, error: tr('この操作は遠隔では使えません: {channel}', { channel }) });
           return;
         }
         try {
@@ -688,6 +707,7 @@ module.exports = {
   composeTabs,
   VIEW_CHANNELS,
   redactForRemote,
+  restoreLocalLanguage,
   MAX_PAIR_FAILURES,
   RemoteHost,
   RemoteClient,

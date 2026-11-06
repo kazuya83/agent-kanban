@@ -122,7 +122,7 @@ async function createRepo({ parent, name, github = '', git: useGit = true }) {
     await runGh(['repo', 'create', n, `--${github}`, '--source', '.', '--remote', 'origin', '--push'], dir);
   } catch (err) {
     // 手元のリポジトリはできているので、開いたうえで知らせる
-    return { dir, github: '', warning: `手元のリポジトリは作りましたが、${err.message}` };
+    return { dir, github: '', warning: tr('手元のリポジトリは作りましたが、{message}', { message: err.message }) };
   }
   return { dir, github };
 }

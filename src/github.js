@@ -230,8 +230,9 @@ const UPDATE_MUTATION = `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, 
   }
 }`;
 
-const SCOPE_MESSAGE =
-  'GitHub Projects のステータスを変えるには、gh に project の権限が必要です。設定の「Projects の権限を追加」を押すか、ターミナルで gh auth refresh -h github.com -s project を実行してください';
+function projectScopeMessage() {
+  return tr('GitHub Projects のステータスを変えるには、gh に project の権限が必要です。設定の「Projects の権限を追加」を押すか、ターミナルで gh auth refresh -h github.com -s project を実行してください');
+}
 
 async function ghGraphql(gh, cwd, query, vars) {
   const args = ['api', 'graphql', '-f', `query=${query}`];
@@ -242,7 +243,7 @@ async function ghGraphql(gh, cwd, query, vars) {
   } catch (err) {
     const msg = `${err.stderr || ''}${err.stdout || ''}${err.message || ''}`;
     if (/INSUFFICIENT_SCOPES|read:project|'project'/i.test(msg)) {
-      const e = new Error(SCOPE_MESSAGE);
+      const e = new Error(projectScopeMessage());
       e.code = 'SCOPE';
       throw e;
     }
@@ -252,7 +253,7 @@ async function ghGraphql(gh, cwd, query, vars) {
   const d = JSON.parse(out);
   if (d.errors && d.errors.length) {
     if (d.errors.some((e) => e.type === 'INSUFFICIENT_SCOPES')) {
-      const e = new Error(SCOPE_MESSAGE);
+      const e = new Error(projectScopeMessage());
       e.code = 'SCOPE';
       throw e;
     }
@@ -289,14 +290,14 @@ async function setIssueProjectStatus(repoPath, number, key, opts = {}) {
     result.projects++;
     const field = p.field;
     if (!field || !field.id) {
-      result.skipped.push({ project: p.title, reason: `「${fieldName}」の項目（単一選択）がありません` });
+      result.skipped.push({ project: p.title, reason: tr('「{field}」の項目（単一選択）がありません', { field: fieldName }) });
       continue;
     }
     const opt = pickStatusOption(field.options, key, mapping);
     if (!opt) {
       const reason = mappingNames(mapping).length
-        ? `「${fieldName}」に設定した選択肢「${mapping}」がありません（${PROJECT_STATUS[key].label} 用）`
-        : `「${fieldName}」に「${PROJECT_STATUS[key].label}」に当たる選択肢がありません`;
+        ? tr('「{field}」に設定した選択肢「{mapping}」がありません（{label} 用）', { field: fieldName, mapping, label: PROJECT_STATUS[key].label })
+        : tr('「{field}」に「{label}」に当たる選択肢がありません', { field: fieldName, label: PROJECT_STATUS[key].label });
       result.skipped.push({ project: p.title, reason });
       continue;
     }

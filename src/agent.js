@@ -1066,8 +1066,8 @@ class AgentManager extends EventEmitter {
     const from = isChat(chat) || (chat && chat.status === 'done') ? chat : null;
     // Pipelineと競争は排他。設定で選んでいない方（「なし」ならどちらも）は使えない
     if ((mode === 'relay' || mode === 'compete') && providers.cleanOrchestration(s.orchestration) !== mode) {
-      const name = (m) => (m === 'relay' ? 'Pipeline' : '競争');
-      const why = providers.cleanOrchestration(s.orchestration) === 'none' ? 'オーケストレーションを使わない設定' : 'Pipelineと競争はどちらか1つだけ使えます';
+      const name = (m) => (m === 'relay' ? 'Pipeline' : tr('競争'));
+      const why = providers.cleanOrchestration(s.orchestration) === 'none' ? tr('オーケストレーションを使わない設定') : tr('Pipelineと競争はどちらか1つだけ使えます');
       throw new Error(tr('{name}は使わない設定になっています（{why}）。「設定」の「オーケストレーション」で{name2}を選んでください', { name: name(mode), why, name2: name(mode) }));
     }
     if (readOnly && mode === 'compete') throw new Error(tr('ソースを変更しないタスクでは、競争は使えません。ほかのエージェントを選んでください'));
@@ -1913,7 +1913,7 @@ class AgentManager extends EventEmitter {
     if (list.some((x) => x.status === 'todo' || x.status === 'queued' || x.status === 'running')) return;
     if (list.some((x) => x.compete.notified)) return;
     for (const x of list) x.compete.notified = true;
-    const summary = list.map((x) => `${whoShort(agentOf(x), x.persona)}: ${x.status === 'failed' ? 'エラー' : 'できた'}`).join(' / ');
+    const summary = list.map((x) => `${whoShort(agentOf(x), x.persona)}: ${x.status === 'failed' ? tr('エラー') : tr('できた')}`).join(' / ');
     this.notify(c, 'review', tr('競争の結果がそろいました: {v}', { v: c.compete.title || c.title }), tr('{summary}。差分を比べて、採用する案を選んでください', { summary }));
   }
 
@@ -1999,12 +1999,12 @@ class AgentManager extends EventEmitter {
     for (const n of list) {
       const dup = this.store.cards.find((c) => c.repoPath === s.repoPath && c.issue && c.issue.number === n && c.status !== 'done');
       if (dup) {
-        errors.push(`#${n}: もうタスクがあります（「${dup.title}」）`);
+        errors.push(tr('#{n}: もうタスクがあります（「{title}」）', { n, title: dup.title }));
         continue;
       }
       try {
         const issue = await this.fetchIssue(s.repoPath, n);
-        if (issue.state && issue.state !== 'open') errors.push(`#${n} はクローズ済みですが、タスクを作りました`);
+        if (issue.state && issue.state !== 'open') errors.push(tr('#{n} はクローズ済みですが、タスクを作りました', { n }));
         const made = this.createTask({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue, session, skill, agent, model });
         cards.push(...made);
         if (made.length === 1 && this.canHaveSubtasks(made[0])) await this.addSubIssuesAsSubtasks(made[0], issue);
@@ -2508,7 +2508,7 @@ class AgentManager extends EventEmitter {
           take(parser.flush());
           out = texts.join('\n');
         }
-        if (code !== 0 || resultError) return reject(new Error(truncate(resultError || err.trim() || out.trim() || `${child.agentCmd} が終了コード ${code} で終わりました`, 300)));
+        if (code !== 0 || resultError) return reject(new Error(truncate(resultError || err.trim() || out.trim() || tr('{cmd} が終了コード {code} で終わりました', { cmd: child.agentCmd, code }), 300)));
         resolve(out);
       });
       // 指示を引数で渡した CLI（Cursor）には、stdin は空のまま閉じる
@@ -2776,7 +2776,7 @@ class AgentManager extends EventEmitter {
         } else if (subPlan === 'proposed') {
           this.log(c, 'question',tr('{agentShort} が、サブタスクに分けて進めることを提案しています。上の「サブタスクの提案」で、サブタスクでやるか、分けずに進めるかを選んでください', { agentShort: agentShort(agent) }));
           this.emit('awaiting', c);
-          this.notify(c, 'awaiting', tr('サブタスクの提案: {title}', { title: c.title }), c.lastText || 'サブタスクに分けて進めることを提案しています');
+          this.notify(c, 'awaiting', tr('サブタスクの提案: {title}', { title: c.title }), c.lastText || tr('サブタスクに分けて進めることを提案しています'));
         } else if (c.subtasks && c.subtasks.phase === 'run') {
           /* サブタスクを動かしている（始めた・マージのコンフリクトを解消した）: advanceSubtasks で続ける */
           if (c.conflict && !c.conflict.resolving) this.notify(c, 'conflict', tr('サブタスクのマージでコンフリクト: {title}', { title: c.title }), tr('{target} のマージでコンフリクトが残っています。もう一度エージェントに頼むか、自分で直してください', { target: c.conflict.target }));
@@ -2787,7 +2787,7 @@ class AgentManager extends EventEmitter {
         } else if (c.awaitingReply) {
           this.log(c, 'question',tr('{agentShort} が質問しています。下の欄から答えると、続きから進めます', { agentShort: agentShort(agent) }));
           this.emit('awaiting', c);
-          this.notify(c, 'awaiting', tr('回答待ち: {title}', { title: c.title }), c.lastText || `${agentShort(agent)} が質問しています`);
+          this.notify(c, 'awaiting', tr('回答待ち: {title}', { title: c.title }), c.lastText || tr('{who} が質問しています', { who: agentShort(agent) }));
         } else if (c.subtaskOf) {
           // サブタスク: 自動でマージするときは知らせない（親が仕上げてから知らせる）
           const sp = this.subtaskParentOf(c);
@@ -2857,7 +2857,7 @@ class AgentManager extends EventEmitter {
     } else if (code === 0 && !run.resultError) {
       this.notify(c, 'awaiting', tr('返事: {title}', { title: c.title }), c.lastText || tr('{who} が返事をしました', { who: agentShort(run.agent) }));
     } else {
-      c.error = run.resultError || run.lastError || `${cmd} が終了コード ${code} で終了しました`;
+      c.error = run.resultError || run.lastError || tr('{cmd} が終了コード {code} で終了しました', { cmd, code });
     }
     if (c.error) {
       this.log(c, 'error', c.error);
@@ -3728,7 +3728,7 @@ class AgentManager extends EventEmitter {
       this.log(c, 'system',tr('{ref} をタスクのブランチに取り込み始めました', { ref }));
       if (!files.length) {
         await git.finishMerge(wt);
-        this.markResolved(c, 'コンフリクトなしで取り込めました');
+        this.markResolved(c, tr('コンフリクトなしで取り込めました'));
         return { resolved: true };
       }
     }
@@ -3761,14 +3761,14 @@ class AgentManager extends EventEmitter {
     if (!(await git.mergeInProgress(wt))) {
       const marked = await git.filesWithMarkers(wt, c.conflict.files);
       if (marked.length) throw new Error(tr('まだコンフリクトの印（<<<<<<< など）が残っています: {v}', { v: marked.join(', ') }));
-      this.markResolved(c, 'コンフリクトを解消しました');
+      this.markResolved(c, tr('コンフリクトを解消しました'));
       return;
     }
     // git add 済みでも、印が残っていればまだ
     const marked = await git.filesWithMarkers(wt, c.conflict.files);
     if (marked.length) throw new Error(tr('まだコンフリクトの印（<<<<<<< など）が残っています: {v}', { v: marked.join(', ') }));
     await git.finishMerge(wt);
-    this.markResolved(c, 'コンフリクトを解消して、取り込みを完了しました');
+    this.markResolved(c, tr('コンフリクトを解消して、取り込みを完了しました'));
   }
 
   async abortConflict(id) {
@@ -3836,7 +3836,7 @@ class AgentManager extends EventEmitter {
       return false;
     }
     if (inProgress) await git.finishMerge(wt);
-    this.markResolved(c, `${agentShort(agentOf(c))} がコンフリクトを解消しました`);
+    this.markResolved(c, tr('{who} がコンフリクトを解消しました', { who: agentShort(agentOf(c)) }));
     return true;
   }
 

@@ -33,7 +33,7 @@ const git = require('./src/git');
 const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
-const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, routeSide, stripRouting, stripLocalSettings, droppedSettingKeys, droppedSettingsMessage, composeTabs, VIEW_CHANNELS, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory } = require('./src/remote');
+const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, routeSide, stripRouting, stripLocalSettings, droppedSettingKeys, droppedSettingsMessage, composeTabs, VIEW_CHANNELS, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory, restoreLocalLanguage } = require('./src/remote');
 const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
 const sshKey = require('./src/ssh-key');
 const dirBrowse = require('./src/dir-browse');
@@ -215,6 +215,8 @@ async function dispatch(channel, arg) {
       if (channel === 'settings:update') {
         const dropped = droppedSettingKeys(stripRouting(arg), data);
         if (dropped.length) throw new Error(droppedSettingsMessage(dropped));
+        // ホストの設定そのものには language が無い（あってもホストの言語）。画面へ返す前に手元の言語を入れ直す
+        return restoreLocalLanguage(data, store.settings);
       }
       if (channel === 'board:get' && data && typeof data === 'object') {
         hostBoardCache = data;
@@ -570,7 +572,7 @@ app.whenReady().then(async () => {
     const r = await dialog.showOpenDialog(win, {
       title: tr('操作側から受け取った公開鍵（.pub）を選択'),
       properties: ['openFile'],
-      filters: [{ name: '公開鍵', extensions: ['pub'] }, { name: 'すべてのファイル', extensions: ['*'] }],
+      filters: [{ name: tr('公開鍵'), extensions: ['pub'] }, { name: tr('すべてのファイル'), extensions: ['*'] }],
     });
     if (r.canceled || !r.filePaths[0]) return null;
     const file = r.filePaths[0];
@@ -866,7 +868,7 @@ app.whenReady().then(async () => {
     store.settings.lastRepoParent = parent;
     markNoGitRepo(store.settings, dir, false);
     openRepo(dir, { tab });
-    const warning = (await repoSetup.hasCommit(dir)) ? '' : 'クローンしましたが、このリポジトリにはコミットがまだありません。タスクを動かすには、最初のコミットを入れて push してください';
+    const warning = (await repoSetup.hasCommit(dir)) ? '' : tr('クローンしましたが、このリポジトリにはコミットがまだありません。タスクを動かすには、最初のコミットを入れて push してください');
     return { dir, warning };
   });
   handle('repo:create', async ({ parent, name, github, git: useGit, tab } = {}) => {
@@ -948,7 +950,7 @@ app.whenReady().then(async () => {
     const r = await dialog.showSaveDialog(win, {
       title: e === 'zip' ? tr('Pipelineとカスタムエージェントをまとめてエクスポート') : tr('Pipelineをエクスポート'),
       defaultPath: path.join(app.getPath('downloads'), base.endsWith(`.${e}`) ? base : `${base}.${e}`),
-      filters: [e === 'zip' ? { name: 'zip', extensions: ['zip'] } : { name: 'Pipeline（JSON）', extensions: ['json'] }],
+      filters: [e === 'zip' ? { name: 'zip', extensions: ['zip'] } : { name: tr('Pipeline（JSON）'), extensions: ['json'] }],
     });
     if (r.canceled || !r.filePath) return null;
     const buf = Buffer.from(String(data || ''), 'base64');
@@ -960,7 +962,7 @@ app.whenReady().then(async () => {
     const r = await dialog.showOpenDialog(win, {
       title: tr('Pipeline（.json）か、Pipelineとカスタムエージェントをまとめた zip を選択'),
       properties: ['openFile'],
-      filters: [{ name: 'Pipeline（.json / .zip）', extensions: PACK_EXTS }, { name: 'すべてのファイル', extensions: ['*'] }],
+      filters: [{ name: tr('Pipeline（.json / .zip）'), extensions: PACK_EXTS }, { name: tr('すべてのファイル'), extensions: ['*'] }],
     });
     if (r.canceled || !r.filePaths[0]) return null;
     const file = r.filePaths[0];

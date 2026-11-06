@@ -179,7 +179,7 @@ class Updater extends EventEmitter {
         }
         this.set({ state, latestVersion: latest, checkedAt: Date.now() });
       } catch (err) {
-        this.set({ state: 'error', error: `新しい版を確かめられませんでした: ${(err && err.message) || err}`, checkedAt: Date.now() });
+        this.set({ state: 'error', error: tr('新しい版を確かめられませんでした: {message}', { message: (err && err.message) || err }), checkedAt: Date.now() });
       } finally {
         this.checking = null;
       }

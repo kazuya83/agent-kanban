@@ -210,7 +210,7 @@ function codexParser({ summarize }) {
           out.push({ type: 'result' });
           break;
         case 'turn.failed':
-          out.push({ type: 'result', error: (ev.error && ev.error.message) || 'Codex がエラーで止まりました' });
+          out.push({ type: 'result', error: (ev.error && ev.error.message) || tr('Codex がエラーで止まりました') });
           break;
         case 'error':
           if (ev.message) out.push({ type: 'log_error', text: ev.message });
@@ -255,12 +255,12 @@ function geminiParser({ summarize }) {
         case 'tool_result': {
           const failed = ev.status === 'error';
           const body = failed && ev.error ? ev.error.message || '' : ev.output || '';
-          return [...flush(), { type: 'tool_result', text: trunc(body || (failed ? 'エラー' : 'ok'), 1500), error: failed }];
+          return [...flush(), { type: 'tool_result', text: trunc(body || (failed ? tr('エラー') : 'ok'), 1500), error: failed }];
         }
         case 'error':
-          return [...flush(), { type: 'log_error', text: String(ev.message || 'エラー') }];
+          return [...flush(), { type: 'log_error', text: String(ev.message || tr('エラー')) }];
         case 'result':
-          if (ev.status && ev.status !== 'success') return [...flush(), { type: 'result', error: (ev.error && ev.error.message) || `エラー（${ev.status}）` }];
+          if (ev.status && ev.status !== 'success') return [...flush(), { type: 'result', error: (ev.error && ev.error.message) || tr('エラー（{subtype}）', { subtype: ev.status }) }];
           return [...flush(), { type: 'result' }];
         default:
           return [];
@@ -358,11 +358,11 @@ function cursorParser({ summarize }) {
           return [];
         }
         case 'error':
-          return [...flush(), { type: 'log_error', text: String(ev.message || (ev.error && ev.error.message) || 'エラー') }];
+          return [...flush(), { type: 'log_error', text: String(ev.message || (ev.error && ev.error.message) || tr('エラー')) }];
         case 'result':
           if (ev.is_error || (ev.subtype && ev.subtype !== 'success')) {
             const e = ev.error && typeof ev.error === 'object' ? ev.error.message : ev.error;
-            return [...flush(), { type: 'result', error: String(e || ev.result || `エラー（${ev.subtype || 'error'}）`) }];
+            return [...flush(), { type: 'result', error: String(e || ev.result || tr('エラー（{subtype}）', { subtype: ev.subtype || 'error' })) }];
           }
           return [...flush(), { type: 'result' }];
         default:

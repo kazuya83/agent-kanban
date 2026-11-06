@@ -222,7 +222,7 @@ async function operationInProgress(dir) {
   const checks = [
     ['rebase-merge', 'rebase'],
     ['rebase-apply', 'rebase'],
-    ['MERGE_HEAD', 'マージ'],
+    ['MERGE_HEAD', tr('マージ')],
     ['CHERRY_PICK_HEAD', 'cherry-pick'],
     ['REVERT_HEAD', 'revert'],
     ['BISECT_LOG', 'bisect'],
