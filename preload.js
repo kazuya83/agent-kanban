@@ -48,6 +48,11 @@ contextBridge.exposeInMainWorld('api', {
   createFromIssues: (p) => call('card:createFromIssues', p),
   createChat: (p) => call('chat:create', p),
   repoGithub: () => call('repo:github'),
+  // 連携: { id, config, secrets } を保存する・接続を試す。一覧にはトークンの値は入らない（設定済みかどうかだけ）
+  trackers: () => call('trackers:list'),
+  saveTracker: (p) => call('trackers:save', p),
+  removeTracker: (id) => call('trackers:remove', { id }),
+  testTracker: (p) => call('trackers:test', p),
   openExternal: (url) => call('open:external', url),
   ghStatus: () => call('gh:status'),
   ghInstall: () => call('gh:install'),

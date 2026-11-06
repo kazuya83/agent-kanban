@@ -15,7 +15,7 @@ function fnSource(name) {
   return m[0];
 }
 
-const SECTIONS = ['general', 'update', 'branch', 'issue', 'permission', 'task', 'agents', 'custom', 'orchestration'];
+const SECTIONS = ['general', 'update', 'integrations', 'branch', 'issue', 'permission', 'task', 'agents', 'custom', 'orchestration'];
 
 test('上部の設定ボタンとモーダルへの依存が残っていない', () => {
   assert.doesNotMatch(src, /settingsBtn/);
@@ -24,7 +24,7 @@ test('上部の設定ボタンとモーダルへの依存が残っていない',
   }
 });
 
-test('設定画面に9つの節の中身があり、入力欄の ID は1つずつ', () => {
+test('設定画面に10の節の中身があり、入力欄の ID は1つずつ', () => {
   const body = fnSource('renderSettingsView');
   const block = body.slice(body.indexOf('const sections = {'), body.indexOf('// 描き直しても'));
   assert.deepStrictEqual([...block.matchAll(/^ {4}(\w+): `/gm)].map((m) => m[1]), SECTIONS);

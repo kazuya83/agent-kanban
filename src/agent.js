@@ -8,6 +8,9 @@ const git = require('./git');
 const wsl = require('./wsl');
 const { resolveCommand, isWin } = require('./env');
 const github = require('./github');
+const trackers = require('./trackers');
+const { buildIssuePrompt } = require('./trackers/prompt');
+const IssueRef = require('../renderer/issue-ref');
 const ghCli = require('./gh');
 const { withSkill } = require('./skills');
 const providers = require('./providers');
@@ -20,6 +23,9 @@ const FlowModel = require('../renderer/flow-model');
 const Subtasks = require('./subtasks');
 const { SCRIPT_KINDS, SCRIPT_SETTINGS, PORT_START, PORT_END, PORT_COUNT, portsFree, cleanScript, appendOutput, startScript } = require('./worktree-scripts');
 const I18n = require('../renderer/i18n');
+// GitHub の Issue は、これまでどおり番号だけを渡す（fetchIssue などはテストで差し替えるので、形を変えない）
+const issueArg = (ref) => (IssueRef.providerOf(ref) === IssueRef.DEFAULT_PROVIDER ? ref.number : ref);
+const issueRef = (arg) => (arg && typeof arg === 'object' ? arg : IssueRef.cleanIssue({ number: arg }));
 const { tr } = I18n;
 
 // 内部の指示は日本語のまま。ja 以外のときだけ、返事の言語を先頭に足す（ログには出さない。ブランチ名の生成には使わない）
@@ -90,7 +96,7 @@ function buildSkillSuggestPrompt(c, similar = []) {
   const picked = talkExcerpt(c);
   if (picked.length) lines.push('## やりとり（抜粋）', ...picked, '');
   const info = [];
-  if (c.issue) info.push(`- Issue: #${c.issue.number} ${c.issue.url || ''}`.trim());
+  if (c.issue) info.push(`- Issue: ${IssueRef.keyOf(c.issue)} ${c.issue.url || ''}`.trim());
   if (c.branch) info.push(`- ブランチ: ${c.branch}`);
   if ((c.mergedInto || []).length) info.push(`- 取り込み先: ${c.mergedInto.join(', ')}（git log で変更を確かめられます）`);
   if (c.prUrl) info.push(`- PR: ${c.prUrl}`);
@@ -157,7 +163,7 @@ function buildAfterDonePrompt(c, message) {
   const picked = talkExcerpt(c);
   if (picked.length) lines.push('### やりとり（抜粋）', ...picked, '');
   const info = [];
-  if (c.issue) info.push(`- Issue: #${c.issue.number} ${c.issue.url || ''}`.trim());
+  if (c.issue) info.push(`- Issue: ${IssueRef.keyOf(c.issue)} ${c.issue.url || ''}`.trim());
   if (c.branch) info.push(`- ブランチ: ${c.branch}`);
   if ((c.mergedInto || []).length) info.push(`- 取り込み先: ${c.mergedInto.join(', ')}（git log で変更を確かめられます）`);
   if (c.prUrl) info.push(`- PR: ${c.prUrl}`);
@@ -178,7 +184,7 @@ const SPEC_QUESTIONS_RE = new RegExp('\\n?[ \\t]*```[ \\t]*' + SPEC_QUESTIONS_LA
 const SPEC_CHECK_PROMPT = [
   '# 開発を始める前に、タスクの内容が足りているかを確かめてください',
   '',
-  'ファイルを変える前に、下の「タスク」（GitHub Issue のときはタイトル・本文・コメント）を読み、必要ならリポジトリのコードも読んで、開発を始められるくらい仕様が詰まっているかを判断してください。',
+  'ファイルを変える前に、下の「タスク」（Issue から作ったタスクのときはタイトル・本文・コメント）を読み、必要ならリポジトリのコードも読んで、開発を始められるくらい仕様が詰まっているかを判断してください。',
   '',
   '- 詰まっている（何を作る・直すのか、どうなれば完了かが分かり、残りは妥当な判断で決められる）ときは、そのまま開発を進めてください。細かいことは自分で妥当に決めてかまいません',
   '- 詰まっていない（目的・対象・期待する動きが分からない、やり方が大きく分かれて結果が変わる、など）ときは、ファイルを変えずに次の形で返事をして、そこで止まってください',
@@ -679,7 +685,7 @@ function buildBranchNamePrompt(rule, c) {
     '## タスク',
     `- タイトル: ${c.issue ? c.issue.title : c.title}`,
   ];
-  if (c.issue) lines.push(`- GitHub Issue 番号: ${c.issue.number}`);
+  if (c.issue) lines.push(`- Issue 番号: ${IssueRef.keyOf(c.issue).replace(/^#/, '')}`);
   lines.push(`- タスク ID: ${c.id}`, `- 指示（抜粋）: ${truncate(String(c.prompt || '').replace(/\s+/g, ' '), 400)}`);
   lines.push(
     '',
@@ -756,6 +762,7 @@ class AgentManager extends EventEmitter {
     super();
     this.store = store;
     this.opts = opts;
+    this.trackers = (opts && opts.trackers) || new trackers.Trackers({ store });
     this.procs = new Map(); // cardId -> child process
     this.scriptRuns = new Map(); // cardId -> 最後に動かしたスクリプト（セットアップ・片付け・実行）
     this.pending = new Map(); // permission request id -> { cardId, toolName, input, resolve }
@@ -900,9 +907,9 @@ class AgentManager extends EventEmitter {
     if (card) this.queueIssueSync(card);
   }
 
-  // ---------- GitHub Projects のステータス ----------
+  // ---------- Issue のステータス ----------
 
-  // カードの状態に合う Projects のステータス（変えないときは null）
+  // カードの状態に合う Issue のステータス（変えないときは null）
   issueStatusKey(c) {
     // 完了したタスクについて話しているだけのときは、Issue のステータスを変えない
     if (c.afterDone) return null;
@@ -917,9 +924,17 @@ class AgentManager extends EventEmitter {
     return null;
   }
 
-  // Issue から作ったカードの列が変わったら、Issue が入っている Project の Status を合わせる（裏で順番に動かす）
+  // カードの Issue のサービス（登録されていなければ null）
+  issueProvider(c) {
+    return c.issue ? trackers.get(IssueRef.providerOf(c.issue)) : null;
+  }
+
+  // Issue から作ったカードの列が変わったら、サービスの Issue の状態を合わせる（裏で順番に動かす）。
+  // サービスが setStatus を持たないときは何もしない
   queueIssueSync(c) {
     if (!c.issue || this.store.repoSettings(c.repoPath).issueStatusSync === false) return;
+    const provider = this.issueProvider(c);
+    if (!provider || typeof provider.setStatus !== 'function') return;
     const key = this.issueStatusKey(c);
     if (!key) return;
     c.issueSync = c.issueSync || {};
@@ -936,38 +951,49 @@ class AgentManager extends EventEmitter {
 
   async runIssueSync(c, key) {
     if (!this.store.card(c.id) || !c.issueSync || c.issueSync.wanted !== key) return; // 破棄された・もっと新しい状態がある
+    const provider = this.issueProvider(c);
+    const label = provider ? provider.statusLabel || provider.label : IssueRef.providerOf(c.issue);
+    const issueKey = IssueRef.keyOf(c.issue);
+    const where = (x) => (x.project ? tr('{label}「{project}」', { label, project: x.project }) : label);
     try {
-      const r = await this.setIssueProjectStatus(c.repoPath, c.issue.number, key);
+      const r = await this.setIssueProjectStatus(c.repoPath, issueArg(c.issue), key);
       if (!this.store.card(c.id)) return;
       c.issueSync.synced = key;
       c.issueSync.error = null;
-      for (const u of r.updated) this.log(c, 'system', u.from ? tr('GitHub Projects「{project}」で #{number} のステータスを {to} にしました（前は {from}）', { project: u.project, number: c.issue.number, to: u.to, from: u.from }) : tr('GitHub Projects「{project}」で #{number} のステータスを {to} にしました', { project: u.project, number: c.issue.number, to: u.to }));
-      for (const s of r.skipped) {
-        const msg = tr('GitHub Projects「{project}」のステータスは変えませんでした: {reason}', { project: s.project, reason: s.reason });
+      for (const u of r.updated || []) this.log(c, 'system', u.from ? tr('{where}で {key} のステータスを {to} にしました（前は {from}）', { where: where(u), key: issueKey, to: u.to, from: u.from }) : tr('{where}で {key} のステータスを {to} にしました', { where: where(u), key: issueKey, to: u.to }));
+      for (const s of r.skipped || []) {
+        const msg = tr('{where}のステータスは変えませんでした: {reason}', { where: where(s), reason: s.reason });
         if (c.issueSync.lastSkip !== msg) this.log(c, 'system', msg);
         c.issueSync.lastSkip = msg;
       }
-      if (!r.projects && !c.issueSync.noProject) {
+      if (r.projects === 0 && !c.issueSync.noProject) {
         c.issueSync.noProject = true;
-        this.log(c, 'system',tr('#{number} はどの GitHub Projects にも入っていないので、ステータスは変えませんでした', { number: c.issue.number }));
+        this.log(c, 'system', tr('{key} はどの {label} にも入っていないので、ステータスは変えませんでした', { key: issueKey, label }));
       }
     } catch (err) {
       if (!this.store.card(c.id)) return;
       // 同じエラーは何度も出さない
-      if (c.issueSync.error !== err.message) this.log(c, 'error',tr('GitHub Projects のステータスを変えられませんでした: {message}', { message: err.message }));
+      if (c.issueSync.error !== err.message) this.log(c, 'error', tr('{label} のステータスを変えられませんでした: {message}', { label, message: err.message }));
       c.issueSync.error = err.message;
     }
     this.store.save();
     this.emit('changed', c.id);
   }
 
-  // テストで差し替えられるようにメソッドにしておく
-  setIssueProjectStatus(repoPath, number, key) {
-    const s = this.store.repoSettings(repoPath);
-    return github.setIssueProjectStatus(repoPath, number, key, { gh: this.opts.ghPath, fieldName: s.statusFieldName, mapping: s.statusMapping });
+  // テストで差し替えられるようにメソッドにしておく。ref は issueArg の形
+  setIssueProjectStatus(repoPath, ref, key) {
+    const r = issueRef(ref);
+    return this.trackers.call(IssueRef.providerOf(r), 'setStatus', { repoPath, ghPath: this.opts.ghPath }, r, key);
   }
 
-  // 実行中の Projects の更新が終わるまで待つ（テスト・終了時用）
+  // Issue にコメントを書く。サービスが addComment を持たないときは何もしない
+  async addIssueComment(c, body) {
+    const provider = this.issueProvider(c);
+    if (!provider || typeof provider.addComment !== 'function') return null;
+    return this.trackers.call(provider.id, 'addComment', { repoPath: c.repoPath }, c.issue, body);
+  }
+
+  // 実行中の Issue の状態の更新が終わるまで待つ（テスト・終了時用）
   async flushIssueSync() {
     while (this.issueSyncs && this.issueSyncs.size) await Promise.all([...this.issueSyncs.values()]);
   }
@@ -1246,7 +1272,7 @@ class AgentManager extends EventEmitter {
       card.noGit = true;
       card.readOnly = true;
     }
-    if (issue) card.issue = { number: issue.number, title: issue.title, url: issue.url };
+    if (issue) card.issue = IssueRef.cleanIssue(issue);
     card.agent = agent || providers.defaultAgentOf(s);
     if (model && !relay) card.model = cleanModel(model);
     if (persona && !relay) card.persona = persona;
@@ -1581,17 +1607,19 @@ class AgentManager extends EventEmitter {
     if (this.accepting.has(id)) throw new Error(tr('サブタスクを作っています'));
     const list = Subtasks.cleanItems(items || c.subtaskProposal.items);
     if (!list.length) throw new Error(tr('サブタスクを1つ以上入れてください'));
-    if (createIssues && !c.issue) throw new Error(tr('GitHub Issue から作ったタスクだけ、サブIssue を作れます'));
+    const issueProvider = this.issueProvider(c);
+    if (createIssues && (!issueProvider || typeof issueProvider.createSubIssue !== 'function')) throw new Error(tr('Issue から作ったタスクで、サブIssue に対応しているサービスだけ、サブIssue を作れます'));
     this.accepting.add(id);
     try {
       if (createIssues) {
         for (const x of list) {
           if (x.issue) continue;
-          const made = await this.createSubIssue(c.repoPath, c.issue.number, { title: x.title, body: `${x.prompt}\n\n---\n${tr('Worktree Kanban のサブタスクとして作成しました（親: #{number}）。', { number: c.issue.number })}` });
-          x.issue = { number: made.number, title: made.title, url: made.url };
+          const parentKey = IssueRef.keyOf(c.issue);
+          const made = await this.createSubIssue(c.repoPath, issueArg(c.issue), { title: x.title, body: `${x.prompt}\n\n---\n${tr('Worktree Kanban のサブタスクとして作成しました（親: {key}）。', { key: parentKey })}` });
+          x.issue = IssueRef.cleanIssue(this.trackers.normalizeIssue(issueProvider.id, made));
           // 途中で失敗しても、作ったサブIssue は覚えておく（もう一度押したときに二重に作らない）
           c.subtaskProposal.items = list;
-          this.log(c, 'system',tr('サブIssue #{number}「{title}」を作って、#{number2} にぶら下げました', { number: made.number, title: x.title, number2: c.issue.number }));
+          this.log(c, 'system', tr('サブIssue {key}「{title}」を作って、{key2} にぶら下げました', { key: x.issue.key, title: x.title, key2: parentKey }));
         }
       }
       if (!this.store.card(id) || !c.subtaskProposal) return;
@@ -2044,56 +2072,62 @@ class AgentManager extends EventEmitter {
   }
 
   /**
-   * GitHub Issue の番号からカードを作る
-   * @param {{ numbers: string, extra?: string }} p  numbers は「12」「12, 15」「#12 #15」など
+   * プロジェクトで選んだサービスの Issue からカードを作る
+   * @param {{ numbers: string, extra?: string }} p  numbers は「12」「12, 15」「#12 #15」など。読み方はサービスの parseRefs が決める
    * @returns {Promise<{ cards: object[], errors: string[] }>}
    */
   async createFromIssues({ numbers, extra, session, skill, agent, model }) {
     const s = this.store.settings;
     if (!s.repoPath) throw new Error(tr('先にリポジトリを選んでください'));
-    const list = github.parseIssueNumbers(numbers);
+    const provider = this.trackers.forRepo(s.repoPath);
+    const list = await this.trackers.parseRefs(provider.id, s.repoPath, numbers);
     const cards = [];
     const errors = [];
-    for (const n of list) {
-      const dup = this.store.cards.find((c) => c.repoPath === s.repoPath && c.issue && c.issue.number === n && c.status !== 'done');
+    for (const ref of list) {
+      const dup = this.store.cards.find((c) => c.repoPath === s.repoPath && IssueRef.sameIssue(c.issue, ref) && c.status !== 'done');
       if (dup) {
-        errors.push(tr('#{n}: もうタスクがあります（「{title}」）', { n, title: dup.title }));
+        errors.push(tr('{key}: もうタスクがあります（「{title}」）', { key: ref.key, title: dup.title }));
         continue;
       }
       try {
-        const issue = await this.fetchIssue(s.repoPath, n);
-        if (issue.state && issue.state !== 'open') errors.push(tr('#{n} はクローズ済みですが、タスクを作りました', { n }));
-        const made = this.createTask({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue, session, skill, agent, model });
+        const issue = this.trackers.normalizeIssue(provider.id, await this.fetchIssue(s.repoPath, issueArg(ref)));
+        if (issue.state && issue.state !== 'open') errors.push(tr('{key} はクローズ済みですが、タスクを作りました', { key: issue.key }));
+        const made = this.createTask({ title: `${issue.key} ${issue.title}`, prompt: buildIssuePrompt(issue, extra, { label: provider.label }), issue, session, skill, agent, model });
         cards.push(...made);
         if (made.length === 1 && this.canHaveSubtasks(made[0])) await this.addSubIssuesAsSubtasks(made[0], issue);
       } catch (err) {
-        errors.push(`#${n}: ${err.message}`);
+        errors.push(`${ref.key}: ${err.message}`);
       }
     }
     if (!cards.length) throw new Error(errors.join('\n'));
     return { cards, errors };
   }
 
-  // テストで差し替えられるようにメソッドにしておく
-  fetchIssue(repoPath, n, opts) {
-    return github.fetchIssue(repoPath, n, opts);
+  // テストで差し替えられるようにメソッドにしておく。ref は issueArg の形
+  fetchIssue(repoPath, ref) {
+    const r = issueRef(ref);
+    return this.trackers.call(IssueRef.providerOf(r), 'fetchIssue', { repoPath }, r);
   }
 
-  fetchSubIssues(repoPath, n) {
-    return github.fetchSubIssues(repoPath, n);
+  fetchSubIssues(repoPath, ref) {
+    const r = issueRef(ref);
+    return this.trackers.call(IssueRef.providerOf(r), 'fetchSubIssues', { repoPath }, r);
   }
 
-  createSubIssue(repoPath, parentNumber, issue) {
-    return github.createSubIssue(repoPath, parentNumber, issue);
+  createSubIssue(repoPath, parent, issue) {
+    const r = issueRef(parent);
+    return this.trackers.call(IssueRef.providerOf(r), 'createSubIssue', { repoPath }, r, issue);
   }
 
   // Issue にサブIssue がぶら下がっていれば、開いているものをサブタスクにする（読めなければ、サブタスクなしのまま）
   async addSubIssuesAsSubtasks(c, issue) {
+    const provider = this.issueProvider(c);
+    if (!provider || typeof provider.fetchSubIssues !== 'function') return;
     let subs;
     try {
-      subs = (await this.fetchSubIssues(c.repoPath, issue.number)).filter((x) => x.state !== 'closed');
+      subs = (await this.fetchSubIssues(c.repoPath, issueArg(c.issue))).filter((x) => x.state !== 'closed').map((x) => this.trackers.normalizeIssue(provider.id, x));
     } catch (err) {
-      this.log(c, 'system',tr('#{number} のサブIssue を読めなかったので、サブタスクなしで作りました（{v}）', { number: issue.number, v: err.message.split('\n')[0] }));
+      this.log(c, 'system', tr('{key} のサブIssue を読めなかったので、サブタスクなしで作りました（{v}）', { key: issue.key, v: err.message.split('\n')[0] }));
       this.changed(c);
       return;
     }
@@ -2102,14 +2136,14 @@ class AgentManager extends EventEmitter {
     for (const x of subs.slice(0, Subtasks.MAX_SUBTASKS)) {
       let full = x;
       try {
-        full = { ...x, ...(await this.fetchIssue(c.repoPath, x.number)) };
+        full = this.trackers.normalizeIssue(provider.id, { ...x, ...(await this.fetchIssue(c.repoPath, issueArg(x))) });
       } catch {
         /* 本文だけで作る */
       }
-      items.push({ key: `issue-${x.number}`, title: `#${x.number} ${full.title}`, prompt: github.buildIssuePrompt(full), issue: { number: x.number, title: full.title, url: full.url || x.url } });
+      items.push({ key: `issue-${IssueRef.branchPart(x)}`, title: `${x.key} ${full.title}`, prompt: buildIssuePrompt(full, undefined, { label: provider.label }), issue: { ...full, url: full.url || x.url } });
     }
     c.subtasks = { items: Subtasks.cleanItems(items).map((x) => ({ ...x, state: 'pending' })), merge: this.defaultSubtaskMerge(c), phase: 'plan' };
-    this.log(c, 'system', tr('#{number} のサブIssue {n} 件（{list}）を、サブタスクにしました。開始すると、順番を決めてからサブタスクごとに動かします', { number: issue.number, n: c.subtasks.items.length, list: c.subtasks.items.map((x) => `#${x.issue.number}`).join(', ') }));
+    this.log(c, 'system', tr('{key} のサブIssue {n} 件（{list}）を、サブタスクにしました。開始すると、順番を決めてからサブタスクごとに動かします', { key: issue.key, n: c.subtasks.items.length, list: c.subtasks.items.map((x) => IssueRef.keyOf(x.issue)).join(', ') }));
     this.changed(c);
   }
 
@@ -2255,7 +2289,7 @@ class AgentManager extends EventEmitter {
   }
 
   commitMessage(c) {
-    return c.issue ? `agent: ${c.title.replace(/^#\d+\s*/, '')} (#${c.issue.number})` : `agent: ${c.title}`;
+    return c.issue ? `agent: ${IssueRef.stripKey(c.title, c.issue)} (${IssueRef.keyOf(c.issue)})` : `agent: ${c.title}`;
   }
 
   updateCard(id, { title, prompt, skill }) {
@@ -2448,7 +2482,7 @@ class AgentManager extends EventEmitter {
     const base = c.flowBase || reopen || this.store.repoSettings(c.repoPath).baseBranch || (await git.currentBranch(top));
     if (base === 'HEAD') throw new Error(tr('ベースブランチが決まりません（detached HEAD）。設定でベースブランチを指定してください'));
     const baseCommit = await git.revParse(top, base);
-    let branch = c.issue ? `agent/issue-${c.issue.number}-${c.id}` : `agent/${slugify(c.title)}-${c.id}`;
+    let branch = c.issue ? `agent/issue-${IssueRef.branchPart(c.issue)}-${c.id}` : `agent/${slugify(c.title)}-${c.id}`;
     const rule = c.flowBase ? '' : String(this.store.repoSettings(c.repoPath).branchNamingRule || '').trim(); // 並列の枝は、あとでマージして消すのでいつもの名前
     if (rule) {
       // 続きのときは前と同じ名前から番号を付けていく
@@ -3557,7 +3591,7 @@ class AgentManager extends EventEmitter {
           if (await git.isDirty(dir)) throw new Error(tr('{target} をチェックアウトしている {dir} に未コミットの変更があります。コミットするか退避してからマージしてください。', { target, dir }));
         }
         try {
-          await git.merge(dir, c.branch, (c.issue ? `Merge agent task: ${c.title.replace(/^#\d+\s*/, '')} (#${c.issue.number})` : `Merge agent task: ${c.title}`), target);
+          await git.merge(dir, c.branch, (c.issue ? `Merge agent task: ${IssueRef.stripKey(c.title, c.issue)} (${IssueRef.keyOf(c.issue)})` : `Merge agent task: ${c.title}`), target);
         } catch (err) {
           if (!err.conflictFiles) throw err;
           // コンフリクト: マージは中止済み。カードに出して、解消の方法を選んでもらう
@@ -3610,11 +3644,11 @@ class AgentManager extends EventEmitter {
 
   // PR の既定のタイトルと本文
   prDefaults(c) {
-    const title = c.issue ? c.title.replace(/^#\d+\s*/, '') : c.title;
+    const title = c.issue ? IssueRef.stripKey(c.title, c.issue) : c.title;
     const lines = [];
-    if (c.issue) lines.push(`Closes #${c.issue.number}`, '');
+    if (c.issue) lines.push(IssueRef.linkLine(c.issue), '');
     // サブIssue も、このタスクのブランチで閉じる
-    const subIssues = c.subtasks ? c.subtasks.items.filter((x) => x.issue && x.state === 'merged').map((x) => `Closes #${x.issue.number}`) : [];
+    const subIssues = c.subtasks ? c.subtasks.items.filter((x) => x.issue && x.state === 'merged').map((x) => IssueRef.linkLine(x.issue)) : [];
     if (subIssues.length) lines.push(...subIssues, '');
     if (c.lastMessage) lines.push(c.lastMessage, '');
     lines.push('---', tr('Worktree Kanban のタスクから作成しました。'));

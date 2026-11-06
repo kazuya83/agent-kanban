@@ -238,7 +238,9 @@ const DEFAULT_SETTINGS = {
   teardownScript: '', // worktree を消す直前に動かすスクリプト
   runScript: '', // タスク詳細の「実行」ボタンで動かすスクリプト（開発サーバーなど）
   integration: 'pr', // レビュー後の取り込み方: merge（ローカルで直接マージ） / pr（push してプルリクエストを作る）
-  issueStatusSync: true, // Issue から作ったタスクの列に合わせて、GitHub Projects の Status（In progress / In review / Done）を変える
+  issueProvider: 'github', // このプロジェクトで使う課題管理サービス（src/trackers に登録したプロバイダの ID）
+  trackerConfigs: {}, // 連携するサービスの設定（アプリ全体。プロバイダの ID ごと）。トークンは入れない（src/secrets.js に保存する）
+  issueStatusSync: true, // Issue から作ったタスクの列に合わせて、サービスの Issue の状態を変える（GitHub なら Projects の Status: In progress / In review / Done）
   statusFieldName: '', // Projects で変える項目（単一選択）の名前。空なら「Status」
   statusMapping: { inProgress: '', inReview: '', done: '' }, // 列ごとに使う選択肢の名前（カンマ区切りで複数可）。空なら名前から自動で探す
   customAgents: [], // カスタムエージェント（元にする CLI・モデルと、プロフィール: 名前・アイコンと色・説明・振る舞いの指示）。タスク・会話・Pipeline・競争で選べる
@@ -311,7 +313,7 @@ const MAX_NOTIFICATIONS = 200;
 
 // ---------- プロジェクト（リポジトリ）ごとの設定 ----------
 // リポジトリに関わる設定だけをプロジェクトごとに持つ。コマンドのパス・モデル・同時に動かす数・自動更新などはアプリ全体で1つ
-const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'ciAutoFix', 'subtaskMerge', 'pushAfterMerge', 'relayFlow', 'relayFlows', 'relayFlowId', 'customAgents', 'competeCustomAgents', 'setupScript', 'teardownScript', 'runScript'];
+const REPO_SETTING_KEYS = ['baseBranch', 'integration', 'branchNamingRule', 'issueProvider', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'permissionMode', 'allowedTools', 'defaultSkill', 'specCheck', 'ciAutoFix', 'subtaskMerge', 'pushAfterMerge', 'relayFlow', 'relayFlows', 'relayFlowId', 'customAgents', 'competeCustomAgents', 'setupScript', 'teardownScript', 'runScript'];
 const MAX_REPO_SETTINGS = 200;
 
 // 初めて開いたプロジェクトの設定（初期値。取り込み方は PR を作成。GitHub でないリポジトリは開いたときに直接マージにする）
@@ -334,6 +336,7 @@ function pickRepoSettings(src) {
   for (const k of REPO_SETTING_KEYS) if (src[k] !== undefined) out[k] = k === 'statusMapping' ? { ...out.statusMapping, ...(src[k] || {}) } : src[k];
   if (!['merge', 'pr'].includes(out.integration)) out.integration = DEFAULT_SETTINGS.integration;
   if (!['auto', 'review'].includes(out.subtaskMerge)) out.subtaskMerge = 'auto';
+  out.issueProvider = String(out.issueProvider || '') || DEFAULT_SETTINGS.issueProvider;
   // 既定の Pipeline のフローは relayFlow を正とする（前の版の設定・relayFlow を直接変えたときも、一覧の既定の分に入る）
   Object.assign(out, cleanRelayFlows(out.relayFlows, out.relayFlowId, src.relayFlow !== undefined ? src.relayFlow : undefined));
   out.customAgents = cleanCustomAgents(out.customAgents);
