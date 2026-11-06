@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { VIEWS, VIEW_KEY, SETTINGS_NAV, normalizeView, loadView, saveView, canSchedule, bindNavMenu, settingsNavHtml, activeSection, bindSettingsNav } = require('../renderer/app-view.js');
+const { VIEWS, VIEW_KEY, SETTINGS_NAV, normalizeView, loadView, saveView, isPipelineSubtask, canSchedule, bindNavMenu, settingsNavHtml, activeSection, bindSettingsNav } = require('../renderer/app-view.js');
 const { ICON_NAMES, NOTIF_ICON } = require('../renderer/icons.js');
 
 const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8');
@@ -68,6 +68,14 @@ test('保存先に settings が残っていてもカンバン管理で起動す�
 
 test('設定を開いたときに保存先が壊れていても例外を出さない', () => {
   assert.doesNotThrow(() => saveView(brokenStorage, 'settings'));
+});
+
+test('isPipelineSubtask: 並列の枝だけ true', () => {
+  assert.strictEqual(isPipelineSubtask({ relay: { branchOf: { parent: 'p', index: 0 } } }), true);
+  assert.strictEqual(isPipelineSubtask({ title: 'ふつうのカード' }), false);
+  assert.strictEqual(isPipelineSubtask({ relay: { index: 0 } }), false, 'Pipeline の本体（branchOf なし）');
+  assert.strictEqual(isPipelineSubtask({ subtaskOf: 'parent' }), false);
+  assert.strictEqual(isPipelineSubtask(null), false);
 });
 
 test('canSchedule: ふつうのタスクには出し、会話・サブタスク・Pipeline の枝には出さない', () => {
@@ -395,4 +403,16 @@ test('スケジュールのアイコンがある', () => {
 
 test('app-view.js に絵文字がない', () => {
   assert.doesNotMatch(read('app-view.js'), /[\u{1F000}-\u{1FFFF}\u{2600}-\u{26FF}\u{FE0F}]/u);
+});
+
+test('subtaskChipHtml: 並列の枝は AppView.isPipelineSubtask で「サブタスク」を出す', () => {
+  const src = read('renderer.js');
+  const start = src.indexOf('function subtaskChipHtml');
+  const end = src.indexOf('function subtaskChildHtml');
+  assert.ok(start >= 0 && end > start);
+  const fn = src.slice(start, end);
+  assert.ok(fn.indexOf('if (c.subtaskOf)') < fn.indexOf('AppView.isPipelineSubtask(c)'), '手動のサブタスクを先に判定する');
+  assert.match(fn, /「\$\{esc\(p\.title\)\}」のサブタスク（Pipeline の並列の枝）/);
+  assert.match(fn, /Pipeline の並列の枝のサブタスク/);
+  assert.match(fn, /class="orch-chip sub"/);
 });

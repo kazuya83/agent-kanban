@@ -1218,10 +1218,16 @@ function subtaskBarHtml(c) {
   });
   return `<div class="relay-bar sub-bar">${segs.join('')}</div>`;
 }
+// ボードのカードに「サブタスク」を出す。手動のサブタスクと、Pipeline の並列の枝
 function subtaskChipHtml(c) {
   if (c.subtaskOf) {
     const p = subtaskParent(c);
     return p ? `<span class="orch-chip sub" title="「${esc(p.title)}」のサブタスク">${icon('branch')}サブタスク</span>` : '';
+  }
+  if (AppView.isPipelineSubtask(c)) {
+    const p = card(c.relay.branchOf.parent);
+    const title = p ? `「${esc(p.title)}」のサブタスク（Pipeline の並列の枝）` : 'Pipeline の並列の枝のサブタスク';
+    return `<span class="orch-chip sub" title="${title}">${icon('branch')}サブタスク</span>`;
   }
   if (!c.subtasks) return '';
   const n = subCounts(c);
