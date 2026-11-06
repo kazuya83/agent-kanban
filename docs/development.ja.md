@@ -113,6 +113,16 @@ Electron メインプロセス
 - エージェントが終わると、worktree の変更は自動でそのブランチにコミットされます
 - ボードのデータは Electron の userData フォルダの `board.json` に保存されます
 
+### 外部サービスとの連携
+
+使う人向けの説明は [integrations.md](integrations.ja.md) にあります。
+
+- `src/trackers/index.js`: プロバイダの登録と共通の処理。プロバイダの形は、このファイルの先頭のコメントに書いてあります。サービスを足すには `src/trackers/<id>.js` を書いて、末尾の `BUILTIN` に足します。持たない機能は書かなくてかまいません
+- `src/trackers/github.js`・`gitlab.js`・`linear.js`・`jira.js`: 課題管理サービスのプロバイダ。GitHub は今までの `gh` の処理を使い、ほかは `src/trackers/http.js` で API を呼びます。`createMergeRequest` と `mergeRequestState` を持つプロバイダ（GitLab）は、origin が合うリポジトリで `gh` の代わりになります
+- `src/slack.js`: Slack の設定の欄、通知の投稿、Socket Mode の受信。課題管理サービスではないので、`src/trackers` の外にあります
+- `src/secrets.js`: トークンの保管。Electron の `safeStorage` で暗号化して userData の `secrets.json` に保存します。読むのはメインプロセスの中で接続先へ送る直前だけで、画面・遠隔のクライアント・ログ・エージェントの環境変数には渡しません
+- `src/trackers/http.js`: API の呼び出し。https を基本にし、転送（3xx）は追わず、エラーの文からトークンを消します
+
 ## 開発
 
 ```bash

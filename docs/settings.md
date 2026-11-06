@@ -8,7 +8,7 @@ The list of sections is on the left, and all sections run down the right side. P
 
 | Group | Sections |
 | --- | --- |
-| (no heading) | [General](#general), [App updates](#app-updates) |
+| (no heading) | [General](#general), [App updates](#app-updates), [Integrations](#integrations) |
 | This project | [Branches and landing](#branches-and-landing), [Issue sync](#issue-sync), [Permissions](#permissions), [Task defaults](#task-defaults) |
 | Agent | [Agents to use](#agents-to-use), [Custom agents](#custom-agents), [Orchestration](#orchestration) |
 
@@ -36,12 +36,16 @@ Projects that were in use before this version keep their existing settings (incl
 
 Shows the current version and whether a new one is available. You can also open this by pressing the update notice next to the version at the top left. See [install.md](install.md) for details.
 
+## Integrations
+
+Enter the address and token for GitLab, Linear, Jira, and Slack. These are the same for every project. Each service has "Save", "Test connection", and "Delete". Saved tokens are not shown on screen. See [integrations.md](integrations.md) for details.
+
 ## Branches and landing
 
 | Item | Description |
 | --- | --- |
 | Base branch | Where worktrees are created from. It is also the default merge target. If empty, the checked-out branch is used |
-| How to land after review | **Create a PR** (default) or **Merge directly**. Repositories with no origin or not on GitHub, and folders not managed by git, start with "Merge directly" |
+| How to land after review | **Create a PR** (default; **Create an MR** in a connected GitLab repository) or **Merge directly**. Repositories with no origin or not on GitHub or a connected GitLab, and folders not managed by git, start with "Merge directly" |
 | Branch naming rule | The agent comes up with branch names that follow a rule written in plain language |
 
 "After merging, push to origin", chosen in the merge dialog, is also remembered per project.
@@ -50,9 +54,11 @@ Shows the current version and whether a new one is available. You can also open 
 
 | Item | Description |
 | --- | --- |
-| Update Issue status automatically | Changes the Status in GitHub Projects to match the task's column (the field and option names are also per project) |
+| Issue tracker to use | Choose GitHub, GitLab, Linear, or Jira. Used by the Issue field of "+ New task" |
+| Update Issue status automatically | Changes the Issue's status in the service to match the task's column. On GitHub, this is the Status in Projects (the field and option names are also per project) |
+| Comment on the issue when a task starts, a PR is created, and the task is done | Shown for GitLab, Linear, and Jira (on by default) |
 
-See [usage.md](usage.md#update-issue-status-automatically) for details.
+See [usage.md](usage.md#update-issue-status-automatically) and [integrations.md](integrations.md) for details.
 
 ## Permissions
 
