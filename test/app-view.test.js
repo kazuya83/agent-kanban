@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const vm = require('node:vm');
-const { VIEWS, VIEW_KEY, SETTINGS_NAV, normalizeView, loadView, saveView, isPipelineSubtask, canSchedule, bindNavMenu, settingsNavHtml, activeSection, bindSettingsNav } = require('../renderer/app-view.js');
+const { VIEWS, VIEW_KEY, SETTINGS_NAV, normalizeView, loadView, saveView, isPipelineSubtask, canSchedule, bindNavMenu, settingsNavHtml, activeSection, bindSettingsNav, isBoardBackground } = require('../renderer/app-view.js');
 const { icon, ICON_NAMES, NOTIF_ICON } = require('../renderer/icons.js');
 const { tr } = require('../renderer/i18n.js');
 const { displayText } = require('../renderer/flow-model.js');
@@ -772,4 +772,11 @@ test('isHiddenSubtask: 並列の枝は、親がボードにいても隠さない
 test('使い方: 並列の枝のカードに「サブタスク」のラベルが付くと書いてある', () => {
   const doc = fs.readFileSync(path.join(__dirname, '..', 'docs', 'usage.ja.md'), 'utf8');
   assert.match(doc, /Pipeline の並列で自動で作られた枝のカードには、ボード上で「サブタスク」のラベルが付きます（工程の名前に「サブタスク」がなくても付きます）/);
+});
+
+test('isBoardBackground: カードと操作できる部品の上は余白として扱わない', () => {
+  // selector に挙がった部品の中にいる要素を真似る
+  const inside = (name) => ({ closest: (sel) => (sel.split(', ').includes(name) ? {} : null) });
+  for (const name of ['.card', 'button', 'a', 'input', 'textarea', 'select', 'label', 'summary']) assert.strictEqual(isBoardBackground(inside(name)), false, name);
+  assert.strictEqual(isBoardBackground(inside('.column')), true);
 });

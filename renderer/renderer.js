@@ -828,8 +828,15 @@ function boardClick(e) {
     return;
   }
   const el = e.target.closest('.card');
-  if (el) select(el.dataset.id);
+  if (el) return select(el.dataset.id);
+  if (state.selected && boardPressedOnBackground && AppView.isBoardBackground(e.target)) closeDetailOrBack();
 }
+// カードの上で押している間にボードが描き直されると、click はボード自体に届くことがある。
+// それで詳細が閉じないように、押し始めの場所も見る
+let boardPressedOnBackground = false;
+$('board').addEventListener('mousedown', (e) => {
+  boardPressedOnBackground = AppView.isBoardBackground(e.target);
+});
 // ボードのドラッグ&ドロップ: 列を動かして状態を変える（Todo → 実行中で開始、レビュー ⇄ 完了。マージとは切り離す）
 function canDragCard(c) {
   return !!c && !isChat(c) && !c.afterDone && !isHiddenSubtask(c) && ['todo', 'review', 'failed', 'done'].includes(c.status);
@@ -1006,7 +1013,7 @@ function closeDetail() {
   $('detailBackdrop').classList.add('hidden');
   renderBoard();
 }
-// ✕・背景・Esc で閉じる: 親から開いたサブタスクなら、親のタスクの詳細（サブタスクタブ）に戻る
+// ✕・背景・ボードの余白・Esc で閉じる: 親から開いたサブタスクなら、親のタスクの詳細（サブタスクタブ）に戻る
 function closeDetailOrBack() {
   const back = state.subFrom && card(state.subFrom) ? state.subFrom : null;
   if (!back) return closeDetail();

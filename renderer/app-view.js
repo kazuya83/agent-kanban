@@ -156,5 +156,8 @@
     return { scrollTo, sync };
   }
 
-  return { VIEWS, DEFAULT_VIEW, VIEW_KEY, SETTINGS_NAV, normalizeView, loadView, saveView, isPipelineSubtask, canSchedule, bindNavMenu, settingsNavHtml, activeSection, bindSettingsNav };
+  // ボードの余白か（カードや操作できる部品の上でなければ、押すと詳細パネルを閉じる）
+  const isBoardBackground = (target) => !target.closest('.card, button, a, input, textarea, select, label, summary');
+
+  return { VIEWS, DEFAULT_VIEW, VIEW_KEY, SETTINGS_NAV, normalizeView, loadView, saveView, isPipelineSubtask, canSchedule, bindNavMenu, settingsNavHtml, activeSection, bindSettingsNav, isBoardBackground };
 });
