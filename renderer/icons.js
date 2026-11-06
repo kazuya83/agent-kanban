@@ -39,6 +39,8 @@
     file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
     image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
     clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
     play: '<path d="M7 4.5v15a.5.5 0 0 0 .77.42l11.5-7.5a.5.5 0 0 0 0-.84L7.77 4.08A.5.5 0 0 0 7 4.5z" fill="currentColor"/>',
     pause: '<rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor"/><rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor"/>',
     stop: '<rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/>',
@@ -63,7 +65,7 @@
   const AGENT_ICON = { claude: 'claude', codex: 'codex', gemini: 'gemini', cursor: 'cursor' };
 
   // 通知の種類ごとのアイコン
-  const NOTIF = { permission: 'lock', question: 'question', awaiting: 'chat', review: 'eye', failed: 'alert', done: 'checkCircle', skill: 'bulb', conflict: 'conflict' };
+  const NOTIF = { permission: 'lock', question: 'question', awaiting: 'chat', review: 'eye', failed: 'alert', done: 'checkCircle', skill: 'bulb', conflict: 'conflict', schedule: 'calendar' };
 
   function icon(name, cls) {
     const p = PATHS[name];
