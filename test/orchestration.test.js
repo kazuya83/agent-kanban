@@ -659,9 +659,12 @@ test('チェックポイント: Codex は引き継ぎ文を付けて新しい会
   assert.strictEqual(cp.session.size, undefined, 'Codex の会話はバイト数を持たない');
   await agents.rewind(c.id, cp.id);
   await waitFor(() => c.status === 'review' && c.lastPromptSent && c.lastPromptSent.includes('ここまでのやりとり'));
-  assert.match(c.lastPromptSent, /最初の指示/);
-  assert.match(c.lastPromptSent, /codex done/);
-  assert.match(c.lastPromptSent, /二度目の指示/);
+  assert.ok(c.lastPromptSent.startsWith('## ここまでのやりとり\n'));
+  assert.ok(c.lastPromptSent.endsWith('二度目の指示'));
+  const handoff = c.lastPromptSent.slice(0, -'二度目の指示'.length);
+  assert.match(handoff, /【ユーザー】 最初の指示/);
+  assert.match(handoff, /codex done/);
+  assert.doesNotMatch(handoff, /二度目の指示/, '送り直す指示は引き継ぎ文に入れない');
   const last = calls().filter((x) => x.kind === 'codex').at(-1);
   assert.notStrictEqual(last.args[1], 'resume');
 });
@@ -705,15 +708,26 @@ test('チェックポイント: Claude の会話は size まで切り詰めて�
   const proj = path.join(configDir, 'projects', 'repo');
   fs.mkdirSync(proj, { recursive: true });
   const file = path.join(proj, `${sid}.jsonl`);
-  const body = '{"a":1}\n{"b":2}\n';
+  const body = '{"id":"toolu_KEEPKEEP1"}\n{"b":2}\n';
   fs.writeFileSync(file, body);
+  const side = path.join(proj, sid);
+  fs.mkdirSync(path.join(side, 'tool-results'), { recursive: true });
+  fs.mkdirSync(path.join(side, 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(side, 'tool-results', 'toolu_KEEPKEEP1.txt'), 'keep');
+  fs.writeFileSync(path.join(side, 'tool-results', 'toolu_DROPDROP1.txt'), 'drop');
+  fs.writeFileSync(path.join(side, 'subagents', 'agent-abc123def4567890.jsonl'), 'later');
+  fs.writeFileSync(path.join(side, 'ccr-tip.json'), '{}');
   agents.send(c.id, '二度目');
   await waitFor(() => c.status === 'review' && c.checkpoints.length === 2);
   const cp = c.checkpoints[1];
   assert.strictEqual(cp.session.size, Buffer.byteLength(body));
-  fs.appendFileSync(file, '{"c":3}\n');
+  fs.appendFileSync(file, '{"id":"toolu_DROPDROP1","agentId":"abc123def4567890"}\n');
   await agents.rewind(c.id, cp.id);
   assert.strictEqual(fs.readFileSync(file, 'utf8'), body);
+  assert.ok(fs.existsSync(path.join(side, 'tool-results', 'toolu_KEEPKEEP1.txt')));
+  assert.ok(!fs.existsSync(path.join(side, 'tool-results', 'toolu_DROPDROP1.txt')));
+  assert.ok(!fs.existsSync(path.join(side, 'subagents', 'agent-abc123def4567890.jsonl')));
+  assert.ok(fs.existsSync(path.join(side, 'ccr-tip.json')));
   assert.strictEqual(c.sessionId, sid);
   assert.strictEqual(c.forkNext, false);
   await waitFor(() => c.status === 'review' && c.lastPromptSent === cp.prompt);
@@ -728,6 +742,9 @@ test('チェックポイント: Claude の会話は size まで切り詰めて�
   await agents.rewind(c.id, again.id);
   assert.strictEqual(fs.readFileSync(file, 'utf8'), kept, 'ほかのカードが使っている会話は切らない');
   await waitFor(() => c.status === 'review' && /ここまでのやりとり/.test(c.lastPromptSent || ''));
+  assert.ok(c.lastPromptSent.startsWith('## ここまでのやりとり\n'));
+  const handoff = c.lastPromptSent.slice(0, -String(again.prompt || '').length);
+  assert.doesNotMatch(handoff, /【ユーザー】 二度目/);
   assert.notStrictEqual(c.sessionId, sid);
 });
 
@@ -803,4 +820,40 @@ test('チェックポイント: 中断の再開・コンフリクト解消・完
   agents.send(c.id, '完了後の質問');
   await waitFor(() => c.status === 'done' && /完了後の質問/.test(c.lastPromptSent || ''));
   assert.strictEqual(c.checkpoints.length, n, '完了後の会話は記録しない');
+});
+
+test('チェックポイント: マージ途中の追加指示ではコミットせず、MERGE_HEAD とマーカーを残す', async () => {
+  const { agents, repo } = setup();
+  const [c] = agents.createTask({ title: 'merge-cp', prompt: '一度目' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review' && c.checkpoints && c.checkpoints.length === 1);
+  const wt = c.worktreePath;
+  const commit = (cwd, msg) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', msg], { cwd });
+  fs.writeFileSync(path.join(wt, 'conflict.txt'), 'branch\n');
+  execFileSync('git', ['add', 'conflict.txt'], { cwd: wt });
+  commit(wt, 'branch side');
+  fs.writeFileSync(path.join(repo, 'conflict.txt'), 'main\n');
+  execFileSync('git', ['add', 'conflict.txt'], { cwd: repo });
+  commit(repo, 'main side');
+  let merged = false;
+  try {
+    execFileSync('git', ['merge', '--no-ff', 'main'], { cwd: wt, encoding: 'utf8' });
+    merged = true;
+  } catch {
+    /* コンフリクトで終了コード 1 */
+  }
+  assert.strictEqual(merged, false);
+  const gitDir = path.resolve(wt, execFileSync('git', ['rev-parse', '--git-dir'], { cwd: wt, encoding: 'utf8' }).trim());
+  assert.ok(fs.existsSync(path.join(gitDir, 'MERGE_HEAD')));
+  assert.match(fs.readFileSync(path.join(wt, 'conflict.txt'), 'utf8'), /<<<<<<< /);
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim();
+  const commits = execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim();
+  agents.send(c.id, 'マージ途中の追加');
+  await waitFor(() => c.status === 'review' && c.checkpoints.length === 2 && /マージ途中の追加/.test(c.lastPromptSent || ''));
+  assert.ok(fs.existsSync(path.join(gitDir, 'MERGE_HEAD')), 'MERGE_HEAD が残る');
+  assert.strictEqual(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim(), head);
+  assert.strictEqual(execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim(), commits, 'マーカー入りのコミットは増えない');
+  assert.match(fs.readFileSync(path.join(wt, 'conflict.txt'), 'utf8'), /<<<<<<< /);
+  assert.strictEqual(execFileSync('git', ['show', 'HEAD:conflict.txt'], { cwd: wt, encoding: 'utf8' }), 'branch\n');
+  assert.strictEqual(c.checkpoints[1].commit, head, '起動直前の HEAD を記録する');
 });

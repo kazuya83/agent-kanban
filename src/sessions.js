@@ -199,8 +199,79 @@ function sessionSize(id, opts = {}) {
   return files.length ? files[0].size : null;
 }
 
+// 付属ファイルの、会話の中で指している名前。短い名前は本文と重なりやすいので対象にしない
+function sideToken(file) {
+  let base = path.basename(file);
+  if (base.endsWith('.meta.json')) base = base.slice(0, -'.meta.json'.length);
+  else if (base.includes('.')) base = base.slice(0, base.lastIndexOf('.'));
+  if (base.startsWith('agent-')) base = base.slice('agent-'.length);
+  return base.length >= 8 ? base : '';
+}
+
+function walkFiles(dir) {
+  const out = [];
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...walkFiles(p));
+    else if (e.isFile()) out.push(p);
+  }
+  return out;
+}
+
+function removeEmptyDirs(dir) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) if (e.isDirectory()) removeEmptyDirs(path.join(dir, e.name));
+  try {
+    if (!fs.readdirSync(dir).length) fs.rmdirSync(dir);
+  } catch {
+    /* ファイルが残っている */
+  }
+}
+
+// size より後ろの会話にだけ出てくる付属記録（サブエージェントやツールの出力）を消す。前の会話が参照しているものは残す
+function discardSideAfter(jsonlFile, id, size) {
+  const dir = path.join(path.dirname(jsonlFile), id);
+  let dirStat;
+  try {
+    dirStat = fs.statSync(dir);
+  } catch {
+    return;
+  }
+  if (!dirStat.isDirectory()) return;
+  const fileSize = fs.statSync(jsonlFile).size;
+  if (fileSize <= size) return;
+  const head = Buffer.alloc(size);
+  const tail = Buffer.alloc(fileSize - size);
+  const fd = fs.openSync(jsonlFile, 'r');
+  try {
+    if (fs.readSync(fd, head, 0, size, 0) !== size) return;
+    if (fs.readSync(fd, tail, 0, tail.length, size) !== tail.length) return;
+  } finally {
+    fs.closeSync(fd);
+  }
+  for (const file of walkFiles(dir)) {
+    const token = sideToken(file);
+    if (!token) continue;
+    const raw = Buffer.from(token);
+    if (tail.includes(raw) && !head.includes(raw)) fs.rmSync(file, { force: true });
+  }
+  removeEmptyDirs(dir);
+}
+
 // 会話ファイルを size バイトに切り詰める。size の直前が改行で、ファイルがそれ以上のときだけ
 // 条件に合わなければ何もせず false（行の途中・小さすぎる・ID が不正）
+// 切り詰めるときは、その時点よりあとの付属フォルダの記録も捨てる
 function truncateSession(id, size, opts = {}) {
   if (!isValidId(id)) return false;
   if (!Number.isInteger(size) || size <= 0) return false;
@@ -217,6 +288,7 @@ function truncateSession(id, size, opts = {}) {
       fs.closeSync(fd);
     }
   }
+  for (const f of files) if (f.size !== size) discardSideAfter(f.file, id, size);
   for (const f of files) if (f.size !== size) fs.truncateSync(f.file, size);
   return true;
 }

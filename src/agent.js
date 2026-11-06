@@ -2665,8 +2665,10 @@ class AgentManager extends EventEmitter {
     if (!Checkpoints.shouldRecord(c)) return;
     let commit = null;
     if (!isChat(c) && !isNoGit(c) && c.worktreePath) {
-      // 手で直した未コミットの変更を、戻す先のコミットに含める
-      if (await git.isDirty(c.worktreePath, { untracked: true })) await git.commitAll(c.worktreePath, this.commitMessage(c));
+      // 手で直した未コミットの変更を、戻す先のコミットに含める。
+      // マージや rebase の途中ではコミットしない（git add -A が未マージのファイルを解消済みにして、マーカーのままマージコミットになる）。HEAD だけ記録する
+      const op = await git.operationInProgress(c.worktreePath);
+      if (!op && (await git.isDirty(c.worktreePath, { untracked: true }))) await git.commitAll(c.worktreePath, this.commitMessage(c));
       commit = await git.revParse(c.worktreePath, 'HEAD');
     }
     const session = await this.checkpointSession(c);
@@ -2727,7 +2729,7 @@ class AgentManager extends EventEmitter {
       const plan = await this.planConversation(c, cp);
       let prompt = cp.prompt || '';
       if (plan.handoff) {
-        const text = Checkpoints.handoffText(c.logs, { before: cp.at });
+        const text = Checkpoints.handoffText(c.logs, { before: cp.at, omitLatestUser: true });
         if (text) prompt = `${text}${prompt}`;
       }
       this.applyRewind(c, cp, idx, plan);

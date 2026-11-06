@@ -34,7 +34,10 @@ test('blockReason: 戻せない条件はすべて理由を返し、レビュー�
   assert.match(Checkpoints.blockReason(card({ mergedInto: ['main'] })), /マージ済み/);
   assert.match(Checkpoints.blockReason(card({ mergedAt: 1 })), /マージ済み/);
   assert.match(Checkpoints.blockReason(card({ noGit: true })), /git で管理していない/);
-  assert.match(Checkpoints.blockReason(card({ noGit: true, readOnly: true })), /git で管理していない/);
+  // 読み取り専用は git のリポジトリでも noGit が立つ。worktree が無いので、その理由にする
+  const readOnly = Checkpoints.blockReason(card({ noGit: true, readOnly: true, worktreePath: null }));
+  assert.match(readOnly, /worktree がありません/);
+  assert.doesNotMatch(readOnly, /git で管理していない/);
   assert.match(Checkpoints.blockReason(card({ kind: 'chat', worktreePath: null })), /worktree がありません/);
   assert.match(Checkpoints.blockReason(card({ worktreePath: null })), /worktree がありません/);
   assert.match(Checkpoints.blockReason(card({ worktreePath: '' })), /worktree がありません/);
@@ -184,6 +187,59 @@ test('handoffText: 指示と返事だけ、時点より前、8000字まで', () 
   const exact = Checkpoints.handoffText([{ t: 1, kind: 'user', text: 'あ' }], { max: 8000 });
   assert.ok(exact.length <= 8000);
   assert.match(exact, /【ユーザー】 あ/);
+  assert.ok(exact.startsWith('## ここまでのやりとり\n'));
+
+  // 今から送り直す指示は引き継ぎ文に入れない。長い指示が 8,000 字を先に使わない
+  const huge = '送'.repeat(9000);
+  const again = [
+    { t: 1, kind: 'user', text: '残したい指示' },
+    { t: 2, kind: 'text', text: '残したい返事' },
+    { t: 3, kind: 'user', text: huge },
+  ];
+  const kept = Checkpoints.handoffText(again, { before: 4, omitLatestUser: true });
+  assert.ok(kept.startsWith('## ここまでのやりとり\n'));
+  assert.match(kept, /残したい指示/);
+  assert.match(kept, /残したい返事/);
+  assert.doesNotMatch(kept, /送送送/);
+  const eaten = Checkpoints.handoffText(again, { before: 4 });
+  assert.match(eaten, /送送送/);
+  assert.doesNotMatch(eaten, /残したい指示/);
+});
+
+test('handoffText: 上限ぎりぎりでも見出しを残す', () => {
+  const head = '## ここまでのやりとり\n';
+  const max = Checkpoints.HANDOFF_LIMIT;
+  const prefix = '【ユーザー】 ';
+  const room = max - head.length - 2;
+  const body = 'あ'.repeat(room - prefix.length);
+  const filled = Checkpoints.handoffText([{ t: 1, kind: 'user', text: body }], { max });
+  assert.strictEqual(filled.length, max);
+  assert.ok(filled.startsWith(head));
+  assert.ok(filled.endsWith('\n\n'));
+  assert.ok(filled.includes(body));
+
+  // 以前の予算（見出しだけ引いて末尾の空行を入れない）だと、ぴったりで見出しの先頭が切れた
+  const older = '古'.repeat(40);
+  const olderLine = prefix.length + older.length;
+  const newerLen = max - head.length - olderLine - 1;
+  const newer = '新'.repeat(newerLen - prefix.length);
+  const tight = Checkpoints.handoffText(
+    [
+      { t: 1, kind: 'user', text: older },
+      { t: 2, kind: 'user', text: newer },
+    ],
+    { max },
+  );
+  assert.ok(tight.startsWith(head));
+  assert.ok(tight.length <= max);
+  assert.ok(tight.endsWith('\n\n'));
+  assert.match(tight, /【ユーザー】 新/);
+  assert.doesNotMatch(tight, /古古古/);
+
+  const over = Checkpoints.handoffText([{ t: 1, kind: 'user', text: `${body}あ` }], { max });
+  assert.strictEqual(over.length, max);
+  assert.ok(over.startsWith(head));
+  assert.ok(over.endsWith('\n\n'));
 });
 
 test('会話ファイル: 改行の位置で切り詰め、小さい・行の途中・不正な ID は変えない', () => {
@@ -221,6 +277,53 @@ test('会話ファイル: 改行の位置で切り詰め、小さい・行の途
   }
   assert.strictEqual(fs.readFileSync(file, 'utf8'), body);
   assert.strictEqual(sessions.truncateSession('missingID1', 1, { configDir }), false);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('会話ファイル: 切り詰めるとき、その時点よりあとの付属記録だけ消す', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-sess-side-'));
+  const configDir = path.join(dir, 'claude');
+  const proj = path.join(configDir, 'projects', 'repo');
+  const id = 'sessSide01';
+  const side = path.join(proj, id);
+  fs.mkdirSync(path.join(side, 'tool-results'), { recursive: true });
+  fs.mkdirSync(path.join(side, 'subagents'), { recursive: true });
+  const keepId = 'toolu_KEEPKEEP1';
+  const dropId = 'toolu_DROPDROP1';
+  const bothId = 'toolu_BOTHBOTH1';
+  const agentId = 'abc123def4567890';
+  const body = `{"id":"${keepId}"}\n{"id":"${bothId}"}\n`;
+  const tail = `{"id":"${dropId}","agentId":"${agentId}","also":"${bothId}"}\n`;
+  const file = path.join(proj, `${id}.jsonl`);
+  fs.writeFileSync(file, body + tail);
+  const keepFile = path.join(side, 'tool-results', `${keepId}.txt`);
+  const dropFile = path.join(side, 'tool-results', `${dropId}.txt`);
+  const bothFile = path.join(side, 'tool-results', `${bothId}.txt`);
+  const agentFile = path.join(side, 'subagents', `agent-${agentId}.jsonl`);
+  const agentMeta = path.join(side, 'subagents', `agent-${agentId}.meta.json`);
+  const tip = path.join(side, 'ccr-tip.json');
+  fs.writeFileSync(keepFile, 'keep');
+  fs.writeFileSync(dropFile, 'drop');
+  fs.writeFileSync(bothFile, 'both');
+  fs.writeFileSync(agentFile, 'agent');
+  fs.writeFileSync(agentMeta, '{}');
+  fs.writeFileSync(tip, '{}');
+
+  const mid = Buffer.byteLength(body) - 3;
+  assert.strictEqual(sessions.truncateSession(id, mid, { configDir }), false);
+  assert.ok(fs.existsSync(dropFile), '切り詰めないときは付属記録も残す');
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), body + tail);
+
+  const size = Buffer.byteLength(body);
+  assert.strictEqual(sessions.truncateSession(id, size, { configDir }), true);
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), body);
+  assert.ok(fs.existsSync(keepFile), '時点より前のツール出力は残す');
+  assert.ok(fs.existsSync(bothFile), '前後の両方にあるものは残す');
+  assert.ok(fs.existsSync(tip), '会話が参照しない付属ファイルは残す');
+  assert.ok(!fs.existsSync(dropFile), '時点よりあとだけのツール出力は消す');
+  assert.ok(!fs.existsSync(agentFile), '時点よりあとのサブエージェントの記録は消す');
+  assert.ok(!fs.existsSync(agentMeta));
 
   fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -107,7 +107,8 @@ function blockReason(card, ctx) {
   }
   if (c.subtasks && c.subtasks.phase && c.subtasks.phase !== 'plan') return tr('サブタスクを動かしているあいだは戻せません');
   if ((c.mergedInto && c.mergedInto.length) || c.mergedAt) return tr('マージ済みのタスクは戻せません');
-  if (c.noGit) return tr('git で管理していないフォルダは戻せません');
+  // 読み取り専用は git のリポジトリでも noGit が立つ。worktree が無いので、その理由にする
+  if (c.noGit && !c.readOnly) return tr('git で管理していないフォルダは戻せません');
   if (c.kind === 'chat' || !c.worktreePath || x.worktreeMissing) return tr('worktree がありません');
   if (c.prUrl) return tr('PR があるので戻せません');
   if (x.parentMerged) return tr('親のタスクがこの枝をすでにマージしたので戻せません');
@@ -129,20 +130,26 @@ function publicView(card, ctx) {
 }
 
 // 会話を続けられないエージェント向けに、その時点より前の指示と返事を 8,000 字までまとめる
+// omitLatestUser: 今から送り直す指示（直前のユーザーログ）は含めない。prompt 側に付く
 function handoffText(logs, opts) {
   const o = opts || {};
   const before = o.before;
   const max = o.max > 0 ? o.max : HANDOFF_LIMIT;
   const lines = [];
+  let latestUser = -1;
   for (const l of logs || []) {
     if (!l || (before != null && !(typeof l.t === 'number' && l.t < before))) continue;
     if (l.kind !== 'user' && l.kind !== 'text') continue;
     const text = String(l.text || '').trim();
     if (!text) continue;
+    if (l.kind === 'user') latestUser = lines.length;
     lines.push(`${l.kind === 'user' ? '【ユーザー】' : '【エージェント】'} ${text}`);
   }
+  if (o.omitLatestUser && latestUser >= 0) lines.splice(latestUser, 1);
   if (!lines.length) return '';
-  const room = max - HANDOFF_HEAD.length;
+  const tail = '\n\n';
+  // 末尾の空行も予算に入れる。見出しを切って 8,000 字に収めない
+  const room = max - HANDOFF_HEAD.length - tail.length;
   if (room <= 0) return '';
   const picked = [];
   let size = 0;
@@ -157,8 +164,7 @@ function handoffText(logs, opts) {
     size += add;
   }
   if (!picked.length) return '';
-  const text = `${HANDOFF_HEAD}${picked.join('\n')}\n\n`;
-  return text.length > max ? text.slice(text.length - max) : text;
+  return `${HANDOFF_HEAD}${picked.join('\n')}${tail}`;
 }
 
 module.exports = {
