@@ -115,7 +115,7 @@ async function launch(lang) {
     },
     async reset() {
       await page.evaluate(() => {
-        setView?.('board');
+        setView('kanban');
         closeModal();
         $('skillPicker').classList.add('hidden');
         $('notifPanel').classList.add('hidden');

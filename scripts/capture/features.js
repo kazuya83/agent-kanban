@@ -63,7 +63,7 @@ function features(ctx) {
 
       // 2. その Pipeline を選んで、タスクを作る
       await show({ cards: onlyCards(base), settings: after });
-      await page.evaluate(() => setView('board'));
+      await page.evaluate(() => setView('kanban'));
       await settle();
       await snap(0.2);
       await moveTo('#newBtn', { n: 4 });
@@ -402,6 +402,81 @@ function features(ctx) {
       await show({ cards: list({ logs: null, enter: null, stock: { ...c.csv, id: 'stock', title: t.tStock, issue: undefined, btw: [], skill: 'test-writer', branch: 'agent/task-a41f07c2', lastMessage: 'Read src/api/orders.js', startedAt: now() - 2000, createdAt: now() } }) });
       await settle();
       await snap(2.4);
+    }),
+
+    // 毎朝の依存関係チェックを登録して、今すぐ動かす
+    scheduler: (outFile) => record(outFile, async ({ snap, moveTo, typeInto }) => {
+      const others = { logs: c.logs, paging: c.paging, speed: c.speed };
+      const at = now();
+      const day = 86400000;
+      const next = (hour) => {
+        const d = new Date(at + day);
+        d.setHours(hour, 0, 0, 0);
+        return d.getTime();
+      };
+      const common = { repoPath: paths.SHOP, skill: null, agent: 'claude', model: '', enabled: true, catchUp: false, createdAt: at - 30 * day, updatedAt: at - day };
+      const weekly = { ...common, id: 'weekly', title: t.scWeekly, prompt: t.scWeeklyDo, readOnly: true, rule: { kind: 'weekly', hour: 17, minute: 0, weekdays: [5] }, nextRunAt: next(17) + 3 * day, lastRunAt: at - 4 * day, lastStatus: 'ok', runs: [] };
+      const check = { ...common, id: 'deps', title: t.scTitle, prompt: t.scPrompt, readOnly: true, createdAt: at, updatedAt: at, rule: { kind: 'daily', hour: 9, minute: 0 }, nextRunAt: next(9), lastRunAt: null, lastStatus: '', runs: [] };
+      const stage = (schedules, cards) => show({ cards: onlyCards({ ...others, ...cards }), schedules });
+
+      // 1. 画面を切り替えて、スケジュールを登録する
+      await stage([weekly], {});
+      await settle();
+      await snap(0.4);
+      await moveTo('#navBtn', { n: 4 });
+      await page.click('#navBtn');
+      await settle(150);
+      await snap(0.4);
+      await moveTo('#navMenu [data-view=scheduler]', { n: 3 });
+      await page.click('#navMenu [data-view=scheduler]');
+      await page.waitForSelector('[data-sched-act=new]');
+      await settle();
+      await snap(0.8);
+      await moveTo('[data-sched-act=new]');
+      await page.click('[data-sched-act=new]');
+      await page.waitForSelector('#schedPrompt');
+      await page.selectOption('#schedAgent', 'claude');
+      await settle();
+      await snap(0.3);
+      await typeInto('#schedTitle', t.scTitle, 0.6);
+      await typeInto('#schedPrompt', t.scPrompt, 1.2);
+      await moveTo('#schedKind', { n: 4 });
+      await snap(0.9);
+      await moveTo('#schedReadOnly', { n: 3 });
+      await page.check('#schedReadOnly');
+      await snap(0.7);
+      await moveTo('#schedOk', { n: 3 });
+      await snap(0.3);
+      await page.click('#schedOk');
+      await page.waitForFunction(() => $('modal').classList.contains('hidden')); // 閉じても中身は残るので、ダイアログで見る
+
+      // 2. 一覧に出る。詳細から今すぐ動かす（ふつうは毎朝 9:00 に動く）
+      await stage([check, weekly], {});
+      await settle();
+      await snap(1.4);
+      await moveTo('[data-sched-id=deps]', { n: 4 });
+      await page.click('[data-sched-id=deps]');
+      await page.waitForSelector('[data-sched-do=run]');
+      await settle();
+      await snap(1.8);
+      await moveTo('[data-sched-do=run]', { n: 4 });
+      await snap(0.4);
+      await page.click('[data-sched-do=run]');
+      await settle();
+
+      // 3. カンバンにカードができて、結果を報告する
+      const task = { ...c.csv, id: 'deps-run', title: t.scTitle, issue: undefined, btw: [], skill: undefined, readOnly: true, scheduleId: 'deps', scheduleTitle: t.scTitle, branch: '', worktreePath: '', createdAt: at, startedAt: at - 3000, lastMessage: 'Bash npm audit' };
+      const ran = { ...check, lastRunAt: at, lastStatus: 'ok', runs: [{ at, status: 'ok', cardId: 'deps-run', message: ctx.tr('タスクを作って開始しました') }] };
+      await page.evaluate(() => {
+        closeModal();
+        setView('kanban');
+      });
+      await stage([ran, weekly], { run: task });
+      await settle();
+      await snap(2.0);
+      await stage([ran, weekly], { run: { ...task, status: 'review', lastMessage: t.scReport, costUsd: 0.02 } });
+      await settle();
+      await snap(3.0);
     }),
   };
 }

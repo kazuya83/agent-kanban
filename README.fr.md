@@ -216,6 +216,8 @@ Si un merge entre en conflit, la carte devient un conflit. Une fois la branche d
 
 Depuis le menu de la barre du haut, passez au « Planificateur de tâches » pour gérer, sous forme de cartes, des planifications qui créent et lancent une tâche à une date donnée (une fois, toutes les heures, tous les jours, toutes les semaines ou tous les mois). Vous pouvez enregistrer une tâche du kanban comme planification, et créer tout de suite une tâche à partir d'une planification. Les planifications ne tournent que tant que l'application est ouverte (détails dans [docs/usage.md](docs/usage.md) (English)).
 
+![Enregistrer une vérification quotidienne des dépendances, la lancer tout de suite et voir le résultat sur le tableau](docs/images/fr/feature-scheduler.gif)
+
 ## Prérequis
 
 - git

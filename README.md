@@ -216,6 +216,8 @@ When you create a task, you can pick one Claude Code skill (it is passed as `/sk
 
 From the menu in the top bar, switch to "Task scheduler" to manage schedules that create and run a task at a set time (once, hourly, daily, weekly, or monthly) as cards. You can register a kanban task as a schedule directly, and you can create a task from a schedule right away. Schedules run only while the app is open (see [docs/usage.md](docs/usage.md)).
 
+![Registering a daily dependency check, running it now, and seeing the result on the board](docs/images/en/feature-scheduler.gif)
+
 ## Requirements
 
 - git

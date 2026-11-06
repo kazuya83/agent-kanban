@@ -1,6 +1,11 @@
 // 機能ごとの GIF で使う架空の文言（言語ごと）。実在の人・リポジトリは使わない
 module.exports = {
   en: {
+    scTitle: 'Check dependencies every morning',
+    scPrompt: 'Run npm outdated and npm audit, and report packages that are out of date or have known vulnerabilities, starting with the most urgent.',
+    scWeekly: 'Summarize the week’s merged changes',
+    scWeeklyDo: 'Summarize the changes merged to main this week.',
+    scReport: '2 packages have known vulnerabilities (1 high). 5 are out of date.',
     plName: 'Implement and review',
     plRequest: 'Implement with Codex, review with Claude, and go back to implementation if changes are needed (up to 3 times)',
     plImpl: 'Implement', plImplDo: 'Make the requested change and update the tests.',
@@ -15,6 +20,11 @@ module.exports = {
     subApi: 'Add the coupon API', subUi: 'Add a coupon field to the cart', subTest: 'Add end-to-end checkout tests',
   },
   ja: {
+    scTitle: '毎朝の依存関係チェック',
+    scPrompt: 'npm outdated と npm audit を実行し、古いパッケージと脆弱性のあるパッケージを、急ぐものから順に報告してください。',
+    scWeekly: '今週マージした変更をまとめる',
+    scWeeklyDo: '今週 main にマージした変更をまとめてください。',
+    scReport: '脆弱性のあるパッケージが 2 件（高 1 件）、古いパッケージが 5 件ありました。',
     plName: '実装とレビュー',
     plRequest: 'Codex で実装して Claude でレビューし、直すところがあれば実装に戻す（3回まで）',
     plImpl: '実装', plImplDo: '頼まれた変更を行い、テストも直してください。',
@@ -29,6 +39,11 @@ module.exports = {
     subApi: 'クーポンの API を作る', subUi: 'カートにクーポンの欄を足す', subTest: '購入の流れの E2E テストを足す',
   },
   es: {
+    scTitle: 'Revisar las dependencias cada mañana',
+    scPrompt: 'Ejecuta npm outdated y npm audit, e informa de los paquetes desactualizados o con vulnerabilidades conocidas, empezando por los más urgentes.',
+    scWeekly: 'Resumir los cambios fusionados de la semana',
+    scWeeklyDo: 'Resume los cambios fusionados en main esta semana.',
+    scReport: '2 paquetes tienen vulnerabilidades conocidas (1 alta). 5 están desactualizados.',
     plName: 'Implementar y revisar',
     plRequest: 'Implementar con Codex, revisar con Claude y volver a la implementación si hay cambios que hacer (hasta 3 veces)',
     plImpl: 'Implementar', plImplDo: 'Haz el cambio pedido y actualiza las pruebas.',
@@ -43,6 +58,11 @@ module.exports = {
     subApi: 'Añadir la API de cupones', subUi: 'Añadir un campo de cupón al carrito', subTest: 'Añadir pruebas de extremo a extremo del pago',
   },
   fr: {
+    scTitle: 'Vérifier les dépendances chaque matin',
+    scPrompt: 'Exécute npm outdated et npm audit, puis signale les paquets obsolètes ou ayant des vulnérabilités connues, en commençant par les plus urgents.',
+    scWeekly: 'Résumer les changements fusionnés de la semaine',
+    scWeeklyDo: 'Résume les changements fusionnés dans main cette semaine.',
+    scReport: '2 paquets ont des vulnérabilités connues (1 élevée). 5 sont obsolètes.',
     plName: 'Implémenter et relire',
     plRequest: "Implémenter avec Codex, relire avec Claude et revenir à l'implémentation s'il y a des corrections à faire (3 fois maximum)",
     plImpl: 'Implémentation', plImplDo: 'Effectue le changement demandé et mets à jour les tests.',
@@ -57,6 +77,11 @@ module.exports = {
     subApi: "Ajouter l'API des coupons", subUi: 'Ajouter un champ coupon au panier', subTest: 'Ajouter des tests de bout en bout du paiement',
   },
   zh: {
+    scTitle: '每天早上检查依赖项',
+    scPrompt: '运行 npm outdated 和 npm audit，并按紧急程度报告过时或存在已知漏洞的软件包。',
+    scWeekly: '汇总本周合并的更改',
+    scWeeklyDo: '汇总本周合并到 main 的更改。',
+    scReport: '有 2 个软件包存在已知漏洞（1 个高危），5 个已过时。',
     plName: '实现与审查',
     plRequest: '用 Codex 实现，用 Claude 审查，如有需要修改的地方就回到实现（最多 3 次）',
     plImpl: '实现', plImplDo: '完成所要求的修改，并更新测试。',

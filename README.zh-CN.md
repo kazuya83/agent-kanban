@@ -216,6 +216,8 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 
 从顶栏菜单切换到「任务调度」，就可以用卡片管理在指定时间（仅一次、每小时、每天、每周、每月）创建并运行任务的日程。看板任务可以直接登记成日程，也可以从日程立刻创建任务。只有在应用开着的时候才会运行（详见 [docs/usage.md](docs/usage.md) (English)）。
 
+![登记每天的依赖项检查，立即运行，并在看板上查看结果](docs/images/zh/feature-scheduler.gif)
+
 ## 需要准备
 
 - git

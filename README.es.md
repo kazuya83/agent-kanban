@@ -216,6 +216,8 @@ Al crear una tarea puedes elegir una skill de Claude Code (se pasa como `/nombre
 
 Desde el menú de la barra superior, cambia a «Programador de tareas» para gestionar, en tarjetas, programaciones que crean y ejecutan una tarea en un momento dado (una vez, cada hora, cada día, cada semana o cada mes). Puedes registrar una tarea del kanban como programación, y también crear una tarea desde una programación en el momento. Las programaciones solo se ejecutan mientras la aplicación está abierta (más detalles en [docs/usage.md](docs/usage.md) (English)).
 
+![Registrar una revisión diaria de dependencias, ejecutarla ahora y ver el resultado en el tablero](docs/images/es/feature-scheduler.gif)
+
 ## Requisitos
 
 - git
