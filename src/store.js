@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isAgent, cleanEnabledAgents, cleanOrchestration, cleanRelaySteps, cleanCustomAgents } = require('./providers');
 const FlowModel = require('../renderer/flow-model');
+const { cleanSchedules } = require('../renderer/schedule-model');
 
 // Pipelineのフローチャート（プロジェクトごと）の初期値: 前と同じ「実装 → レビュー」
 const DEFAULT_RELAY_FLOW = FlowModel.flowFromSteps(DEFAULT_RELAY_STEPS);
@@ -434,7 +435,7 @@ function migrateSettings(settings, raw, cards) {
 class Store {
   constructor(file) {
     this.file = file;
-    this.data = { settings: { ...DEFAULT_SETTINGS }, cards: [], removedCost: {}, costLog: [], weeklyResetAt: 0, notifications: [] };
+    this.data = { settings: { ...DEFAULT_SETTINGS }, cards: [], removedCost: {}, costLog: [], weeklyResetAt: 0, notifications: [], schedules: [] };
     this.timer = null;
     this.load();
   }
@@ -449,6 +450,7 @@ class Store {
       this.data.notifications = Array.isArray(raw.notifications) ? raw.notifications : [];
       this.data.costLog = Array.isArray(raw.costLog) ? raw.costLog : [];
       this.data.weeklyResetAt = Number(raw.weeklyResetAt) || 0;
+      this.data.schedules = cleanSchedules(raw.schedules);
       migrateSettings(this.data.settings, raw.settings || {}, this.data.cards);
     } catch {
       /* 初回起動 */
@@ -499,6 +501,29 @@ class Store {
 
   card(id) {
     return this.data.cards.find((c) => c.id === id);
+  }
+
+  // タスクスケジューラのスケジュール（全リポジトリの分。動かすときはタブを開いていないリポジトリの分も使う）
+  get schedules() {
+    return this.data.schedules;
+  }
+
+  // そのリポジトリのスケジュール（画面に渡す分）
+  schedulesOf(repoPath) {
+    return this.data.schedules.filter((s) => s.repoPath === repoPath);
+  }
+
+  schedule(id) {
+    return this.data.schedules.find((s) => s.id === id);
+  }
+
+  addSchedule(s) {
+    this.data.schedules.push(s);
+    return s;
+  }
+
+  removeSchedule(id) {
+    this.data.schedules = this.data.schedules.filter((s) => s.id !== id);
   }
 
   // 削除したタスクで使った金額も合計に残すため、リポジトリごとに足し込んでおく
