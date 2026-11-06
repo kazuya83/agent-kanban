@@ -1,0 +1,68 @@
+/* 設定の画面（左に項目の一覧、右に全項目を縦に並べる）。
+   入力欄などの --panel-2 が見分けられるように、モーダルと同じ --panel を土台にする（ライトの --bg とはほぼ同じ色） */
+.settings-view { flex: 1; display: flex; min-width: 0; min-height: 0; background: var(--panel); }
+
+/* 左の項目の一覧。右とは別にスクロールする */
+.settings-nav { flex: none; width: 240px; padding: 16px 8px 16px 12px; overflow-y: auto; }
+.settings-nav-heading { margin-top: 8px; padding: 12px 10px 4px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 600; }
+.settings-nav-heading:first-child { margin-top: 0; border-top: 0; }
+.settings-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+}
+.settings-nav-item .ic { width: 16px; height: 16px; margin-right: 0; color: var(--muted); }
+.settings-nav-item:hover { background: var(--panel-2); }
+.settings-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.settings-nav-item.active { background: var(--panel-2); font-weight: 600; }
+.settings-nav-item.active .ic { color: var(--text); }
+.settings-nav-item.active::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: -8px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* 右の本文。position: relative で、節の offsetTop をこのスクロール領域から測れるようにする */
+.settings-main { position: relative; flex: 1; min-width: 0; overflow: auto; }
+.settings-content { max-width: 860px; padding: 24px 32px 8px; }
+.settings-section { margin-bottom: 40px; scroll-margin-top: 16px; }
+/* どの項目を押しても節の先頭まで届くように、最後の節は画面の高さぶん取る */
+.settings-section:last-of-type { min-height: 100vh; margin-bottom: 0; }
+.settings-title { margin: 0 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 20px; font-weight: 500; }
+/* .modal-box の外なので、モーダルと同じ見た目をここで付ける */
+.settings-view code { font-family: var(--mono); font-size: 12px; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+
+.settings-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 860px;
+  padding: 10px 32px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+
+/* 狭いときは、項目の一覧を上にたたむ。折り返して、現在地がいつも見えるようにする */
+@media (max-width: 720px) {
+  .settings-view { flex-direction: column; }
+  .settings-nav { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  .settings-nav-heading { display: none; }
+  .settings-nav-item { flex: none; white-space: nowrap; }
+  .settings-nav-item.active::before { top: auto; right: 10px; bottom: 0; left: 10px; width: auto; height: 3px; }
+  .settings-main { flex: 1; min-height: 0; }
+  .settings-content { padding: 16px; }
+  .settings-actions { padding: 10px 16px; }
+}
