@@ -1,5 +1,5 @@
 // Electron メインプロセス
-const { app, BrowserWindow, ipcMain, dialog, shell, Notification, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Notification, safeStorage, powerMonitor } = require('electron');
 const path = require('path');
 
 // 承認用の MCP サーバーとして呼ばれたのに ELECTRON_RUN_AS_NODE が効かなかったとき
@@ -42,6 +42,7 @@ const { Updater } = require('./src/updater');
 const { Scheduler } = require('./src/scheduler');
 const trackersRegistry = require('./src/trackers');
 const { SecretStore } = require('./src/secrets');
+const { SlackBridge } = require('./src/slack');
 const { createScheduleApi, notificationClickPlan } = require('./src/schedule-wiring');
 const fs = require('fs');
 
@@ -78,6 +79,7 @@ let quitState = 'idle'; // 終了の流れ: idle → confirming → stopping →
 let store;
 let agents;
 let trackers; // 課題管理・チャットサービスとの連携（src/trackers）
+let slack; // Slack への通知と、Slack からの開始（src/slack.js）
 let permServer;
 let remoteHost = null;
 let remoteClient = null;
@@ -134,7 +136,7 @@ function send(channel, payload) {
 function boardState() {
   const { cleanRepoTabs, repoTabSummary } = require('./src/store');
   const repoTabs = repoTabSummary(cleanRepoTabs(store.settings.repoTabs, store.settings.repoPath), store.cards, store.settings);
-  return { settings: store.settings, repoTabs, issueProviders: trackersRegistry.issueProviderMeta(), cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath), schedules: store.schedulesOf(store.settings.repoPath) };
+  return { settings: store.settings, repoTabs, issueProviders: trackersRegistry.issueProviderMeta(), trackerStatus: trackers.statusMap(), cards: agents.publicCards(store.settings.repoPath), totalCostUsd: store.totalCost(store.settings.repoPath), notifications: agents.listNotifications(store.settings.repoPath), schedules: store.schedulesOf(store.settings.repoPath) };
 }
 
 // 画面に渡すボード。クライアントとして接続中は、見ている側（ホスト / このマシン）のボードに、両方のタブを並べて載せる
@@ -525,6 +527,12 @@ app.whenReady().then(async () => {
     }
     if (win && !win.isFocused()) win.flashFrame(true);
   });
+
+  slack = new SlackBridge({ trackers, agents, store });
+  trackers.setStatusSource('slack', () => slack.status());
+  slack.on('status', notifyBoard);
+  slack.start();
+  powerMonitor.on('resume', () => slack.reconnect()); // スリープの間に切れた接続には、自分では気づけない
 
   remoteClient = new RemoteClient();
   remoteClient.on('event', (channel, payload) => {
@@ -1244,6 +1252,7 @@ app.on('before-quit', (e) => {
   // 終了の確認中も含めて、ここからはスケジュールを発火させない（キャンセルされたら動かし直す）
   scheduler?.stop();
   if (quitState === 'done' || !agents) {
+    slack?.stop();
     store?.flush();
     permServer?.close();
     reconnector?.cancel();

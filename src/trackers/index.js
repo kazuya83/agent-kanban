@@ -15,6 +15,8 @@
 //     url を変えたときは、一緒に入れ直さなかった secret を消す（保存したトークンを別の接続先へ送らないため）。
 //     select の options は [{ value, label }]。
 //   testConnection(ctx) → { ok: boolean, message?: string }   接続テスト。ctx には画面に入力中の値も入る
+//   validateConfig(config, secrets)   保存の前に値を確かめる。だめなら例外（secrets は今回入力された分だけ）
+//   guide: ['...']   欄の上に出す、設定の手順（日本語の原文で書く）
 //
 //   matchesRemote(url, config) → boolean   origin の URL がこのサービスのものか（プロジェクトの初期値を決める）
 //   statusLabel: 'GitHub Projects'   状態同期のログに出す名前（無ければ label）
@@ -37,6 +39,7 @@
 //
 // 上の ref には、カードの c.issue（renderer/issue-ref.js の形）もそのまま渡る。
 // チャットサービス（parseRefs・fetchIssue を持たない）は、configFields と testConnection で「連携」の欄にだけ出る。
+// 接続の状態を画面に出すには setStatusSource(id, fn) を呼ぶ（fn の返り値 { state, text } にトークンを入れない）。
 //
 // ctx（呼び出しごとに作る）: { provider, repoPath, config, settings, ghPath, secret(name) }
 //   config: このサービスの設定（secret を除く） / settings: プロジェクトの設定 / secret(name): 保存したトークンを読む
@@ -144,6 +147,16 @@ class Trackers extends EventEmitter {
     super();
     this.store = store;
     this.secrets = secrets;
+    this.statusSources = new Map();
+  }
+
+  // 接続を持ち続けるサービスの状態を、画面に出せるようにする
+  setStatusSource(id, fn) {
+    this.statusSources.set(id, fn);
+  }
+
+  statusMap() {
+    return Object.fromEntries([...this.statusSources].map(([id, fn]) => [id, fn()]));
   }
 
   mustGet(id) {
@@ -236,7 +249,7 @@ class Trackers extends EventEmitter {
       for (const f of secretFields(p)) secrets[f.name] = this.hasSecret(p.id, f.name);
       const fields = fieldsOf(p).map(({ name, type, label, placeholder, help, required, options, allowHttpField }) => ({ name, type, label, placeholder, help, required: !!required, options, allowHttpField }));
       const configured = fieldsOf(p).every((f) => !f.required || (f.type === 'secret' ? secrets[f.name] : !!config[f.name]));
-      return { id: p.id, label: p.label, issues: canIssues(p), configFields: fields, config, secrets, configured, canTest: typeof p.testConnection === 'function', saved: !!(this.store.settings.trackerConfigs || {})[p.id] };
+      return { id: p.id, label: p.label, issues: canIssues(p), configFields: fields, config, secrets, configured, canTest: typeof p.testConnection === 'function', saved: !!(this.store.settings.trackerConfigs || {})[p.id], guide: p.guide || [], status: this.statusSources.has(p.id) ? this.statusSources.get(p.id)() : null };
     });
   }
 
@@ -259,6 +272,7 @@ class Trackers extends EventEmitter {
       const missing = f.type === 'secret' ? !given[f.name] && (!this.hasSecret(id, f.name) || urlChanged(p, prev, next)) : !next[f.name];
       if (f.required && missing && f.type !== 'checkbox') throw new Error(tr('「{label}」を入れてください', { label: tr(f.label) }));
     }
+    if (typeof p.validateConfig === 'function') p.validateConfig(next, given);
     if (Object.keys(given).length && !this.secrets) throw new Error(tr('このマシンでは OS の安全な保存先を使えないので、トークンを保存できません（平文では保存しません）。Linux では GNOME Keyring や KWallet などを使えるようにしてください'));
     for (const [name, value] of Object.entries(given)) this.secrets.set(secretName(id, name), value);
     const cleared = [];
@@ -301,5 +315,6 @@ class Trackers extends EventEmitter {
 // 組み込みのプロバイダ。サービスを足すときは、ここに1行足す
 const BUILTIN = ['./github', './linear', './jira'];
 for (const file of BUILTIN) register(require(file));
+register(require('../slack').provider); // 課題管理ではないので、本体は src/slack.js にある
 
 module.exports = { Trackers, register, unregister, get, list, issueProviders, isIssueProvider, issueProviderMeta, cleanConfig, secretName };

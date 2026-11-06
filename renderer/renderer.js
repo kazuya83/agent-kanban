@@ -482,6 +482,7 @@ function orchChipsHtml(c) {
   }
   else if (c.persona) chips.push(`<span class="orch-chip agent persona" style="--pc:${esc(c.persona.color || '#6366f1')}" title="${esc(c.persona.description || tr('カスタムエージェント'))}">${personaIcon(c.persona, agentOf(c))}${esc(whoLabel(agentOf(c), c.persona))}</span>`);
   else chips.push(`<span class="orch-chip agent">${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</span>`);
+  if (c.slack) chips.push(`<span class="orch-chip slack" title="${esc(tr('Slack の {user} が {channel} から頼んだタスクです', { user: c.slack.userName ? `@${c.slack.userName}` : c.slack.user, channel: c.slack.channelName ? `#${c.slack.channelName}` : c.slack.channel }))}">Slack · ${esc(c.slack.userName || c.slack.user)}</span>`);
   if (c.scheduleId) chips.push(tr('<span class="orch-chip schedule" title="スケジュール「{v}」から作られたタスクです">{v2}{v3}</span>', { v: (esc(c.scheduleTitle || '')), v2: (icon('calendar')), v3: (esc(c.scheduleTitle || tr('スケジュール'))) }));
   if (c.compete) {
     const n = competitors(c).length;
@@ -4768,6 +4769,8 @@ function trackerCardHtml(t) {
   const badge = !fields.length ? '' : t.configured ? `<span class="badge">${tr('設定済み')}</span>` : `<span class="badge">${tr('未設定')}</span>`;
   return `<div class="tracker-card" data-tracker="${esc(t.id)}">
       <div class="tracker-head"><b>${esc(t.label)}</b>${badge}</div>
+      ${t.status ? `<small class="tracker-status" data-tracker-status="${esc(t.id)}">${esc(t.status.text || '')}</small>` : ''}
+      ${(t.guide || []).length ? `<details class="tracker-guide"><summary>${tr('設定のしかた')}</summary><ol>${t.guide.map((x) => `<li>${esc(tr(x))}</li>`).join('')}</ol></details>` : ''}
       ${fields.map((f) => trackerFieldHtml(t, f)).join('')}
       <div class="tracker-actions">
         ${fields.length ? `<button class="btn small primary" type="button" data-tact="save">${tr('保存')}</button>` : ''}
@@ -4786,6 +4789,14 @@ function readTrackerCard(card) {
     if (el.value) secrets[el.dataset.secret] = el.value;
   });
   return { config, secrets };
+}
+
+// 開いている「連携」の欄の、接続の状態を新しくする（Slack の接続は設定の保存より少し遅れて変わる）
+function updateTrackerStatus(board) {
+  document.querySelectorAll('[data-tracker-status]').forEach((el) => {
+    const s = ((board && board.trackerStatus) || {})[el.dataset.trackerStatus];
+    if (s) el.textContent = s.text || '';
+  });
 }
 
 async function drawTrackers() {
@@ -5372,6 +5383,7 @@ api.onRemote((rs) => {
 api.onBoard((board) => {
   state.board = board;
   renderBoard();
+  updateTrackerStatus(board);
   markSeenIfOpen();
   if (state.selected) {
     renderDetailHead();
