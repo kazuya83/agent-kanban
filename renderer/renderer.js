@@ -4983,6 +4983,11 @@ $('notifPanel').addEventListener('click', async (e) => {
     run(() => api.readNotifications([item.dataset.nid]));
     closeNotifications();
     select(item.dataset.card);
+  } else if (item && item.classList.contains('k-schedule')) {
+    // カードを作れなかったスケジュールの失敗: 開くカードがないので、スケジューラ画面で確かめてもらう
+    run(() => api.readNotifications([item.dataset.nid]));
+    closeNotifications();
+    setView('scheduler');
   }
 });
 

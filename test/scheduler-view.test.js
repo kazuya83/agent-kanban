@@ -73,7 +73,7 @@ function setup({ schedules = [], settings = { repoPath: '/repo' }, cards = [], a
     $: (id) => doc.els.get(id) || null,
     esc: (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]),
     icon: (n) => `[${n}]`,
-    ScheduleModel: { describeRule: (r) => `rule:${r.kind}` },
+    ScheduleModel: { describeRule: (r) => `rule:${r.kind}`, WEEKDAY_NAMES: ['日', '月', '火', '水', '木', '金', '土'] },
     RELAY_PREFIX: 'relay:',
     CUSTOM_PREFIX: 'custom:',
     isRelayRef: (v) => typeof v === 'string' && v.startsWith('relay:'),

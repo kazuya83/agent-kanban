@@ -362,7 +362,7 @@ test('重複防止: 競争の複数のカードのどれかが残っていても
   assert.strictEqual(s.lastStatus, 'skipped');
 });
 
-test('失敗: リポジトリがなければ記録して通知し、次回へ進む', (t) => {
+test('失敗: リポジトリがなければ記録して通知し、スケジュールを止める（画面から消せないので通知を繰り返さない）', (t) => {
   const { agents, missing, clock, sch, add } = setup(t);
   const s = add({ repoPath: '/gone' });
   missing.add('/gone');
@@ -373,10 +373,20 @@ test('失敗: リポジトリがなければ記録して通知し、次回へ進
   assert.match(s.lastError, /リポジトリが見つかりません: \/gone/);
   assert.strictEqual(s.lastRunAt, null);
   assert.strictEqual(s.lastCardId, '');
-  assert.strictEqual(s.nextRunAt, T0 + 24 * 60 * MIN);
+  assert.deepStrictEqual([s.enabled, s.nextRunAt], [false, null]);
   assert.strictEqual(agents.notified.length, 1);
   assert.deepStrictEqual([agents.notified[0].cardId, agents.notified[0].repoPath, agents.notified[0].kind], ['', '/gone', 'schedule']);
   assert.match(agents.notified[0].title, /定期/);
+  assert.match(agents.notified[0].body, /停止しました/);
+  // 止めたあとは、時刻が進んでも通知しない
+  clock.now = T0 + 48 * 60 * MIN;
+  sch.tick();
+  assert.strictEqual(agents.notified.length, 1);
+  // フォルダが戻れば、再開して次回の予定が入る
+  missing.delete('/gone');
+  sch.update(s.id, { enabled: true });
+  assert.strictEqual(s.enabled, true);
+  assert.ok(s.nextRunAt > clock.now);
 });
 
 test('失敗: カードを作れないとき（Pipeline が消されたなど）も記録して通知する', (t) => {
@@ -438,7 +448,7 @@ test('失敗: 1つが失敗しても、ほかのスケジュールは動く。�
   clock.now = T0;
   sch.tick();
   assert.strictEqual(a.lastStatus, 'failed');
-  assert.strictEqual(a.nextRunAt, T0 + 24 * 60 * MIN);
+  assert.deepStrictEqual([a.enabled, a.nextRunAt], [false, null]); // 通知できなくても止める
   assert.strictEqual(b.lastStatus, 'ok');
 });
 

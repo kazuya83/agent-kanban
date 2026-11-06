@@ -142,12 +142,17 @@ class Scheduler extends EventEmitter {
       return;
     }
     const res = this.fire(s, true);
-    if (res.error) this.alert(s, res.error);
+    if (!res.error) return;
+    // リポジトリが消えたスケジュールは、そのリポジトリを開けないので画面から止めることも消すこともできない。
+    // 失敗の通知が続かないよう、ここで止める（フォルダが戻れば、開いて「再開」できる）
+    const gone = !this.exists(s.repoPath);
+    if (gone) s.enabled = false;
+    this.alert(s, gone ? `${res.error}\nスケジュールを停止しました` : res.error);
   }
 
   // 次回へ進む（遅れた分を積み上げないよう、今の時刻から計算する）。次回がなければ止める
   advance(s, now) {
-    s.nextRunAt = nextRun(s.rule, now);
+    s.nextRunAt = s.enabled ? nextRun(s.rule, now) : null;
     if (s.nextRunAt === null) s.enabled = false;
   }
 

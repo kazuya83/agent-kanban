@@ -895,7 +895,7 @@ class AgentManager extends EventEmitter {
   /**
    * 通知を足す。右上の通知一覧に出し、'notification' イベントでデスクトップ通知にも使う
    * @param {object} c カード
-   * @param {string} kind permission / question / awaiting / review / failed / done / skill
+   * @param {string} kind permission / question / awaiting / review / failed / done / skill / schedule
    */
   notify(c, kind, title, body, extra) {
     const n = {

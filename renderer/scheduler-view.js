@@ -10,7 +10,7 @@
    agentFieldHtml, bindAgentField, modelFieldHtml, updateModelField, readModelField, renderSkillSlot,
    agentLabel, isRelayRef, isCustomRef, pipelineOfRef, findCustomAgent, relayFlowInfo, RELAY_PREFIX, CUSTOM_PREFIX */
 (function (root) {
-  const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+  const WEEKDAYS = ScheduleModel.WEEKDAY_NAMES;
   const RULE_KINDS = [
     ['once', '1回だけ'],
     ['hourly', '毎時'],
@@ -150,7 +150,7 @@
     }
     const list = sortedSchedules(schedules());
     return `<div class="sched-head">
-        <div><h2>${icon('clock')}タスクスケジューラ</h2><p class="muted small">決めた日時に、カンバンにタスクを作って開始します。アプリを起動しているあいだだけ動きます。</p></div>
+        <div><h2>${icon('calendar')}タスクスケジューラ</h2><p class="muted small">決めた日時に、カンバンにタスクを作って開始します。アプリを起動しているあいだだけ動きます。</p></div>
         <button class="btn primary" data-sched-act="new">${icon('plus')}新しいスケジュール</button>
       </div>
       ${list.length ? `<div class="sched-grid">${list.map(cardHtml).join('')}</div>` : '<div class="col-empty">スケジュールはまだありません。「新しいスケジュール」か、カンバンのタスク詳細の「スケジュール登録」から作れます。</div>'}`;
@@ -212,7 +212,7 @@
     const toggle = s.enabled
       ? '<button class="btn ghost" data-sched-do="toggle">停止</button>'
       : `<button class="btn ghost" data-sched-do="toggle" ${resumable ? '' : 'disabled title="日時が過ぎています。「編集」で日時を変えてください"'}>再開</button>`;
-    return `<h2>${icon('clock')}${esc(s.title)}</h2>
+    return `<h2>${icon('calendar')}${esc(s.title)}</h2>
       <dl class="sched-info">
         ${row('繰り返し', esc(ruleText(s)))}
         ${row('次回の実行', esc(nextRunText(s)))}
@@ -332,7 +332,7 @@
     const rule = { ...base, ...(schedule ? schedule.rule : {}) };
     const files = fromCard ? (fromCard.attachments || []).length : 0;
     openModal(
-      `<h2>${icon('clock')}${schedule ? 'スケジュールを編集' : '新しいスケジュール'}</h2>
+      `<h2>${icon('calendar')}${schedule ? 'スケジュールを編集' : '新しいスケジュール'}</h2>
        ${fromCard ? `<p class="muted small">タスク「${esc(fromCard.title)}」の内容をコピーして登録します。元のタスクはそのまま残ります。${files ? `添付ファイル（${files} 件）はコピーしません。` : ''}</p>` : ''}
        <label class="field"><span>タスク名（省略すると指示の1行目）</span><input id="schedTitle" value="${esc(draft.title)}" /></label>
        ${agentFieldHtml('sched', draft.agent)}
