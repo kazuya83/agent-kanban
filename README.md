@@ -148,4 +148,4 @@ The same commands update to the latest version. You can also update from the app
 
 ## License
 
-Released under the [MIT License](LICENSE).
+Released under the [Functional Source License 1.1 (FSL-1.1-ALv2)](LICENSE). You can use, modify, and redistribute it for any purpose except a competing commercial product or service. Each version becomes available under the Apache License 2.0 two years after its release.

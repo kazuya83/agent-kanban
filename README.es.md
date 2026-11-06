@@ -148,4 +148,4 @@ Los mismos comandos actualizan a la última versión. También se puede actualiz
 
 ## Licencia
 
-Publicado bajo la [licencia MIT](LICENSE).
+Publicado bajo la [Functional Source License 1.1 (FSL-1.1-ALv2)](LICENSE). Puedes usarlo, modificarlo y redistribuirlo para cualquier fin, salvo un producto o servicio comercial competidor. Cada versión pasa a estar disponible bajo la Apache License 2.0 dos años después de su publicación.

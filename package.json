@@ -3,7 +3,7 @@
   "version": "0.1.8",
   "description": "Kanban desktop app that runs AI coding agents (Claude Code / Codex CLI / Gemini CLI / Cursor CLI) in parallel, one git worktree per task. Mac and Windows can each remotely operate the other",
   "main": "main.js",
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "author": "kazuya83",
   "homepage": "https://github.com/kazuya83/worktree-kanban",
   "scripts": {

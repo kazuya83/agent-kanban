@@ -138,4 +138,4 @@ irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 
 
 ## ライセンス
 
-[MIT License](LICENSE) で公開しています。
+[Functional Source License 1.1（FSL-1.1-ALv2）](LICENSE) で公開しています。競合する商用の製品・サービスにする場合を除いて、利用・改変・再配布ができます。各版は、公開から2年後に Apache License 2.0 でも使えるようになります。
