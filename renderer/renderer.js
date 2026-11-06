@@ -2651,6 +2651,7 @@ function worktreeHtml(c, data) {
           : tr('worktree が見つかりません（削除された可能性があります）。');
     return `<div class="wt-toolbar"><span class="muted">${esc(why)}</span>${refresh}</div>${c.branch ? tr('<div class="pad small muted">ブランチ: <code>{branch}</code></div>', { branch: (esc(c.branch)) }) : ''}${others}`;
   }
+  const scripts = '<div id="wtScripts"></div>';
   const s = data.status;
   const live = c.status === 'running' || c.status === 'queued';
   const cs = sumChanges(s.committed);
@@ -2671,7 +2672,7 @@ function worktreeHtml(c, data) {
   }
   nodes.reverse(); // 新しいものを上に
 
-  return tr('<div class="wt-toolbar">\n      <span class="wt-sum"><b>{length}</b> コミット · <b>{length2}</b> ファイル(コミット済み) · <b>{length3}</b> ファイル(未コミット)</span>\n      {v}{refresh}</div>\n    <div class="pad wt">\n      <dl class="wt-meta">\n        <dt>場所</dt><dd><code>{path}</code></dd>\n        <dt>ブランチ</dt><dd><code>{branch}</code> ← <code>{v2}</code></dd>\n        <dt>HEAD</dt><dd><code>{short}</code> {subject}</dd>\n      </dl>\n      <h4>流れ</h4>\n      <ul class="wt-graph">{v3}</ul>\n      <h4>未コミットの変更 <span class="muted small">{v4}</span></h4>\n      {v5}\n      {v6}\n      <h4>コミット済みの変更（ベースから） <span class="muted small">{v7}</span></h4>\n      {v8}\n    </div>{others}', { length: (s.commits.length), length2: (s.committed.length), length3: (s.uncommitted.length), v: (live ? tr('<span class="muted small">自動で更新中</span>') : ''), refresh, path: (esc(s.path)), branch: (esc(s.branch)), v2: (esc(s.baseBranch || s.base.short)), short: (esc(s.head.short)), subject: (esc(s.head.subject)), v3: (nodes.join('')), v4: (s.uncommitted.length ? `+${us.add} -${us.del}` : ''), v5: (fileListHtml(s.uncommitted, { showTime: true })), v6: (s.untrackedTruncated ? tr('<div class="muted small">ほか {untrackedTruncated} 個の新規ファイルは省略しました</div>', { untrackedTruncated: (s.untrackedTruncated) }) : ''), v7: (s.committed.length ? `+${cs.add} -${cs.del}` : ''), v8: (fileListHtml(s.committed)), others });
+  return scripts + tr('<div class="wt-toolbar">\n      <span class="wt-sum"><b>{length}</b> コミット · <b>{length2}</b> ファイル(コミット済み) · <b>{length3}</b> ファイル(未コミット)</span>\n      {v}{refresh}</div>\n    <div class="pad wt">\n      <dl class="wt-meta">\n        <dt>場所</dt><dd><code>{path}</code></dd>\n        <dt>ブランチ</dt><dd><code>{branch}</code> ← <code>{v2}</code></dd>\n        <dt>HEAD</dt><dd><code>{short}</code> {subject}</dd>\n      </dl>\n      <h4>流れ</h4>\n      <ul class="wt-graph">{v3}</ul>\n      <h4>未コミットの変更 <span class="muted small">{v4}</span></h4>\n      {v5}\n      {v6}\n      <h4>コミット済みの変更（ベースから） <span class="muted small">{v7}</span></h4>\n      {v8}\n    </div>{others}', { length: (s.commits.length), length2: (s.committed.length), length3: (s.uncommitted.length), v: (live ? tr('<span class="muted small">自動で更新中</span>') : ''), refresh, path: (esc(s.path)), branch: (esc(s.branch)), v2: (esc(s.baseBranch || s.base.short)), short: (esc(s.head.short)), subject: (esc(s.head.subject)), v3: (nodes.join('')), v4: (s.uncommitted.length ? `+${us.add} -${us.del}` : ''), v5: (fileListHtml(s.uncommitted, { showTime: true })), v6: (s.untrackedTruncated ? tr('<div class="muted small">ほか {untrackedTruncated} 個の新規ファイルは省略しました</div>', { untrackedTruncated: (s.untrackedTruncated) }) : ''), v7: (s.committed.length ? `+${cs.add} -${cs.del}` : ''), v8: (fileListHtml(s.committed)), others });
 }
 
 // 同じリポジトリで並列に動いている worktree の一覧
@@ -2713,7 +2714,71 @@ async function renderWorktree(c, { quiet } = {}) {
   const r = $('refreshWt');
   if (r) r.onclick = () => renderWorktree(card(c.id) || c);
   body.querySelectorAll('.wt-list li[data-card]').forEach((li) => (li.onclick = () => select(li.dataset.card)));
+  if (scriptView.id !== c.id) scriptView = { id: c.id, data: null, top: null };
+  paintScripts();
+  loadScripts(c.id);
 }
+
+// ---------- worktree のスクリプト（セットアップ・片付け・実行） ----------
+
+const SCRIPT_LABEL = { run: tr('実行'), setup: tr('セットアップ'), teardown: tr('片付け') };
+let scriptView = { id: null, data: null, top: null }; // top: 出力を手で遡っているときのスクロール位置
+
+function scriptResultText(r) {
+  const label = SCRIPT_LABEL[r.kind];
+  if (r.running) return tr('{label} を実行中です…', { label });
+  if (r.stopped) return tr('{label} を止めました', { label });
+  if (r.timedOut) return tr('{label} は時間切れで止めました', { label });
+  if (r.code === 0) return tr('{label} が終わりました', { label });
+  return tr('{label} が失敗しました（{reason}）', { label, reason: r.error ? esc(r.error) : tr('終了コード {code}', { code: r.code === null ? '?' : r.code }) });
+}
+
+function scriptPanelHtml(data) {
+  if (!Object.values(data.scripts).some(Boolean)) return tr('<div class="wt-script-bar muted small">設定の「ブランチと取り込み」にスクリプトを書くと、ここから動かせます。</div>');
+  const r = data.run;
+  const busy = !!(r && r.running);
+  const buttons = ['run', 'setup', 'teardown'].filter((k) => data.scripts[k]).map((k) => `<button class="btn small ${k === 'run' ? 'primary' : 'ghost'}" data-script="${k}" ${busy ? 'disabled' : ''}>${SCRIPT_LABEL[k]}</button>`);
+  const stop = busy ? `<button class="btn small danger" data-script="stop">${tr('スクリプトを止める')}</button>` : '';
+  const output = r ? `<pre class="wt-script-out">${esc(r.output) || tr('（まだ出力はありません）')}</pre>` : '';
+  return `<div class="wt-script-bar">${buttons.join('')}${stop}${r ? `<span class="muted small">${scriptResultText(r)}</span>` : ''}</div>${output}`;
+}
+
+function paintScripts() {
+  const box = $('wtScripts');
+  if (!box || !scriptView.data) return;
+  const { id } = scriptView;
+  box.innerHTML = scriptPanelHtml(scriptView.data);
+  const pre = box.querySelector('pre');
+  if (pre) {
+    pre.scrollTop = scriptView.top === null ? pre.scrollHeight : scriptView.top;
+    pre.onscroll = () => (scriptView.top = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30 ? null : pre.scrollTop);
+  }
+  box.querySelectorAll('[data-script]').forEach((b) => {
+    b.onclick = async () => {
+      const kind = b.dataset.script;
+      if (kind === 'teardown' && !confirm(tr('片付けスクリプトを実行しますか？ worktree は消しません。'))) return;
+      const data = await run(() => (kind === 'stop' ? api.stopScript(id) : api.runScript(id, kind)));
+      if (data && scriptView.id === id) {
+        scriptView.data = data;
+        scriptView.top = null;
+        paintScripts();
+      }
+    };
+  });
+}
+
+async function loadScripts(id) {
+  const data = await api.scripts(id).catch(() => null);
+  if (!data || scriptView.id !== id || state.selected !== id || state.tab !== 'worktree') return;
+  scriptView.data = data;
+  paintScripts();
+}
+
+// スクリプトが動いているあいだは、出力を追いかける
+setInterval(() => {
+  const r = scriptView.data && scriptView.data.run;
+  if (r && r.running && state.tab === 'worktree' && state.selected === scriptView.id && !document.hidden) loadScripts(scriptView.id);
+}, 1000);
 
 // 実行中は worktree タブを自動で更新する
 setInterval(() => {
@@ -4065,7 +4130,17 @@ function renderSettingsView() {
         <small>${tr('レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。')}</small></label>
       <label class="field">${tr('<span>ブランチの命名規則（自然言語で書けます）</span>')}
         <textarea id="sBranchRule" rows="2" placeholder="${tr('例: feature/<Issue番号>-<内容を表す短い英語> にする。Issue がないときは feature/<内容を表す短い英語>')}">${esc(s.branchNamingRule || '')}</textarea>
-        <small>${tr('書いておくと、タスクの開始時にそのタスクのエージェントがこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。')}</small></label>`,
+        <small>${tr('書いておくと、タスクの開始時にそのタスクのエージェントがこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。')}</small></label>
+      <label class="field">${tr('<span>セットアップスクリプト（worktree を作った直後に動かす）</span>')}
+        <textarea id="sSetupScript" class="mono" rows="3" spellcheck="false" placeholder="${tr('例: npm install')}">${esc(s.setupScript || '')}</textarea>
+        <small>${tr('エージェントを始める前に、worktree の中で動かします。失敗するとエージェントは始めず、タスクはエラーになります。')}</small></label>
+      <label class="field">${tr('<span>片付けスクリプト（worktree を消す直前に動かす）</span>')}
+        <textarea id="sTeardownScript" class="mono" rows="3" spellcheck="false" placeholder="${tr('例: docker compose down')}">${esc(s.teardownScript || '')}</textarea>
+        <small>${tr('マージ・破棄などで worktree を消す前に動かします。失敗してもログに警告を残して worktree は消します。5分で打ち切ります。')}</small></label>
+      <label class="field">${tr('<span>実行スクリプト（詳細の worktree タブのボタンで動かす）</span>')}
+        <textarea id="sRunScript" class="mono" rows="3" spellcheck="false" placeholder="${tr('例: npm run dev')}">${esc(s.runScript || '')}</textarea>
+        <small>${tr('開発サーバーなど、タスクの変更を手で確かめるためのコマンドです。worktree タブから動かす・止めることができ、セットアップと片付けも手で動かせます。')}</small></label>
+      <small class="muted s-note">${tr('スクリプトは macOS・Linux・WSL では sh / bash で動き、途中の行が失敗するとそこで止まります。Windows では各行を && でつないで cmd で動かします。環境変数 WORKTREE_KANBAN_ROOT（リポジトリ）、WORKTREE_KANBAN_WORKTREE、WORKTREE_KANBAN_BRANCH、WORKTREE_KANBAN_BASE_BRANCH、WORKTREE_KANBAN_TASK_ID が使えます。')}</small>`,
     issue: `<div class="field">
         <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> ${tr('Issue のステータスを自動で変える（GitHub Projects）')}</label>
         <small>${tr('Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。')}</small>
@@ -4562,6 +4637,9 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
         baseBranch: $('sBase').value,
         integration: $('sIntegration').value,
         branchNamingRule: $('sBranchRule').value.trim(),
+        setupScript: $('sSetupScript').value,
+        teardownScript: $('sTeardownScript').value,
+        runScript: $('sRunScript').value,
         permissionMode: $('sMode').value,
         allowedTools: $('sAllowed').value,
         maxParallel: $('sMax').value,
