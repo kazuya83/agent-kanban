@@ -7,6 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { tr } = require('../renderer/i18n');
 
 const MAX_FILES = 10;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
@@ -51,18 +52,18 @@ function fmtSize(n) {
  */
 function parseAttachments(list) {
   if (list == null) return [];
-  if (!Array.isArray(list)) throw new Error('添付ファイルの形が正しくありません');
-  if (list.length > MAX_FILES) throw new Error(`添付できるファイルは ${MAX_FILES} 個までです`);
+  if (!Array.isArray(list)) throw new Error(tr('添付ファイルの形が正しくありません'));
+  if (list.length > MAX_FILES) throw new Error(tr('添付できるファイルは {MAX_FILES} 個までです', { MAX_FILES }));
   let total = 0;
   const used = new Set();
   return list.map((a, i) => {
     const data = a && typeof a.data === 'string' ? a.data.replace(/^data:[^,]*,/, '') : '';
-    if (!data || !/^[A-Za-z0-9+/]+=*$/.test(data)) throw new Error(`添付ファイル「${(a && a.name) || i + 1}」を読み取れませんでした`);
+    if (!data || !/^[A-Za-z0-9+/]+=*$/.test(data)) throw new Error(tr('添付ファイル「{v}」を読み取れませんでした', { v: (a && a.name) || i + 1 }));
     const buf = Buffer.from(data, 'base64');
     let name = safeName(a.name, i);
-    if (buf.length > MAX_FILE_BYTES) throw new Error(`添付ファイル「${name}」が大きすぎます（1つ ${fmtSize(MAX_FILE_BYTES)} まで）`);
+    if (buf.length > MAX_FILE_BYTES) throw new Error(tr('添付ファイル「{name}」が大きすぎます（1つ {fmtSize} まで）', { name, fmtSize: fmtSize(MAX_FILE_BYTES) }));
     total += buf.length;
-    if (total > MAX_TOTAL_BYTES) throw new Error(`添付ファイルが大きすぎます（合わせて ${fmtSize(MAX_TOTAL_BYTES)} まで）`);
+    if (total > MAX_TOTAL_BYTES) throw new Error(tr('添付ファイルが大きすぎます（合わせて {fmtSize} まで）', { fmtSize: fmtSize(MAX_TOTAL_BYTES) }));
     // 同じ名前があれば番号を付ける
     if (used.has(name.toLowerCase())) {
       const ext = path.extname(name);
@@ -164,7 +165,7 @@ function logExtra(atts, parsed) {
       /* */
     }
     if (data && data.length <= MAX_LOG_IMAGE_B64) images.push({ mediaType: a.mediaType, data });
-    else images.push({ omitted: '大きすぎるので表示しません' });
+    else images.push({ omitted: tr('大きすぎるので表示しません') });
   });
   return images.length ? { attachments: files, images } : { attachments: files };
 }

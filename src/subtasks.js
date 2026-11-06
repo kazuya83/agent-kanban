@@ -21,6 +21,8 @@
 // 提案: c.subtaskProposal = { items, at }（ユーザーが「サブタスクでやる」と答えたら c.subtasks にする）
 // サブタスクのカード: c.subtaskOf = { parent, key, approved? }
 
+const { tr } = require('../renderer/i18n');
+
 const SUBTASK_MARKER = '[[SUBTASKS]]';
 const SUBTASK_LANG = 'subtasks';
 const SUBTASK_BLOCK_RE = new RegExp('\\n?[ \\t]*```[ \\t]*' + SUBTASK_LANG + '[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*', 'g');
@@ -260,8 +262,8 @@ function describeOrder(items) {
   const title = new Map(items.map((x) => [x.key, x.title]));
   const free = items.filter((x) => !x.after.length).map((x) => `「${x.title}」`);
   const parts = [];
-  if (free.length) parts.push(free.length > 1 ? `並列: ${free.join('・')}` : `最初: ${free[0]}`);
-  for (const x of items) if (x.after.length) parts.push(`「${x.title}」は ${x.after.map((a) => `「${title.get(a)}」`).join('・')} のあと`);
+  if (free.length) parts.push(free.length > 1 ? tr('並列: {names}', { names: free.join('・') }) : tr('最初: {name}', { name: free[0] }));
+  for (const x of items) if (x.after.length) parts.push(tr('「{title}」は {deps} のあと', { title: x.title, deps: x.after.map((a) => `「${title.get(a)}」`).join('・') }));
   return parts.join(' / ');
 }
 

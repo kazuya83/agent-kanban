@@ -24,7 +24,7 @@
     "productName": "Agent Kanban",
     "artifactName": "agent-kanban-${version}-${os}-${arch}.${ext}",
     "files": ["main.js", "preload.js", "src/**", "renderer/**"],
-    "asarUnpack": ["src/permission-mcp.js"],
+    "asarUnpack": ["src/permission-mcp.js", "renderer/i18n.js", "renderer/locales/**/*.js"],
     "directories": {
       "output": "dist",
       "buildResources": "build"

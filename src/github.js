@@ -5,6 +5,7 @@
 const { execFile } = require('child_process');
 const { git } = require('./git');
 const { resolveCommand } = require('./env');
+const { tr } = require('../renderer/i18n');
 
 function execFileP(cmd, args, opts) {
   return new Promise((resolve, reject) => {
@@ -32,10 +33,10 @@ async function repoSlug(repoPath) {
   try {
     url = await git(repoPath, ['remote', 'get-url', 'origin']);
   } catch {
-    throw new Error('このリポジトリに origin がありません。GitHub のリポジトリを origin に設定してください');
+    throw new Error(tr('このリポジトリに origin がありません。GitHub のリポジトリを origin に設定してください'));
   }
   const slug = parseGithubRemote(url);
-  if (!slug) throw new Error(`origin が GitHub のリポジトリではありません（${url.trim()}）`);
+  if (!slug) throw new Error(tr('origin が GitHub のリポジトリではありません（{v}）', { v: url.trim() }));
   return slug;
 }
 
@@ -45,9 +46,9 @@ function parseIssueNumbers(text) {
     .map((s) => s.trim().replace(/^#/, ''))
     .filter(Boolean);
   const bad = nums.filter((n) => !/^\d+$/.test(n));
-  if (bad.length) throw new Error(`Issue 番号として読めません: ${bad.join(', ')}`);
+  if (bad.length) throw new Error(tr('Issue 番号として読めません: {v}', { v: bad.join(', ') }));
   const list = [...new Set(nums.map(Number))].filter((n) => n > 0);
-  if (!list.length) throw new Error('Issue 番号を入力してください（例: 12 または 12, 15）');
+  if (!list.length) throw new Error(tr('Issue 番号を入力してください（例: 12 または 12, 15）'));
   return list;
 }
 
@@ -77,13 +78,13 @@ async function viaApi(slug, number, token) {
   if (res.status === 404) {
     throw new Error(
       token
-        ? `Issue #${number} が見つかりません（${slug.owner}/${slug.repo}）`
-        : `Issue #${number} が見つかりません。private リポジトリの場合は、gh をインストールして GitHub にログインしてください（「Issue から」の画面からできます）`,
+        ? tr('Issue #{number} が見つかりません（{owner}/{repo}）', { number, owner: slug.owner, repo: slug.repo })
+        : tr('Issue #{number} が見つかりません。private リポジトリの場合は、gh をインストールして GitHub にログインしてください（「Issue から」の画面からできます）', { number }),
     );
   }
-  if (res.status === 401) throw new Error('GitHub トークンが正しくありません');
-  if (res.status === 403) throw new Error('GitHub API の利用制限に達しました。gh をインストールして GitHub にログインしてください（「Issue から」の画面からできます）');
-  if (!res.ok) throw new Error(`GitHub API がエラーを返しました（${res.status}）`);
+  if (res.status === 401) throw new Error(tr('GitHub トークンが正しくありません'));
+  if (res.status === 403) throw new Error(tr('GitHub API の利用制限に達しました。gh をインストールして GitHub にログインしてください（「Issue から」の画面からできます）'));
+  if (!res.ok) throw new Error(tr('GitHub API がエラーを返しました（{status}）', { status: res.status }));
   const d = await res.json();
   let comments = [];
   if (d.comments > 0) {
@@ -123,7 +124,7 @@ async function fetchIssue(repoPath, number, opts = {}) {
     return { ...(await viaApi(slug, number, token)), slug };
   } catch (err) {
     // gh も API もだめなら、gh のエラーのほうが原因に近いことが多いので添える
-    if (ghError && ghError.stderr) err.message += `\n（gh のエラー: ${String(ghError.stderr).trim().split('\n')[0]}）`;
+    if (ghError && ghError.stderr) err.message += `\n${tr('（gh のエラー: {message}）', { message: String(ghError.stderr).trim().split('\n')[0] })}`;
     throw err;
   }
 }
@@ -229,8 +230,9 @@ const UPDATE_MUTATION = `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, 
   }
 }`;
 
-const SCOPE_MESSAGE =
-  'GitHub Projects のステータスを変えるには、gh に project の権限が必要です。設定の「Projects の権限を追加」を押すか、ターミナルで gh auth refresh -h github.com -s project を実行してください';
+function projectScopeMessage() {
+  return tr('GitHub Projects のステータスを変えるには、gh に project の権限が必要です。設定の「Projects の権限を追加」を押すか、ターミナルで gh auth refresh -h github.com -s project を実行してください');
+}
 
 async function ghGraphql(gh, cwd, query, vars) {
   const args = ['api', 'graphql', '-f', `query=${query}`];
@@ -241,21 +243,21 @@ async function ghGraphql(gh, cwd, query, vars) {
   } catch (err) {
     const msg = `${err.stderr || ''}${err.stdout || ''}${err.message || ''}`;
     if (/INSUFFICIENT_SCOPES|read:project|'project'/i.test(msg)) {
-      const e = new Error(SCOPE_MESSAGE);
+      const e = new Error(projectScopeMessage());
       e.code = 'SCOPE';
       throw e;
     }
-    if (/auth login|not logged/i.test(msg)) throw new Error('GitHub にログインしていません。「Issue から」の画面からログインしてください');
-    throw new Error(`GitHub API がエラーを返しました: ${String(err.stderr || err.message).trim().split('\n')[0]}`);
+    if (/auth login|not logged/i.test(msg)) throw new Error(tr('GitHub にログインしていません。「Issue から」の画面からログインしてください'));
+    throw new Error(tr('GitHub API がエラーを返しました: {message}', { message: String(err.stderr || err.message).trim().split('\n')[0] }));
   }
   const d = JSON.parse(out);
   if (d.errors && d.errors.length) {
     if (d.errors.some((e) => e.type === 'INSUFFICIENT_SCOPES')) {
-      const e = new Error(SCOPE_MESSAGE);
+      const e = new Error(projectScopeMessage());
       e.code = 'SCOPE';
       throw e;
     }
-    throw new Error(`GitHub API がエラーを返しました: ${d.errors[0].message}`);
+    throw new Error(tr('GitHub API がエラーを返しました: {v}', { v: d.errors[0].message }));
   }
   return d.data;
 }
@@ -271,15 +273,15 @@ async function ghGraphql(gh, cwd, query, vars) {
  * @returns {Promise<{ updated: {project: string, from: string, to: string}[], unchanged: {project: string, to: string}[], skipped: {project: string, reason: string}[], projects: number }>}
  */
 async function setIssueProjectStatus(repoPath, number, key, opts = {}) {
-  if (!PROJECT_STATUS[key]) throw new Error(`不明なステータスです: ${key}`);
+  if (!PROJECT_STATUS[key]) throw new Error(tr('不明なステータスです: {key}', { key }));
   const gh = opts.gh || resolveCommand('gh');
-  if (!gh) throw new Error('Projects のステータスを変えるには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます');
+  if (!gh) throw new Error(tr('Projects のステータスを変えるには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます'));
   const slug = await repoSlug(repoPath);
   const fieldName = String(opts.fieldName || '').trim() || 'Status';
   const mapping = (opts.mapping && opts.mapping[key]) || '';
   const data = await ghGraphql(gh, repoPath, ITEMS_QUERY, { owner: slug.owner, repo: slug.repo, number: Number(number), field: fieldName });
   const issue = data && data.repository && data.repository.issue;
-  if (!issue) throw new Error(`Issue #${number} が見つかりません（${slug.owner}/${slug.repo}）`);
+  if (!issue) throw new Error(tr('Issue #{number} が見つかりません（{owner}/{repo}）', { number, owner: slug.owner, repo: slug.repo }));
   const items = (issue.projectItems && issue.projectItems.nodes) || [];
   const result = { updated: [], unchanged: [], skipped: [], projects: 0 };
   for (const item of items) {
@@ -288,14 +290,14 @@ async function setIssueProjectStatus(repoPath, number, key, opts = {}) {
     result.projects++;
     const field = p.field;
     if (!field || !field.id) {
-      result.skipped.push({ project: p.title, reason: `「${fieldName}」の項目（単一選択）がありません` });
+      result.skipped.push({ project: p.title, reason: tr('「{field}」の項目（単一選択）がありません', { field: fieldName }) });
       continue;
     }
     const opt = pickStatusOption(field.options, key, mapping);
     if (!opt) {
       const reason = mappingNames(mapping).length
-        ? `「${fieldName}」に設定した選択肢「${mapping}」がありません（${PROJECT_STATUS[key].label} 用）`
-        : `「${fieldName}」に「${PROJECT_STATUS[key].label}」に当たる選択肢がありません`;
+        ? tr('「{field}」に設定した選択肢「{mapping}」がありません（{label} 用）', { field: fieldName, mapping, label: PROJECT_STATUS[key].label })
+        : tr('「{field}」に「{label}」に当たる選択肢がありません', { field: fieldName, label: PROJECT_STATUS[key].label });
       result.skipped.push({ project: p.title, reason });
       continue;
     }
@@ -327,7 +329,7 @@ async function fetchSubIssues(repoPath, number) {
     if (token) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(`https://api.github.com/${pathName}?per_page=100`, { headers });
     if (res.status === 404) return [];
-    if (!res.ok) throw new Error(`サブIssue を読めませんでした（GitHub API ${res.status}）`);
+    if (!res.ok) throw new Error(tr('サブIssue を読めませんでした（GitHub API {status}）', { status: res.status }));
     list = await res.json();
   }
   return (Array.isArray(list) ? list : [])
@@ -350,18 +352,18 @@ async function fetchSubIssues(repoPath, number) {
  */
 async function createSubIssue(repoPath, parentNumber, { title, body }) {
   const gh = resolveCommand('gh');
-  if (!gh) throw new Error('サブIssue を作るには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます');
+  if (!gh) throw new Error(tr('サブIssue を作るには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます'));
   const slug = await repoSlug(repoPath);
   const base = `repos/${slug.owner}/${slug.repo}/issues`;
   const run = async (args) => {
     try {
       return JSON.parse((await execFileP(gh, args, { cwd: repoPath, timeout: 30000 })) || '{}');
     } catch (err) {
-      throw new Error(`GitHub がエラーを返しました: ${String(err.stderr || err.message).trim().split('\n')[0]}`);
+      throw new Error(tr('GitHub がエラーを返しました: {message}', { message: String(err.stderr || err.message).trim().split('\n')[0] }));
     }
   };
   const issue = await run(['api', '-X', 'POST', base, '-f', `title=${String(title || '').slice(0, 250)}`, '-f', `body=${String(body || '')}`]);
-  if (!issue.number) throw new Error('Issue を作れませんでした');
+  if (!issue.number) throw new Error(tr('Issue を作れませんでした'));
   await run(['api', '-X', 'POST', `${base}/${Number(parentNumber)}/sub_issues`, '-F', `sub_issue_id=${issue.id}`]);
   return { number: issue.number, title: issue.title || title, url: issue.html_url || '' };
 }

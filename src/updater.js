@@ -8,6 +8,7 @@
 // releases/latest のリダイレクト先（.../releases/tag/v0.1.9）から最新版を調べる
 const { EventEmitter } = require('events');
 const path = require('path');
+const { tr } = require('../renderer/i18n');
 
 const REPO = 'kazuya83/agent-kanban';
 const APP_NAME = 'Agent Kanban';
@@ -43,9 +44,9 @@ function assetName(platform, arch, version) {
 
 // この環境でアプリから更新できるか。できなければ理由を返す
 function unsupportedReason({ packaged, platform, arch, env }) {
-  if (!packaged) return '開発版（npm start）では更新できません。git pull で最新にしてください';
-  if (!assetName(platform, arch, '0')) return `この OS・CPU（${platform} ${arch}）向けの版はリリースしていません`;
-  if (platform === 'linux' && !(env && env.APPIMAGE)) return 'AppImage で起動したときだけ、アプリから更新できます';
+  if (!packaged) return tr('開発版（npm start）では更新できません。git pull で最新にしてください');
+  if (!assetName(platform, arch, '0')) return tr('この OS・CPU（{platform} {arch}）向けの版はリリースしていません', { platform, arch });
+  if (platform === 'linux' && !(env && env.APPIMAGE)) return tr('AppImage で起動したときだけ、アプリから更新できます');
   return null;
 }
 
@@ -63,20 +64,24 @@ function macBundlePath(execPath) {
 // アプリを終了したあとに裏で動かす、入れ替えのスクリプト（spawn に渡す command と args）
 function installCommand({ platform, pid, version, execPath, env = {} }) {
   const v = String(version).replace(/^v/, '');
-  if (!/^\d+(\.\d+)*$/.test(v)) throw new Error(`版の番号が正しくありません: ${version}`);
+  if (!/^\d+(\.\d+)*$/.test(v)) throw new Error(tr('版の番号が正しくありません: {version}', { version }));
   const n = parseInt(pid, 10);
-  if (!(n > 0)) throw new Error('プロセス番号が正しくありません');
+  if (!(n > 0)) throw new Error(tr('プロセス番号が正しくありません'));
+  // 入れ替えはアプリ終了後に動くので、スクリプトを作る時点の言語で文を埋め込んでおく
+  const starting = tr('v{v} に更新します', { v });
+  const done = tr('更新しました');
+  const failed = tr('エラー: 更新できませんでした');
   if (platform === 'win32') {
     const script = [
       "$ErrorActionPreference = 'Stop'",
       `Wait-Process -Id ${n} -ErrorAction SilentlyContinue`,
       'Start-Sleep -Milliseconds 500',
-      `Write-Output ("==> v${v} に更新します: " + (Get-Date))`,
+      `Write-Output (${psq(`==> ${starting}: `)} + (Get-Date))`,
       `$env:AGENT_KANBAN_VERSION = ${psq(v)}`,
       'Remove-Item Env:AGENT_KANBAN_NO_LAUNCH -ErrorAction SilentlyContinue',
       // install.ps1 は入れたあとに起動する。入れられなかったときは元のアプリを起動し直す
-      `try { Invoke-RestMethod -Uri ${psq(INSTALL_PS1)} -UseBasicParsing | Invoke-Expression; Write-Output '==> 更新しました' }`,
-      `catch { Write-Output ("エラー: 更新できませんでした: " + $_); Start-Process -FilePath ${psq(execPath)} }`,
+      `try { Invoke-RestMethod -Uri ${psq(INSTALL_PS1)} -UseBasicParsing | Invoke-Expression; Write-Output ${psq(`==> ${done}`)} }`,
+      `catch { Write-Output (${psq(`${failed}: `)} + $_); Start-Process -FilePath ${psq(execPath)} }`,
     ].join('\n');
     return { command: 'powershell.exe', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-Command', script] };
   }
@@ -95,13 +100,13 @@ function installCommand({ platform, pid, version, execPath, env = {} }) {
   const script = [
     `while kill -0 ${n} 2>/dev/null; do sleep 0.5; done`,
     'sleep 0.5',
-    `echo "==> v${v} に更新します: $(date)"`,
+    `echo ${shq(`==> ${starting}:`)} "$(date)"`,
     'set -o pipefail',
     `if curl -fsSL ${shq(INSTALL_SH)} | AGENT_KANBAN_VERSION=${shq(v)} bash; then`,
-    "  echo '==> 更新しました'",
+    `  echo ${shq(`==> ${done}`)}`,
     `  ${relaunchNew}`,
     'else',
-    "  echo 'エラー: 更新できませんでした'",
+    `  echo ${shq(failed)}`,
     `  ${relaunchOld}`,
     'fi',
   ].join('\n');
@@ -168,7 +173,7 @@ class Updater extends EventEmitter {
       try {
         const res = await this.fetch(`https://github.com/${REPO}/releases/latest`, { method: 'HEAD', redirect: 'follow' });
         const latest = versionFromReleaseUrl(res.url);
-        if (!latest) throw new Error(`最新のリリースが見つかりませんでした（${res.status}）`);
+        if (!latest) throw new Error(tr('最新のリリースが見つかりませんでした（{status}）', { status: res.status }));
         let state = compareVersions(latest, this.currentVersion) > 0 ? 'available' : 'latest';
         // Mac の dmg は公開のあとに追加されるので、この OS 向けのファイルがそろっているかも確かめる
         const name = state === 'available' && assetName(this.platform, this.arch, latest);
@@ -178,7 +183,7 @@ class Updater extends EventEmitter {
         }
         this.set({ state, latestVersion: latest, checkedAt: Date.now() });
       } catch (err) {
-        this.set({ state: 'error', error: `新しい版を確かめられませんでした: ${(err && err.message) || err}`, checkedAt: Date.now() });
+        this.set({ state: 'error', error: tr('新しい版を確かめられませんでした: {message}', { message: (err && err.message) || err }), checkedAt: Date.now() });
       } finally {
         this.checking = null;
       }
@@ -204,7 +209,7 @@ class Updater extends EventEmitter {
   // 入れ替えのスクリプトを裏で起動する。このあと呼んだ側がアプリを終了すると、スクリプトが入れ替えて起動し直す
   install({ pid = process.pid, execPath = process.execPath } = {}) {
     if (this.reason) throw new Error(this.reason);
-    if (this.state !== 'available') throw new Error(this.state === 'preparing' ? `v${this.latestVersion} のこの OS 向けのファイルはまだ準備中です。しばらくしてからもう一度試してください` : '新しい版はありません');
+    if (this.state !== 'available') throw new Error(this.state === 'preparing' ? tr('v{version} のこの OS 向けのファイルはまだ準備中です。しばらくしてからもう一度試してください', { version: this.latestVersion }) : tr('新しい版はありません'));
     const { command, args } = installCommand({ platform: this.platform, pid, version: this.latestVersion, execPath, env: this.env });
     let out = 'ignore';
     if (this.logFile) {
