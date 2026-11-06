@@ -58,7 +58,7 @@ flowchart LR
 - **When it finishes, you bring the work in by merging (`--no-ff`) or opening a PR (`gh`).** You can choose the target branch, and you can push to origin after the merge
 - Board state is stored in `board.json` in Electron's userData folder. There is no external server
 
-On Codex / Gemini / Cursor, in-card approval, multiple-choice questions, btw, and cost display are unavailable because of CLI limits (see [docs/agents.md](docs/agents.md) (Japanese)).
+On Codex / Gemini / Cursor, in-card approval, multiple-choice questions, btw, and cost display are unavailable because of CLI limits (see [docs/agents.md](docs/agents.md)).
 
 ## Features
 
@@ -74,9 +74,9 @@ You can operate the board on the PC that runs the agents (the host) from Worktre
 
 ![Operating the host board from the client (the top shows "Remote control → SSH 100.101.102.103")](docs/images/en/rc-client.png)
 
-Steps, and how to fix a connection that fails, are in [docs/remote.md](docs/remote.md) (Japanese).
+Steps, and how to fix a connection that fails, are in [docs/remote.md](docs/remote.md).
 
-Also included: splitting a large task into subtasks that run in parallel or in order (branched from the parent branch and merged back when done; you can also start a single subtask; GitHub sub-issues are supported), drag-and-drop changes to a card's state (column), messages to a running agent (btw), image and file attachments, Pipeline and competition (combinations of several agents), and WSL repositories on Windows. Usage is summarized in [docs/usage.md](docs/usage.md) (Japanese).
+Also included: splitting a large task into subtasks that run in parallel or in order (branched from the parent branch and merged back when done; you can also start a single subtask; GitHub sub-issues are supported), drag-and-drop changes to a card's state (column), messages to a running agent (btw), image and file attachments, Pipeline and competition (combinations of several agents), and WSL repositories on Windows. Usage is summarized in [docs/usage.md](docs/usage.md).
 
 ### Run several repositories in parallel
 
@@ -86,7 +86,7 @@ Repositories open as tabs (up to 3). Switching tabs does not stop tasks in the o
 
 The "+" on the tab bar, or clicking the open tab, lets you pick from recently opened repositories. You can also clone from a URL or create a new repository from there.
 
-You can open a folder that is not a git repository (video production and other work that is not code). In that case it runs the task directly in the folder without creating a worktree, and you finish it with "Mark done" (see [docs/usage.md](docs/usage.md) (Japanese)).
+You can open a folder that is not a git repository (video production and other work that is not code). In that case it runs the task directly in the folder without creating a worktree, and you finish it with "Mark done" (see [docs/usage.md](docs/usage.md)).
 
 ![Repository picker (recent repositories, and the ones open in tabs)](docs/images/en/repo-switch.png)
 
@@ -182,7 +182,7 @@ When you create a task, you can pick one Claude Code skill (it is passed as `/sk
 
 ### Task scheduler
 
-From the menu in the top bar, switch to "Task scheduler" to manage schedules that create and run a task at a set time (once, hourly, daily, weekly, or monthly) as cards. You can register a kanban task as a schedule directly, and you can create a task from a schedule right away. Schedules run only while the app is open (see [docs/usage.md](docs/usage.md) (Japanese)).
+From the menu in the top bar, switch to "Task scheduler" to manage schedules that create and run a task at a set time (once, hourly, daily, weekly, or monthly) as cards. You can register a kanban task as a schedule directly, and you can create a task from a schedule right away. Schedules run only while the app is open (see [docs/usage.md](docs/usage.md)).
 
 ## Requirements
 
@@ -204,7 +204,7 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/insta
 irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex
 ```
 
-The same commands update to the latest version. You can also update from the app: "Settings" → "App update" → "Update to the new version". If you check "Update automatically when a new version is out", it replaces itself and relaunches when no task is running. For pinning a version, uninstalling, installing from a downloaded file, and the first-launch warning, see [docs/install.md](docs/install.md) (Japanese).
+The same commands update to the latest version. You can also update from the app: "Settings" → "App update" → "Update to the new version". If you check "Update automatically when a new version is out", it replaces itself and relaunches when no task is running. For pinning a version, uninstalling, installing from a downloaded file, and the first-launch warning, see [docs/install.md](docs/install.md).
 
 ## Usage
 
@@ -217,12 +217,12 @@ The same commands update to the latest version. You can also update from the app
 
 | Document | Contents |
 | --- | --- |
-| [Screen and usage](docs/usage.md) (Japanese) | How to use each feature: approval, questions, spec check, task scheduler, skills, chat, btw, merge / PR, Issue status, notifications, conflicts, and more |
-| [Agents and orchestration](docs/agents.md) (Japanese) | Differences between Claude Code / Codex / Gemini / Cursor, Pipeline and competition |
-| [Settings](docs/settings.md) (Japanese) | The settings screen opened from the top-bar menu, and its items |
-| [Remote control](docs/remote.md) (Japanese) | How to operate the board from another PC over an SSH tunnel, and how to fix a connection that fails |
-| [Install](docs/install.md) (Japanese) | Install, update, uninstall, and using a WSL repository on Windows |
-| [For developers](docs/development.md) (Japanese) | Run from source, build, release, how the app is built, and tests |
+| [Screen and usage](docs/usage.md) | How to use each feature: approval, questions, spec check, task scheduler, skills, chat, btw, merge / PR, Issue status, notifications, conflicts, and more |
+| [Agents and orchestration](docs/agents.md) | Differences between Claude Code / Codex / Gemini / Cursor, Pipeline and competition |
+| [Settings](docs/settings.md) | The settings screen opened from the top-bar menu, and its items |
+| [Remote control](docs/remote.md) | How to operate the board from another PC over an SSH tunnel, and how to fix a connection that fails |
+| [Install](docs/install.md) | Install, update, uninstall, and using a WSL repository on Windows |
+| [For developers](docs/development.md) | Run from source, build, release, how the app is built, and tests |
 
 ## License
 

@@ -58,7 +58,7 @@ flowchart LR
 - **Une fois terminé, vous intégrez le travail par un merge (`--no-ff`) ou en ouvrant un PR (`gh`).** Vous choisissez la branche cible, et vous pouvez pousser vers origin après le merge
 - L'état du tableau est enregistré dans `board.json`, dans le dossier userData d'Electron. Il n'y a pas de serveur externe
 
-Avec Codex / Gemini / Cursor, à cause des limites de la CLI, l'approbation sur la carte, les questions à choix, btw et l'affichage du coût ne sont pas disponibles (détails dans [docs/agents.md](docs/agents.md) (Japanese)).
+Avec Codex / Gemini / Cursor, à cause des limites de la CLI, l'approbation sur la carte, les questions à choix, btw et l'affichage du coût ne sont pas disponibles (détails dans [docs/agents.md](docs/agents.md) (English)).
 
 ## Fonctions principales
 
@@ -74,9 +74,9 @@ Vous pouvez piloter le tableau du PC qui fait tourner les agents (l'hôte) depui
 
 ![Pilotage du tableau de l'hôte depuis le client (en haut : « Contrôle à distance → SSH 100.101.102.103 »)](docs/images/fr/rc-client.png)
 
-La procédure, et comment réparer une connexion qui échoue, se trouve dans [docs/remote.md](docs/remote.md) (Japanese).
+La procédure, et comment réparer une connexion qui échoue, se trouve dans [docs/remote.md](docs/remote.md) (English).
 
-Également : découper une grande tâche en sous-tâches qui avancent en parallèle ou dans l'ordre (elles partent de la branche parente et y sont fusionnées une fois terminées ; une seule sous-tâche peut aussi être démarrée ; les sous-issues GitHub sont prises en charge), changer l'état (colonne) d'une carte par glisser-déposer, messages à un agent en cours d'exécution (btw), pièces jointes image et fichier, Pipeline et compétition (combinaisons de plusieurs agents), et dépôts WSL sous Windows. L'utilisation est résumée dans [docs/usage.md](docs/usage.md) (Japanese).
+Également : découper une grande tâche en sous-tâches qui avancent en parallèle ou dans l'ordre (elles partent de la branche parente et y sont fusionnées une fois terminées ; une seule sous-tâche peut aussi être démarrée ; les sous-issues GitHub sont prises en charge), changer l'état (colonne) d'une carte par glisser-déposer, messages à un agent en cours d'exécution (btw), pièces jointes image et fichier, Pipeline et compétition (combinaisons de plusieurs agents), et dépôts WSL sous Windows. L'utilisation est résumée dans [docs/usage.md](docs/usage.md) (English).
 
 ### Lancer plusieurs dépôts en parallèle
 
@@ -86,7 +86,7 @@ Les dépôts s'ouvrent en onglets (3 au plus). Changer d'onglet n'arrête pas le
 
 Le « + » de la barre d'onglets, ou un clic sur l'onglet ouvert, permet de choisir parmi les dépôts ouverts récemment. Vous pouvez aussi cloner depuis une URL ou créer un nouveau dépôt depuis là.
 
-Vous pouvez ouvrir un dossier qui n'est pas un dépôt git (production vidéo et autre travail qui n'est pas du code). La tâche s'exécute alors directement dans le dossier, sans worktree, et vous la terminez avec « Marquer comme terminée » (détails dans [docs/usage.md](docs/usage.md) (Japanese)).
+Vous pouvez ouvrir un dossier qui n'est pas un dépôt git (production vidéo et autre travail qui n'est pas du code). La tâche s'exécute alors directement dans le dossier, sans worktree, et vous la terminez avec « Marquer comme terminée » (détails dans [docs/usage.md](docs/usage.md) (English)).
 
 ![Dialogue de choix du dépôt (dépôts récents et ceux ouverts en onglets)](docs/images/fr/repo-switch.png)
 
@@ -182,7 +182,7 @@ Si un merge entre en conflit, la carte devient un conflit. Une fois la branche d
 
 ### Planificateur de tâches
 
-Depuis le menu de la barre du haut, passez au « Planificateur de tâches » pour gérer, sous forme de cartes, des planifications qui créent et lancent une tâche à une date donnée (une fois, toutes les heures, tous les jours, toutes les semaines ou tous les mois). Vous pouvez enregistrer une tâche du kanban comme planification, et créer tout de suite une tâche à partir d'une planification. Les planifications ne tournent que tant que l'application est ouverte (détails dans [docs/usage.md](docs/usage.md) (Japanese)).
+Depuis le menu de la barre du haut, passez au « Planificateur de tâches » pour gérer, sous forme de cartes, des planifications qui créent et lancent une tâche à une date donnée (une fois, toutes les heures, tous les jours, toutes les semaines ou tous les mois). Vous pouvez enregistrer une tâche du kanban comme planification, et créer tout de suite une tâche à partir d'une planification. Les planifications ne tournent que tant que l'application est ouverte (détails dans [docs/usage.md](docs/usage.md) (English)).
 
 ## Prérequis
 
@@ -204,7 +204,7 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/insta
 irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex
 ```
 
-Les mêmes commandes mettent à jour vers la dernière version. Vous pouvez aussi mettre à jour depuis l'application : « Réglages » → « Mise à jour de l'application » → « Mettre à jour vers la nouvelle version ». Si vous cochez « Mettre à jour automatiquement quand une nouvelle version sort », elle se remplace et se relance lorsqu'aucune tâche ne tourne. Pour choisir une version, désinstaller, installer depuis un fichier et l'avertissement du premier lancement, voir [docs/install.md](docs/install.md) (Japanese).
+Les mêmes commandes mettent à jour vers la dernière version. Vous pouvez aussi mettre à jour depuis l'application : « Réglages » → « Mise à jour de l'application » → « Mettre à jour vers la nouvelle version ». Si vous cochez « Mettre à jour automatiquement quand une nouvelle version sort », elle se remplace et se relance lorsqu'aucune tâche ne tourne. Pour choisir une version, désinstaller, installer depuis un fichier et l'avertissement du premier lancement, voir [docs/install.md](docs/install.md) (English).
 
 ## Utilisation
 
@@ -217,12 +217,12 @@ Les mêmes commandes mettent à jour vers la dernière version. Vous pouvez auss
 
 | Document | Contenu |
 | --- | --- |
-| [Écran et utilisation](docs/usage.md) (Japanese) | Utilisation de chaque fonction : approbation, questions, vérification de la spécification, planificateur de tâches, skills, conversation, btw, merge / PR, état des Issues, notifications, conflits, et le reste |
-| [Agents et orchestration](docs/agents.md) (Japanese) | Différences entre Claude Code / Codex / Gemini / Cursor, Pipeline et compétition |
-| [Réglages](docs/settings.md) (Japanese) | L'écran des réglages ouvert depuis le menu de la barre du haut, et ses rubriques |
-| [Contrôle à distance](docs/remote.md) (Japanese) | Comment piloter le tableau depuis un autre PC par un tunnel SSH, et comment réparer une connexion qui échoue |
-| [Installation](docs/install.md) (Japanese) | Installation, mise à jour, désinstallation, et utilisation d'un dépôt WSL sous Windows |
-| [Pour les développeurs](docs/development.md) (Japanese) | Lancer depuis les sources, compiler, publier, comment l'application est faite, et les tests |
+| [Écran et utilisation](docs/usage.md) (English) | Utilisation de chaque fonction : approbation, questions, vérification de la spécification, planificateur de tâches, skills, conversation, btw, merge / PR, état des Issues, notifications, conflits, et le reste |
+| [Agents et orchestration](docs/agents.md) (English) | Différences entre Claude Code / Codex / Gemini / Cursor, Pipeline et compétition |
+| [Réglages](docs/settings.md) (English) | L'écran des réglages ouvert depuis le menu de la barre du haut, et ses rubriques |
+| [Contrôle à distance](docs/remote.md) (English) | Comment piloter le tableau depuis un autre PC par un tunnel SSH, et comment réparer une connexion qui échoue |
+| [Installation](docs/install.md) (English) | Installation, mise à jour, désinstallation, et utilisation d'un dépôt WSL sous Windows |
+| [Pour les développeurs](docs/development.md) (English) | Lancer depuis les sources, compiler, publier, comment l'application est faite, et les tests |
 
 ## Licence
 
