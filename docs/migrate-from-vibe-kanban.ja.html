@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vibe Kanban から Worktree Kanban に移る方法</title>
+  <meta name="description" content="Vibe Kanban に何が起きたか、ブランチ・worktree・エクスポートしたデータの残し方、Worktree Kanban に移る手順をまとめました。">
+  <link rel="canonical" href="https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.ja.html">
+  <link rel="alternate" hreflang="en" href="https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.html">
+  <link rel="alternate" hreflang="ja" href="https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.ja.html">
+  <link rel="icon" href="images/icon.png">
+  <link rel="stylesheet" href="migrate.css">
+</head>
+<body>
+  <header>
+    <img src="images/icon.png" alt="">
+    <a href="./">Worktree Kanban</a>
+    <a class="lang" href="migrate-from-vibe-kanban.html" lang="en">English</a>
+  </header>
+  <main>
+    <h1>Vibe Kanban から移る方法</h1>
+    <p class="checked">2026年11月7日に、Vibe Kanban の告知とソースコードで確かめた内容です。Worktree Kanban は Vibe Kanban・bloop とは関係ありません。</p>
+    <p>コードは失われません。Vibe Kanban の作業は普通の git のブランチと worktree にあるので、アプリがなくても残ります。Worktree Kanban は Vibe Kanban のボードを自動では取り込めないため、このページでは、大事なものを先に保存してから、進行中の作業を手で移します。目安は、1リポジトリあたり30分ほどです。</p>
+
+    <h2>Vibe Kanban に何が起きたか</h2>
+    <ul>
+      <li>2026年4月10日に、開発元の bloop が<a href="https://www.vibekanban.com/blog/shutdown">会社の終了を告知</a>しました。プロジェクトの README にも「sunsetting」（終了に向かっている）と書かれています。</li>
+      <li>告知では、リモートサービスの提供期間は30日でした。対象は、クラウドのカンバンの Issue・コメント・プロジェクト・組織です。有料プランも終了しました。</li>
+      <li>ローカルのワークスペースは引き続き動くと告知され、プロジェクトはコミュニティに引き継がれました。<a href="https://github.com/BloopAI/vibe-kanban">リポジトリ</a>には2026年11月もコミットがあります。GitHub の最新リリースは、2026年4月24日の v0.1.44 です。</li>
+    </ul>
+    <p><strong>ローカルのワークスペースだけを使っているなら、今すぐ移る必要はありません。</strong>移行を考える理由は、開発を支える会社がなくなったことと、4月から新しいリリースが出ていないことです。</p>
+
+    <h2>何が引き継げるか</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Vibe Kanban</th><th>Worktree Kanban</th></tr></thead>
+        <tbody>
+          <tr><td>git のブランチとコミット</td><td>リポジトリに残るので、そのまま使えます</td></tr>
+          <tr><td>進行中のワークスペース</td><td>今のブランチをもとにタスクを作り直します（手順5）</td></tr>
+          <tr><td>ボード・Issue・エージェントとの会話</td><td>取り込めません。バックアップを参照用に残し、未完了のものを作り直します</td></tr>
+          <tr><td>Setup script</td><td>セットアップスクリプト</td></tr>
+          <tr><td>Copy files</td><td>セットアップスクリプトに <code>cp</code> の行を足します</td></tr>
+          <tr><td>Dev server script</td><td>実行スクリプト（worktree タブから手で起動します）</td></tr>
+          <tr><td>Cleanup script・Archive script</td><td>片付けスクリプト（worktree を消す直前に動きます）</td></tr>
+          <tr><td>エージェントのログイン</td><td>そのまま使えます。どちらも手元の CLI を動かします</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>先に確かめておく違い</h2>
+    <p>Worktree Kanban は完全な代わりではありません。始める前に、次の点を確かめてください。</p>
+    <h3>できなくなること</h3>
+    <ul>
+      <li><strong>一部のエージェント。</strong>動かせるのは Claude Code・Codex CLI・Gemini CLI・Cursor CLI です。GitHub Copilot・Amp・OpenCode・Droid・CCR・Qwen Code は動かせません。Codex・Gemini・Cursor では、カード上の承認などの一部の機能が<a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/agents.ja.md">使えません</a>。</li>
+      <li><strong>内蔵のプレビューブラウザ。</strong>開発サーバーは、いつものブラウザで開いてください。</li>
+      <li><strong>複数のリポジトリにまたがるワークスペース。</strong>タスクは1つのリポジトリに属します。リポジトリは、タブで3つまで同時に開けます。</li>
+      <li><strong>Vibe Kanban 自身の MCP サーバー</strong>を使った、エージェントからのタスク管理。</li>
+      <li><strong>チームのボード。</strong>ボードは1台の PC に保存されます。クラウドで共有するボードはありません。</li>
+      <li><strong>Apache-2.0 のライセンス。</strong>Worktree Kanban は <a href="https://github.com/kazuya83/worktree-kanban/blob/main/LICENSE">FSL-1.1-ALv2</a> で公開している source-available のソフトウェアで、競合する商用の製品やサービスには使えません。各版は、リリースから2年後に Apache 2.0 でも使えるようになります。</li>
+    </ul>
+    <h3>できるようになること</h3>
+    <ul>
+      <li>SSH トンネルを使った、外部サーバーなしの <a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/remote.ja.md">Mac と Windows の相互遠隔操作</a>。</li>
+      <li><a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/agents.ja.md">Pipeline と競争</a>：フローチャートでエージェントをつなぐ、同じタスクを複数のエージェントに解かせる。</li>
+      <li>大きなタスクのサブタスク分割と、タスクのスケジュール実行。</li>
+    </ul>
+
+    <h2>移行の6つの手順</h2>
+
+    <h3>1. 作業を git に保存する</h3>
+    <p>リポジトリごとに次を実行して、Vibe Kanban の worktree とブランチを一覧にします。Vibe Kanban の設定で変えていなければ、ブランチの接頭辞は <code>vk</code> です。</p>
+<pre><code>git worktree list
+git branch --list 'vk/*'</code></pre>
+    <p>残したい worktree は、コミットしていない変更をコミットし、ブランチを push します。既定の worktree の場所は一時フォルダなので、ここが大事です。</p>
+<pre><code>git -C &lt;worktree のパス&gt; status --short
+git -C &lt;worktree のパス&gt; add -A
+git -C &lt;worktree のパス&gt; commit -m "WIP: move from Vibe Kanban"
+git -C &lt;worktree のパス&gt; push -u origin HEAD</code></pre>
+
+    <h3>2. クラウドのデータをエクスポートする（使っていた場合）</h3>
+    <p>Vibe Kanban で <code>/export</code> を開くと、<code>issues.csv</code>・<code>projects.csv</code>・<code>users.csv</code> と、選べば添付ファイルの入った zip をダウンロードできます。クラウドのサービスの提供期間は30日と告知されていたので、今は使えないかもしれません。クラウドのプロジェクトを使っていなければ、飛ばしてください。</p>
+
+    <h3>3. ローカルのデータをバックアップする</h3>
+    <p>次のフォルダを安全な場所にコピーします。データベース（<code>db.v2.sqlite</code>）・<code>config.json</code>・<code>profiles.json</code> が入っています。<code>credentials.json</code> が入っていることもあるので、コピーは人に渡さず、コミットもしないでください。</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>OS</th><th>フォルダ</th></tr></thead>
+        <tbody>
+          <tr><td>Mac</td><td><code>~/Library/Application Support/ai.bloop.vibe-kanban</code></td></tr>
+          <tr><td>Linux</td><td><code>~/.local/share/vibe-kanban</code></td></tr>
+          <tr><td>Windows</td><td><code>%APPDATA%\bloop\vibe-kanban\data</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>4. Worktree Kanban をインストールする</h3>
+    <p>Mac / Linux：</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.sh | bash</code></pre>
+    <p>Windows（PowerShell）：</p>
+<pre><code>irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex</code></pre>
+    <p><a href="https://github.com/kazuya83/worktree-kanban/releases/latest">Releases からダウンロード</a>することもできます。署名・公証がないため、初めて開くときに OS の警告が出ることがあります。インストールしたらリポジトリを開き、設定の「使うエージェント」でエージェントを選び、「ブランチと取り込み」にスクリプトを入れます。</p>
+
+    <h3>5. 進行中の作業を移す</h3>
+    <ul>
+      <li><strong>ほぼ終わっている作業：</strong>ターミナルで worktree かブランチから仕上げて、いつもどおりマージするか PR を作ります。</li>
+      <li><strong>まだエージェントに任せたい作業：</strong>「ブランチと取り込み」の「ベースブランチ」を <code>vk/...</code> のブランチにしてから、タスクを作ります。そのブランチから worktree が作られます。マージ先の初期値も同じブランチになるので、main に直接入れるときはマージの画面で選び直してください。終わったら「ベースブランチ」を元に戻します。</li>
+      <li><strong>まだ始めていない Issue：</strong>タスクを手で作ります。GitHub Issue なら、「＋ 新しいタスク」の「GitHub Issue から作成」タブを使えます。</li>
+    </ul>
+    <p>エージェントは Vibe Kanban での会話を読めません。終わったことと残っていることを、新しいタスクに書いてください。</p>
+
+    <h3>6. 片付ける</h3>
+    <p>すべてマージか push が終わったら、古い worktree と、いらなくなったブランチを消します。<code>git branch -d</code> は、マージしていないブランチの削除を断ります。</p>
+<pre><code>git worktree remove &lt;worktree のパス&gt;
+git branch -d vk/&lt;ブランチ名&gt;
+git worktree prune</code></pre>
+    <p>迷うなら、あとで構いません。しばらく両方のアプリを残しておいても問題ありません。</p>
+
+    <a class="download" href="https://github.com/kazuya83/worktree-kanban/releases/latest">Worktree Kanban をダウンロード</a>
+  </main>
+  <footer><a href="./">ホーム</a> · <a href="https://github.com/kazuya83/worktree-kanban">GitHub</a> · <a href="https://github.com/kazuya83/worktree-kanban/blob/main/LICENSE">FSL-1.1-ALv2 License</a></footer>
+</body>
+</html>
