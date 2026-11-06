@@ -1,6 +1,7 @@
 // GitHub CLI（gh）の確認・インストール・ログイン
 const { spawn, execFile } = require('child_process');
 const { resolveCommand, isWin } = require('./env');
+const { tr } = require('../renderer/i18n');
 
 const DOWNLOAD_URL = 'https://cli.github.com/';
 const DEVICE_URL = 'https://github.com/login/device';
@@ -84,12 +85,12 @@ function stream(cmd, args, onLine, { stdin } = {}) {
 async function install(onLine) {
   if (resolveCommand('gh')) return status();
   const inst = installer();
-  if (!inst) throw new Error(`この環境では自動でインストールできません。${DOWNLOAD_URL} からインストールしてください`);
+  if (!inst) throw new Error(tr('この環境では自動でインストールできません。{DOWNLOAD_URL} からインストールしてください', { DOWNLOAD_URL }));
   onLine(`$ ${inst.label}`);
   const code = await stream(inst.cmd, inst.args, onLine);
   const st = await status();
   if (!st.installed) {
-    throw new Error(code === 0 ? 'インストールは終わりましたが gh が見つかりません。アプリを再起動してください' : `インストールに失敗しました（終了コード ${code}）`);
+    throw new Error(code === 0 ? tr('インストールは終わりましたが gh が見つかりません。アプリを再起動してください') : tr('インストールに失敗しました（終了コード {code}）', { code }));
   }
   return st;
 }
@@ -97,7 +98,7 @@ async function install(onLine) {
 // ブラウザで確認コードを入れる流れ（ログイン・権限の追加）を動かす
 async function deviceFlow(args, onEvent) {
   const gh = resolveCommand('gh');
-  if (!gh) throw new Error('gh が入っていません');
+  if (!gh) throw new Error(tr('gh が入っていません'));
   let sentCode = false;
   const code = await stream(
     gh,
@@ -124,7 +125,7 @@ async function deviceFlow(args, onEvent) {
 async function login(onEvent) {
   const code = await deviceFlow(['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web', '--scopes', 'project'], onEvent);
   const st = await status();
-  if (!st.loggedIn) throw new Error(code === 0 ? 'ログインを確認できませんでした' : `ログインに失敗しました（終了コード ${code}）`);
+  if (!st.loggedIn) throw new Error(code === 0 ? tr('ログインを確認できませんでした') : tr('ログインに失敗しました（終了コード {code}）', { code }));
   return st;
 }
 
@@ -135,7 +136,7 @@ async function login(onEvent) {
 async function addProjectScope(onEvent) {
   const code = await deviceFlow(['auth', 'refresh', '--hostname', 'github.com', '--scopes', 'project'], onEvent);
   const st = await status();
-  if (code !== 0 || st.hasProjectScope === false) throw new Error(code === 0 ? 'project の権限を確認できませんでした' : `権限の追加に失敗しました（終了コード ${code}）`);
+  if (code !== 0 || st.hasProjectScope === false) throw new Error(code === 0 ? tr('project の権限を確認できませんでした') : tr('権限の追加に失敗しました（終了コード {code}）', { code }));
   return st;
 }
 
@@ -146,7 +147,7 @@ async function addProjectScope(onEvent) {
  */
 async function createPullRequest({ cwd, head, base, title, body, repo, gh: ghPath }) {
   const gh = ghPath || resolveCommand('gh');
-  if (!gh) throw new Error('PR を作るには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます');
+  if (!gh) throw new Error(tr('PR を作るには GitHub CLI（gh）が必要です。「Issue から」の画面からインストールとログインができます'));
   const opts = { cwd, timeout: 60000 };
   const repoArgs = repo ? ['--repo', repo] : [];
   const view = await run(gh, ['pr', 'view', head, ...repoArgs, '--json', 'url,number,state'], opts);
@@ -161,8 +162,8 @@ async function createPullRequest({ cwd, head, base, title, body, repo, gh: ghPat
   const r = await run(gh, ['pr', 'create', ...repoArgs, '--head', head, '--base', base, '--title', title, '--body', body], opts);
   if (r.code !== 0) {
     const msg = (r.stderr || r.stdout).trim();
-    if (/auth login|not logged/i.test(msg)) throw new Error('GitHub にログインしていません。「Issue から」の画面からログインしてください');
-    throw new Error(`PR を作れませんでした: ${msg}`);
+    if (/auth login|not logged/i.test(msg)) throw new Error(tr('GitHub にログインしていません。「Issue から」の画面からログインしてください'));
+    throw new Error(tr('PR を作れませんでした: {msg}', { msg }));
   }
   const url = (r.stdout.match(/https:\/\/\S+\/pull\/\d+/) || [r.stdout.trim()])[0];
   const m = url.match(/\/pull\/(\d+)/);
@@ -176,18 +177,18 @@ async function createPullRequest({ cwd, head, base, title, body, repo, gh: ghPat
  */
 async function pullRequestState({ url, cwd, gh: ghPath }) {
   const gh = ghPath || resolveCommand('gh');
-  if (!gh) throw new Error('PR の状態を確かめるには GitHub CLI（gh）が必要です');
+  if (!gh) throw new Error(tr('PR の状態を確かめるには GitHub CLI（gh）が必要です'));
   const r = await run(gh, ['pr', 'view', url, '--json', 'state,mergedAt,headRefOid,baseRefName,mergeable'], { cwd, timeout: 30000 });
   if (r.code !== 0) {
     const msg = (r.stderr || r.stdout).trim();
-    if (/auth login|not logged/i.test(msg)) throw new Error('GitHub にログインしていません');
-    throw new Error(msg || 'PR の状態を取れませんでした');
+    if (/auth login|not logged/i.test(msg)) throw new Error(tr('GitHub にログインしていません'));
+    throw new Error(msg || tr('PR の状態を取れませんでした'));
   }
   let d;
   try {
     d = JSON.parse(r.stdout);
   } catch {
-    throw new Error('PR の状態を読めませんでした');
+    throw new Error(tr('PR の状態を読めませんでした'));
   }
   return {
     state: String(d.state || '').toUpperCase(),

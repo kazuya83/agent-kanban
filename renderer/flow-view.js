@@ -7,6 +7,11 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.FlowView = api;
 })(typeof self !== 'undefined' ? self : this, function (FM) {
+  const i18n = typeof module === 'object' && module.exports ? require('./i18n.js') : typeof I18n !== 'undefined' ? I18n : null;
+  function tr(key, vars) {
+    if (i18n) return i18n.tr(key, vars);
+    return vars ? String(key).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : key;
+  }
   // 大きさは flow-editor.js と同じ
   const W = { start: 120, step: 200, if: 170, parallel: 160, join: 160, end: 120 };
   const H = { start: 40, step: 64, if: 56, parallel: 48, join: 48, end: 40 };
@@ -113,7 +118,7 @@
         const p = edgePath({ ...a, x: a.x + ox, y: a.y + oy }, { ...b, x: b.x + ox, y: b.y + oy });
         const es = edgeState(e, states, back, o.counts);
         const parts = [];
-        if (a.type === 'if') parts.push(e.value || (e.else ? 'それ以外' : ''));
+        if (a.type === 'if') parts.push(e.value || (e.else ? tr('それ以外') : ''));
         if (back.has(e.id)) parts.push(`↺${o.counts && o.counts[e.id] ? ` ${o.counts[e.id]}/` : ' '}${e.maxLoops || (FM && FM.MAX_LOOPS_DEFAULT) || 3}`);
         const label = parts.filter(Boolean).join(' ');
         return `<g class="fv-edge ${es ? `e-${es}` : ''} ${back.has(e.id) ? 'back' : ''}"><path d="${p.d}" marker-end="url(#fvArrow${es === DONE ? 'Done' : es === 'active' ? 'Active' : ''})"/>${label ? `<text x="${p.mx}" y="${p.my}">${esc(cut(label, 18))}</text>` : ''}</g>`;
@@ -127,8 +132,9 @@
         const y = n.y + oy;
         const s = states.get(n.id) || 'pending';
         const info = n.type === 'step' && o.stepInfo ? o.stepInfo(n) || {} : {};
-        const title = info.title || (FM ? FM.labelOf(n) : n.label || n.type);
-        const kind = FM ? FM.TYPE_LABEL[n.type] : n.type;
+        const kindJa = FM ? FM.TYPE_LABEL[n.type] : '';
+        const kind = kindJa ? tr(kindJa) : n.type;
+        const title = info.title || (FM && FM.shownLabel ? FM.shownLabel(n) : n.label || n.type);
         const round = n.type === 'start' || n.type === 'end' ? h / 2 : n.type === 'if' ? 14 : 8;
         const cur = o.current && o.current === n.id;
         const mark = marks[s] || '';
@@ -147,7 +153,7 @@
 
     const z = Number(o.zoom);
     const dims = Number.isFinite(z) && z > 0 ? `width="${Math.round(vw * z)}" height="${Math.round(vh * z)}"` : `width="${vw}" height="${vh}" style="max-width:100%;height:auto"`;
-    return `<svg class="fv" viewBox="0 0 ${vw} ${vh}" ${dims} role="img" aria-label="Pipelineのフローチャート">
+    return `<svg class="fv" viewBox="0 0 ${vw} ${vh}" ${dims} role="img" aria-label="${esc(tr('Pipelineのフローチャート'))}">
       <defs>
         <marker id="fvArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fv-arrow"/></marker>
         <marker id="fvArrowDone" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fv-arrow done"/></marker>

@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const wsl = require('./wsl');
+const { tr } = require('../renderer/i18n');
 
 // 一度に返すフォルダの数（node_modules のような大きいフォルダで重くならないように）
 const MAX_ENTRIES = 1000;
@@ -34,21 +35,21 @@ function isRepo(dir) {
 // dir の中のフォルダ（隠しフォルダは showHidden のときだけ）を名前順で返す
 function listDirs(dir, { showHidden = false } = {}) {
   const raw = String(dir || '').trim();
-  if (!raw) throw new Error('フォルダのパスが空です');
+  if (!raw) throw new Error(tr('フォルダのパスが空です'));
   const api = pathApi(raw);
   const abs = api.resolve(raw);
   let st;
   try {
     st = fs.statSync(abs);
   } catch {
-    throw new Error(`フォルダが見つかりません: ${abs}`);
+    throw new Error(tr('フォルダが見つかりません: {abs}', { abs }));
   }
-  if (!st.isDirectory()) throw new Error(`フォルダではありません: ${abs}`);
+  if (!st.isDirectory()) throw new Error(tr('フォルダではありません: {abs}', { abs }));
   let entries;
   try {
     entries = fs.readdirSync(abs, { withFileTypes: true });
   } catch (err) {
-    throw new Error(`フォルダの中を読めませんでした（${abs}）: ${err.code || err.message}`);
+    throw new Error(tr('フォルダの中を読めませんでした（{abs}）: {v}', { abs, v: err.code || err.message }));
   }
   const dirs = [];
   for (const e of entries) {

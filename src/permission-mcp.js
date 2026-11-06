@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 // Claude Code の --permission-prompt-tool から呼ばれる、最小構成の MCP サーバー（stdio）。
 // 許可を求められたらアプリ本体（127.0.0.1 の HTTP）に問い合わせ、ユーザーがカード上で
-// 「許可 / 拒否」を押すまで待ってから結果を返す。依存パッケージなし。
+// 「許可 / 拒否」を押すまで待ってから結果を返す。npm の依存はない。
+// 言語は renderer/i18n.js（パッケージ時は permission-mcp.js と一緒に asar の外へ出す）。
 const http = require('http');
 const fs = require('fs');
+const I18n = require('../renderer/i18n');
+const { tr } = I18n;
 
-// 接続先（ポート・トークン・カード）。ふつうは env で受け取る。
+// 接続先（ポート・トークン・カード・言語）。ふつうは env で受け取る。
 // WSL の中の claude から Windows のアプリを呼ぶと env（WSLENV）が届かないことがあるので、
 // env に無いときは、引数で渡された MCP の設定ファイル（mcpServers.agent_kanban.env）から読む
 function loadSettings(env = process.env, argv = process.argv) {
   let fromFile = {};
-  if (!env.KANBAN_PORT || !env.KANBAN_TOKEN) {
+  if (!env.KANBAN_PORT || !env.KANBAN_TOKEN || !env.KANBAN_LANGUAGE) {
     const file = (argv || []).slice(2).find((a) => typeof a === 'string' && /\.json$/i.test(a));
     if (file) {
       try {
@@ -24,7 +27,7 @@ function loadSettings(env = process.env, argv = process.argv) {
     }
   }
   const pick = (k) => env[k] || fromFile[k] || '';
-  return { port: Number(pick('KANBAN_PORT')), token: pick('KANBAN_TOKEN'), card: pick('KANBAN_CARD') };
+  return { port: Number(pick('KANBAN_PORT')), token: pick('KANBAN_TOKEN'), card: pick('KANBAN_CARD'), language: pick('KANBAN_LANGUAGE') };
 }
 
 let PORT = NaN;
@@ -107,7 +110,7 @@ async function handle(msg) {
     try {
       decision = await ask((params && params.arguments) || {});
     } catch (err) {
-      decision = { behavior: 'deny', message: `Agent Kanban に接続できなかったため拒否しました: ${err.message}` };
+      decision = { behavior: 'deny', message: tr('Agent Kanban に接続できなかったため拒否しました: {message}', { message: err.message }) };
     }
     return send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(decision) }] } });
   }
@@ -121,7 +124,12 @@ let started = false;
 function start() {
   if (started) return;
   started = true;
-  ({ port: PORT, token: TOKEN, card: CARD } = loadSettings());
+  const loaded = loadSettings();
+  PORT = loaded.port;
+  TOKEN = loaded.token;
+  CARD = loaded.card;
+  // このプロセスの初期言語は日本語のままなので、アプリが渡した言語に合わせる
+  I18n.setLanguage(loaded.language);
   let buf = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk) => {

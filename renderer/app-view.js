@@ -5,6 +5,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AppView = api;
 })(typeof self !== 'undefined' ? self : this, function () {
+  const tr = (typeof module === 'object' && module.exports ? require('./i18n.js') : I18n).tr;
   const VIEWS = ['kanban', 'scheduler', 'settings'];
   const DEFAULT_VIEW = 'kanban';
   const VIEW_KEY = 'agent-kanban.view';
@@ -79,25 +80,25 @@
     {
       heading: null,
       items: [
-        { id: 'general', label: '全般', icon: 'settings' },
-        { id: 'update', label: 'アプリの更新', icon: 'download' },
+        { id: 'general', label: tr('全般'), icon: 'settings' },
+        { id: 'update', label: tr('アプリの更新'), icon: 'download' },
       ],
     },
     {
-      heading: 'このプロジェクト',
+      heading: tr('このプロジェクト'),
       items: [
-        { id: 'branch', label: 'ブランチと取り込み', icon: 'branch' },
-        { id: 'issue', label: 'Issue 連携', icon: 'zap' },
-        { id: 'permission', label: '権限', icon: 'lock' },
-        { id: 'task', label: 'タスクの既定', icon: 'note' },
+        { id: 'branch', label: tr('ブランチと取り込み'), icon: 'branch' },
+        { id: 'issue', label: tr('Issue 連携'), icon: 'zap' },
+        { id: 'permission', label: tr('権限'), icon: 'lock' },
+        { id: 'task', label: tr('タスクの既定'), icon: 'note' },
       ],
     },
     {
-      heading: 'エージェント',
+      heading: tr('エージェント'),
       items: [
-        { id: 'agents', label: '使うエージェント', icon: 'bot' },
-        { id: 'custom', label: 'カスタムエージェント', icon: 'wrench' },
-        { id: 'orchestration', label: 'オーケストレーション', icon: 'pipeline' },
+        { id: 'agents', label: tr('使うエージェント'), icon: 'bot' },
+        { id: 'custom', label: tr('カスタムエージェント'), icon: 'wrench' },
+        { id: 'orchestration', label: tr('オーケストレーション'), icon: 'pipeline' },
       ],
     },
   ];

@@ -25,9 +25,16 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.ScheduleModel = api;
 })(typeof self !== 'undefined' ? self : this, function () {
+  const i18n = typeof module === 'object' && module.exports ? require('./i18n.js') : typeof I18n !== 'undefined' ? I18n : null;
+  function tr(key, vars) {
+    if (i18n) return i18n.tr(key, vars);
+    return vars ? String(key).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : key;
+  }
+  function weekdayNames() {
+    return [tr('日'), tr('月'), tr('火'), tr('水'), tr('木'), tr('金'), tr('土')];
+  }
   const RULE_KINDS = ['once', 'hourly', 'daily', 'weekly', 'monthly'];
   const RUN_STATUSES = ['ok', 'skipped', 'missed', 'failed'];
-  const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
   const MAX_RUNS = 20;
   const LATE_MS = 10 * 60 * 1000; // 予定からこれより遅れたら「見送り」にする（アプリの停止・スリープ）
   const TITLE_MAX = 40; // タイトルを指示の1行目から作るときの長さ（タスクのカードと同じ）
@@ -132,13 +139,16 @@
     if (!r) return '';
     if (r.kind === 'once') {
       const d = new Date(r.at);
-      return `1回だけ ${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      return tr('1回だけ {date} {time}', {
+        date: `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`,
+        time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+      });
     }
-    if (r.kind === 'hourly') return `毎時 ${r.minute}分`;
+    if (r.kind === 'hourly') return tr('毎時 {minute}分', { minute: r.minute });
     const time = `${pad(r.hour)}:${pad(r.minute)}`;
-    if (r.kind === 'daily') return `毎日 ${time}`;
-    if (r.kind === 'weekly') return `毎週 ${r.weekdays.map((d) => WEEKDAY_NAMES[d]).join('・')} ${time}`;
-    return `毎月 ${r.day}日 ${time}${r.day > 28 ? '（ない月は末日）' : ''}`;
+    if (r.kind === 'daily') return tr('毎日 {time}', { time });
+    if (r.kind === 'weekly') return tr('毎週 {days} {time}', { days: r.weekdays.map((d) => weekdayNames()[d]).join(tr('・')), time });
+    return r.day > 28 ? tr('毎月 {day}日 {time}（ない月は末日）', { day: r.day, time }) : tr('毎月 {day}日 {time}', { day: r.day, time });
   }
 
   function cleanRuns(list) {
@@ -205,20 +215,22 @@
   /** 登録・編集の入力を確かめる。問題があれば、画面に出す文を返す（問題がなければ空文字） */
   function scheduleError(input) {
     const i = input || {};
-    if (!str(i.repoPath).trim()) return '先にリポジトリを選んでください';
-    if (!str(i.prompt).trim()) return '指示を入力してください';
+    if (!str(i.repoPath).trim()) return tr('先にリポジトリを選んでください');
+    if (!str(i.prompt).trim()) return tr('指示を入力してください');
     const kind = i.rule && i.rule.kind;
     if (cleanRule(i.rule)) return '';
-    if (kind === 'once') return '実行する日時を入力してください';
-    if (kind === 'weekly' && !(Array.isArray(i.rule.weekdays) && i.rule.weekdays.length)) return '曜日を1つ以上選んでください';
-    if (RULE_KINDS.includes(kind)) return '繰り返しの日時の値が正しくありません';
-    return '繰り返しの種類を選んでください';
+    if (kind === 'once') return tr('実行する日時を入力してください');
+    if (kind === 'weekly' && !(Array.isArray(i.rule.weekdays) && i.rule.weekdays.length)) return tr('曜日を1つ以上選んでください');
+    if (RULE_KINDS.includes(kind)) return tr('繰り返しの日時の値が正しくありません');
+    return tr('繰り返しの種類を選んでください');
   }
 
   return {
     RULE_KINDS,
     RUN_STATUSES,
-    WEEKDAY_NAMES,
+    get WEEKDAY_NAMES() {
+      return weekdayNames();
+    },
     MAX_RUNS,
     LATE_MS,
     cleanRule,

@@ -2,6 +2,13 @@
 const { execFile } = require('child_process');
 const fs = require('fs');
 const wsl = require('./wsl');
+const I18n = require('../renderer/i18n');
+const { tr } = I18n;
+
+// 画面のボタン「マージ」とは別の文。ボタンは Merge、ここは文の中に入れる操作名
+function mergeOperationName() {
+  return I18n.getLanguage() === 'ja' ? 'マージ' : tr('文中の操作名（マージ）');
+}
 
 function git(cwd, args, { allowExitCodes = [], network = false, timeout } = {}) {
   return new Promise((resolve, reject) => {
@@ -23,7 +30,7 @@ function git(cwd, args, { allowExitCodes = [], network = false, timeout } = {}) 
     execFile(file, argv, opts, (err, stdout, stderr) => {
       if (err) {
         if (typeof err.code === 'number' && allowExitCodes.includes(err.code)) return resolve(stdout);
-        const e = new Error(`git ${args.join(' ')} に失敗しました: ${(stderr || err.message).trim()}`);
+        const e = new Error(tr('git {v} に失敗しました: {v2}', { v: args.join(' '), v2: (stderr || err.message).trim() }));
         e.stdout = stdout;
         e.stderr = stderr;
         return reject(e);
@@ -49,7 +56,7 @@ async function revParse(repo, ref) {
   try {
     return (await git(repo, ['rev-parse', '--verify', `${ref}^{commit}`])).trim();
   } catch {
-    throw new Error(`${ref} が見つかりません（リポジトリにコミットが1つもない可能性があります）`);
+    throw new Error(tr('{ref} が見つかりません（リポジトリにコミットが1つもない可能性があります）', { ref }));
   }
 }
 
@@ -114,7 +121,7 @@ async function merge(cwd, branch, message, target) {
     const files = await conflictFiles(cwd).catch(() => []);
     await git(cwd, ['merge', '--abort']).catch(() => {});
     if (files.length) {
-      const e = new Error(`${target || 'マージ先'} へのマージでコンフリクトが起きたため、マージを中止しました（${files.join(', ')}）`);
+      const e = new Error(tr('{v} へのマージでコンフリクトが起きたため、マージを中止しました（{v2}）', { v: target || tr('マージ先'), v2: files.join(', ') }));
       e.conflictFiles = files;
       throw e;
     }
@@ -171,10 +178,10 @@ async function branchExists(repo, name) {
 
 // 外から受け取ったブランチ名を git / gh の引数に渡す前に確かめる。
 // 「-」で始まる名前はオプションとして解釈されてしまう（引数インジェクション）ので受け付けない
-function assertSafeRef(name, label = 'ブランチ名') {
+function assertSafeRef(name, label = tr('ブランチ名')) {
   const s = String(name ?? '');
   if (!s || s.startsWith('-') || /[\x00-\x20\x7f~^:?*[\\]/.test(s) || s.includes('..') || s.includes('@{')) {
-    throw new Error(`「${s}」は${label}に使えません`);
+    throw new Error(tr('「{s}」は{label}に使えません', { s, label }));
   }
   return s;
 }
@@ -184,7 +191,7 @@ async function checkBranchName(repo, name) {
   try {
     await git(repo, ['check-ref-format', '--branch', name]);
   } catch {
-    throw new Error(`「${name}」はブランチ名に使えません`);
+    throw new Error(tr('「{name}」はブランチ名に使えません', { name }));
   }
 }
 
@@ -221,7 +228,7 @@ async function operationInProgress(dir) {
   const checks = [
     ['rebase-merge', 'rebase'],
     ['rebase-apply', 'rebase'],
-    ['MERGE_HEAD', 'マージ'],
+    ['MERGE_HEAD', mergeOperationName()],
     ['CHERRY_PICK_HEAD', 'cherry-pick'],
     ['REVERT_HEAD', 'revert'],
     ['BISECT_LOG', 'bisect'],

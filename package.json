@@ -1,7 +1,7 @@
 {
   "name": "agent-kanban",
   "version": "0.1.8",
-  "description": "AI コーディングエージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）のタスクをカンバンで管理し、git worktree ごとに並列実行するデスクトップアプリ",
+  "description": "Desktop app that manages AI coding agent tasks (Claude Code / Codex CLI / Gemini CLI / Cursor CLI) on a kanban board and runs them in parallel, one git worktree each",
   "main": "main.js",
   "license": "MIT",
   "author": "kazuya83",
@@ -24,7 +24,7 @@
     "productName": "Agent Kanban",
     "artifactName": "agent-kanban-${version}-${os}-${arch}.${ext}",
     "files": ["main.js", "preload.js", "src/**", "renderer/**"],
-    "asarUnpack": ["src/permission-mcp.js"],
+    "asarUnpack": ["src/permission-mcp.js", "renderer/i18n.js", "renderer/locales/**/*.js"],
     "directories": {
       "output": "dist",
       "buildResources": "build"

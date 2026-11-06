@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# Agent Kanban のインストーラー（macOS / Linux）
+# Agent Kanban installer (macOS / Linux)
 #
 #   curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash
 #
-# バージョンを指定する:  curl -fsSL ... | AGENT_KANBAN_VERSION=0.1.1 bash
-# アンインストール:      curl -fsSL ... | bash -s -- --uninstall
+# Pin a version:  curl -fsSL ... | AGENT_KANBAN_VERSION=0.1.1 bash
+# Uninstall:      curl -fsSL ... | bash -s -- --uninstall
 set -euo pipefail
 
 REPO="kazuya83/agent-kanban"
 APP_NAME="Agent Kanban"
 BIN_NAME="agent-kanban"
-# 前の名前（Claude Agent Kanban）で入れたものは、入れ替えるときに片付ける
+# Builds installed under the previous name (Claude Agent Kanban) are removed on replace
 OLD_APP_NAME="Claude Agent Kanban"
 OLD_BIN_NAME="claude-agent-kanban"
 VERSION="${AGENT_KANBAN_VERSION:-latest}"
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m警告:\033[0m %s\n' "$*" >&2; }
-die() { printf '\033[1;31mエラー:\033[0m %s\n' "$*" >&2; exit 1; }
+warn() { printf '\033[1;33mWarning:\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[1;31mError:\033[0m %s\n' "$*" >&2; exit 1; }
 
 os="$(uname -s)"
 arch="$(uname -m)"
@@ -31,48 +31,48 @@ if [ "${1:-}" = "--uninstall" ]; then
     Darwin)
       for d in /Applications "${HOME}/Applications"; do
         for n in "${APP_NAME}" "${OLD_APP_NAME}"; do
-          [ -d "${d}/${n}.app" ] && { rm -rf "${d}/${n}.app"; info "${d}/${n}.app を削除しました"; }
+          [ -d "${d}/${n}.app" ] && { rm -rf "${d}/${n}.app"; info "Removed ${d}/${n}.app"; }
         done
       done ;;
     Linux)
       for n in "${BIN_NAME}" "${OLD_BIN_NAME}"; do
         rm -f "${HOME}/.local/bin/${n}" "${HOME}/.local/share/applications/${n}.desktop" "${HOME}/.local/share/icons/${n}.png"
       done
-      info "削除しました" ;;
+      info "Removed" ;;
   esac
-  info "ボードのデータ（userData フォルダ）は残しています。不要なら手動で削除してください。"
+  info "Board data (the userData folder) was left in place. Delete it manually if you no longer need it."
   exit 0
 fi
 
-command -v curl >/dev/null || die "curl が必要です"
+command -v curl >/dev/null || die "curl is required"
 
-# 対象のファイル名
+# Asset file name for this machine
 case "${os}" in
   Darwin)
     case "${arch}" in
       arm64) pattern="mac-arm64.dmg" ;;
       x86_64) pattern="mac-x64.dmg" ;;
-      *) die "対応していない CPU です: ${arch}" ;;
+      *) die "Unsupported CPU: ${arch}" ;;
     esac ;;
   Linux)
-    [ "${arch}" = "x86_64" ] || die "Linux は x86_64 のみ対応しています（今は ${arch}）"
+    [ "${arch}" = "x86_64" ] || die "Linux supports x86_64 only (this machine is ${arch})"
     pattern="linux-x86_64.AppImage" ;;
-  *) die "対応していない OS です: ${os}（Windows は install.ps1 を使ってください）" ;;
+  *) die "Unsupported OS: ${os} (on Windows, use install.ps1)" ;;
 esac
 
-# ダウンロードする URL を決める
-# GitHub API は使わない（未ログインだと回数制限で 403 になることがあるため）。
-# 最新版は github.com/.../releases/latest のリダイレクト先（.../releases/tag/v0.1.2）から調べる
-info "リリース情報を取得しています（${VERSION}）"
+# Decide the download URL.
+# Do not use the GitHub API (unauthenticated calls can hit the rate limit and return 403).
+# The latest release is taken from the redirect target of github.com/.../releases/latest (.../releases/tag/v0.1.2).
+info "Fetching release information (${VERSION})"
 if [ "${VERSION}" = "latest" ]; then
-  final="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest")" || die "最新のリリースを調べられませんでした"
+  final="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest")" || die "Could not look up the latest release"
   tag="${final##*/}"
 else
   tag="v${VERSION#v}"
 fi
 case "${tag}" in
   v[0-9]*) ;;
-  *) die "リリースが見つかりません（${tag}）" ;;
+  *) die "Release not found (${tag})" ;;
 esac
 name="${BIN_NAME}-${tag#v}-${pattern}"
 url="https://github.com/${REPO}/releases/download/${tag}/${name}"
@@ -80,18 +80,18 @@ url="https://github.com/${REPO}/releases/download/${tag}/${name}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 file="${tmp}/$(basename "${url}")"
-info "ダウンロードしています: $(basename "${url}")"
+info "Downloading: $(basename "${url}")"
 if ! curl -fL --progress-bar -o "${file}" "${url}"; then
-  # 前の名前のころのリリース（claude-agent-kanban-…）
+  # Release from when the project used the previous name (claude-agent-kanban-…)
   url="https://github.com/${REPO}/releases/download/${tag}/${OLD_BIN_NAME}-${tag#v}-${pattern}"
   file="${tmp}/$(basename "${url}")"
-  info "ダウンロードしています: $(basename "${url}")"
+  info "Downloading: $(basename "${url}")"
   if ! curl -fL --progress-bar -o "${file}" "${url}"; then
     if [ "${os}" = "Darwin" ]; then
-      # Mac の dmg は、公開のあとに追加される（Mac のビルドを待たずに公開するため）
-      die "${tag} の Mac 版はまだ準備中です。しばらくしてからもう一度試すか、前の版を入れてください（例: AGENT_KANBAN_VERSION=前の版の番号）。https://github.com/${REPO}/releases"
+      # The Mac dmg is added after the release is published (so the release does not wait for the Mac build)
+      die "The Mac build for ${tag} is not ready yet. Try again later, or install a previous version (example: AGENT_KANBAN_VERSION=0.1.0). https://github.com/${REPO}/releases"
     fi
-    die "ダウンロードできませんでした: ${url}（バージョン ${tag} があるか、https://github.com/${REPO}/releases で確認してください）"
+    die "Download failed: ${url} (check that version ${tag} exists at https://github.com/${REPO}/releases)"
   fi
 fi
 
@@ -102,14 +102,14 @@ case "${os}" in
     mkdir -p "${mnt}"
     hdiutil attach "${file}" -nobrowse -quiet -mountpoint "${mnt}"
     src="$(find "${mnt}" -maxdepth 1 -name '*.app' | head -n1)"
-    [ -n "${src}" ] || { hdiutil detach "${mnt}" -quiet || true; die "dmg の中にアプリが見つかりません"; }
-    # dmg の中のアプリの名前（前の名前のころのリリースなら Claude Agent Kanban）
+    [ -n "${src}" ] || { hdiutil detach "${mnt}" -quiet || true; die "No app was found inside the dmg"; }
+    # App name inside the dmg (Claude Agent Kanban for a release from the previous name)
     app_name="$(basename "${src}" .app)"
-    # 起動したまま入れ替えると、裏で動いている古いアプリの画面が壊れるので、先に終了してもらう（前の名前のアプリも）
+    # Replacing the app while it is running breaks the window of the old process, so quit it first (including the previous name)
     relaunch=""
     for n in "${APP_NAME}" "${OLD_APP_NAME}"; do
       pgrep -x "${n}" >/dev/null 2>&1 || continue
-      info "${n} が起動中なので、終了してから入れ替えます（実行中のタスクがあれば、アプリに確認が出ます）"
+      info "${n} is running, so it will quit before the update (if a task is running, the app will ask you to confirm)"
       osascript -e "tell application \"${n}\" to quit" >/dev/null 2>&1 || true
       for _ in $(seq 1 30); do
         pgrep -x "${n}" >/dev/null 2>&1 || break
@@ -117,18 +117,18 @@ case "${os}" in
       done
       if pgrep -x "${n}" >/dev/null 2>&1; then
         hdiutil detach "${mnt}" -quiet || true
-        die "${n} が終了しませんでした。アプリを終了してから（⌘Q）、もう一度実行してください"
+        die "${n} did not quit. Quit the app (⌘Q) and run this again"
       fi
       relaunch=1
     done
     rm -rf "${dest}/${APP_NAME}.app" "${dest}/${OLD_APP_NAME}.app"
     cp -R "${src}" "${dest}/"
     hdiutil detach "${mnt}" -quiet || true
-    # 署名していないアプリなので、ダウンロード時に付く「隔離」の印を外す
+    # The app is unsigned, so clear the quarantine flag added on download
     xattr -dr com.apple.quarantine "${dest}/${app_name}.app" 2>/dev/null || true
-    info "インストールしました: ${dest}/${app_name}.app（${tag}）"
+    info "Installed: ${dest}/${app_name}.app (${tag})"
     if [ -n "${relaunch}" ]; then
-      info "${app_name} を起動し直します"
+      info "Relaunching ${app_name}"
       open -a "${dest}/${app_name}.app" || true
     fi
     run_hint="open -a \"${app_name}\""
@@ -147,17 +147,17 @@ Icon=${HOME}/.local/share/icons/${BIN_NAME}.png
 Type=Application
 Categories=Development;
 EOF
-    info "インストールしました: ${bin}/${BIN_NAME}（${tag}）"
-    case ":${PATH}:" in *":${bin}:"*) ;; *) warn "${bin} が PATH に入っていません。シェルの設定に追加してください。" ;; esac
+    info "Installed: ${bin}/${BIN_NAME} (${tag})"
+    case ":${PATH}:" in *":${bin}:"*) ;; *) warn "${bin} is not on PATH. Add it to your shell configuration." ;; esac
     run_hint="${BIN_NAME}"
     ;;
 esac
 
-# 動かすのに必要なもの
-command -v git >/dev/null || warn "git が見つかりません。インストールしてください。"
+# What you need in order to run
+command -v git >/dev/null || warn "git was not found. Please install it."
 if ! command -v claude >/dev/null && ! command -v codex >/dev/null && ! command -v gemini >/dev/null && ! command -v cursor-agent >/dev/null; then
-  warn "エージェントの CLI（claude / codex / gemini / cursor-agent）が見つかりません。使うものをインストールしてログインしてください（Claude Code・Codex CLI・Gemini CLI・Cursor CLI）。"
+  warn "No agent CLI (claude / codex / gemini / cursor-agent) was found. Install the one you use and sign in (Claude Code, Codex CLI, Gemini CLI, or Cursor CLI)."
 fi
 
 echo
-info "起動するには: ${run_hint}"
+info "To launch: ${run_hint}"

@@ -1,9 +1,10 @@
 // スケジューラと main.js のつなぎ。Electron なしで試せるように、IPC の引数の整え方と、
+const { tr } = require('../renderer/i18n');
 // デスクトップ通知を押したときの動きをここに置く
 
 function needId(arg) {
   const id = arg && typeof arg === 'object' ? arg.id : arg;
-  if (!id || typeof id !== 'string') throw new Error('スケジュールが指定されていません');
+  if (!id || typeof id !== 'string') throw new Error(tr('スケジュールが指定されていません'));
   return id;
 }
 
@@ -13,7 +14,7 @@ function createScheduleApi({ scheduler, store }) {
     // 新しいスケジュールは、今開いているリポジトリのものにする（遠隔操作ではホストの今のリポジトリ）
     create(p) {
       const repoPath = store.settings.repoPath;
-      if (!repoPath) throw new Error('先にリポジトリを開いてください');
+      if (!repoPath) throw new Error(tr('先にリポジトリを開いてください'));
       return scheduler.create({ ...(p || {}), repoPath });
     },
     update(p) {

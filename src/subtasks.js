@@ -21,6 +21,8 @@
 // 提案: c.subtaskProposal = { items, at }（ユーザーが「サブタスクでやる」と答えたら c.subtasks にする）
 // サブタスクのカード: c.subtaskOf = { parent, key, approved? }
 
+const { tr } = require('../renderer/i18n');
+
 const SUBTASK_MARKER = '[[SUBTASKS]]';
 const SUBTASK_LANG = 'subtasks';
 const SUBTASK_BLOCK_RE = new RegExp('\\n?[ \\t]*```[ \\t]*' + SUBTASK_LANG + '[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*', 'g');
@@ -255,13 +257,21 @@ function applyPlan(items, plan) {
   return cleanItems(out).map((x, i) => ({ ...out[i], after: x.after }));
 }
 
+// 名前の引用符と区切りは訳文の側に置く（日本語のときは「名前」を・でつなぐ）
+function quoteName(name) {
+  return tr('「{name}」', { name });
+}
+function joinQuoted(names) {
+  return names.map((name) => quoteName(name)).join(tr('・'));
+}
+
 // 順番の説明（ログ用）: 「並列: A・B / C は A のあと」
 function describeOrder(items) {
   const title = new Map(items.map((x) => [x.key, x.title]));
-  const free = items.filter((x) => !x.after.length).map((x) => `「${x.title}」`);
+  const free = items.filter((x) => !x.after.length);
   const parts = [];
-  if (free.length) parts.push(free.length > 1 ? `並列: ${free.join('・')}` : `最初: ${free[0]}`);
-  for (const x of items) if (x.after.length) parts.push(`「${x.title}」は ${x.after.map((a) => `「${title.get(a)}」`).join('・')} のあと`);
+  if (free.length) parts.push(free.length > 1 ? tr('並列: {names}', { names: joinQuoted(free.map((x) => x.title)) }) : tr('最初: {name}', { name: quoteName(free[0].title) }));
+  for (const x of items) if (x.after.length) parts.push(tr('「{title}」は {deps} のあと', { title: x.title, deps: joinQuoted(x.after.map((a) => title.get(a))) }));
   return parts.join(' / ');
 }
 
@@ -298,4 +308,6 @@ module.exports = {
   applyPlan,
   progressOf,
   describeOrder,
+  quoteName,
+  joinQuoted,
 };

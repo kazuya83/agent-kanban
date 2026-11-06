@@ -4,6 +4,11 @@
 // - ノード・線を押すと、右の欄で中身（エージェント・担当の説明・期待値・ループの上限など）を変えられる
 // - 形は FlowModel（flow-model.js）で確かめ、直すところがあるうちは保存できない
 (function (root) {
+  const i18n = typeof module === 'object' && module.exports ? require('./i18n.js') : root.I18n;
+  function tr(key, vars) {
+    if (i18n) return i18n.tr(key, vars);
+    return vars ? String(key).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : key;
+  }
   const FM = root.FlowModel;
   const Z = root.Zoom;
   // 拡大・縮小の倍率（開き直しても、前の倍率で開く）
@@ -11,13 +16,28 @@
   const W = { start: 120, step: 200, if: 170, parallel: 160, join: 160, end: 120 };
   const H = { start: 40, step: 64, if: 56, parallel: 48, join: 48, end: 40 };
   const AI_REQUEST_MAX = 2000;
-  const ADD = [
-    ['step', '工程', '1つのエージェントが作業する工程'],
-    ['if', '分岐（if）', '直前の工程のエージェントが書いた判定の値で、行き先を分けます'],
-    ['parallel', '並列', '枝ごとに別の worktree で、工程を同時に動かします'],
-    ['join', '合流', '並列の枝がすべて終わるのを待ち、変更をマージします'],
-    ['end', '終了', 'Pipelineを終えてレビュー列へ'],
-  ];
+  const ADD = ['step', 'if', 'parallel', 'join', 'end'];
+  function addButton(type) {
+    let label = type;
+    let tip = '';
+    if (type === 'step') {
+      label = tr('工程');
+      tip = tr('1つのエージェントが作業する工程');
+    } else if (type === 'if') {
+      label = tr('分岐（if）');
+      tip = tr('直前の工程のエージェントが書いた判定の値で、行き先を分けます');
+    } else if (type === 'parallel') {
+      label = tr('並列');
+      tip = tr('枝ごとに別の worktree で、工程を同時に動かします');
+    } else if (type === 'join') {
+      label = tr('合流');
+      tip = tr('並列の枝がすべて終わるのを待ち、変更をマージします');
+    } else if (type === 'end') {
+      label = tr('終了');
+      tip = tr('Pipelineを終えてレビュー列へ');
+    }
+    return `<button class="btn small fe-add" data-type="${type}" type="button" title="${esc(tip)}">＋ ${esc(label)}</button>`;
+  }
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -67,22 +87,55 @@
     const stepName = (n) => {
       if (n.custom) {
         const ca = customOf(n.custom);
-        if (!ca) return 'カスタムエージェントが見つかりません';
-        return `${ca.icon ? `${ca.icon} ` : ''}${ca.name}（${agentName(ca.agent)}${ca.model ? ` / ${ca.model}` : ''}）${opts.enabled.includes(ca.agent) ? '' : '（使わない設定）'}`;
+        if (!ca) return tr('カスタムエージェントが見つかりません');
+        return tr('{icon}{name}（{agent}{model}）{off}', {
+          icon: ca.icon ? `${ca.icon} ` : '',
+          name: ca.name,
+          agent: agentName(ca.agent),
+          model: ca.model ? ` / ${ca.model}` : '',
+          off: opts.enabled.includes(ca.agent) ? '' : tr('（使わない設定）'),
+        });
       }
-      return agentName(n.agent) + (n.model ? ` / ${n.model}` : '') + (opts.enabled.includes(n.agent) ? '' : '（使わない設定）');
+      return agentName(n.agent) + (n.model ? ` / ${n.model}` : '') + (opts.enabled.includes(n.agent) ? '' : tr('（使わない設定）'));
+    };
+    const typeLabel = (type) => tr(FM.TYPE_LABEL[type] || type || '');
+    // 種別名・「工程N」・「〜の判定」は画面の言語にする。付けた名前はそのまま。保存値は日本語のまま
+    const showName = (n) => (n ? FM.shownLabel(n) : '');
+    const labelValue = (n) => (FM.isDefaultLabel(n) ? '' : String(n.label == null ? '' : n.label));
+    const stepNumber = (n) => {
+      const m = /^工程(\d+)$/.exec(String(n.label || '').trim());
+      if (m) return m[1];
+      let c = 0;
+      for (const x of flow.nodes) {
+        if (x.type !== 'step') continue;
+        c += 1;
+        if (x.id === n.id) return c;
+      }
+      return c + 1;
+    };
+    // 既定の名前は value に入れない（訳した文を入れると、そのまま保存される）。placeholder に訳を出す
+    const labelPlaceholder = (n) => {
+      const raw = String(n.label || '').trim();
+      const ca = n.type === 'step' && n.custom ? customOf(n.custom) : null;
+      if (ca && !raw) return ca.name;
+      if (n.type === 'step' && (!raw || /^工程\d+$/.test(raw))) return tr('工程{n}', { n: stepNumber(n) });
+      if (!raw || raw === FM.TYPE_LABEL[n.type]) return tr(FM.TYPE_LABEL[n.type] || '');
+      if (/^.+の判定$/.test(raw)) return FM.displayText(raw);
+      if (n.type === 'step') return tr('例: 実装');
+      if (n.type === 'if') return tr('例: レビューの結果');
+      return '';
     };
 
     box.innerHTML = `
       <div class="fe-head">
-        <h2>Pipelineのフローチャート</h2>
-        <div class="fe-tools">${ADD.map(([t, l, tip]) => `<button class="btn small fe-add" data-type="${t}" type="button" title="${esc(tip)}">＋ ${esc(l)}</button>`).join('')}</div>
+        <h2>${tr('Pipelineのフローチャート')}</h2>
+        <div class="fe-tools">${ADD.map(addButton).join('')}</div>
       </div>
-      <p class="muted small fe-help">ノードはドラッグで動かせます。何もないところをドラッグすると、スクロールできます。右上のボタンか、⌘（Ctrl）を押しながらのスクロール・ピンチで拡大・縮小できます。ノードの下の丸（出口）から別のノードへドラッグすると、線をつなげます。前のノードへ戻る線を引くとループになり、戻る上限を決められます。ノードや線を選んで Delete キーで消せます。</p>
+      <p class="muted small fe-help">${tr('ノードはドラッグで動かせます。何もないところをドラッグすると、スクロールできます。右上のボタンか、⌘（Ctrl）を押しながらのスクロール・ピンチで拡大・縮小できます。ノードの下の丸（出口）から別のノードへドラッグすると、線をつなげます。前のノードへ戻る線を引くとループになり、戻る上限を決められます。ノードや線を選んで Delete キーで消せます。')}</p>
       ${opts.generate
         ? `<div class="fe-ai">
-        <textarea id="feAiText" rows="2" maxlength="${AI_REQUEST_MAX}" placeholder="作りたいフローや直したいところを文章で書けます（${esc(agentName(baseAgent))} が組み立てます）。例: Codex で実装して Claude でレビューし、直すところがあれば実装に戻す（3回まで）"></textarea>
-        <div class="fe-ai-acts"><button class="btn small primary" id="feAiRun" type="button" title="⌘（Ctrl）＋Enter でも送れます">AIで反映</button><button class="btn small ghost" id="feAiUndo" type="button" hidden>元に戻す</button></div>
+        <textarea id="feAiText" rows="2" maxlength="${AI_REQUEST_MAX}" placeholder="${esc(tr('作りたいフローや直したいところを文章で書けます（{agent} が組み立てます）。例: Codex で実装して Claude でレビューし、直すところがあれば実装に戻す（3回まで）', { agent: agentName(baseAgent) }))}"></textarea>
+        <div class="fe-ai-acts"><button class="btn small primary" id="feAiRun" type="button" title="${esc(tr('⌘（Ctrl）＋Enter でも送れます'))}">${tr('AIで反映')}</button><button class="btn small ghost" id="feAiUndo" type="button" hidden>${tr('元に戻す')}</button></div>
       </div>
       <div class="fe-ai-msg small" id="feAiMsg" hidden></div>`
         : ''}
@@ -91,7 +144,7 @@
         <div class="fe-side" id="feSide"></div>
       </div>
       <div class="fe-errors" id="feErrors"></div>
-      <div class="modal-actions"><button class="btn ghost" id="feCancel" type="button">キャンセル</button><button class="btn primary" id="feSave" type="button">保存</button></div>`;
+      <div class="modal-actions"><button class="btn ghost" id="feCancel" type="button">${tr('キャンセル')}</button><button class="btn primary" id="feSave" type="button">${tr('保存')}</button></div>`;
     host.classList.remove('hidden');
     const inner = box.querySelector('#feInner');
     const svg = box.querySelector('#feSvg');
@@ -112,18 +165,19 @@
     function nodeHtml(n) {
       const [w, h] = size(n);
       const steps = FM.orderSteps(flow);
-      let title = FM.labelOf(n);
+      let title = showName(n);
       let sub = '';
       if (n.type === 'step') {
         const i = steps.findIndex((x) => x.id === n.id);
-        title = `${i + 1}. ${n.label || '（名前なし）'}`;
+        const raw = String(n.label || '').trim();
+        title = tr('{n}. {label}', { n: i + 1, label: raw ? FM.displayText(raw, 'step') : tr('（名前なし）') });
         sub = stepName(n);
-      } else if (n.type === 'if') sub = n.question ? n.question : '判定の値で分ける';
-      else if (n.type === 'parallel') sub = '同時に動かす';
-      else if (n.type === 'join') sub = 'すべて待ってマージ';
-      const port = n.type === 'end' ? '' : '<span class="fe-port" title="ドラッグして、つなぐ先のノードで離す"></span>';
+      } else if (n.type === 'if') sub = n.question ? n.question : tr('判定の値で分ける');
+      else if (n.type === 'parallel') sub = tr('同時に動かす');
+      else if (n.type === 'join') sub = tr('すべて待ってマージ');
+      const port = n.type === 'end' ? '' : `<span class="fe-port" title="${esc(tr('ドラッグして、つなぐ先のノードで離す'))}"></span>`;
       return `<div class="fe-node t-${n.type} ${sel && sel.kind === 'node' && sel.id === n.id ? 'sel' : ''} ${n.type === 'step' && stepOff(n) ? 'off' : ''}" data-id="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px">
-        <span class="fe-kind">${esc(FM.TYPE_LABEL[n.type])}</span>
+        <span class="fe-kind">${esc(typeLabel(n.type))}</span>
         <b class="fe-title">${esc(title)}</b>${sub ? `<span class="fe-sub">${esc(sub)}</span>` : ''}${port}</div>`;
     }
     function edgePath(e) {
@@ -158,10 +212,10 @@
       const from = node(e.from);
       if (from && from.type === 'if') {
         if (e.value) parts.push(e.value);
-        if (e.else) parts.push(e.value ? '＋それ以外' : 'それ以外');
-        if (!e.value && !e.else) parts.push('期待値なし');
+        if (e.else) parts.push(e.value ? tr('＋それ以外') : tr('それ以外'));
+        if (!e.value && !e.else) parts.push(tr('期待値なし'));
       }
-      if (back.has(e.id)) parts.push(`↺ ${e.maxLoops || FM.MAX_LOOPS_DEFAULT}回まで`);
+      if (back.has(e.id)) parts.push(tr('↺ {n}回まで', { n: e.maxLoops || FM.MAX_LOOPS_DEFAULT }));
       return parts.join(' ');
     }
     // keepSide: 右の欄は描き直さない（入力中の欄のフォーカスを保つ）
@@ -237,60 +291,61 @@
     function drawErrors() {
       const errs = FM.validateFlow(FM.cleanFlow(flow) || flow);
       box.querySelector('#feErrors').innerHTML = errs.length
-        ? `<b>直すところ（${errs.length}）</b><ul>${errs.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`
-        : '<span class="fe-ok">✓ このフローで Pipeline を動かせます</span>';
+        ? `<b>${tr('直すところ（{n}）', { n: errs.length })}</b><ul>${errs.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`
+        : `<span class="fe-ok">${tr('✓ このフローで Pipeline を動かせます')}</span>`;
       box.querySelector('#feSave').disabled = errs.length > 0;
     }
 
     // ---------- 右の欄（選んだノード・線の中身） ----------
     function drawSide(back) {
       if (!sel) {
-        side.innerHTML = `<div class="muted small">ノードや線を選ぶと、ここで中身を変えられます。</div>
+        side.innerHTML = `<div class="muted small">${tr('ノードや線を選ぶと、ここで中身を変えられます。')}</div>
           <div class="fe-legend small">
-            <div><b>分岐（if）</b>: 直前の工程のエージェントに、返事の最後へ <code>[[RESULT:値]]</code> を書いてもらい、線ごとの期待値と比べて行き先を選びます。3つ以上に分けられます。</div>
-            <div><b>並列 → 合流</b>: 枝ごとに別の worktree で同時に動かし、すべての枝が終わったらマージして先へ進みます。コンフリクトしたら止めて知らせます。</div>
-            <div><b>ループ</b>: 前のノードへ戻る線を引くと、戻る上限の回数まで繰り返します。</div>
+            <div>${tr('<b>分岐（if）</b>: 直前の工程のエージェントに、返事の最後へ <code>[[RESULT:値]]</code> を書いてもらい、線ごとの期待値と比べて行き先を選びます。3つ以上に分けられます。')}</div>
+            <div>${tr('<b>並列 → 合流</b>: 枝ごとに別の worktree で同時に動かし、すべての枝が終わったらマージして先へ進みます。コンフリクトしたら止めて知らせます。')}</div>
+            <div>${tr('<b>ループ</b>: 前のノードへ戻る線を引くと、戻る上限の回数まで繰り返します。')}</div>
           </div>`;
         return;
       }
       if (sel.kind === 'node') {
         const n = node(sel.id);
         if (!n) return ((sel = null), drawSide(back));
-        const del = n.type === 'start' ? '' : '<button class="btn small danger" id="feDel" type="button">このノードを消す</button>';
+        const del = n.type === 'start' ? '' : `<button class="btn small danger" id="feDel" type="button">${tr('このノードを消す')}</button>`;
         let body = '';
         if (n.type === 'step') {
           const list = opts.agents.filter(([a]) => opts.enabled.includes(a) || (a === n.agent && !n.custom));
-          const plain = list.map(([a, l]) => `<option value="${a}" ${a === n.agent && !n.custom ? 'selected' : ''}>${esc(l)}${opts.enabled.includes(a) ? '' : '（使わない設定）'}</option>`).join('');
-          const lost = n.custom && !customOf(n.custom) ? `<option value="custom:${esc(n.custom)}" selected>（見つからないカスタムエージェント）</option>` : '';
+          const offTag = esc(tr('（使わない設定）'));
+          const plain = list.map(([a, l]) => `<option value="${a}" ${a === n.agent && !n.custom ? 'selected' : ''}>${esc(l)}${opts.enabled.includes(a) ? '' : offTag}</option>`).join('');
+          const lost = n.custom && !customOf(n.custom) ? `<option value="custom:${esc(n.custom)}" selected>${tr('（見つからないカスタムエージェント）')}</option>` : '';
           const custom = customs.length || lost
-            ? `<optgroup label="カスタムエージェント">${customs.map((ca) => `<option value="custom:${esc(ca.id)}" ${ca.id === n.custom ? 'selected' : ''}>${esc(`${ca.icon ? `${ca.icon} ` : ''}${ca.name}（${agentName(ca.agent)}${ca.model ? ` / ${ca.model}` : ''}）`)}${opts.enabled.includes(ca.agent) ? '' : '（使わない設定）'}</option>`).join('')}${lost}</optgroup>`
+            ? `<optgroup label="${esc(tr('カスタムエージェント'))}">${customs.map((ca) => `<option value="custom:${esc(ca.id)}" ${ca.id === n.custom ? 'selected' : ''}>${esc(tr('{icon}{name}（{agent}{model}）{off}', { icon: ca.icon ? `${ca.icon} ` : '', name: ca.name, agent: agentName(ca.agent), model: ca.model ? ` / ${ca.model}` : '', off: opts.enabled.includes(ca.agent) ? '' : tr('（使わない設定）') }))}</option>`).join('')}${lost}</optgroup>`
             : '';
           const ca = n.custom ? customOf(n.custom) : null;
           const sugg = ((opts.modelSuggest || {})[n.agent] || []).map((m) => `<option value="${esc(m)}"></option>`).join('');
-          body = `<label class="field"><span>エージェント</span><select id="feAgent">${custom ? `<optgroup label="エージェント">${plain}</optgroup>${custom}` : plain}</select></label>
+          body = `<label class="field"><span>${tr('エージェント')}</span><select id="feAgent">${custom ? `<optgroup label="${esc(tr('エージェント'))}">${plain}</optgroup>${custom}` : plain}</select></label>
             ${n.custom
-              ? `<small class="muted fe-ca-note">${ca ? `カスタムエージェント「${esc(ca.name)}」のモデル（${esc(ca.model || '設定の既定')}）とプロフィールで動かします。${ca.description ? esc(ca.description) : ''}` : 'このカスタムエージェントは見つかりません。選び直してください。'}</small>`
-              : `<label class="field"><span>モデル（空なら設定の既定）</span><input id="feModel" list="feModelList" autocomplete="off" spellcheck="false" maxlength="100" placeholder="例: ${esc(((opts.modelSuggest || {})[n.agent] || [])[0] || '')}" value="${esc(n.model || '')}" /><datalist id="feModelList">${sugg}</datalist></label>`}
-            <label class="field"><span>工程の名前</span><input id="feLabel" maxlength="30" placeholder="${ca ? esc(ca.name) : '例: 実装'}" value="${esc(n.label || '')}" /></label>
-            <label class="field"><span>担当の説明</span><textarea id="feInst" rows="6" placeholder="例: 前の工程の変更をレビューして直す">${esc(n.instruction || '')}</textarea></label>`;
+              ? `<small class="muted fe-ca-note">${ca ? tr('カスタムエージェント「{name}」のモデル（{model}）とプロフィールで動かします。{desc}', { name: esc(ca.name), model: esc(ca.model || tr('設定の既定')), desc: ca.description ? esc(ca.description) : '' }) : tr('このカスタムエージェントは見つかりません。選び直してください。')}</small>`
+              : `<label class="field"><span>${tr('モデル（空なら設定の既定）')}</span><input id="feModel" list="feModelList" autocomplete="off" spellcheck="false" maxlength="100" placeholder="${esc(tr('例: {model}', { model: ((opts.modelSuggest || {})[n.agent] || [])[0] || '' }))}" value="${esc(n.model || '')}" /><datalist id="feModelList">${sugg}</datalist></label>`}
+            <label class="field"><span>${tr('工程の名前')}</span><input id="feLabel" maxlength="30" placeholder="${esc(labelPlaceholder(n))}" value="${esc(labelValue(n))}" /></label>
+            <label class="field"><span>${tr('担当の説明')}</span><textarea id="feInst" rows="6" placeholder="${esc(tr('例: 前の工程の変更をレビューして直す'))}">${esc(n.instruction || '')}</textarea></label>`;
           const j = FM.judgeOf(flow, n.id);
-          if (j) body += `<small class="muted">この工程のあとは分岐「${esc(j.node.label || '')}」です。エージェントに、返事の最後へ判定の値（${j.options.map((o) => `<code>${esc(o.value)}</code>`).join(' / ') || 'まだありません'}）を書いてもらいます。</small>`;
+          if (j) body += `<small class="muted">${tr('この工程のあとは分岐「{label}」です。エージェントに、返事の最後へ判定の値（{values}）を書いてもらいます。', { label: esc(FM.shownLabel(j.node)), values: j.options.map((o) => `<code>${esc(o.value)}</code>`).join(' / ') || tr('まだありません') })}</small>`;
         } else if (n.type === 'if') {
-          body = `<label class="field"><span>分岐の名前</span><input id="feLabel" maxlength="30" placeholder="例: レビューの結果" value="${esc(n.label || '')}" /></label>
-            <label class="field"><span>判定すること（エージェントに伝えます）</span><textarea id="feQuestion" rows="3" placeholder="例: テストがすべて通り、直すところがないか">${esc(n.question || '')}</textarea></label>
-            <small class="muted">行き先ごとに線を引き、線を選んで「期待値」と「条件の説明」を決めます。どの期待値にも合わないときの行き先は、線の「どれにも合わないとき」で決めます（なければ止まって知らせます）。</small>`;
+          body = `<label class="field"><span>${tr('分岐の名前')}</span><input id="feLabel" maxlength="30" placeholder="${esc(labelPlaceholder(n))}" value="${esc(labelValue(n))}" /></label>
+            <label class="field"><span>${tr('判定すること（エージェントに伝えます）')}</span><textarea id="feQuestion" rows="3" placeholder="${esc(tr('例: テストがすべて通り、直すところがないか'))}">${esc(n.question || '')}</textarea></label>
+            <small class="muted">${tr('行き先ごとに線を引き、線を選んで「期待値」と「条件の説明」を決めます。どの期待値にも合わないときの行き先は、線の「どれにも合わないとき」で決めます（なければ止まって知らせます）。')}</small>`;
           const outs = FM.outEdges(flow, n.id);
           if (outs.length) {
             body += `<div class="fe-branches">${outs
-              .map((e) => `<button class="fe-branch" data-edge="${esc(e.id)}" type="button"><code>${esc(e.value || (e.else ? 'それ以外' : '（期待値なし）'))}</code> → ${esc(FM.labelOf(node(e.to)))}${e.when ? `<span class="muted"> ${esc(e.when)}</span>` : ''}</button>`)
+              .map((e) => `<button class="fe-branch" data-edge="${esc(e.id)}" type="button"><code>${esc(e.value || (e.else ? tr('それ以外') : tr('（期待値なし）')))}</code> → ${esc(showName(node(e.to)))}${e.when ? `<span class="muted"> ${esc(e.when)}</span>` : ''}</button>`)
               .join('')}</div>`;
           }
         } else if (n.type === 'parallel' || n.type === 'join') {
-          body = `<label class="field"><span>名前</span><input id="feLabel" maxlength="30" value="${esc(n.label || '')}" /></label>
-            <small class="muted">${n.type === 'parallel' ? '線を2本以上出し、それぞれ工程につなぎます。枝の最後は同じ合流につないでください。枝ごとに別の worktree（このタスクのブランチから分けたもの）で同時に動かします。' : '並列の枝の最後をここにつなぎます。すべての枝が終わったら、枝の変更を順にマージして先へ進みます。コンフリクトしたら止めて知らせます。'}</small>`;
-        } else if (n.type === 'start') body = '<small class="muted">Pipelineはここから始まります。線を1本、最初の工程へつないでください。</small>';
-        else body = '<small class="muted">ここに来たら Pipeline を終えて、レビュー列に入れて知らせます。</small>';
-        side.innerHTML = `<h4>${esc(FM.TYPE_LABEL[n.type])}</h4>${body}<div class="fe-side-actions">${del}</div>`;
+          body = `<label class="field"><span>${tr('名前')}</span><input id="feLabel" maxlength="30" placeholder="${esc(labelPlaceholder(n))}" value="${esc(labelValue(n))}" /></label>
+            <small class="muted">${n.type === 'parallel' ? tr('線を2本以上出し、それぞれ工程につなぎます。枝の最後は同じ合流につないでください。枝ごとに別の worktree（このタスクのブランチから分けたもの）で同時に動かします。') : tr('並列の枝の最後をここにつなぎます。すべての枝が終わったら、枝の変更を順にマージして先へ進みます。コンフリクトしたら止めて知らせます。')}</small>`;
+        } else if (n.type === 'start') body = `<small class="muted">${tr('Pipelineはここから始まります。線を1本、最初の工程へつないでください。')}</small>`;
+        else body = `<small class="muted">${tr('ここに来たら Pipeline を終えて、レビュー列に入れて知らせます。')}</small>`;
+        side.innerHTML = `<h4>${esc(typeLabel(n.type))}</h4>${body}<div class="fe-side-actions">${del}</div>`;
         const bind = (id, key, redraw) => {
           const el = side.querySelector(id);
           if (!el) return;
@@ -341,17 +396,17 @@
         if (!e) return ((sel = null), drawSide(back));
         const from = node(e.from);
         const isBack = back.has(e.id);
-        let body = `<div class="small">${esc(FM.labelOf(from))} → ${esc(FM.labelOf(node(e.to)))}</div>`;
+        let body = `<div class="small">${esc(showName(from))} → ${esc(showName(node(e.to)))}</div>`;
         if (from.type === 'if') {
-          body += `<label class="field"><span>期待値（エージェントが書く <code>[[RESULT:値]]</code> の値）</span><input id="feValue" maxlength="40" placeholder="例: ok / ng / retry" value="${esc(e.value || '')}" /></label>
-            <label class="field"><span>条件の説明（どんなときにこの値を書くか）</span><input id="feWhen" maxlength="300" placeholder="例: 直すところがない" value="${esc(e.when || '')}" /></label>
-            <label class="check"><input type="checkbox" id="feElse" ${e.else ? 'checked' : ''} /> どれにも合わないとき（値を書かなかったときも）、この線へ進む</label>`;
+          body += `<label class="field"><span>${tr('期待値（エージェントが書く <code>[[RESULT:値]]</code> の値）')}</span><input id="feValue" maxlength="40" placeholder="${esc(tr('例: ok / ng / retry'))}" value="${esc(e.value || '')}" /></label>
+            <label class="field"><span>${tr('条件の説明（どんなときにこの値を書くか）')}</span><input id="feWhen" maxlength="300" placeholder="${esc(tr('例: 直すところがない'))}" value="${esc(e.when || '')}" /></label>
+            <label class="check"><input type="checkbox" id="feElse" ${e.else ? 'checked' : ''} /> ${tr('どれにも合わないとき（値を書かなかったときも）、この線へ進む')}</label>`;
         }
         if (isBack) {
-          body += `<label class="field"><span>戻る上限（この線を通れる回数。1〜${FM.MAX_LOOPS_LIMIT}回）</span><input id="feLoops" type="number" min="1" max="${FM.MAX_LOOPS_LIMIT}" value="${esc(e.maxLoops || FM.MAX_LOOPS_DEFAULT)}" /></label>
-            <small class="muted">前のノードへ戻る線（ループ）です。上限に達したら Pipeline を終えて、レビュー列に入れて知らせます（並列の枝の中なら、そこまでの変更で合流します）。</small>`;
+          body += `<label class="field"><span>${tr('戻る上限（この線を通れる回数。1〜{max}回）', { max: FM.MAX_LOOPS_LIMIT })}</span><input id="feLoops" type="number" min="1" max="${FM.MAX_LOOPS_LIMIT}" value="${esc(e.maxLoops || FM.MAX_LOOPS_DEFAULT)}" /></label>
+            <small class="muted">${tr('前のノードへ戻る線（ループ）です。上限に達したら Pipeline を終えて、レビュー列に入れて知らせます（並列の枝の中なら、そこまでの変更で合流します）。')}</small>`;
         }
-        side.innerHTML = `<h4>線</h4>${body}<div class="fe-side-actions"><button class="btn small danger" id="feDel" type="button">この線を消す</button></div>`;
+        side.innerHTML = `<h4>${tr('線')}</h4>${body}<div class="fe-side-actions"><button class="btn small danger" id="feDel" type="button">${tr('この線を消す')}</button></div>`;
         const v = side.querySelector('#feValue');
         if (v) v.oninput = () => ((e.value = v.value.replace(/[\][\n]/g, '').trim()), (e.value || delete e.value), touch(), redrawKeepSide());
         const w = side.querySelector('#feWhen');
@@ -402,6 +457,7 @@
         const k = flow.nodes.length % 6;
         const n = { id: uid(type === 'step' ? 's' : type.slice(0, 2), used), type, x: canvas.scrollLeft + 40 + k * 24, y: canvas.scrollTop + 40 + k * 24 };
         if (type === 'step') Object.assign(n, { agent: baseAgent, label: '', instruction: '' });
+        // 既定の名前は日本語。訳した文を label に入れると、その文が保存される
         if (type === 'if') Object.assign(n, { label: '分岐', question: '' });
         if (type === 'parallel') n.label = '並列';
         if (type === 'join') n.label = '合流';
@@ -434,10 +490,10 @@
       const runAi = async () => {
         const request = aiText.value.trim();
         if (aiRun.disabled) return;
-        if (!request) return say('作りたいフローや直したいところを書いてください', 'err');
+        if (!request) return say(tr('作りたいフローや直したいところを書いてください'), 'err');
         aiRun.disabled = true;
         aiUndo.hidden = true;
-        say(`${agentName(baseAgent)} がフローを組み立てています…`);
+        say(tr('{agent} がフローを組み立てています…', { agent: agentName(baseAgent) }));
         try {
           const next = await opts.generate(request, FM.cleanFlow(flow) || flow, baseAgent);
           if (closed) return;
@@ -446,7 +502,7 @@
           setFlow(next);
           aiText.value = '';
           aiUndo.hidden = false;
-          say('反映しました。中身を確かめて「保存」を押してください（まだ保存していません）');
+          say(tr('反映しました。中身を確かめて「保存」を押してください（まだ保存していません）'));
         } catch (err) {
           if (!closed) say((err && err.message) || String(err), 'err');
         } finally {
@@ -616,7 +672,7 @@
       document.removeEventListener('keydown', onKey, true);
     }
     function cancel() {
-      if (dirty && !confirm('フローチャートの変更を保存せずに閉じますか？')) return;
+      if (dirty && !confirm(tr('フローチャートの変更を保存せずに閉じますか？'))) return;
       close();
     }
     box.querySelector('#feCancel').onclick = cancel;
@@ -628,9 +684,9 @@
       if (errs.length) return;
       // 使えない文字のモデル名は cleanFlow が落とすので、落ちたものがあれば知らせる
       const typed = flow.nodes.find((n) => n.type === 'step' && n.model && !clean.nodes.some((x) => x.id === n.id && x.model === n.model));
-      if (typed) return alert(`工程「${typed.label || ''}」のモデル名に使えない文字が入っています: ${typed.model}`);
+      if (typed) return alert(tr('工程「{label}」のモデル名に使えない文字が入っています: {model}', { label: FM.displayText(typed.label || '', 'step'), model: typed.model }));
       const off = clean.nodes.find((n) => n.type === 'step' && stepOff(n));
-      if (off && !confirm(`工程「${off.label}」の ${stepName(off)} は使えません（${off.custom && !customOf(off.custom) ? 'カスタムエージェントが見つかりません' : '使わない設定です'}）。このままだとPipelineを始められません。保存しますか？`)) return;
+      if (off && !confirm(tr('工程「{label}」の {who} は使えません（{why}）。このままだとPipelineを始められません。保存しますか？', { label: FM.displayText(off.label, 'step'), who: stepName(off), why: off.custom && !customOf(off.custom) ? tr('カスタムエージェントが見つかりません') : tr('使わない設定です') }))) return;
       const ok = await opts.onSave(clean);
       if (ok !== false) close();
     };

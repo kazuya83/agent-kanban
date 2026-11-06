@@ -12,6 +12,12 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.PipelinePack = api;
 })(typeof self !== 'undefined' ? self : this, function () {
+  const i18n = typeof module === 'object' && module.exports ? require('./i18n.js') : typeof I18n !== 'undefined' ? I18n : null;
+  const flowModel = typeof module === 'object' && module.exports ? require('./flow-model') : typeof globalThis !== 'undefined' ? globalThis.FlowModel : null;
+  function tr(key, vars) {
+    if (i18n) return i18n.tr(key, vars);
+    return vars ? String(key).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : key;
+  }
   const PIPELINE_FORMAT = 'agent-kanban-pipeline';
   const CUSTOM_FORMAT = 'agent-kanban-custom-agent';
   const BUNDLE_FORMAT = 'agent-kanban-bundle';
@@ -122,7 +128,7 @@
     return out;
   }
   async function inflateRaw(data) {
-    if (typeof DecompressionStream === 'undefined') throw new Error('圧縮された zip を読めません');
+    if (typeof DecompressionStream === 'undefined') throw new Error(tr('圧縮された zip を読めません'));
     const ds = new DecompressionStream('deflate-raw');
     const stream = new Blob([data]).stream().pipeThrough(ds);
     return new Uint8Array(await new Response(stream).arrayBuffer());
@@ -140,14 +146,14 @@
         break;
       }
     }
-    if (eocd < 0) throw new Error('zip ファイルとして読めません');
+    if (eocd < 0) throw new Error(tr('zip ファイルとして読めません'));
     const count = v.getUint16(eocd + 10, true);
-    if (count > MAX_ENTRIES) throw new Error(`zip の中のファイルが多すぎます（${MAX_ENTRIES} まで）`);
+    if (count > MAX_ENTRIES) throw new Error(tr('zip の中のファイルが多すぎます（{max} まで）', { max: MAX_ENTRIES }));
     let p = v.getUint32(eocd + 16, true);
     const out = [];
     let total = 0;
     for (let i = 0; i < count; i++) {
-      if (p + 46 > bytes.length || v.getUint32(p, true) !== 0x02014b50) throw new Error('zip ファイルが壊れています');
+      if (p + 46 > bytes.length || v.getUint32(p, true) !== 0x02014b50) throw new Error(tr('zip ファイルが壊れています'));
       const method = v.getUint16(p + 10, true);
       const csize = v.getUint32(p + 20, true);
       const usize = v.getUint32(p + 24, true);
@@ -159,14 +165,14 @@
       p += 46 + nlen + xlen + clen;
       if (name.endsWith('/')) continue;
       total += usize;
-      if (total > MAX_TOTAL) throw new Error('zip の中身が大きすぎます');
-      if (lo + 30 > bytes.length || v.getUint32(lo, true) !== 0x04034b50) throw new Error('zip ファイルが壊れています');
+      if (total > MAX_TOTAL) throw new Error(tr('zip の中身が大きすぎます'));
+      if (lo + 30 > bytes.length || v.getUint32(lo, true) !== 0x04034b50) throw new Error(tr('zip ファイルが壊れています'));
       const start = lo + 30 + v.getUint16(lo + 26, true) + v.getUint16(lo + 28, true);
       const raw = bytes.subarray(start, start + csize);
       let data;
       if (method === 0) data = raw;
       else if (method === 8) data = await inflateRaw(raw);
-      else throw new Error(`この zip の圧縮方式（${method}）には対応していません`);
+      else throw new Error(tr('この zip の圧縮方式（{method}）には対応していません', { method }));
       out.push({ name, data });
     }
     return out;
@@ -270,9 +276,9 @@
         if (!parseJson(e.name, e.data)) out.skipped.push(e.name);
       }
     } else if (!parseJson(fileName, bytes)) {
-      throw new Error('Pipeline のファイル（.json）か、Pipeline とカスタムエージェントをまとめた zip を選んでください');
+      throw new Error(tr('Pipeline のファイル（.json）か、Pipeline とカスタムエージェントをまとめた zip を選んでください'));
     }
-    if (!out.pipelines.length && !out.customAgents.length) throw new Error('取り込める Pipeline・カスタムエージェントが入っていません');
+    if (!out.pipelines.length && !out.customAgents.length) throw new Error(tr('取り込める Pipeline・カスタムエージェントが入っていません'));
     return out;
   }
 
@@ -317,7 +323,7 @@
         if (!res.reusedAgents.includes(same.name)) res.reusedAgents.push(same.name);
         continue;
       }
-      if (cas.length >= MAX_CUSTOM_AGENTS) throw new Error(`カスタムエージェントは ${MAX_CUSTOM_AGENTS} 個までです。いらないものを消してから取り込んでください`);
+      if (cas.length >= MAX_CUSTOM_AGENTS) throw new Error(tr('カスタムエージェントは {max} 個までです。いらないものを消してから取り込んでください', { max: MAX_CUSTOM_AGENTS }));
       const id = /^[A-Za-z0-9_-]{1,32}$/.test(ca.id) && !caIds.has(ca.id) ? ca.id : randomId('ca', caIds);
       const name = uniqueName(ca.name, caNames, 30);
       caIds.add(id);
@@ -329,12 +335,12 @@
     const flowIds = new Set(flows.map((x) => x.id));
     const flowNames = new Set(flows.map((x) => x.name));
     for (const p of imported.pipelines || []) {
-      if (flows.length >= MAX_PIPELINES) throw new Error(`Pipeline は ${MAX_PIPELINES} 個までです。いらないものを消してから取り込んでください`);
+      if (flows.length >= MAX_PIPELINES) throw new Error(tr('Pipeline は {max} 個までです。いらないものを消してから取り込んでください', { max: MAX_PIPELINES }));
       const flow = JSON.parse(JSON.stringify(p.flow));
       for (const n of flow.nodes || []) {
         if (!n || n.type !== 'step' || !n.custom) continue;
         if (idMap.has(n.custom)) n.custom = idMap.get(n.custom);
-        if (!cas.some((x) => x.id === n.custom)) res.missing.push(`${p.name}「${n.label || '工程'}」`);
+        if (!cas.some((x) => x.id === n.custom)) res.missing.push(tr('{pipeline}「{step}」', { pipeline: p.name, step: n.label && flowModel ? flowModel.displayText(n.label, 'step') : n.label || tr('工程') }));
       }
       const id = randomId('p', flowIds);
       const name = uniqueName(p.name, flowNames, PIPELINE_NAME_MAX);

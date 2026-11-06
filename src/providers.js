@@ -14,6 +14,8 @@
 // Claude Code は承認（--permission-prompt-tool）や実行中のメッセージ（btw）に対応しているので、
 // これまでどおり agent.js の中で直接扱う
 
+const { tr } = require('../renderer/i18n');
+
 const AGENTS = {
   claude: { label: 'Claude Code', short: 'Claude', defaultCmd: 'claude', pathKey: 'claudePath', modelKey: 'model' },
   codex: { label: 'Codex CLI', short: 'Codex', defaultCmd: 'codex', pathKey: 'codexPath', modelKey: 'codexModel' },
@@ -99,7 +101,7 @@ function buildArgs(a, { mode, model, sessionId, prompt, includeDirs = [] } = {})
     args.push(p.startsWith('-') ? ` ${p}` : p);
     return args;
   }
-  throw new Error(`このエージェントには対応していません: ${a}`);
+  throw new Error(tr('このエージェントには対応していません: {a}', { a }));
 }
 
 function trunc(s, n) {
@@ -197,7 +199,7 @@ function codexParser({ summarize }) {
             started.delete(item.id);
             if (item.type === 'command_execution') {
               const failed = item.status === 'failed' || (item.exit_code != null && item.exit_code !== 0);
-              out.push({ type: 'tool_result', text: trunc(item.aggregated_output || `（終了コード ${item.exit_code ?? '?'}）`, 1500), error: failed });
+              out.push({ type: 'tool_result', text: trunc(item.aggregated_output || tr('（終了コード {code}）', { code: item.exit_code ?? '?' }), 1500), error: failed });
             } else if (item.type === 'mcp_tool_call') {
               const r = item.error ? item.error.message || JSON.stringify(item.error) : JSON.stringify(item.result ?? '');
               out.push({ type: 'tool_result', text: trunc(r, 1500), error: item.status === 'failed' || !!item.error });
@@ -208,7 +210,7 @@ function codexParser({ summarize }) {
           out.push({ type: 'result' });
           break;
         case 'turn.failed':
-          out.push({ type: 'result', error: (ev.error && ev.error.message) || 'Codex がエラーで止まりました' });
+          out.push({ type: 'result', error: (ev.error && ev.error.message) || tr('Codex がエラーで止まりました') });
           break;
         case 'error':
           if (ev.message) out.push({ type: 'log_error', text: ev.message });
@@ -253,12 +255,12 @@ function geminiParser({ summarize }) {
         case 'tool_result': {
           const failed = ev.status === 'error';
           const body = failed && ev.error ? ev.error.message || '' : ev.output || '';
-          return [...flush(), { type: 'tool_result', text: trunc(body || (failed ? 'エラー' : 'ok'), 1500), error: failed }];
+          return [...flush(), { type: 'tool_result', text: trunc(body || (failed ? tr('エラー') : 'ok'), 1500), error: failed }];
         }
         case 'error':
-          return [...flush(), { type: 'log_error', text: String(ev.message || 'エラー') }];
+          return [...flush(), { type: 'log_error', text: String(ev.message || tr('エラー')) }];
         case 'result':
-          if (ev.status && ev.status !== 'success') return [...flush(), { type: 'result', error: (ev.error && ev.error.message) || `エラー（${ev.status}）` }];
+          if (ev.status && ev.status !== 'success') return [...flush(), { type: 'result', error: (ev.error && ev.error.message) || tr('エラー（{subtype}）', { subtype: ev.status }) }];
           return [...flush(), { type: 'result' }];
         default:
           return [];
@@ -306,7 +308,7 @@ function cursorParser({ summarize }) {
       if (t.kind === 'shell') {
         const out = [ok.stdout, ok.stderr].filter((x) => String(x || '').trim()).join('\n');
         const failed = ok.exitCode != null && ok.exitCode !== 0;
-        return { text: trunc(out || `（終了コード ${ok.exitCode ?? '?'}）`, 1500), error: failed };
+        return { text: trunc(out || tr('（終了コード {code}）', { code: ok.exitCode ?? '?' }), 1500), error: failed };
       }
       if (typeof ok.content === 'string') return { text: trunc(ok.content, 1500), error: false };
       return { text: trunc(typeof ok === 'object' ? JSON.stringify(ok) : String(ok), 1500), error: false };
@@ -314,7 +316,7 @@ function cursorParser({ summarize }) {
     const bad = r.error || r.failure || r.rejected;
     if (bad) {
       const msg = typeof bad === 'string' ? bad : bad.message || bad.error || bad.reason || bad.stderr || JSON.stringify(bad);
-      return { text: trunc(r.rejected ? `拒否されました: ${msg}` : msg, 1500), error: true };
+      return { text: trunc(r.rejected ? tr('拒否されました: {msg}', { msg }) : msg, 1500), error: true };
     }
     return { text: 'ok', error: false };
   };
@@ -356,11 +358,11 @@ function cursorParser({ summarize }) {
           return [];
         }
         case 'error':
-          return [...flush(), { type: 'log_error', text: String(ev.message || (ev.error && ev.error.message) || 'エラー') }];
+          return [...flush(), { type: 'log_error', text: String(ev.message || (ev.error && ev.error.message) || tr('エラー')) }];
         case 'result':
           if (ev.is_error || (ev.subtype && ev.subtype !== 'success')) {
             const e = ev.error && typeof ev.error === 'object' ? ev.error.message : ev.error;
-            return [...flush(), { type: 'result', error: String(e || ev.result || `エラー（${ev.subtype || 'error'}）`) }];
+            return [...flush(), { type: 'result', error: String(e || ev.result || tr('エラー（{subtype}）', { subtype: ev.subtype || 'error' })) }];
           }
           return [...flush(), { type: 'result' }];
         default:
@@ -376,20 +378,24 @@ function createParser(a, opts = {}) {
   if (a === 'codex') return codexParser(o);
   if (a === 'gemini') return geminiParser(o);
   if (a === 'cursor') return cursorParser(o);
-  throw new Error(`このエージェントには対応していません: ${a}`);
+  throw new Error(tr('このエージェントには対応していません: {a}', { a }));
 }
 
 // ---------- オーケストレーション ----------
 
-// Pipeline（順番に引き継ぐ）の工程の初期値
-const DEFAULT_RELAY_STEPS = [
-  { agent: 'codex', label: '実装', instruction: 'タスクの指示に沿って実装してください。必要ならテストも追加・実行してください。' },
-  {
-    agent: 'claude',
-    label: 'レビュー',
-    instruction: '前の工程の変更をレビューしてください（git log / git diff でベースブランチからの変更を確かめられます）。バグ・抜け・テスト不足があれば直し、最後に何を確かめて何を直したかを短く報告してください。',
-  },
-];
+// Pipeline（順番に引き継ぐ）の工程の初期値。呼んだときの言語で作る（新規インストールと、新しいリポジトリ）
+function defaultRelaySteps() {
+  return [
+    { agent: 'codex', label: tr('実装'), instruction: tr('タスクの指示に沿って実装してください。必要ならテストも追加・実行してください。') },
+    {
+      agent: 'claude',
+      label: tr('レビュー'),
+      instruction: tr('前の工程の変更をレビューしてください（git log / git diff でベースブランチからの変更を確かめられます）。バグ・抜け・テスト不足があれば直し、最後に何を確かめて何を直したかを短く報告してください。'),
+    },
+  ];
+}
+// 読み込み時の言語（テストは原文）で固めたもの。実行中に言語を変えたあとは defaultRelaySteps() を使う
+const DEFAULT_RELAY_STEPS = defaultRelaySteps();
 // 競争（同じタスクを複数のエージェントで並列に解く）の初期値
 const DEFAULT_COMPETE_AGENTS = ['claude', 'codex'];
 
@@ -427,7 +433,7 @@ function cleanRelaySteps(steps) {
   return base
     .filter((_, i) => map.has(i))
     .map(({ raw, ...x }, i) => {
-      const out = { ...x, label: x.label || `工程${i + 1}` };
+      const out = { ...x, label: x.label || tr('工程{n}', { n: i + 1 }) };
       const onPass = cleanRelayTarget(raw.onPass, map);
       const onFail = cleanRelayTarget(raw.onFail, map);
       if (onPass !== null) out.onPass = onPass;
@@ -568,6 +574,7 @@ module.exports = {
   codexPolicy,
   geminiApproval,
   cursorPolicy,
+  defaultRelaySteps,
   DEFAULT_RELAY_STEPS,
   DEFAULT_COMPETE_AGENTS,
   cleanRelaySteps,

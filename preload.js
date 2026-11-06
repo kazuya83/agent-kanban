@@ -13,6 +13,9 @@ const scheduleArg = (a, b) => (a && typeof a === 'object' ? a : { ...(b || {}), 
 contextBridge.exposeInMainWorld('api', {
   getBoard: () => call('board:get'),
   appInfo: () => call('app:info'),
+  // 表示言語はマシンごとの設定。同期で読むのは、画面のスクリプトが言葉を決める前に必要なため
+  language: ipcRenderer.sendSync('app:language'),
+  setLanguage: (c) => call('app:setLanguage', c),
   updateStatus: () => call('update:status'),
   checkUpdate: () => call('update:check'),
   installUpdate: () => call('update:install'),
