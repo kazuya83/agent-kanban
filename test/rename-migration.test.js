@@ -51,3 +51,15 @@ test('画面で読む翻訳のファイルは、最上位で名前を宣言し�
     assert.doesNotMatch(fs.readFileSync(path.join(dir, f), 'utf8'), /^(?:const|let|class)\s/m, f);
   }
 });
+
+test('紹介ページのインストールのコマンドは、README と同じ', () => {
+  const page = read('docs/index.html');
+  assert.match(page, /curl -fsSL https:\/\/raw\.githubusercontent\.com\/\$\{REPO\}\/main\/install\.sh \| bash/);
+  assert.match(page, /irm https:\/\/raw\.githubusercontent\.com\/\$\{REPO\}\/main\/install\.ps1 \| iex/);
+  const readme = read('README.md');
+  assert.ok(readme.includes('curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.sh | bash'));
+  assert.ok(readme.includes('irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex'));
+  for (const lang of ['en', 'ja', 'es', 'fr', 'zh']) {
+    assert.match(page, new RegExp(`^      ${lang}: \\{.*updateDesc: .*copied: `, 'm'), lang);
+  }
+});
