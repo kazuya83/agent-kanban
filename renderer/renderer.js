@@ -2924,12 +2924,12 @@ document.addEventListener('keydown', (e) => {
 
 // エージェントの注意書き（Claude Code 以外は、CLI の作りの都合でできないことがある）
 function agentLimitHint(a) {
-  return a === 'claude' ? '' : `${agentLabel(a)} は CLI の作りの都合で、カードでの承認・選択肢の質問・作業途中へのメッセージ差し込み・既存の会話の引き継ぎに対応していません（btw は終了後の追加指示として送られます）。権限は設定の権限モードに合わせて CLI 側で許可します。`;
+  return a === 'claude' ? '' : tr('{agent} は CLI の作りの都合で、カードでの承認・選択肢の質問・作業途中へのメッセージ差し込み・既存の会話の引き継ぎに対応していません（btw は終了後の追加指示として送られます）。権限は設定の権限モードに合わせて CLI 側で許可します。', { agent: agentLabel(a) });
 }
 
 // Pipelineのフローの要点（工程の並び・直すところ・最初の工程・分岐などの数）
 function relayFlowInfo(flow) {
-  if (!flow || !Array.isArray(flow.nodes)) return { steps: [], errors: ['フローチャートがありません'], first: null, ifs: 0, pars: 0, loops: 0 };
+  if (!flow || !Array.isArray(flow.nodes)) return { steps: [], errors: [tr('フローチャートがありません')], first: null, ifs: 0, pars: 0, loops: 0 };
   const start = FlowModel.startNode(flow);
   const e = start && FlowModel.outEdges(flow, start.id)[0];
   const count = (t) => flow.nodes.filter((n) => n.type === t).length;
@@ -2941,8 +2941,8 @@ function pipelineShortName(p) {
   return n.length ? n.slice(0, PipelinePack.PIPELINE_NAME_MAX).join('').trim() : 'Pipeline';
 }
 function relayFlowLabel(info) {
-  const extra = [info.ifs && `分岐${info.ifs}`, info.pars && `並列${info.pars}`, info.loops && `ループ${info.loops}`].filter(Boolean).join('・');
-  return (info.steps.map((x) => `${x.label}(${whoShort(stepWho(x).agent, stepWho(x).persona)})`).join(' → ') || '未設定') + (extra ? `（${extra}）` : '');
+  const extra = [info.ifs && tr('分岐{n}', { n: info.ifs }), info.pars && tr('並列{n}', { n: info.pars }), info.loops && tr('ループ{n}', { n: info.loops })].filter(Boolean).join(tr('・'));
+  return (info.steps.map((x) => `${x.label}(${whoShort(stepWho(x).agent, stepWho(x).persona)})`).join(' → ') || tr('未設定')) + (extra ? tr('（{extra}）', { extra }) : '');
 }
 // 設定: Pipelineのフローの要約
 function relayFlowSummaryHtml(flow, enabled, cas = customAgents()) {
@@ -2951,13 +2951,13 @@ function relayFlowSummaryHtml(flow, enabled, cas = customAgents()) {
     .map((x, i) => {
       const w = stepWho(x, cas);
       const model = w.model || x.model;
-      return `<li><span class="relay-no">${i + 1}</span> ${personaIcon(w.persona, w.agent)}<b>${esc(x.label)}</b> <span class="muted">${esc(whoLabel(w.agent, w.persona))}${model ? ` / ${esc(model)}` : ''}${w.missing ? '（カスタムエージェントが見つかりません）' : enabled.includes(w.agent) ? '' : '（使わない設定）'}</span>${x.instruction ? `<div class="muted small rs-inst">${esc(x.instruction)}</div>` : ''}</li>`;
+      return `<li><span class="relay-no">${i + 1}</span> ${personaIcon(w.persona, w.agent)}<b>${esc(x.label)}</b> <span class="muted">${esc(whoLabel(w.agent, w.persona))}${model ? ` / ${esc(model)}` : ''}${w.missing ? tr('（カスタムエージェントが見つかりません）') : enabled.includes(w.agent) ? '' : tr('（使わない設定）')}</span>${x.instruction ? `<div class="muted small rs-inst">${esc(x.instruction)}</div>` : ''}</li>`;
     })
     .join('');
-  const extra = [info.ifs && `分岐（if） ${info.ifs}`, info.pars && `並列 ${info.pars}`, info.loops && `ループ ${info.loops}`].filter(Boolean).join(' ・ ');
-  return `${steps ? `<ol class="relay-sum-list">${steps}</ol>` : '<div class="muted small">工程がありません</div>'}
+  const extra = [info.ifs && tr('分岐（if） {n}', { n: info.ifs }), info.pars && tr('並列 {n}', { n: info.pars }), info.loops && tr('ループ {n}', { n: info.loops })].filter(Boolean).join(tr(' ・ '));
+  return `${steps ? `<ol class="relay-sum-list">${steps}</ol>` : `<div class="muted small">${tr('工程がありません')}</div>`}
     ${extra ? `<div class="small muted">${esc(extra)}</div>` : ''}
-    ${info.errors.length ? `<div class="relay-sum-err small">${icon('alert')}直すところがあります: ${esc(info.errors[0])}${info.errors.length > 1 ? ` ほか ${info.errors.length - 1} 件` : ''}</div>` : ''}`;
+    ${info.errors.length ? `<div class="relay-sum-err small">${icon('alert')}${tr('直すところがあります: {error}', { error: esc(info.errors[0]) })}${info.errors.length > 1 ? tr(' ほか {n} 件', { n: info.errors.length - 1 }) : ''}</div>` : ''}`;
 }
 
 // Pipelineと競争は排他。設定で選んだ方だけを使える（'relay' / 'compete' / 'none'＝どちらも使わない）
@@ -2986,31 +2986,31 @@ function agentFieldHtml(idp, value, { orchestration = true } = {}) {
   const plain = AGENTS.filter(([a]) => on.includes(a)).map(([a, l]) => opt(a, l)).join('');
   const cas = customAgents(s);
   const custom = cas.length
-    ? `<optgroup label="カスタムエージェント">${cas.map((ca) => opt(CUSTOM_PREFIX + ca.id, `${ca.icon ? `${ca.icon} ` : ''}${ca.name}（${agentShort(ca.agent)}${ca.model ? ` / ${ca.model}` : ''}）${on.includes(ca.agent) ? '' : '（使わない設定）'}`, !on.includes(ca.agent))).join('')}</optgroup>`
+    ? `<optgroup label="${esc(tr('カスタムエージェント'))}">${cas.map((ca) => opt(CUSTOM_PREFIX + ca.id, tr('{icon}{name}（{agent}{model}）{off}', { icon: ca.icon ? `${ca.icon} ` : '', name: ca.name, agent: agentShort(ca.agent), model: ca.model ? ` / ${ca.model}` : '', off: on.includes(ca.agent) ? '' : tr('（使わない設定）') }), !on.includes(ca.agent))).join('')}</optgroup>`
     : '';
-  const single = custom ? `<optgroup label="1つのエージェントで動かす">${plain}</optgroup>${custom}` : plain;
-  if (orch === 'none') return `<label class="field"><span>エージェント</span><select id="${idp}Agent">${single}</select><small id="${idp}AgentHint" class="muted"></small></label>`;
+  const single = custom ? `<optgroup label="${esc(tr('1つのエージェントで動かす'))}">${plain}</optgroup>${custom}` : plain;
+  if (orch === 'none') return `<label class="field"><span>${tr('エージェント')}</span><select id="${idp}Agent">${single}</select><small id="${idp}AgentHint" class="muted"></small></label>`;
   const relayOpts = pipes
     // 長いと他の欄が見切れるので、名前（15文字まで）だけを出す。工程の並びは選んだときに下の説明に出す
-    .map(({ p, info, off }) => opt(RELAY_PREFIX + p.id, `${pipelineShortName(p)}${info.errors.length ? '（要修正）' : off ? '（使えません）' : ''}`, off, `${p.name}: ${relayFlowLabel(info)}${info.errors.length ? '（設定のフローチャートを直してください）' : off ? '（設定で工程のエージェントを使う設定にしてください）' : ''}`))
+    .map(({ p, info, off }) => opt(RELAY_PREFIX + p.id, tr('{name}{mark}', { name: pipelineShortName(p), mark: info.errors.length ? tr('（要修正）') : off ? tr('（使えません）') : '' }), off, tr('{name}: {flow}{why}', { name: p.name, flow: relayFlowLabel(info), why: info.errors.length ? tr('（設定のフローチャートを直してください）') : off ? tr('（設定で工程のエージェントを使う設定にしてください）') : '' })))
     .join('');
-  return `<label class="field"><span>エージェント</span>
+  return `<label class="field"><span>${tr('エージェント')}</span>
     <select id="${idp}Agent">
-      ${custom ? single : `<optgroup label="1つのエージェントで動かす">${single}</optgroup>`}
-      <optgroup label="${orch === 'relay' && pipes.length > 1 ? 'Pipeline' : 'オーケストレーション'}">
+      ${custom ? single : `<optgroup label="${esc(tr('1つのエージェントで動かす'))}">${single}</optgroup>`}
+      <optgroup label="${esc(orch === 'relay' && pipes.length > 1 ? 'Pipeline' : tr('オーケストレーション'))}">
         ${orch === 'relay'
           ? relayOpts
-          : opt('compete', comp.length >= 2 ? `競争: ${comp.join('・')} で同じタスクを解いて比べる` : '競争（設定で使うエージェントを2つ以上選んでください）', comp.length < 2)}
+          : opt('compete', comp.length >= 2 ? tr('競争: {names} で同じタスクを解いて比べる', { names: comp.join(tr('・')) }) : tr('競争（設定で使うエージェントを2つ以上選んでください）'), comp.length < 2)}
       </optgroup>
     </select>
     <small id="${idp}AgentHint" class="muted"></small></label>`;
 }
 // 選んだ Pipeline の説明（名前と工程の並び。プルダウンには名前だけを出すので、ここで中身を見せる）
 function relayHint(p) {
-  if (!p) return '選んだ Pipeline が見つかりません。選び直してください。';
+  if (!p) return tr('選んだ Pipeline が見つかりません。選び直してください。');
   const info = relayFlowInfo(p.flow);
-  const why = info.errors.length ? '（設定のフローチャートを直してください）' : '';
-  return `Pipeline「${p.name || 'Pipeline'}」: ${relayFlowLabel(info)}${why}。`;
+  const why = info.errors.length ? tr('（設定のフローチャートを直してください）') : '';
+  return tr('Pipeline「{name}」: {flow}{why}。', { name: p.name || 'Pipeline', flow: relayFlowLabel(info), why });
 }
 // onChange(agent): 選び直したときに呼ぶ（会話の欄の出し分けなど）
 function bindAgentField(idp, onChange) {
@@ -3018,8 +3018,8 @@ function bindAgentField(idp, onChange) {
   const hint = () => {
     const v = sel.value;
     $(`${idp}AgentHint`).textContent =
-      isRelayRef(v) ? relayHint(pipelineOfRef(v)) + '設定のフローチャートに沿って、工程ごとにエージェントが作業を引き継ぎます（前の工程の報告を次に渡します。分岐・ループ・並列もフローのとおりに動きます）。フローチャートは「設定」で変えられます。'
-      : v === 'compete' ? 'エージェントごとにカードと worktree を作って並列に解きます。終わったら差分を見比べ、よい案を採用してマージします。'
+      isRelayRef(v) ? relayHint(pipelineOfRef(v)) + tr('設定のフローチャートに沿って、工程ごとにエージェントが作業を引き継ぎます（前の工程の報告を次に渡します。分岐・ループ・並列もフローのとおりに動きます）。フローチャートは「設定」で変えられます。')
+      : v === 'compete' ? tr('エージェントごとにカードと worktree を作って並列に解きます。終わったら差分を見比べ、よい案を採用してマージします。')
       : isCustomRef(v) ? customHint(findCustomAgent(v))
       : agentLimitHint(v);
     onChange?.(v);
@@ -3029,8 +3029,8 @@ function bindAgentField(idp, onChange) {
 }
 // カスタムエージェントを選んだときの説明（プロフィール・モデル）
 function customHint(ca) {
-  if (!ca) return 'カスタムエージェントが見つかりません。選び直してください。';
-  const parts = [`${agentLabel(ca.agent)} を「${ca.name}」のプロフィールで動かします（モデル: ${ca.model || settingsModel(ca.agent) || 'CLI の既定'}）。`];
+  if (!ca) return tr('カスタムエージェントが見つかりません。選び直してください。');
+  const parts = [tr('{agent} を「{name}」のプロフィールで動かします（モデル: {model}）。', { agent: agentLabel(ca.agent), name: ca.name, model: ca.model || settingsModel(ca.agent) || tr('CLI の既定') })];
   if (ca.description) parts.push(ca.description);
   const lim = agentLimitHint(ca.agent);
   if (lim) parts.push(lim);
@@ -3068,7 +3068,7 @@ function settingsModel(agent, s = state.board.settings || {}) {
   return String(s[MODEL_KEY[agent] || 'model'] || '').trim();
 }
 function modelFieldHtml(idp, value = '') {
-  return `<label class="field"><span>モデル（空なら設定の既定）</span>
+  return `<label class="field"><span>${tr('モデル（空なら設定の既定）')}</span>
     <input id="${idp}Model" list="${idp}ModelList" autocomplete="off" spellcheck="false" value="${esc(value)}" /><datalist id="${idp}ModelList"></datalist>
     <small id="${idp}ModelHint" class="muted"></small></label>`;
 }
@@ -3081,9 +3081,9 @@ function updateModelField(idp, agent) {
   input.closest('.field').classList.toggle('hidden', multi);
   if (multi) return;
   const def = settingsModel(agent);
-  input.placeholder = def ? `例: ${def}（設定の既定）` : `例: ${(MODEL_SUGGEST[agent] || [])[0] || ''}`;
+  input.placeholder = def ? tr('例: {model}（設定の既定）', { model: def }) : tr('例: {model}', { model: (MODEL_SUGGEST[agent] || [])[0] || '' });
   $(`${idp}ModelList`).innerHTML = (MODEL_SUGGEST[agent] || []).map((m) => `<option value="${esc(m)}"></option>`).join('');
-  $(`${idp}ModelHint`).textContent = `${agentLabel(agent)} に渡すモデルです。空なら${def ? `設定の「${def}」` : ' CLI の既定のモデル'}を使います。`;
+  $(`${idp}ModelHint`).textContent = tr('{agent} に渡すモデルです。空なら{fallback}を使います。', { agent: agentLabel(agent), fallback: def ? tr('設定の「{model}」', { model: def }) : tr(' CLI の既定のモデル') });
 }
 // 送るモデル（Pipeline・競争のときは送らない）
 function readModelField(idp, agent) {
@@ -3101,26 +3101,26 @@ function newTask(opts = {}) {
   const from = opts.fromChat;
   const fromDone = from && !isChat(from);
   openModal(
-    `<h2>${fromDone ? '修正タスク' : '新しいタスク'}</h2>
+    `<h2>${fromDone ? tr('修正タスク') : tr('新しいタスク')}</h2>
      ${from ? '' : taskModeTabsHtml('text')}
-     ${fromDone ? `<p class="muted small">完了したタスク「${esc(from.title)}」の修正として、新しいタスクを始めます（元のタスクのやりとりをエージェントが引き継ぎます。元のタスクはそのまま残ります）。</p>`
-     : from ? `<p class="muted small">会話「${esc(from.title)}」の続きとして、タスクを始めます（会話の内容をエージェントが引き継ぎます。会話そのものはそのまま残ります）。</p>` : ''}
-     <label class="field"><span>タイトル（省略すると指示の1行目）</span><input id="nTitle" placeholder="例: ログイン画面にパスワード表示ボタンを追加" /></label>
+     ${fromDone ? `<p class="muted small">${tr('完了したタスク「{title}」の修正として、新しいタスクを始めます（元のタスクのやりとりをエージェントが引き継ぎます。元のタスクはそのまま残ります）。', { title: esc(from.title) })}</p>`
+     : from ? `<p class="muted small">${tr('会話「{title}」の続きとして、タスクを始めます（会話の内容をエージェントが引き継ぎます。会話そのものはそのまま残ります）。', { title: esc(from.title) })}</p>` : ''}
+     <label class="field"><span>${tr('タイトル（省略すると指示の1行目）')}</span><input id="nTitle" placeholder="${esc(tr('例: ログイン画面にパスワード表示ボタンを追加'))}" /></label>
      ${agentFieldHtml('n', from && from.persona && findCustomAgent(from.persona.id) && !from.relay ? CUSTOM_PREFIX + from.persona.id : from && enabledAgents().includes(agentOf(from)) ? agentOf(from) : undefined)}
      ${modelFieldHtml('n', from && enabledAgents().includes(agentOf(from)) ? from.model || '' : '')}
-     <div class="field"><span>エージェントへの指示</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。画像やファイルは貼り付け・ドラッグ＆ドロップでも添付できます。"></textarea><div id="nAttach" class="attach-bar"></div></div>
+     <div class="field"><span>${tr('エージェントへの指示')}</span><div id="nSkill" class="skill-slot"></div><textarea id="nPrompt" rows="10" placeholder="${esc(tr('やってほしいことを具体的に書いてください。テストの実行方法なども書いておくと確実です。画像やファイルは貼り付け・ドラッグ＆ドロップでも添付できます。'))}"></textarea><div id="nAttach" class="attach-bar"></div></div>
      ${sessionFieldHtml('n')}
-     <label class="check" title="SQL を作るだけ・調べるだけなど、ソースコードを変えないタスクにします。worktree とブランチは作らず、リポジトリのフォルダでファイルを書き換えるツールを止めて動かします。作ったものはチャットの返事に出るので、確かめてから「完了にする」を押します"><input type="checkbox" id="nReadOnly" /> ソースを変更しない（調べもの・SQL などの生成だけ）</label>
-     <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
-     <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">作成（Ctrl/⌘ + Enter）</button></div>`,
+     <label class="check" title="${esc(tr('SQL を作るだけ・調べるだけなど、ソースコードを変えないタスクにします。worktree とブランチは作らず、リポジトリのフォルダでファイルを書き換えるツールを止めて動かします。作ったものはチャットの返事に出るので、確かめてから「完了にする」を押します'))}"><input type="checkbox" id="nReadOnly" /> ${tr('ソースを変更しない（調べもの・SQL などの生成だけ）')}</label>
+     <label class="check"><input type="checkbox" id="nStart" checked /> ${tr('作成したらすぐに開始する')}</label>
+     <div class="modal-actions"><button class="btn ghost" id="nCancel">${tr('キャンセル')}</button><button class="btn primary" id="nOk">${tr('作成（Ctrl/⌘ + Enter）')}</button></div>`,
     () => {
       if (!from) bindTaskModeTabs();
       $('nPrompt').focus();
-      if (from) $('nPrompt').value = fromDone ? '完了したタスクの内容をもとに、次の点を修正してください。\n\n' : 'ここまでの会話の内容をもとに、作業を進めてください。';
-      if (fromDone) $('nTitle').value = `修正: ${from.title}`;
+      if (from) $('nPrompt').value = fromDone ? `${tr('完了したタスクの内容をもとに、次の点を修正してください。')}\n\n` : tr('ここまでの会話の内容をもとに、作業を進めてください。');
+      if (fromDone) $('nTitle').value = tr('修正: {title}', { title: from.title });
       // Claude Code の会話なら会話そのものを引き継ぐ。それ以外の会話・完了したタスクは、やりとりを指示に添えて渡す
       const fromClaude = from && !fromDone && agentOf(from) === 'claude';
-      fillSessionField('n', fromClaude ? { id: from.sessionId, title: `会話: ${from.title}` } : undefined);
+      fillSessionField('n', fromClaude ? { id: from.sessionId, title: tr('会話: {title}', { title: from.title }) } : undefined);
       bindAgentField('n', (v) => {
         toggleSessionField('n', fromClaude || !from ? firstAgentOf(v) : '');
         updateModelField('n', v);
@@ -3131,7 +3131,7 @@ function newTask(opts = {}) {
       const att = attachField({ box: $('nAttach'), input: $('nPrompt'), drop: $('nPrompt').closest('.field') });
       const submit = async () => {
         const files = att.list();
-        const id = await runBusy('タスクを作成しています…', () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value, model: readModelField('n', $('nAgent').value), fromChat: from ? from.id : undefined, attachments: files.length ? files : undefined, readOnly: $('nReadOnly').checked || undefined }));
+        const id = await runBusy(tr('タスクを作成しています…'), () => api.createCard({ title: $('nTitle').value, prompt: $('nPrompt').value, autoStart: $('nStart').checked, session: readSessionField('n'), skill, agent: $('nAgent').value, model: readModelField('n', $('nAgent').value), fromChat: from ? from.id : undefined, attachments: files.length ? files : undefined, readOnly: $('nReadOnly').checked || undefined }));
         if (id) {
           closeModal();
           selectNew(id);
@@ -3149,7 +3149,7 @@ function newTask(opts = {}) {
 // 新しいタスクの作り方（自然言語で書く / GitHub の Issue から）を切り替えるタブ
 function taskModeTabsHtml(active) {
   const tab = (mode, label) => `<button type="button" class="tab ${mode === active ? 'active' : ''}" data-task-mode="${mode}" role="tab" aria-selected="${mode === active}">${label}</button>`;
-  return `<nav class="tabs task-mode-tabs" role="tablist">${tab('text', '自然言語で作成')}${tab('issue', 'GitHub Issue から作成')}</nav>`;
+  return `<nav class="tabs task-mode-tabs" role="tablist">${tab('text', tr('自然言語で作成'))}${tab('issue', tr('GitHub Issue から作成'))}</nav>`;
 }
 function bindTaskModeTabs() {
   document.querySelectorAll('#modalBox [data-task-mode]').forEach((b) => {
@@ -3174,10 +3174,10 @@ function drawChatList() {
   const box = $('chatList');
   if (!box) return;
   const chats = state.board.cards.filter(isChat).sort(byAttention);
-  box.innerHTML = `<h2>${icon('chat')}会話</h2>
-    <p class="muted small">タスクを作らずに、このリポジトリについてエージェントと話した会話です。選ぶと開きます。</p>
-    <div class="chat-list">${chats.map(cardHtml).join('') || '<div class="col-empty">会話はまだありません</div>'}</div>
-    <div class="modal-actions"><button class="btn ghost" id="chatListClose">閉じる</button><button class="btn primary" id="chatListNew">＋ 新しい会話</button></div>`;
+  box.innerHTML = `<h2>${icon('chat')}${tr('会話')}</h2>
+    <p class="muted small">${tr('タスクを作らずに、このリポジトリについてエージェントと話した会話です。選ぶと開きます。')}</p>
+    <div class="chat-list">${chats.map(cardHtml).join('') || `<div class="col-empty">${tr('会話はまだありません')}</div>`}</div>
+    <div class="modal-actions"><button class="btn ghost" id="chatListClose">${tr('閉じる')}</button><button class="btn primary" id="chatListNew">${tr('＋ 新しい会話')}</button></div>`;
   $('chatListClose').onclick = closeModal;
   $('chatListNew').onclick = newChat;
 }
@@ -3192,15 +3192,15 @@ $('modalBox').addEventListener('click', (e) => {
 function newChat() {
   if (!state.board.settings.repoPath) return chooseRepo();
   openModal(
-    `<h2>${icon('chat')}会話を始める</h2>
-     <p class="muted small">タスクを作らずに、このリポジトリについてエージェントと話せます（質問・調べもの・相談など）。worktree やブランチは作らず、コミットやマージもしません。</p>
+    `<h2>${icon('chat')}${tr('会話を始める')}</h2>
+     <p class="muted small">${tr('タスクを作らずに、このリポジトリについてエージェントと話せます（質問・調べもの・相談など）。worktree やブランチは作らず、コミットやマージもしません。')}</p>
      ${agentFieldHtml('c', undefined, { orchestration: false })}
      ${modelFieldHtml('c')}
-     <div class="field"><span>メッセージ</span><div id="cSkill" class="skill-slot"></div><textarea id="cMsg" rows="6" placeholder="例: このリポジトリの全体の構成を教えて（画像やファイルは貼り付け・ドラッグ＆ドロップでも添付できます）"></textarea><div id="cAttach" class="attach-bar"></div></div>
-     <label class="field"><span>タイトル（省略するとメッセージの1行目）</span><input id="cTitle" /></label>
+     <div class="field"><span>${tr('メッセージ')}</span><div id="cSkill" class="skill-slot"></div><textarea id="cMsg" rows="6" placeholder="${esc(tr('例: このリポジトリの全体の構成を教えて（画像やファイルは貼り付け・ドラッグ＆ドロップでも添付できます）'))}"></textarea><div id="cAttach" class="attach-bar"></div></div>
+     <label class="field"><span>${tr('タイトル（省略するとメッセージの1行目）')}</span><input id="cTitle" /></label>
      ${sessionFieldHtml('c')}
-     <p class="muted small">会話はリポジトリのフォルダ（手元の作業中のファイル）でそのまま動くので、ファイルの変更やコマンドは毎回カードで確かめます。作業してほしくなったら、詳細画面の「タスクにする」で会話の続きからタスクを作れます。</p>
-     <div class="modal-actions"><button class="btn ghost" id="cCancel">キャンセル</button><button class="btn primary" id="cOk">話しかける（Ctrl/⌘ + Enter）</button></div>`,
+     <p class="muted small">${tr('会話はリポジトリのフォルダ（手元の作業中のファイル）でそのまま動くので、ファイルの変更やコマンドは毎回カードで確かめます。作業してほしくなったら、詳細画面の「タスクにする」で会話の続きからタスクを作れます。')}</p>
+     <div class="modal-actions"><button class="btn ghost" id="cCancel">${tr('キャンセル')}</button><button class="btn primary" id="cOk">${tr('話しかける（Ctrl/⌘ + Enter）')}</button></div>`,
     () => {
       $('cMsg').focus();
       fillSessionField('c');
@@ -3214,7 +3214,7 @@ function newChat() {
       const att = attachField({ box: $('cAttach'), input: $('cMsg'), drop: $('cMsg').closest('.field') });
       const submit = async () => {
         const files = att.list();
-        const id = await runBusy('会話を始めています…', () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: firstAgentOf($('cAgent').value) === 'claude' ? readSessionField('c') : { mode: 'new' }, skill, agent: $('cAgent').value, model: readModelField('c', $('cAgent').value), attachments: files.length ? files : undefined }));
+        const id = await runBusy(tr('会話を始めています…'), () => api.createChat({ message: $('cMsg').value, title: $('cTitle').value, session: firstAgentOf($('cAgent').value) === 'claude' ? readSessionField('c') : { mode: 'new' }, skill, agent: $('cAgent').value, model: readModelField('c', $('cAgent').value), attachments: files.length ? files : undefined }));
         if (id) {
           closeModal();
           selectNew(id);
@@ -3232,7 +3232,7 @@ function newChat() {
 // ---------------- スキル ----------------
 // スキルは1つだけ選べる。選んだスキルは、指示の入力欄の上にラベルで出す
 
-const SKILL_SRC = { project: 'プロジェクト', user: '自分用', plugin: 'プラグイン' };
+const SKILL_SRC = { project: tr('プロジェクト'), user: tr('自分用'), plugin: tr('プラグイン') };
 let skillCache = null;
 async function getSkills(force) {
   if (!skillCache || force) skillCache = (await api.listSkills().catch(() => [])) || [];
@@ -3248,8 +3248,8 @@ function renderSkillSlot(slotId, value, onChange, opts = {}) {
     return;
   }
   el.innerHTML = value
-    ? `<span class="skill-chip" title="このスキルを使って実行します">${icon('zap')}/${esc(value)}<button type="button" class="chip-x" title="スキルを外す">×</button></span><button type="button" class="btn small ghost skill-pick">変更</button>`
-    : `<button type="button" class="btn small ghost skill-pick">${icon('zap')}スキルを選ぶ</button>`;
+    ? `<span class="skill-chip" title="${esc(tr('このスキルを使って実行します'))}">${icon('zap')}/${esc(value)}<button type="button" class="chip-x" title="${esc(tr('スキルを外す'))}">×</button></span><button type="button" class="btn small ghost skill-pick">${tr('変更')}</button>`
+    : `<button type="button" class="btn small ghost skill-pick">${icon('zap')}${tr('スキルを選ぶ')}</button>`;
   const x = el.querySelector('.chip-x');
   if (x) x.onclick = () => onChange(null);
   el.querySelector('.skill-pick').onclick = () => openSkillPicker(value, onChange);
@@ -3258,28 +3258,28 @@ function renderSkillSlot(slotId, value, onChange, opts = {}) {
 // カードの一覧から1つ選ぶ
 async function openSkillPicker(current, onPick) {
   const box = $('skillPickerBox');
-  box.innerHTML = '<div class="muted pad">スキルを読み込んでいます…</div>';
+  box.innerHTML = `<div class="muted pad">${tr('スキルを読み込んでいます…')}</div>`;
   $('skillPicker').classList.remove('hidden');
   const skills = await getSkills(true);
   const close = () => $('skillPicker').classList.add('hidden');
   const cardHtmlFor = (s) => `
     <button type="button" class="skill-card ${s.name === current ? 'selected' : ''}" data-skill="${esc(s.name)}">
       <span class="sk-top"><b class="sk-name">/${esc(s.name)}</b><span class="sk-src src-${s.source}">${SKILL_SRC[s.source] || s.source}</span></span>
-      <span class="sk-desc">${esc(s.description || '（説明なし）')}</span>
+      <span class="sk-desc">${esc(s.description || tr('（説明なし）'))}</span>
     </button>`;
   const render = (q) => {
     const k = q.trim().toLowerCase();
     const list = k ? skills.filter((s) => (s.name + ' ' + s.description).toLowerCase().includes(k)) : skills;
     $('skGrid').innerHTML =
-      `<button type="button" class="skill-card none ${!current ? 'selected' : ''}" data-skill=""><span class="sk-top"><b class="sk-name">スキルなし</b></span><span class="sk-desc">スキルを使わずに、指示だけで実行します</span></button>` +
-      (list.map(cardHtmlFor).join('') || '<div class="muted pad">見つかりません</div>');
+      `<button type="button" class="skill-card none ${!current ? 'selected' : ''}" data-skill=""><span class="sk-top"><b class="sk-name">${tr('スキルなし')}</b></span><span class="sk-desc">${tr('スキルを使わずに、指示だけで実行します')}</span></button>` +
+      (list.map(cardHtmlFor).join('') || `<div class="muted pad">${tr('見つかりません')}</div>`);
   };
   box.innerHTML = `
-    <div class="sk-head"><h2>スキルを選ぶ</h2><button type="button" class="icon" id="skClose">✕</button></div>
-    <p class="muted small">1つだけ選べます。選んだスキルは、Claude Code には指示の先頭に <code>/スキル名</code> として、ほかのエージェントには SKILL.md の場所を添えて渡します。</p>
-    <input id="skSearch" placeholder="名前や説明で絞り込む" autocomplete="off" />
+    <div class="sk-head"><h2>${tr('スキルを選ぶ')}</h2><button type="button" class="icon" id="skClose">✕</button></div>
+    <p class="muted small">${tr('1つだけ選べます。選んだスキルは、Claude Code には指示の先頭に ')}<code>${tr('/スキル名')}</code>${tr(' として、ほかのエージェントには SKILL.md の場所を添えて渡します。')}</p>
+    <input id="skSearch" placeholder="${esc(tr('名前や説明で絞り込む'))}" autocomplete="off" />
     <div class="skill-grid" id="skGrid"></div>
-    ${skills.length ? '' : '<p class="muted small">使えるスキルが見つかりません。<code>.claude/skills/&lt;名前&gt;/SKILL.md</code>（このリポジトリ）か <code>~/.claude/skills/</code> に置くと、ここに出ます。</p>'}`;
+    ${skills.length ? '' : `<p class="muted small">${tr('使えるスキルが見つかりません。<code>.claude/skills/&lt;名前&gt;/SKILL.md</code>（このリポジトリ）か <code>~/.claude/skills/</code> に置くと、ここに出ます。')}</p>`}`;
   render('');
   $('skSearch').oninput = (e) => render(e.target.value);
   $('skSearch').focus();
@@ -3305,9 +3305,9 @@ function fmtTime(ms) {
 
 // 「新しい会話」か「既存の会話を引き継ぐ」を選ぶ欄
 function sessionFieldHtml(idp) {
-  return `<label class="field"><span>会話（セッション）</span>
-    <select id="${idp}Session"><option value="">新しい会話で始める</option><option disabled>過去の会話を読み込んでいます…</option></select>
-    <small>過去の Claude Code の会話を選ぶと、その続きとして始めます（元の会話はそのまま残ります）。</small></label>`;
+  return `<label class="field"><span>${tr('会話（セッション）')}</span>
+    <select id="${idp}Session"><option value="">${tr('新しい会話で始める')}</option><option disabled>${tr('過去の会話を読み込んでいます…')}</option></select>
+    <small>${tr('過去の Claude Code の会話を選ぶと、その続きとして始めます（元の会話はそのまま残ります）。')}</small></label>`;
 }
 
 async function fillSessionField(idp, selected) {
@@ -3321,8 +3321,8 @@ async function fillSessionField(idp, selected) {
   if (!sel) return;
   const related = list.filter((x) => x.related);
   const opt = (x) => `<option value="${esc(x.id)}" ${x.id === selectedId ? 'selected' : ''}>${esc(fmtTime(x.updatedAt))}  ${esc(x.title.slice(0, 70))}</option>`;
-  sel.innerHTML = `<option value="">新しい会話で始める</option>
-    ${related.length ? `<optgroup label="このリポジトリの会話">${related.map(opt).join('')}</optgroup>` : '<option disabled>（このリポジトリの過去の会話はありません）</option>'}`;
+  sel.innerHTML = `<option value="">${tr('新しい会話で始める')}</option>
+    ${related.length ? `<optgroup label="${esc(tr('このリポジトリの会話'))}">${related.map(opt).join('')}</optgroup>` : `<option disabled>${tr('（このリポジトリの過去の会話はありません）')}</option>`}`;
   sel._list = list;
 }
 
@@ -3336,10 +3336,10 @@ function readSessionField(idp) {
 // 詳細画面から「既存の会話から選ぶ…」
 function openSessionPicker(c) {
   openModal(
-    `<h2>既存の会話を引き継ぐ</h2>
-     <p class="muted small">「${esc(c.title)}」の次の実行を、選んだ会話の続きとして始めます。</p>
+    `<h2>${tr('既存の会話を引き継ぐ')}</h2>
+     <p class="muted small">${tr('「{title}」の次の実行を、選んだ会話の続きとして始めます。', { title: esc(c.title) })}</p>
      ${sessionFieldHtml('p')}
-     <div class="modal-actions"><button class="btn ghost" id="pCancel">キャンセル</button><button class="btn primary" id="pOk">この会話を使う</button></div>`,
+     <div class="modal-actions"><button class="btn ghost" id="pCancel">${tr('キャンセル')}</button><button class="btn primary" id="pOk">${tr('この会話を使う')}</button></div>`,
     () => {
       fillSessionField('p');
       $('pCancel').onclick = closeModal;
@@ -3348,7 +3348,7 @@ function openSessionPicker(c) {
         const ok = await run(() => api.setSession(c.id, sess).then(() => true));
         if (ok) {
           closeModal();
-          toast(sess.mode === 'new' ? '次は新しい会話で始めます' : '次はこの会話の続きで始めます', 'ok');
+          toast(sess.mode === 'new' ? tr('次は新しい会話で始めます') : tr('次はこの会話の続きで始めます'), 'ok');
         }
       };
     },
@@ -3361,16 +3361,16 @@ function sessionRowHtml(c) {
   const own = (c.sessions || []).filter((x) => x.origin === 'task' && (x.agent || 'claude') === agentOf(c));
   const imported = (c.sessions || []).find((x) => x.origin === 'imported' && x.id === c.sessionId && c.forkNext);
   const opts = [
-    `<option value="__new__" ${!c.sessionId ? 'selected' : ''}>新しい会話で始める</option>`,
+    `<option value="__new__" ${!c.sessionId ? 'selected' : ''}>${tr('新しい会話で始める')}</option>`,
     ...own.map((x, i) => {
       const src = x.from && (c.sessions || []).find((y) => y.id === x.from);
-      const label = src ? `← 引き継ぎ: ${src.label || src.id.slice(0, 8)}` : x.label || '';
-      return `<option value="${esc(x.id)}" ${x.id === c.sessionId && !c.forkNext ? 'selected' : ''}>会話 ${i + 1}（${esc(fmtTime(x.at))}） ${esc(label)}</option>`;
+      const label = src ? tr('← 引き継ぎ: {label}', { label: src.label || src.id.slice(0, 8) }) : x.label || '';
+      return `<option value="${esc(x.id)}" ${x.id === c.sessionId && !c.forkNext ? 'selected' : ''}>${tr('会話 {n}（{time}） {label}', { n: i + 1, time: esc(fmtTime(x.at)), label: esc(label) })}</option>`;
     }),
-    imported ? `<option value="${esc(imported.id)}" selected>引き継ぐ: ${esc(imported.label || imported.id.slice(0, 8))}</option>` : '',
-    agentOf(c) === 'claude' ? `<option value="__pick__">既存の会話から選ぶ…</option>` : '',
+    imported ? `<option value="${esc(imported.id)}" selected>${tr('引き継ぐ: {label}', { label: esc(imported.label || imported.id.slice(0, 8)) })}</option>` : '',
+    agentOf(c) === 'claude' ? `<option value="__pick__">${tr('既存の会話から選ぶ…')}</option>` : '',
   ].join('');
-  return `<dt>会話</dt><dd><select id="dSession" class="d-session" ${busy ? 'disabled title="実行中は切り替えられません"' : ''}>${opts}</select>
+  return `<dt>${tr('会話')}</dt><dd><select id="dSession" class="d-session" ${busy ? `disabled title="${esc(tr('実行中は切り替えられません'))}"` : ''}>${opts}</select>
 </dd>`;
 }
 
@@ -3379,19 +3379,19 @@ function sessionRowHtml(c) {
 // タスクとは別に、Claude Code の会話を一覧して選んで消す
 function openSessionManager() {
   openModal(
-    `<h2>会話（セッション）を消す</h2>
-     <p class="muted small">Claude Code の会話の記録（~/.claude/projects の中）を消します。消した会話は元に戻せず、続きから再開することもできません。実行中・待機中のタスクが使っている会話は消せません。</p>
+    `<h2>${tr('会話（セッション）を消す')}</h2>
+     <p class="muted small">${tr('Claude Code の会話の記録（~/.claude/projects の中）を消します。消した会話は元に戻せず、続きから再開することもできません。実行中・待機中のタスクが使っている会話は消せません。')}</p>
      <div class="row sm-tools">
-       <label class="check small"><input type="checkbox" id="smToggle" /> 表示中をすべて選ぶ</label>
+       <label class="check small"><input type="checkbox" id="smToggle" />${tr(' 表示中をすべて選ぶ')}</label>
      </div>
-     <div id="smList" class="sm-list muted small">会話を読み込んでいます…</div>
-     <div class="modal-actions"><span id="smCount" class="muted small sm-count"></span><button class="btn ghost" id="smClose">閉じる</button><button class="btn danger" id="smDelete" disabled>選んだ会話を消す</button></div>`,
+     <div id="smList" class="sm-list muted small">${tr('会話を読み込んでいます…')}</div>
+     <div class="modal-actions"><span id="smCount" class="muted small sm-count"></span><button class="btn ghost" id="smClose">${tr('閉じる')}</button><button class="btn danger" id="smDelete" disabled>${tr('選んだ会話を消す')}</button></div>`,
     async () => {
       let list = [];
       const picked = new Set();
       const visible = () => list.filter((x) => x.related);
       const updateCount = () => {
-        $('smCount').textContent = picked.size ? `${picked.size} 件を選択中` : '';
+        $('smCount').textContent = picked.size ? tr('{n} 件を選択中', { n: picked.size }) : '';
         $('smDelete').disabled = !picked.size;
       };
       const render = () => {
@@ -3399,7 +3399,7 @@ function openSessionManager() {
         if (!box) return;
         const rows = visible();
         if (!rows.length) {
-          box.innerHTML = '<p class="muted small">（消せる会話はありません）</p>';
+          box.innerHTML = `<p class="muted small">${tr('（消せる会話はありません）')}</p>`;
           updateCount();
           return;
         }
@@ -3407,7 +3407,7 @@ function openSessionManager() {
           .map((x) => {
             const used = x.usedBy || [];
             const busy = used.some((u) => u.busy);
-            const tag = used.length ? `<span class="pill sm-used" title="${esc(used.map((u) => u.title).join('\n'))}">${busy ? '実行中のタスクで使用中' : `タスク「${esc(used[0].title.slice(0, 30))}」${used.length > 1 ? ` ほか ${used.length - 1} 件` : ''}`}</span>` : '';
+            const tag = used.length ? `<span class="pill sm-used" title="${esc(used.map((u) => u.title).join('\n'))}">${busy ? tr('実行中のタスクで使用中') : used.length > 1 ? tr('タスク「{title}」 ほか {n} 件', { title: esc(used[0].title.slice(0, 30)), n: used.length - 1 }) : tr('タスク「{title}」', { title: esc(used[0].title.slice(0, 30)) })}</span>` : '';
             return `<label class="sm-row ${busy ? 'disabled' : ''}"><input type="checkbox" class="smPick" value="${esc(x.id)}" ${busy ? 'disabled' : ''} ${picked.has(x.id) ? 'checked' : ''} />
               <span class="sm-main"><span class="sm-title">${esc(x.title.slice(0, 100))}</span>
               <span class="sm-meta muted small">${esc(fmtTime(x.updatedAt))} · ${esc(x.branch || '')}</span></span>${tag}</label>`;
@@ -3439,13 +3439,15 @@ function openSessionManager() {
       $('smDelete').onclick = async () => {
         const ids = [...picked];
         const used = list.filter((x) => picked.has(x.id) && (x.usedBy || []).length).length;
-        const msg = `選んだ ${ids.length} 件の会話を消しますか？\n消した会話は元に戻せません。${used ? `\n（${used} 件はタスクが使っています。そのタスクは次から新しい会話で始めます）` : ''}`;
+        const msg = used
+          ? tr('選んだ {n} 件の会話を消しますか？\n消した会話は元に戻せません。\n（{used} 件はタスクが使っています。そのタスクは次から新しい会話で始めます）', { n: ids.length, used })
+          : tr('選んだ {n} 件の会話を消しますか？\n消した会話は元に戻せません。', { n: ids.length });
         if (!confirm(msg)) return;
-        const r = await runBusy('会話を消しています…', () => api.deleteSessions(ids));
+        const r = await runBusy(tr('会話を消しています…'), () => api.deleteSessions(ids));
         if (!r) return;
         picked.clear();
         $('smToggle').checked = false;
-        toast(`${r.removed.length} 件の会話を消しました${r.skipped.length ? `（実行中で使っている ${r.skipped.length} 件は消していません）` : ''}`, 'ok');
+        toast(r.skipped.length ? tr('{n} 件の会話を消しました（実行中で使っている {skipped} 件は消していません）', { n: r.removed.length, skipped: r.skipped.length }) : tr('{n} 件の会話を消しました', { n: r.removed.length }), 'ok');
         await load();
       };
       await load();
@@ -3457,10 +3459,10 @@ function openSessionManager() {
 
 // Issue 番号からカードを作る（上部の枠と、詳細ダイアログの両方から使う）
 async function createFromIssues(numbers, extra, autoStart, session, skill, agent, model) {
-  const r = await runBusy('Issue を読み込んでタスクを作成しています…', () => api.createFromIssues({ numbers, extra, autoStart, session, skill, agent, model }));
+  const r = await runBusy(tr('Issue を読み込んでタスクを作成しています…'), () => api.createFromIssues({ numbers, extra, autoStart, session, skill, agent, model }));
   if (!r) return false;
   if (r.errors.length) toast(r.errors.join('\n'));
-  else toast(`${r.ids.length} 件のタスクを Issue から作りました`, 'ok');
+  else toast(tr('{n} 件のタスクを Issue から作りました', { n: r.ids.length }), 'ok');
   await refreshBoardFor(r.ids);
   if (r.ids.length === 1) select(r.ids[0]);
   return true;
@@ -3470,18 +3472,18 @@ async function createFromIssues(numbers, extra, autoStart, session, skill, agent
 function openIssueModal(prefill = '') {
   if (!state.board.settings.repoPath) return chooseRepo();
   openModal(
-    `<h2>新しいタスク</h2>
+    `<h2>${tr('新しいタスク')}</h2>
      ${taskModeTabsHtml('issue')}
-     <label class="field"><span>Issue 番号（複数ならカンマかスペースで区切る。1つの Issue が1枚のカードになり、並列で動きます）</span>
-       <input id="nNumbers" placeholder="例: 12 または 12, 15, 18" inputmode="numeric" value="${esc(prefill)}" /></label>
-     <p class="muted small" id="nRepoInfo">リポジトリを確認しています…</p>
-     <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div>
+     <label class="field"><span>${tr('Issue 番号（複数ならカンマかスペースで区切る。1つの Issue が1枚のカードになり、並列で動きます）')}</span>
+       <input id="nNumbers" placeholder="${esc(tr('例: 12 または 12, 15, 18'))}" inputmode="numeric" value="${esc(prefill)}" /></label>
+     <p class="muted small" id="nRepoInfo">${tr('リポジトリを確認しています…')}</p>
+     <div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div>
      ${agentFieldHtml('n')}
      ${modelFieldHtml('n')}
      ${sessionFieldHtml('n')}
-     <div class="field"><span>追加の指示（任意・すべての Issue に付けます）</span><div id="nSkill" class="skill-slot"></div><textarea id="nExtra" rows="4" placeholder="例: 変更したらテストを追加して npm test で確認して"></textarea></div>
-     <label class="check"><input type="checkbox" id="nStart" checked /> 作成したらすぐに開始する</label>
-     <div class="modal-actions"><button class="btn ghost" id="nCancel">キャンセル</button><button class="btn primary" id="nOk">Issue からタスクを作成</button></div>`,
+     <div class="field"><span>${tr('追加の指示（任意・すべての Issue に付けます）')}</span><div id="nSkill" class="skill-slot"></div><textarea id="nExtra" rows="4" placeholder="${esc(tr('例: 変更したらテストを追加して npm test で確認して'))}"></textarea></div>
+     <label class="check"><input type="checkbox" id="nStart" checked />${tr(' 作成したらすぐに開始する')}</label>
+     <div class="modal-actions"><button class="btn ghost" id="nCancel">${tr('キャンセル')}</button><button class="btn primary" id="nOk">${tr('Issue からタスクを作成')}</button></div>`,
     () => {
       bindTaskModeTabs();
       $('nNumbers').focus();
@@ -3489,8 +3491,8 @@ function openIssueModal(prefill = '') {
         (g) => {
           const el = $('nRepoInfo');
           if (!el) return;
-          if (!g || !g.slug) el.textContent = 'このリポジトリの origin が GitHub ではないため、Issue を読み込めません。';
-          else el.textContent = `${g.slug.owner}/${g.slug.repo} の Issue を読み込みます。`;
+          if (!g || !g.slug) el.textContent = tr('このリポジトリの origin が GitHub ではないため、Issue を読み込めません。');
+          else el.textContent = tr('{owner}/{repo} の Issue を読み込みます。', { owner: g.slug.owner, repo: g.slug.repo });
         },
         () => {},
       );
@@ -3505,11 +3507,11 @@ function openIssueModal(prefill = '') {
       drawSkill();
       const submit = async () => {
         $('nOk').disabled = true;
-        $('nOk').textContent = 'Issue を読み込んでいます…';
+        $('nOk').textContent = tr('Issue を読み込んでいます…');
         const ok = await createFromIssues($('nNumbers').value, $('nExtra').value, $('nStart').checked, readSessionField('n'), skill, $('nAgent').value, readModelField('n', $('nAgent').value));
         if (ok) return closeModal();
         $('nOk').disabled = false;
-        $('nOk').textContent = 'Issue からタスクを作成';
+        $('nOk').textContent = tr('Issue からタスクを作成');
       };
       $('nOk').onclick = submit;
       $('nCancel').onclick = closeModal;
@@ -3526,32 +3528,32 @@ async function openMerge(c) {
   const normal = others.filter((b) => !b.startsWith('agent/'));
   const agentBranches = others.filter((b) => b.startsWith('agent/'));
   const def = c.lastMergeTarget && others.includes(c.lastMergeTarget) ? c.lastMergeTarget : c.baseBranch;
-  const opt = (b) => `<option value="${esc(b)}" ${b === def ? 'selected' : ''}>${esc(b)}${b === c.baseBranch ? '（ベース）' : ''}${b === info.current ? '（チェックアウト中）' : ''}</option>`;
+  const opt = (b) => `<option value="${esc(b)}" ${b === def ? 'selected' : ''}>${esc(b)}${b === c.baseBranch ? tr('（ベース）') : ''}${b === info.current ? tr('（チェックアウト中）') : ''}</option>`;
   openModal(
-    `<h2>マージ</h2>
-     <p class="muted">「${esc(c.title)}」のブランチ <code>${esc(c.branch)}</code> を、選んだブランチにマージします（--no-ff）。</p>
-     <label class="field"><span>マージ先のブランチ</span>
+    `<h2>${tr('マージ')}</h2>
+     <p class="muted">${tr('「{title}」のブランチ <code>{branch}</code> を、選んだブランチにマージします（--no-ff）。', { title: esc(c.title), branch: esc(c.branch) })}</p>
+     <label class="field"><span>${tr('マージ先のブランチ')}</span>
        <select id="mTarget">
          ${normal.map(opt).join('')}
-         ${agentBranches.length ? `<optgroup label="ほかのタスクのブランチ">${agentBranches.map(opt).join('')}</optgroup>` : ''}
-         <option value="__new__">＋ 新しいブランチを作ってマージ…</option>
+         ${agentBranches.length ? `<optgroup label="${esc(tr('ほかのタスクのブランチ'))}">${agentBranches.map(opt).join('')}</optgroup>` : ''}
+         <option value="__new__">${tr('＋ 新しいブランチを作ってマージ…')}</option>
        </select></label>
-     <label class="field hidden" id="mNewWrap"><span>新しいブランチの名前（${esc(c.baseBranch)} から作ります）</span><input id="mNew" placeholder="例: feature/login-improvements" /></label>
-     <label class="check"><input type="checkbox" id="mPush" ${info.hasOrigin && state.board.settings.pushAfterMerge !== false ? 'checked' : ''} ${info.hasOrigin ? '' : 'disabled'} /> マージしたあと origin に push する（<code id="mPushTarget">origin/…</code> にも反映）</label>
-     ${info.hasOrigin ? '' : '<p class="muted small">このリポジトリには origin がないので、ローカルのブランチにだけマージします。</p>'}
-     <label class="check"><input type="checkbox" id="mKeep" /> マージ後もタスクを続ける（worktree とブランチを残す）</label>
+     <label class="field hidden" id="mNewWrap"><span>${tr('新しいブランチの名前（{base} から作ります）', { base: esc(c.baseBranch) })}</span><input id="mNew" placeholder="${esc(tr('例: feature/login-improvements'))}" /></label>
+     <label class="check"><input type="checkbox" id="mPush" ${info.hasOrigin && state.board.settings.pushAfterMerge !== false ? 'checked' : ''} ${info.hasOrigin ? '' : 'disabled'} />${tr(' マージしたあと origin に push する（')}<code id="mPushTarget">origin/…</code>${tr(' にも反映）')}</label>
+     ${info.hasOrigin ? '' : `<p class="muted small">${tr('このリポジトリには origin がないので、ローカルのブランチにだけマージします。')}</p>`}
+     <label class="check"><input type="checkbox" id="mKeep" />${tr(' マージ後もタスクを続ける（worktree とブランチを残す）')}</label>
      <p class="muted small" id="mHint"></p>
-     <div class="modal-actions"><button class="btn ghost" id="mCancel">キャンセル</button><button class="btn primary" id="mOk">マージ</button></div>`,
+     <div class="modal-actions"><button class="btn ghost" id="mCancel">${tr('キャンセル')}</button><button class="btn primary" id="mOk">${tr('マージ')}</button></div>`,
     () => {
       const update = () => {
         const isNew = $('mTarget').value === '__new__';
         $('mNewWrap').classList.toggle('hidden', !isNew);
-        const t = isNew ? $('mNew').value.trim() || '（新しいブランチ）' : $('mTarget').value;
+        const t = isNew ? $('mNew').value.trim() || tr('（新しいブランチ）') : $('mTarget').value;
         $('mPushTarget').textContent = `origin/${t}`;
-        const pushText = $('mPush').checked ? `origin の最新を取り込んでからローカルの ${t} にマージし、origin/${t} に push します。` : `ローカルの ${t} にだけマージします（origin には push しません）。`;
+        const pushText = $('mPush').checked ? tr('origin の最新を取り込んでからローカルの {target} にマージし、origin/{target} に push します。', { target: t }) : tr('ローカルの {target} にだけマージします（origin には push しません）。', { target: t });
         $('mHint').textContent = pushText + ($('mKeep').checked
-          ? 'マージしたあとも、このタスクはレビュー列に残ります。'
-          : `マージしたあと、worktree とブランチ ${c.branch} を削除して「完了」にします。`);
+          ? tr('マージしたあとも、このタスクはレビュー列に残ります。')
+          : tr('マージしたあと、worktree とブランチ {branch} を削除して「完了」にします。', { branch: c.branch }));
         if (isNew) $('mNew').focus();
       };
       $('mTarget').onchange = update;
@@ -3563,18 +3565,18 @@ async function openMerge(c) {
       $('mOk').onclick = async () => {
         const isNew = $('mTarget').value === '__new__';
         const target = isNew ? $('mNew').value.trim() : $('mTarget').value;
-        if (!target) return toast('ブランチ名を入力してください');
+        if (!target) return toast(tr('ブランチ名を入力してください'));
         $('mOk').disabled = true;
         const push = $('mPush').checked;
-        $('mOk').textContent = push ? 'マージして push しています…' : 'マージしています…';
-        const res = await runBusy(push ? `${target} にマージして push しています…` : `${target} にマージしています…`, () => api.merge(c.id, { target, createNew: isNew, keep: $('mKeep').checked, push }));
-        $('mOk').textContent = 'マージ';
+        $('mOk').textContent = push ? tr('マージして push しています…') : tr('マージしています…');
+        const res = await runBusy(push ? tr('{target} にマージして push しています…', { target }) : tr('{target} にマージしています…', { target }), () => api.merge(c.id, { target, createNew: isNew, keep: $('mKeep').checked, push }));
+        $('mOk').textContent = tr('マージ');
         if (res && res.conflict) {
           closeModal();
-          toast(`${target} とコンフリクトしたので、マージを中止しました。詳細画面から解消できます`);
+          toast(tr('{target} とコンフリクトしたので、マージを中止しました。詳細画面から解消できます', { target }));
           return;
         }
-        if (res) toast(push ? `${target} にマージして origin/${target} に push しました` : `${target} にマージしました`, 'ok');
+        if (res) toast(push ? tr('{target} にマージして origin/{target} に push しました', { target }) : tr('{target} にマージしました', { target }), 'ok');
         const ok = !!res;
         $('mOk').disabled = false;
         if (ok) closeModal();
@@ -3590,35 +3592,35 @@ async function openPr(c) {
   const normal = others.filter((b) => !b.startsWith('agent/'));
   const agentBranches = others.filter((b) => b.startsWith('agent/'));
   const def = c.prBase && others.includes(c.prBase) ? c.prBase : c.baseBranch;
-  const opt = (b) => `<option value="${esc(b)}" ${b === def ? 'selected' : ''}>${esc(b)}${b === c.baseBranch ? '（ベース）' : ''}</option>`;
+  const opt = (b) => `<option value="${esc(b)}" ${b === def ? 'selected' : ''}>${esc(b)}${b === c.baseBranch ? tr('（ベース）') : ''}</option>`;
   const title = c.issue ? c.title.replace(/^#\d+\s*/, '') : c.title;
-  const body = [c.issue ? `Closes #${c.issue.number}\n` : '', c.lastMessage ? `${c.lastMessage}\n` : '', '---\nAgent Kanban のタスクから作成しました。'].join('\n').trim();
+  const body = [c.issue ? `Closes #${c.issue.number}\n` : '', c.lastMessage ? `${c.lastMessage}\n` : '', tr('---\nAgent Kanban のタスクから作成しました。')].join('\n').trim();
   const updating = !!c.prUrl;
   openModal(
-    `<h2>${updating ? 'PR を更新' : 'PR を作成'}</h2>
-     <p class="muted">「${esc(c.title)}」のブランチ <code>${esc(c.branch)}</code> を origin に push して、${updating ? `開いている PR（${esc(c.prUrl)}）を更新します。` : 'GitHub にプルリクエストを作ります（gh を使います）。'}</p>
-     <label class="field"><span>PR のマージ先（base）</span>
+    `<h2>${updating ? tr('PR を更新') : tr('PR を作成')}</h2>
+     <p class="muted">${updating ? tr('「{title}」のブランチ {branch} を origin に push して、開いている PR（{url}）を更新します。', { title: esc(c.title), branch: esc(c.branch), url: esc(c.prUrl) }) : tr('「{title}」のブランチ {branch} を origin に push して、GitHub にプルリクエストを作ります（gh を使います）。', { title: esc(c.title), branch: esc(c.branch) })}</p>
+     <label class="field"><span>${tr('PR のマージ先（base）')}</span>
        <select id="pBase" ${updating ? 'disabled' : ''}>
          ${normal.map(opt).join('')}
-         ${agentBranches.length ? `<optgroup label="ほかのタスクのブランチ">${agentBranches.map(opt).join('')}</optgroup>` : ''}
+         ${agentBranches.length ? `<optgroup label="${esc(tr('ほかのタスクのブランチ'))}">${agentBranches.map(opt).join('')}</optgroup>` : ''}
        </select></label>
-     ${updating ? '' : `<label class="field"><span>タイトル</span><input id="pTitle" value="${esc(title)}" /></label>
-     <label class="field"><span>本文</span><textarea id="pBody" rows="6">${esc(body)}</textarea></label>`}
-     <label class="check"><input type="checkbox" id="pKeep" checked /> PR を作ったあともタスクを続ける（worktree とブランチを残す）</label>
+     ${updating ? '' : `<label class="field"><span>${tr('タイトル')}</span><input id="pTitle" value="${esc(title)}" /></label>
+     <label class="field"><span>${tr('本文')}</span><textarea id="pBody" rows="6">${esc(body)}</textarea></label>`}
+     <label class="check"><input type="checkbox" id="pKeep" checked />${tr(' PR を作ったあともタスクを続ける（worktree とブランチを残す）')}</label>
      <p class="muted small" id="pHint"></p>
-     <div class="modal-actions"><button class="btn ghost" id="pCancel">キャンセル</button><button class="btn primary" id="pOk">${updating ? 'push して更新' : 'PR を作成'}</button></div>`,
+     <div class="modal-actions"><button class="btn ghost" id="pCancel">${tr('キャンセル')}</button><button class="btn primary" id="pOk">${updating ? tr('push して更新') : tr('PR を作成')}</button></div>`,
     () => {
       const update = () => {
         $('pHint').textContent = $('pKeep').checked
-          ? 'レビューで直しが入ったら、追加指示を送ってからもう一度このボタンを押すと PR に反映されます。'
-          : `PR を作ったあと、ローカルの worktree とブランチ ${c.branch} を削除して「完了」にします（origin のブランチと PR は残ります）。`;
+          ? tr('レビューで直しが入ったら、追加指示を送ってからもう一度このボタンを押すと PR に反映されます。')
+          : tr('PR を作ったあと、ローカルの worktree とブランチ {branch} を削除して「完了」にします（origin のブランチと PR は残ります）。', { branch: c.branch });
       };
       $('pKeep').onchange = update;
       update();
       $('pCancel').onclick = closeModal;
       $('pOk').onclick = async () => {
         $('pOk').disabled = true;
-        const r = await runBusy(updating ? 'push して PR を更新しています…' : 'push して PR を作成しています…', () =>
+        const r = await runBusy(updating ? tr('push して PR を更新しています…') : tr('push して PR を作成しています…'), () =>
           api.createPr(c.id, {
             base: $('pBase').value,
             title: $('pTitle') ? $('pTitle').value : '',
@@ -3629,7 +3631,7 @@ async function openPr(c) {
         $('pOk').disabled = false;
         if (r) {
           closeModal();
-          toast(r.created ? 'PR を作成しました' : 'PR を更新しました', 'ok');
+          toast(r.created ? tr('PR を作成しました') : tr('PR を更新しました'), 'ok');
           api.openExternal(r.url).catch(() => {});
         }
       };
@@ -3641,7 +3643,7 @@ async function openPr(c) {
 function agentConfigHtml(a, s, body) {
   const on = enabledAgents(s).includes(a);
   return `<div class="agent-cfg ${on ? 'on' : ''}" data-agent="${a}">
-    <label class="check agent-cfg-head"><input type="checkbox" class="sUse" value="${a}" ${on ? 'checked' : ''} /> ${agentIcon(a)}<b>${esc(agentLabel(a))}</b> を使う</label>
+    <label class="check agent-cfg-head"><input type="checkbox" class="sUse" value="${a}" ${on ? 'checked' : ''} /> ${agentIcon(a)}<b>${esc(agentLabel(a))}</b>${tr(' を使う')}</label>
     <div class="agent-cfg-body" ${on ? '' : 'hidden'}>${body}</div></div>`;
 }
 
@@ -4554,7 +4556,7 @@ async function openRecentRepo(dir) {
     closeDetail();
     state.board = await api.getBoard();
     renderBoard();
-    toast(inTab ? `${repoFolderName(r)} のタブに切り替えました` : `${repoFolderName(r)} を開きました`, 'ok');
+    toast(inTab ? tr('{name} のタブに切り替えました', { name: repoFolderName(r) }) : tr('{name} を開きました', { name: repoFolderName(r) }), 'ok');
     checkEnv();
     return;
   }
@@ -4585,53 +4587,53 @@ async function chooseRepo(opts) {
   const tabNote = !current
     ? ''
     : asNew
-      ? `<p class="muted small">選んだリポジトリを新しいタブで開きます（タブは ${MAX_REPO_TABS} つまで）。</p>`
-      : `<p class="muted small">選んだリポジトリで、今のタブ（${esc(repoFolderName(current))}）を置き換えます。${tabs.length < MAX_REPO_TABS ? '残しておきたいときは、タブの右の「＋」から開いてください。' : ''}</p>`;
+      ? `<p class="muted small">${tr('選んだリポジトリを新しいタブで開きます（タブは {n} つまで）。', { n: MAX_REPO_TABS })}</p>`
+      : `<p class="muted small">${tr('選んだリポジトリで、今のタブ（{name}）を置き換えます。', { name: esc(repoFolderName(current)) })}${tabs.length < MAX_REPO_TABS ? tr('残しておきたいときは、タブの右の「＋」から開いてください。') : ''}</p>`;
   const bySide = state.board.recentBySide;
   const recent = ((rc && bySide ? bySide[onHost ? 'host' : 'local'] : state.board.settings.recentRepoPaths) || []).filter((p) => p);
   const host = rc ? remoteHostLabel(rc) : '';
   const recentHtml = recent.length
-    ? `<p class="repo-section-label">${rc ? (onHost ? `ホスト（${esc(host)}）で最近開いたリポジトリ` : 'このマシンで最近開いたリポジトリ') : '最近開いたリポジトリ'}</p>
+    ? `<p class="repo-section-label">${rc ? (onHost ? tr('ホスト（{host}）で最近開いたリポジトリ', { host: esc(host) }) : tr('このマシンで最近開いたリポジトリ')) : tr('最近開いたリポジトリ')}</p>
        <div class="repo-choices">
          ${recent
            .map((p) => {
              const on = p === current;
-             const tag = on ? ' <span class="repo-current-tag">開いています</span>' : tabbed.has(p) ? ' <span class="repo-current-tag">タブにあります</span>' : '';
+             const tag = on ? ` <span class="repo-current-tag">${tr('開いています')}</span>` : tabbed.has(p) ? ` <span class="repo-current-tag">${tr('タブにあります')}</span>` : '';
              return `<button class="btn repo-choice${on ? ' current' : ''}" data-recent="${esc(p)}" ${on ? 'disabled' : ''}>${icon('folder')}<b>${esc(repoFolderName(p))}${tag}</b><small>${esc(p)}</small></button>`;
            })
            .join('')}
        </div>
-       <p class="repo-section-label">または新しく開く</p>`
+       <p class="repo-section-label">${tr('または新しく開く')}</p>`
     : '';
   openModal(
-    `<h2>${rc ? (onHost ? 'ホストのリポジトリを選ぶ' : 'このマシンのリポジトリを選ぶ') : 'リポジトリを選ぶ'}</h2>
+    `<h2>${rc ? (onHost ? tr('ホストのリポジトリを選ぶ') : tr('このマシンのリポジトリを選ぶ')) : tr('リポジトリを選ぶ')}</h2>
      ${
        rc
          ? `<div class="mtabs repo-target-tabs" role="tablist">
-             <button class="mtab${onHost ? ' active' : ''}" type="button" data-repo-target="host">${icon('monitor')}ホスト（${esc(host)}）</button>
-             <button class="mtab${onHost ? '' : ' active'}" type="button" data-repo-target="local">${icon('folder')}このマシン</button>
+             <button class="mtab${onHost ? ' active' : ''}" type="button" data-repo-target="host">${icon('monitor')}${tr('ホスト（{host}）', { host: esc(host) })}</button>
+             <button class="mtab${onHost ? '' : ' active'}" type="button" data-repo-target="local">${icon('folder')}${tr('このマシン')}</button>
            </div>
            <p class="muted small">${
              onHost
-               ? `接続先（${esc(host)}）のフォルダを選びます。エージェントはホストのそのフォルダで動きます。`
-               : 'このマシンのフォルダを選びます。エージェントはこのマシンで、ホストのタスクと並んで動きます。このマシンのタブはホストには表示されません。'
+               ? tr('接続先（{host}）のフォルダを選びます。エージェントはホストのそのフォルダで動きます。', { host: esc(host) })
+               : tr('このマシンのフォルダを選びます。エージェントはこのマシンで、ホストのタスクと並んで動きます。このマシンのタブはホストには表示されません。')
            }</p>`
          : ''
      }
      ${tabNote}
-     ${distros.length ? `<p class="muted small">選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。</p>` : ''}
+     ${distros.length ? `<p class="muted small">${tr('選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。')}</p>` : ''}
      ${recentHtml}
      <div class="repo-choices">
        ${
          onHost
-           ? `<button class="btn repo-choice" data-pick="">${icon('monitor')}<b>ホストのフォルダを開く</b><small>${esc(host)} のフォルダを、この画面で辿って選びます</small></button>`
-           : `<button class="btn repo-choice" data-pick="">${icon(distros.length ? 'monitor' : 'folder')}<b>${distros.length ? 'このパソコンのフォルダを開く' : '手元のフォルダを開く'}</b><small>${distros.length ? 'C:\\Users\\… など' : 'git リポジトリ、または git で管理していないフォルダ'}</small></button>`
+           ? `<button class="btn repo-choice" data-pick="">${icon('monitor')}<b>${tr('ホストのフォルダを開く')}</b><small>${tr('{host} のフォルダを、この画面で辿って選びます', { host: esc(host) })}</small></button>`
+           : `<button class="btn repo-choice" data-pick="">${icon(distros.length ? 'monitor' : 'folder')}<b>${distros.length ? tr('このパソコンのフォルダを開く') : tr('手元のフォルダを開く')}</b><small>${distros.length ? tr('C:\\Users\\… など') : tr('git リポジトリ、または git で管理していないフォルダ')}</small></button>`
        }
-       ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">${icon('terminal')}<b>${esc(d)} のフォルダを開く</b><small>\\\\wsl.localhost\\${esc(d)}\\home\\… から開きます</small></button>`).join('')}
-       <button class="btn repo-choice" id="rpClone">${icon('download')}<b>URL からクローンする</b><small>https://github.com/owner/repo・git@github.com:owner/repo.git・owner/repo</small></button>
-       <button class="btn repo-choice" id="rpCreate">${icon('folderPlus')}<b>新しく作る</b><small>空のリポジトリ（GitHub にも作れます）か、git で管理しないフォルダを作ります</small></button>
+       ${distros.map((d) => `<button class="btn repo-choice" data-pick="${esc(d)}">${icon('terminal')}<b>${tr('{name} のフォルダを開く', { name: esc(d) })}</b><small>${tr('\\\\wsl.localhost\\{name}\\home\\… から開きます', { name: esc(d) })}</small></button>`).join('')}
+       <button class="btn repo-choice" id="rpClone">${icon('download')}<b>${tr('URL からクローンする')}</b><small>${tr('https://github.com/owner/repo・git@github.com:owner/repo.git・owner/repo')}</small></button>
+       <button class="btn repo-choice" id="rpCreate">${icon('folderPlus')}<b>${tr('新しく作る')}</b><small>${tr('空のリポジトリ（GitHub にも作れます）か、git で管理しないフォルダを作ります')}</small></button>
      </div>
-     <div class="modal-actions"><button class="btn ghost" id="rpCancel">キャンセル</button></div>`,
+     <div class="modal-actions"><button class="btn ghost" id="rpCancel">${tr('キャンセル')}</button></div>`,
     () => {
       $('rpCancel').onclick = closeModal;
       $('modalBox').querySelectorAll('[data-repo-target]').forEach((b) =>
@@ -4662,7 +4664,7 @@ async function chooseRepo(opts) {
 
 // ホストのフォルダを辿る一覧（遠隔操作中に使う。ホストの画面にダイアログを出さないため）
 // el に描く。onPick(dir) は「pickLabel」のボタンで今のフォルダを選んだとき、onOpenRepo(dir) は一覧の git リポジトリの「開く」
-async function mountDirBrowser(el, { start = '', wsl = '', pickLabel = 'このフォルダを選ぶ', onPick, onOpenRepo } = {}) {
+async function mountDirBrowser(el, { start = '', wsl = '', pickLabel = tr('このフォルダを選ぶ'), onPick, onOpenRepo } = {}) {
   const st = { hidden: false, listing: null, seq: 0 };
   const load = async (dir, { first = false } = {}) => {
     const seq = ++st.seq;
@@ -4685,24 +4687,24 @@ async function mountDirBrowser(el, { start = '', wsl = '', pickLabel = 'この�
   const draw = () => {
     const r = st.listing;
     el.innerHTML = `<div class="dir-browser">
-      <div class="input-row"><input class="mono db-path" spellcheck="false" autocomplete="off" value="${esc(r.path)}" title="パスを入れて Enter で移動します" /><button class="btn db-go">移動</button></div>
+      <div class="input-row"><input class="mono db-path" spellcheck="false" autocomplete="off" value="${esc(r.path)}" title="${esc(tr('パスを入れて Enter で移動します'))}" /><button class="btn db-go">${tr('移動')}</button></div>
       <div class="db-tools">
-        <button class="btn ghost small db-up" ${r.parent ? '' : 'disabled'}>↑ 上のフォルダ</button>
-        <button class="btn ghost small db-home">ホーム</button>
-        <label class="db-hidden"><input type="checkbox" ${st.hidden ? 'checked' : ''} /> 隠しフォルダも出す</label>
-        ${r.repo ? '<span class="db-repo-tag">git リポジトリ</span>' : ''}
+        <button class="btn ghost small db-up" ${r.parent ? '' : 'disabled'}>${tr('↑ 上のフォルダ')}</button>
+        <button class="btn ghost small db-home">${tr('ホーム')}</button>
+        <label class="db-hidden"><input type="checkbox" ${st.hidden ? 'checked' : ''} />${tr(' 隠しフォルダも出す')}</label>
+        ${r.repo ? `<span class="db-repo-tag">${tr('git リポジトリ')}</span>` : ''}
       </div>
       <div class="db-list">
         ${
           r.dirs.length
             ? r.dirs
                 .map(
-                  (d) => `<div class="db-row${d.repo ? ' repo' : ''}"><button class="db-dir" data-dir="${esc(d.path)}">${icon(d.repo ? 'branch' : 'folder')}<span>${esc(d.name)}</span></button>${d.repo && onOpenRepo ? `<button class="btn small db-open" data-open="${esc(d.path)}">開く</button>` : ''}</div>`,
+                  (d) => `<div class="db-row${d.repo ? ' repo' : ''}"><button class="db-dir" data-dir="${esc(d.path)}">${icon(d.repo ? 'branch' : 'folder')}<span>${esc(d.name)}</span></button>${d.repo && onOpenRepo ? `<button class="btn small db-open" data-open="${esc(d.path)}">${tr('開く')}</button>` : ''}</div>`,
                 )
                 .join('')
-            : '<p class="muted small db-empty">この中にフォルダはありません</p>'
+            : `<p class="muted small db-empty">${tr('この中にフォルダはありません')}</p>`
         }
-        ${r.truncated ? '<p class="muted small db-empty">フォルダが多いので、先頭の分だけ出しています。パスを入れて移動してください</p>' : ''}
+        ${r.truncated ? `<p class="muted small db-empty">${tr('フォルダが多いので、先頭の分だけ出しています。パスを入れて移動してください')}</p>` : ''}
       </div>
       ${onPick ? `<div class="db-actions"><button class="btn primary db-pick">${esc(pickLabel)}</button></div>` : ''}
     </div>`;
@@ -4722,7 +4724,7 @@ async function mountDirBrowser(el, { start = '', wsl = '', pickLabel = 'この�
     const pick = el.querySelector('.db-pick');
     if (pick) pick.onclick = () => onPick(r.path);
   };
-  el.innerHTML = '<p class="muted small">ホストのフォルダを読み込んでいます…</p>';
+  el.innerHTML = `<p class="muted small">${tr('ホストのフォルダを読み込んでいます…')}</p>`;
   await load(start, { first: true });
 }
 
@@ -4730,16 +4732,16 @@ async function mountDirBrowser(el, { start = '', wsl = '', pickLabel = 'この�
 function hostFolderModal(opts = {}) {
   const host = remoteHostLabel();
   openModal(
-    `<h2>ホストのフォルダを開く</h2>
-     <p class="muted small">接続先（${esc(host)}）のフォルダです。開きたいフォルダまで移動して「このフォルダを開く」を押すか、一覧の git リポジトリの「開く」を押します。git で管理していないフォルダも開けます（worktree を作らず、そのフォルダでタスクを動かします）。</p>
+    `<h2>${tr('ホストのフォルダを開く')}</h2>
+     <p class="muted small">${tr('接続先（{host}）のフォルダです。開きたいフォルダまで移動して「このフォルダを開く」を押すか、一覧の git リポジトリの「開く」を押します。git で管理していないフォルダも開けます（worktree を作らず、そのフォルダでタスクを動かします）。', { host: esc(host) })}</p>
      <div id="hfBrowser"></div>
-     <div class="modal-actions"><button class="btn ghost" id="hfBack">戻る</button></div>`,
+     <div class="modal-actions"><button class="btn ghost" id="hfBack">${tr('戻る')}</button></div>`,
     () => {
       $('hfBack').onclick = () => chooseRepo();
       mountDirBrowser($('hfBrowser'), {
         start: '',
         wsl: opts.wsl || '',
-        pickLabel: 'このフォルダを開く',
+        pickLabel: tr('このフォルダを開く'),
         onPick: (dir) => openRecentRepo(dir),
         onOpenRepo: (dir) => openRecentRepo(dir),
       });
@@ -4757,17 +4759,17 @@ function repoNameFromUrl(url) {
 async function repoSetupModal(mode, distros = []) {
   const clone = mode === 'clone';
   openModal(
-    `<h2>${clone ? 'URL からクローンする' : '新しく作る'}</h2>
-     ${clone ? `<label class="field"><span>リポジトリの URL</span><input id="rsUrl" class="mono" placeholder="https://github.com/owner/repo または owner/repo" autocomplete="off" spellcheck="false" /></label>` : ''}
-     ${distros.length ? `<label class="field"><span>作る場所</span><select id="rsWhere"><option value="">このパソコン</option>${distros.map((d) => `<option value="${esc(d)}">${esc(d)}（WSL）</option>`).join('')}</select></label>` : ''}
-     <label class="field"><span>置き場所（この中にフォルダを作ります）</span>
-       <div class="input-row"><input id="rsParent" class="mono" spellcheck="false" /><button class="btn" id="rsBrowse">選ぶ…</button></div></label>
+    `<h2>${clone ? tr('URL からクローンする') : tr('新しく作る')}</h2>
+     ${clone ? `<label class="field"><span>${tr('リポジトリの URL')}</span><input id="rsUrl" class="mono" placeholder="${esc(tr('https://github.com/owner/repo または owner/repo'))}" autocomplete="off" spellcheck="false" /></label>` : ''}
+     ${distros.length ? `<label class="field"><span>${tr('作る場所')}</span><select id="rsWhere"><option value="">${tr('このパソコン')}</option>${distros.map((d) => `<option value="${esc(d)}">${esc(d)}（WSL）</option>`).join('')}</select></label>` : ''}
+     <label class="field"><span>${tr('置き場所（この中にフォルダを作ります）')}</span>
+       <div class="input-row"><input id="rsParent" class="mono" spellcheck="false" /><button class="btn" id="rsBrowse">${tr('選ぶ…')}</button></div></label>
      <div id="rsHostBrowser" class="dir-browser-inline hidden"></div>
-     <label class="field"><span>フォルダ名${clone ? '（空なら URL から決めます）' : ''}</span><input id="rsName" class="mono" spellcheck="false" autocomplete="off" placeholder="${clone ? 'repo' : '例: my-app'}" /></label>
-     ${clone ? '' : `<label class="field"><span>ソース管理</span><select id="rsGit"><option value="git">git で管理する（タスクごとに worktree で作業し、マージ・PR で取り込む）</option><option value="none">git で管理しない（フォルダだけ作る。動画づくりなど、コード以外の作業に）</option></select><small>git で管理しないフォルダでは、タスクはそのフォルダの中で直接動きます。差分・worktree・マージ・PR は使えず、終わったら「完了にする」で完了にします</small></label>`}
-     ${clone ? '' : `<label class="field" id="rsGhWrap"><span>GitHub</span><select id="rsGh"><option value="">作らない（手元だけ）</option><option value="private">GitHub にも作る（非公開）</option><option value="public">GitHub にも作る（公開）</option></select><small>GitHub にも作るときは、gh（GitHub CLI）にログインしている必要があります</small></label>`}
+     <label class="field"><span>${tr('フォルダ名')}${clone ? tr('（空なら URL から決めます）') : ''}</span><input id="rsName" class="mono" spellcheck="false" autocomplete="off" placeholder="${clone ? 'repo' : esc(tr('例: my-app'))}" /></label>
+     ${clone ? '' : `<label class="field"><span>${tr('ソース管理')}</span><select id="rsGit"><option value="git">${tr('git で管理する（タスクごとに worktree で作業し、マージ・PR で取り込む）')}</option><option value="none">${tr('git で管理しない（フォルダだけ作る。動画づくりなど、コード以外の作業に）')}</option></select><small>${tr('git で管理しないフォルダでは、タスクはそのフォルダの中で直接動きます。差分・worktree・マージ・PR は使えず、終わったら「完了にする」で完了にします')}</small></label>`}
+     ${clone ? '' : `<label class="field" id="rsGhWrap"><span>GitHub</span><select id="rsGh"><option value="">${tr('作らない（手元だけ）')}</option><option value="private">${tr('GitHub にも作る（非公開）')}</option><option value="public">${tr('GitHub にも作る（公開）')}</option></select><small>${tr('GitHub にも作るときは、gh（GitHub CLI）にログインしている必要があります')}</small></label>`}
      <p class="muted small" id="rsPreview"></p>
-     <div class="modal-actions"><button class="btn ghost" id="rsBack">戻る</button><button class="btn primary" id="rsOk">${clone ? 'クローンして開く' : '作って開く'}</button></div>`,
+     <div class="modal-actions"><button class="btn ghost" id="rsBack">${tr('戻る')}</button><button class="btn primary" id="rsOk">${clone ? tr('クローンして開く') : tr('作って開く')}</button></div>`,
     async () => {
       const where = () => ($('rsWhere') ? $('rsWhere').value : '');
       const sep = () => (where() || /^[A-Za-z]:\\|^\\\\/.test($('rsParent').value) ? '\\' : '/');
@@ -4777,11 +4779,11 @@ async function repoSetupModal(mode, distros = []) {
       // WSL のフォルダと、git で管理しないフォルダでは GitHub に作れない
       const syncGh = () => {
         if ($('rsGhWrap')) $('rsGhWrap').hidden = !!where() || noGit();
-        if (!clone) $('rsOk').textContent = noGit() ? 'フォルダを作って開く' : '作って開く';
+        if (!clone) $('rsOk').textContent = noGit() ? tr('フォルダを作って開く') : tr('作って開く');
       };
       const preview = () => {
         const p = $('rsParent').value.trim().replace(/[\\/]+$/, '');
-        $('rsPreview').textContent = p && name() ? `作るフォルダ: ${p}${sep()}${name()}` : '';
+        $('rsPreview').textContent = p && name() ? tr('作るフォルダ: {path}', { path: `${p}${sep()}${name()}` }) : '';
       };
       const loadParent = async () => {
         $('rsParent').value = (await api.repoDefaultParent({ ...targetOpts(), ...(where() ? { wsl: where() } : {}) }).catch(() => '')) || '';
@@ -4798,7 +4800,7 @@ async function repoSetupModal(mode, distros = []) {
           mountDirBrowser(box, {
             start: $('rsParent').value.trim(),
             wsl: where(),
-            pickLabel: 'ここを置き場所にする',
+            pickLabel: tr('ここを置き場所にする'),
             onPick: (dir) => {
               $('rsParent').value = dir;
               box.classList.add('hidden');
@@ -4819,13 +4821,13 @@ async function repoSetupModal(mode, distros = []) {
       $('rsOk').onclick = async () => {
         const parent = $('rsParent').value.trim();
         const r = clone
-          ? await runBusy('クローンしています…（大きいリポジトリは時間がかかります）', () => api.cloneRepo({ ...targetOpts(), url: $('rsUrl').value.trim(), parent, name: $('rsName').value.trim(), tab: state.repoOpenMode }))
-          : await runBusy(noGit() ? 'フォルダを作っています…' : 'リポジトリを作っています…', () => api.createRepo({ ...targetOpts(), parent, name: $('rsName').value.trim(), github: where() || noGit() ? '' : $('rsGh').value, git: !noGit(), tab: state.repoOpenMode }));
+          ? await runBusy(tr('クローンしています…（大きいリポジトリは時間がかかります）'), () => api.cloneRepo({ ...targetOpts(), url: $('rsUrl').value.trim(), parent, name: $('rsName').value.trim(), tab: state.repoOpenMode }))
+          : await runBusy(noGit() ? tr('フォルダを作っています…') : tr('リポジトリを作っています…'), () => api.createRepo({ ...targetOpts(), parent, name: $('rsName').value.trim(), github: where() || noGit() ? '' : $('rsGh').value, git: !noGit(), tab: state.repoOpenMode }));
         if (!r) return;
         closeModal();
         closeDetail();
         if (r.warning) toast(r.warning);
-        else toast(clone ? 'クローンしました' : r.git === false ? 'git で管理しないフォルダを作りました' : r.github ? 'リポジトリを作り、GitHub にも push しました' : 'リポジトリを作りました', 'ok');
+        else toast(clone ? tr('クローンしました') : r.git === false ? tr('git で管理しないフォルダを作りました') : r.github ? tr('リポジトリを作り、GitHub にも push しました') : tr('リポジトリを作りました'), 'ok');
         state.board = await api.getBoard();
         renderBoard();
         checkEnv();
@@ -4950,18 +4952,18 @@ api.onGh((ev) => {
 
 function timeAgo(t) {
   const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (s < 60) return 'たった今';
-  if (s < 3600) return `${Math.floor(s / 60)}分前`;
-  if (s < 86400) return `${Math.floor(s / 3600)}時間前`;
-  return new Date(t).toLocaleString();
+  if (s < 60) return tr('たった今');
+  if (s < 3600) return tr('{n}分前', { n: Math.floor(s / 60) });
+  if (s < 86400) return tr('{n}時間前', { n: Math.floor(s / 3600) });
+  return new Date(t).toLocaleString(typeof I18n !== 'undefined' ? I18n.locale() : undefined);
 }
 
 function notifItemHtml(n) {
   const alive = !!card(n.cardId);
   const action =
     n.action && !n.actedAt && alive
-      ? `<button class="btn small primary" data-nact="${esc(n.id)}">${esc(n.actionLabel || '実行')}</button>`
-      : n.action && n.actedAt ? '<span class="muted small">対応済み</span>' : '';
+      ? `<button class="btn small primary" data-nact="${esc(n.id)}">${esc(n.actionLabel || tr('実行'))}</button>`
+      : n.action && n.actedAt ? `<span class="muted small">${tr('対応済み')}</span>` : '';
   return `<div class="notif-item ${n.read ? '' : 'unread'} k-${esc(n.kind)}" data-nid="${esc(n.id)}" data-card="${alive ? esc(n.cardId) : ''}">
     <span class="notif-icon">${icon(NOTIF_ICON[n.kind] || 'bell')}</span>
     <div class="notif-main">
@@ -4969,7 +4971,7 @@ function notifItemHtml(n) {
       ${n.body ? `<div class="notif-body">${esc(plainText(n.body))}</div>` : ''}
       <div class="notif-foot"><span class="muted small">${timeAgo(n.t)}</span>${action}</div>
     </div>
-    <button class="icon notif-x" data-nclear="${esc(n.id)}" title="この通知を消す">✕</button>
+    <button class="icon notif-x" data-nclear="${esc(n.id)}" title="${esc(tr('この通知を消す'))}">✕</button>
   </div>`;
 }
 
@@ -4981,11 +4983,11 @@ function renderNotifications() {
   const panel = $('notifPanel');
   if (panel.classList.contains('hidden')) return;
   panel.innerHTML = `
-    <div class="notif-head"><b>通知</b><span class="spacer"></span>
-      ${unread ? '<button class="btn small ghost" data-nall="read">すべて既読</button>' : ''}
-      ${list.length ? '<button class="btn small ghost" data-nall="clear">すべて消す</button>' : ''}
+    <div class="notif-head"><b>${tr('通知')}</b><span class="spacer"></span>
+      ${unread ? `<button class="btn small ghost" data-nall="read">${tr('すべて既読')}</button>` : ''}
+      ${list.length ? `<button class="btn small ghost" data-nall="clear">${tr('すべて消す')}</button>` : ''}
     </div>
-    <div class="notif-list">${list.length ? list.map(notifItemHtml).join('') : '<p class="muted pad">通知はまだありません</p>'}</div>`;
+    <div class="notif-list">${list.length ? list.map(notifItemHtml).join('') : `<p class="muted pad">${tr('通知はまだありません')}</p>`}</div>`;
 }
 
 function closeNotifications() {
@@ -5023,7 +5025,7 @@ $('notifPanel').addEventListener('click', async (e) => {
   if (act) {
     const n = (state.board.notifications || []).find((v) => v.id === act.dataset.nact);
     const c = n && card(n.cardId);
-    const r = await runBusy('スキルの提案を頼んでいます…', () => api.actNotification(act.dataset.nact).then((v) => v || {}), 'スキルの提案を新しい会話で頼みました。返事が来たら、下の欄から追加したいものを伝えてください');
+    const r = await runBusy(tr('スキルの提案を頼んでいます…'), () => api.actNotification(act.dataset.nact).then((v) => v || {}), tr('スキルの提案を新しい会話で頼みました。返事が来たら、下の欄から追加したいものを伝えてください'));
     const to = (r && r.cardId) || (c && c.id);
     if (r && to) {
       closeNotifications();
@@ -5111,15 +5113,15 @@ document.addEventListener('click', (e) => {
   const code = b.parentElement.querySelector('pre.md-code code');
   navigator.clipboard.writeText(code ? code.textContent : '').then(
     () => {
-      b.textContent = 'コピーしました';
+      b.textContent = tr('コピーしました');
       b.classList.add('copied');
       clearTimeout(b._copiedTimer);
       b._copiedTimer = setTimeout(() => {
-        b.textContent = 'コピー';
+        b.textContent = tr('コピー');
         b.classList.remove('copied');
       }, 1500);
     },
-    () => toast('コピーできませんでした'),
+    () => toast(tr('コピーできませんでした')),
   );
 });
 
@@ -5151,11 +5153,11 @@ async function checkEnv() {
   const on = enabledAgents();
   const has = (a) => (env.agents ? !!env.agents[a] : a === 'claude' ? !!env.claude : true);
   if (env.wsl) {
-    if (!env.git) msgs.push(`${env.wsl}（WSL）の中に git が見つかりません。${env.wsl} のターミナルで sudo apt install git を実行してください。`);
-    for (const a of on) if (!has(a)) msgs.push(`${env.wsl}（WSL）の中に ${a} が見つかりません。${env.wsl} のターミナルで ${agentLabel(a)} をインストールしてログインしてください（このリポジトリのタスクは ${env.wsl} の中で動きます）。`);
+    if (!env.git) msgs.push(tr('{wsl}（WSL）の中に git が見つかりません。{wsl} のターミナルで sudo apt install git を実行してください。', { wsl: env.wsl }));
+    for (const a of on) if (!has(a)) msgs.push(tr('{wsl}（WSL）の中に {agent} が見つかりません。{wsl} のターミナルで {label} をインストールしてログインしてください（このリポジトリのタスクは {wsl} の中で動きます）。', { wsl: env.wsl, agent: a, label: agentLabel(a) }));
   } else {
-    if (!env.git) msgs.push(`git が見つかりません。${env.platform === 'win32' ? 'Git for Windows（https://git-scm.com/）' : env.platform === 'darwin' ? 'ターミナルで xcode-select --install を実行するか Homebrew で git' : 'git'} をインストールしてから、アプリを再起動してください。`);
-    for (const a of on) if (!has(a)) msgs.push(`${a} コマンドが見つかりません。${agentLabel(a)} をインストールしてログインするか、「設定」で ${a} のフルパスを指定してください（ターミナルで which ${a}、Windows なら where ${a} で調べられます）。使わないなら、「設定」の「使うエージェント」でチェックを外してください。`);
+    if (!env.git) msgs.push(env.platform === 'win32' ? tr('git が見つかりません。Git for Windows（https://git-scm.com/）をインストールしてから、アプリを再起動してください。') : env.platform === 'darwin' ? tr('git が見つかりません。ターミナルで xcode-select --install を実行するか Homebrew で git をインストールしてから、アプリを再起動してください。') : tr('git が見つかりません。git をインストールしてから、アプリを再起動してください。'));
+    for (const a of on) if (!has(a)) msgs.push(tr('{agent} コマンドが見つかりません。{label} をインストールしてログインするか、「設定」で {agent} のフルパスを指定してください（ターミナルで which {agent}、Windows なら where {agent} で調べられます）。使わないなら、「設定」の「使うエージェント」でチェックを外してください。', { agent: a, label: agentLabel(a) }));
   }
   const el = $('envBanner');
   el.innerHTML = msgs.map((m) => `<div>${icon('alert')}${esc(m)}</div>`).join('');
