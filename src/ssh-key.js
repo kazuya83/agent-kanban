@@ -70,7 +70,7 @@ async function generateKey({ keyPath = '', command = 'ssh-keygen', prefixArgs = 
   } catch {
     /* 取れない環境もある */
   }
-  const c = comment || `agent-kanban ${user ? `${user}@` : ''}${os.hostname()}`;
+  const c = comment || `worktree-kanban ${user ? `${user}@` : ''}${os.hostname()}`;
   // -N "" でパスフレーズなし（Windows の ssh-keygen にも空文字の引数として渡る）
   const args = [...prefixArgs, '-t', 'ed25519', '-N', '', '-C', c, '-f', st.path, '-q'];
   return new Promise((resolve, reject) => {
@@ -188,7 +188,7 @@ function permissionError(err, file, line, admin) {
   if (err && (err.code === 'EACCES' || err.code === 'EPERM')) {
     const cmd = admin ? registerCommands(line).winAdmin : registerCommands(line).mac;
     return new Error(admin
-      ? tr('{file} に書き込めませんでした（権限がありません）。このユーザーは管理者なので、公開鍵は管理者用のファイルに入れる必要があります。Agent Kanban を「管理者として実行」で開き直すか、次のコマンドを管理者の PowerShell で実行してください: {cmd}', { file, cmd })
+      ? tr('{file} に書き込めませんでした（権限がありません）。このユーザーは管理者なので、公開鍵は管理者用のファイルに入れる必要があります。Worktree Kanban を「管理者として実行」で開き直すか、次のコマンドを管理者の PowerShell で実行してください: {cmd}', { file, cmd })
       : tr('{file} に書き込めませんでした（権限がありません）。次のコマンドをターミナルで実行してください: {cmd}', { file, cmd }));
   }
   return err;

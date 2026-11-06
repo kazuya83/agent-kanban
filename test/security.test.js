@@ -32,7 +32,7 @@ test('quoteForCmd: cmd.exe で抜けられる文字を含む引数は拒否す�
 });
 
 function setup() {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-sec-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-sec-'));
   const repo = path.join(tmp, 'repo');
   fs.mkdirSync(repo);
   const g = (...a) => execFileSync('git', a, { cwd: repo });

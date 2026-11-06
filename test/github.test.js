@@ -47,7 +47,7 @@ process.exit(2);
 }
 
 test('リモート URL と Issue 番号の読み取り', () => {
-  assert.deepStrictEqual(github.parseGithubRemote('https://github.com/kazuya83/agent-kanban.git'), { owner: 'kazuya83', repo: 'agent-kanban' });
+  assert.deepStrictEqual(github.parseGithubRemote('https://github.com/kazuya83/worktree-kanban.git'), { owner: 'kazuya83', repo: 'worktree-kanban' });
   assert.deepStrictEqual(github.parseGithubRemote('git@github.com:acme/app.git\n'), { owner: 'acme', repo: 'app' });
   assert.deepStrictEqual(github.parseGithubRemote('ssh://git@github.com/acme/app'), { owner: 'acme', repo: 'app' });
   assert.strictEqual(github.parseGithubRemote('https://gitlab.com/acme/app.git'), null);

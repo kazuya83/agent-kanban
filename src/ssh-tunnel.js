@@ -1,5 +1,5 @@
 // クライアント側で SSH のポート転送（ssh -N -L）を張る
-// ホストの Agent Kanban は 127.0.0.1 でしか待ち受けないので、Tailscale の IP などへは
+// ホストの Worktree Kanban は 127.0.0.1 でしか待ち受けないので、Tailscale の IP などへは
 // 直接つながらない。アプリが ssh を起動し、手元の空きポート → ホストの 127.0.0.1:port へ転送する
 const net = require('net');
 const { spawn } = require('child_process');
@@ -51,7 +51,7 @@ function explainSshError(stderr, { host = '', user = '', sshPort = 22, spawnErro
   const howto = tr('ホストが Mac なら「システム設定 → 一般 → 共有 → リモートログイン」をオン、Windows なら「設定 → システム → オプション機能」で「OpenSSH サーバー」を追加してサービス sshd を開始');
   const guide = tr('詳しい手順は README の「遠隔操作」（docs/remote.md）にあります');
   if (/timed out|ETIMEDOUT/i.test(text)) {
-    return tr('SSH の接続がタイムアウトしました（{target}）。相手から返事がないときに出ます。次を順に確かめてください: ① 両方の PC で Tailscale が「接続中」か（操作側で tailscale ping {host} が返るか） ② IP やホスト名が、ホストの Agent Kanban の「RC設定」に出ている接続先と合っているか ③ ホストがスリープしていないか ④ ホストで SSH サーバーが動いているか（{howto}） ⑤ ホストのファイアウォールが SSH（{sshPort}）を止めていないか（Mac の「ステルスモード」「外部からの接続をすべてブロック」など）。{guide}', { target, host, howto, sshPort, guide });
+    return tr('SSH の接続がタイムアウトしました（{target}）。相手から返事がないときに出ます。次を順に確かめてください: ① 両方の PC で Tailscale が「接続中」か（操作側で tailscale ping {host} が返るか） ② IP やホスト名が、ホストの Worktree Kanban の「RC設定」に出ている接続先と合っているか ③ ホストがスリープしていないか ④ ホストで SSH サーバーが動いているか（{howto}） ⑤ ホストのファイアウォールが SSH（{sshPort}）を止めていないか（Mac の「ステルスモード」「外部からの接続をすべてブロック」など）。{guide}', { target, host, howto, sshPort, guide });
   }
   if (/Connection refused/i.test(text)) {
     return tr('SSH の接続を断られました（{target}）。ホストで SSH サーバーが動いていません。{howto}してください（SSH のポートが 22 以外ならそれも合わせてください）。{guide}', { target, howto, guide });

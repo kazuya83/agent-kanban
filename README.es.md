@@ -1,6 +1,6 @@
 [English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-# Agent Kanban
+# Worktree Kanban
 
 Aplicación de escritorio (Electron, Mac / Windows / Linux) que ejecuta en paralelo las CLI de agentes de programación con IA (Claude Code / Codex CLI / Gemini CLI / Cursor CLI), cada tarea en su propio git worktree, y las gestiona en un tablero kanban. **No solo ejecuta tareas dentro de un repositorio: también puede ejecutar a la vez tareas de varios repositorios.**
 
@@ -86,7 +86,7 @@ Desde el menú de la barra superior, cambia a «Programador de tareas» para ges
 
 ### Operar desde otro PC (RC)
 
-Puedes manejar el tablero del PC que ejecuta los agentes (el host) desde Agent Kanban en otro PC (el cliente). Tanto Mac como Windows pueden ser el host, y cualquiera de los dos puede ser el cliente. En el cliente puedes aprobar, responder preguntas, enviar instrucciones adicionales, hacer merge, etc., igual que en la pantalla del host.
+Puedes manejar el tablero del PC que ejecuta los agentes (el host) desde Worktree Kanban en otro PC (el cliente). Tanto Mac como Windows pueden ser el host, y cualquiera de los dos puede ser el cliente. En el cliente puedes aprobar, responder preguntas, enviar instrucciones adicionales, hacer merge, etc., igual que en la pantalla del host.
 
 - La aplicación del host solo escucha en `127.0.0.1`. La del cliente conecta con un túnel `ssh -N -L`, así que en el host solo hace falta un servidor SSH. Para conectar desde fuera, usa Tailscale u otra red similar
 - SSH entra con una clave. En los «Ajustes de RC» del cliente, crea una clave ed25519 (`~/.ssh/agent-kanban_ed25519`) y registra la clave pública en los «Ajustes de RC» del host
@@ -111,13 +111,13 @@ Además: dividir una tarea grande en subtareas que avanzan en paralelo o en orde
 **Mac / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.sh | bash
 ```
 
 **Windows** (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex
 ```
 
 Los mismos comandos actualizan a la última versión. También se puede actualizar desde la aplicación: «Ajustes» → «Actualización de la aplicación» → «Actualizar a la nueva versión». Si marcas «Actualizar automáticamente cuando salga una versión nueva», se sustituye y se vuelve a abrir cuando no hay ninguna tarea en marcha. Para fijar una versión, desinstalar, instalar desde un archivo y el aviso del primer arranque, consulta [docs/install.md](docs/install.md) (Japanese).

@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { listDirs, parentDir } = require('../src/dir-browse');
 
-const tmpdir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-db-')));
+const tmpdir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-db-')));
 
 test('listDirs: フォルダだけを名前順で返し、git リポジトリに印を付ける', () => {
   const root = tmpdir();

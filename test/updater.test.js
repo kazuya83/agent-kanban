@@ -13,16 +13,16 @@ test('版の番号を数字として比べる', () => {
 });
 
 test('releases/latest のリダイレクト先から版を取り出す', () => {
-  assert.strictEqual(versionFromReleaseUrl('https://github.com/kazuya83/agent-kanban/releases/tag/v0.1.9'), '0.1.9');
-  assert.strictEqual(versionFromReleaseUrl('https://github.com/kazuya83/agent-kanban/releases'), null);
+  assert.strictEqual(versionFromReleaseUrl('https://github.com/kazuya83/worktree-kanban/releases/tag/v0.1.9'), '0.1.9');
+  assert.strictEqual(versionFromReleaseUrl('https://github.com/kazuya83/worktree-kanban/releases'), null);
   assert.strictEqual(versionFromReleaseUrl(''), null);
 });
 
 test('OS・CPU ごとのリリースのファイル名（install.sh / install.ps1 と同じ）', () => {
-  assert.strictEqual(assetName('darwin', 'arm64', '0.1.9'), 'agent-kanban-0.1.9-mac-arm64.dmg');
-  assert.strictEqual(assetName('darwin', 'x64', '0.1.9'), 'agent-kanban-0.1.9-mac-x64.dmg');
-  assert.strictEqual(assetName('linux', 'x64', '0.1.9'), 'agent-kanban-0.1.9-linux-x86_64.AppImage');
-  assert.strictEqual(assetName('win32', 'x64', '0.1.9'), 'agent-kanban-0.1.9-win-x64.zip');
+  assert.strictEqual(assetName('darwin', 'arm64', '0.1.9'), 'worktree-kanban-0.1.9-mac-arm64.dmg');
+  assert.strictEqual(assetName('darwin', 'x64', '0.1.9'), 'worktree-kanban-0.1.9-mac-x64.dmg');
+  assert.strictEqual(assetName('linux', 'x64', '0.1.9'), 'worktree-kanban-0.1.9-linux-x86_64.AppImage');
+  assert.strictEqual(assetName('win32', 'x64', '0.1.9'), 'worktree-kanban-0.1.9-win-x64.zip');
   assert.strictEqual(assetName('linux', 'arm64', '0.1.9'), null);
 });
 
@@ -34,7 +34,7 @@ test('開発版・AppImage 以外の Linux では更新しない', () => {
 });
 
 test('Mac の .app のフォルダを実行ファイルの場所から求める', () => {
-  assert.strictEqual(macBundlePath('/Applications/Agent Kanban.app/Contents/MacOS/Agent Kanban'), '/Applications/Agent Kanban.app');
+  assert.strictEqual(macBundlePath('/Applications/Worktree Kanban.app/Contents/MacOS/Worktree Kanban'), '/Applications/Worktree Kanban.app');
   assert.strictEqual(macBundlePath('/usr/bin/electron'), '');
 });
 
@@ -54,7 +54,7 @@ function fakeFetch(map) {
 const mk = (fetch, o = {}) => new Updater({ currentVersion: '0.1.8', packaged: true, platform: 'darwin', arch: 'arm64', env: {}, fetch, ...o });
 
 test('新しい版があり、この OS 向けのファイルもあれば available', async () => {
-  const f = fakeFetch((u) => (u.endsWith('/releases/latest') ? { status: 200, url: 'https://github.com/kazuya83/agent-kanban/releases/tag/v0.1.9' } : { status: 200 }));
+  const f = fakeFetch((u) => (u.endsWith('/releases/latest') ? { status: 200, url: 'https://github.com/kazuya83/worktree-kanban/releases/tag/v0.1.9' } : { status: 200 }));
   const up = mk(f);
   const events = [];
   up.on('changed', (s) => events.push(s.state));
@@ -62,14 +62,14 @@ test('新しい版があり、この OS 向けのファイルもあれば availa
   assert.strictEqual(s.state, 'available');
   assert.strictEqual(s.latestVersion, '0.1.9');
   assert.match(s.releaseUrl, /\/releases\/tag\/v0\.1\.9$/);
-  assert.ok(f.calls.some((u) => u.endsWith('/releases/download/v0.1.9/agent-kanban-0.1.9-mac-arm64.dmg')));
+  assert.ok(f.calls.some((u) => u.endsWith('/releases/download/v0.1.9/worktree-kanban-0.1.9-mac-arm64.dmg')));
   assert.deepStrictEqual(events, ['checking', 'available']);
 });
 
 test('同じ版なら latest、ファイルがまだなければ preparing、通信できなければ error', async () => {
-  const same = await mk(fakeFetch(() => ({ status: 200, url: 'https://github.com/kazuya83/agent-kanban/releases/tag/v0.1.8' }))).check();
+  const same = await mk(fakeFetch(() => ({ status: 200, url: 'https://github.com/kazuya83/worktree-kanban/releases/tag/v0.1.8' }))).check();
   assert.strictEqual(same.state, 'latest');
-  const prep = await mk(fakeFetch((u) => (u.endsWith('/latest') ? { status: 200, url: 'https://github.com/kazuya83/agent-kanban/releases/tag/v0.1.9' } : { status: 404 }))).check();
+  const prep = await mk(fakeFetch((u) => (u.endsWith('/latest') ? { status: 200, url: 'https://github.com/kazuya83/worktree-kanban/releases/tag/v0.1.9' } : { status: 404 }))).check();
   assert.strictEqual(prep.state, 'preparing');
   const err = await mk(fakeFetch(() => new Error('offline'))).check();
   assert.strictEqual(err.state, 'error');
@@ -77,14 +77,14 @@ test('同じ版なら latest、ファイルがまだなければ preparing、通
 });
 
 test('同時に何回確かめても、問い合わせは1回', async () => {
-  const f = fakeFetch(() => ({ status: 200, url: 'https://github.com/kazuya83/agent-kanban/releases/tag/v0.1.8' }));
+  const f = fakeFetch(() => ({ status: 200, url: 'https://github.com/kazuya83/worktree-kanban/releases/tag/v0.1.8' }));
   const up = mk(f);
   await Promise.all([up.check(), up.check(), up.check()]);
   assert.strictEqual(f.calls.length, 1);
 });
 
 test('新しい版がないとき・開発版では入れ替えない', async () => {
-  const up = mk(fakeFetch(() => ({ status: 200, url: 'https://github.com/kazuya83/agent-kanban/releases/tag/v0.1.8' })));
+  const up = mk(fakeFetch(() => ({ status: 200, url: 'https://github.com/kazuya83/worktree-kanban/releases/tag/v0.1.8' })));
   await up.check();
   assert.throws(() => up.install(), /新しい版はありません/);
   assert.throws(() => mk(null, { packaged: false }).install(), /開発版/);
@@ -96,9 +96,9 @@ test('入れ替えのスクリプトを、アプリと切り離して起動す�
     spawned.push({ command, args, opts });
     return { unref() {} };
   };
-  const up = mk(fakeFetch((u) => (u.endsWith('/latest') ? { status: 200, url: 'https://github.com/kazuya83/agent-kanban/releases/tag/v0.1.9' } : { status: 200 })), { spawn, env: { ELECTRON_RUN_AS_NODE: '1', HOME: '/h' } });
+  const up = mk(fakeFetch((u) => (u.endsWith('/latest') ? { status: 200, url: 'https://github.com/kazuya83/worktree-kanban/releases/tag/v0.1.9' } : { status: 200 })), { spawn, env: { ELECTRON_RUN_AS_NODE: '1', HOME: '/h' } });
   await up.check();
-  const s = up.install({ pid: 4321, execPath: '/Applications/Agent Kanban.app/Contents/MacOS/Agent Kanban' });
+  const s = up.install({ pid: 4321, execPath: '/Applications/Worktree Kanban.app/Contents/MacOS/Worktree Kanban' });
   assert.strictEqual(s.state, 'installing');
   assert.strictEqual(spawned.length, 1);
   const { command, args, opts } = spawned[0];
@@ -108,25 +108,25 @@ test('入れ替えのスクリプトを、アプリと切り離して起動す�
   const script = args[1];
   assert.match(script, /kill -0 4321/);
   assert.match(script, /AGENT_KANBAN_VERSION='0\.1\.9' bash/);
-  assert.match(script, /open '\/Applications\/Agent Kanban\.app'/); // 入れられなかったら元のアプリを起動し直す
+  assert.match(script, /open '\/Applications\/Worktree Kanban\.app'/); // 入れられなかったら元のアプリを起動し直す
 });
 
 test('Mac / Linux のスクリプトは bash の文法として正しい', { skip: process.platform === 'win32' }, () => {
   for (const [platform, env] of [['darwin', {}], ['linux', { APPIMAGE: "/home/a/it's.AppImage" }]]) {
-    const { args } = installCommand({ platform, pid: 1, version: '0.1.9', execPath: '/x/Agent Kanban.app/Contents/MacOS/Agent Kanban', env });
+    const { args } = installCommand({ platform, pid: 1, version: '0.1.9', execPath: '/x/Worktree Kanban.app/Contents/MacOS/Worktree Kanban', env });
     const r = spawnSync('/bin/bash', ['-n', '-c', args[1]]);
     assert.strictEqual(r.status, 0, String(r.stderr));
   }
 });
 
 test('Windows は install.ps1 を使い、入れられなかったら元のアプリを起動し直す', () => {
-  const { command, args } = installCommand({ platform: 'win32', pid: 99, version: 'v0.2.0', execPath: "C:\\Users\\a'b\\Agent Kanban.exe" });
+  const { command, args } = installCommand({ platform: 'win32', pid: 99, version: 'v0.2.0', execPath: "C:\\Users\\a'b\\Worktree Kanban.exe" });
   assert.strictEqual(command, 'powershell.exe');
   const script = args[args.length - 1];
   assert.match(script, /Wait-Process -Id 99/);
   assert.match(script, /AGENT_KANBAN_VERSION = '0\.2\.0'/);
   assert.match(script, /install\.ps1/);
-  assert.match(script, /Start-Process -FilePath 'C:\\Users\\a''b\\Agent Kanban\.exe'/);
+  assert.match(script, /Start-Process -FilePath 'C:\\Users\\a''b\\Worktree Kanban\.exe'/);
 });
 
 test('おかしな版の番号・プロセス番号ではスクリプトを作らない', () => {

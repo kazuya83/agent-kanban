@@ -1,4 +1,4 @@
-// Agent Kanban 同士の遠隔操作（SSH トンネル前提）
+// Worktree Kanban 同士の遠隔操作（SSH トンネル前提）
 // - ホスト: 127.0.0.1 で TCP 待ち受け。改行区切り JSON
 // - クライアント: トンネル先（通常は 127.0.0.1:port）へ接続し、ペアリングコードまたはトークンで認証
 // - 認証後、ボード操作用の invoke と、board:changed などの event を中継する
@@ -680,7 +680,7 @@ function droppedSettingKeys(patch, result) {
 function droppedSettingsMessage(keys) {
   const sep = I18n.getLanguage() === 'ja' || I18n.getLanguage() === 'zh' ? '、' : ', ';
   const names = [...new Set(keys.map((k) => settingLabel(k)))];
-  return tr('ホストの Agent Kanban の版が古いため、次の設定を保存できませんでした: {names}。ホストのアプリを新しい版に更新してから、もう一度保存してください。', { names: names.join(sep) });
+  return tr('ホストの Worktree Kanban の版が古いため、次の設定を保存できませんでした: {names}。ホストのアプリを新しい版に更新してから、もう一度保存してください。', { names: names.join(sep) });
 }
 
 module.exports = {

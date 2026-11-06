@@ -70,7 +70,7 @@ scripts/release-local.sh
 
 ### マージしたあとに自動でビルドする
 
-次を1回実行しておきます。そうすると、Agent Kanban でタスクを main にマージするたびに（マージのメッセージが `Merge agent task:` で始まるとき）、`/build-apps` が裏で動きます。
+次を1回実行しておきます。そうすると、Worktree Kanban でタスクを main にマージするたびに（マージのメッセージが `Merge agent task:` で始まるとき）、`/build-apps` が裏で動きます。
 
 ```bash
 git config core.hooksPath .githooks

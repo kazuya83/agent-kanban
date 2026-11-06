@@ -167,7 +167,7 @@ test('設定: Pipelineのフローはプロジェクトごと。前のバージ�
 // ---------- 動かす ----------
 
 function setup() {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-flow-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-flow-'));
   const repo = path.join(tmp, 'repo');
   fs.mkdirSync(repo);
   const g = (...a) => execFileSync('git', a, { cwd: repo }).toString();

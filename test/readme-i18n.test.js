@@ -205,7 +205,7 @@ test('docs へのリンク注記は、付けたいときと付けないときを
 test('日本語の文字判定は空と ASCII を外し、かなと漢字を拾う', () => {
   assert.equal(hasJapanese(''), false);
   assert.equal(hasJapanese('Warning: curl is required'), false);
-  assert.equal(hasJapanese('Agent Kanban'), false);
+  assert.equal(hasJapanese('Worktree Kanban'), false);
   assert.equal(hasJapanese('警告'), true);
   assert.equal(hasJapanese('ひらがな'), true);
   assert.equal(hasJapanese('カタカナ'), true);
@@ -279,7 +279,7 @@ test('スペイン語の3つの事実は、実行・自動では許可しない�
 test('更新スクリプトは終了コードを見て、表示文は見ない', () => {
   for (const platform of ['darwin', 'linux', 'win32']) {
     const env = platform === 'linux' ? { APPIMAGE: '/a.AppImage' } : {};
-    const { args } = installCommand({ platform, pid: 7, version: '0.1.9', execPath: '/Applications/Agent Kanban.app/Contents/MacOS/Agent Kanban', env });
+    const { args } = installCommand({ platform, pid: 7, version: '0.1.9', execPath: '/Applications/Worktree Kanban.app/Contents/MacOS/Worktree Kanban', env });
     const script = args[args.length - 1];
     assert.equal(trustsExitStatus(script, platform), true, platform);
   }

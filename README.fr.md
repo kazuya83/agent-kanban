@@ -1,6 +1,6 @@
 [English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-# Agent Kanban
+# Worktree Kanban
 
 Application de bureau (Electron, Mac / Windows / Linux) qui lance en parallèle les CLI d'agents de code IA (Claude Code / Codex CLI / Gemini CLI / Cursor CLI), chaque tâche dans son propre git worktree, et les suit sur un tableau kanban. **Elle ne se limite pas à un seul dépôt : elle peut aussi faire avancer en même temps des tâches de plusieurs dépôts.**
 
@@ -86,7 +86,7 @@ Depuis le menu de la barre du haut, passez au « Planificateur de tâches » pou
 
 ### Piloter depuis un autre PC (RC)
 
-Vous pouvez piloter le tableau du PC qui fait tourner les agents (l'hôte) depuis Agent Kanban sur un autre PC (le client). Mac ou Windows peuvent être l'hôte, et l'un ou l'autre peut être le client. Sur le client, vous approuvez, répondez aux questions, envoyez des instructions supplémentaires, mergez, etc., comme sur l'écran de l'hôte.
+Vous pouvez piloter le tableau du PC qui fait tourner les agents (l'hôte) depuis Worktree Kanban sur un autre PC (le client). Mac ou Windows peuvent être l'hôte, et l'un ou l'autre peut être le client. Sur le client, vous approuvez, répondez aux questions, envoyez des instructions supplémentaires, mergez, etc., comme sur l'écran de l'hôte.
 
 - L'application hôte n'écoute que sur `127.0.0.1`. L'application cliente se connecte avec un tunnel `ssh -N -L` : l'hôte n'a donc besoin que d'un serveur SSH. Pour vous connecter depuis l'extérieur, utilisez Tailscale ou un réseau du même genre
 - SSH se connecte avec une clé. Dans les « Réglages RC » du client, créez une clé ed25519 (`~/.ssh/agent-kanban_ed25519`) et enregistrez la clé publique dans les « Réglages RC » de l'hôte
@@ -111,13 +111,13 @@ La procédure, et comment réparer une connexion qui échoue, se trouve dans [do
 **Mac / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.sh | bash
 ```
 
 **Windows** (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex
 ```
 
 Les mêmes commandes mettent à jour vers la dernière version. Vous pouvez aussi mettre à jour depuis l'application : « Réglages » → « Mise à jour de l'application » → « Mettre à jour vers la nouvelle version ». Si vous cochez « Mettre à jour automatiquement quand une nouvelle version sort », elle se remplace et se relance lorsqu'aucune tâche ne tourne. Pour choisir une version, désinstaller, installer depuis un fichier et l'avertissement du premier lancement, voir [docs/install.md](docs/install.md) (Japanese).

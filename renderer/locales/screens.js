@@ -1506,11 +1506,11 @@ api.add({
     "fr": "Fusion…",
     "zh": "正在合并…"
   },
-  "---\nAgent Kanban のタスクから作成しました。": {
-    "en": "---\nCreated from an Agent Kanban task.",
-    "es": "---\nCreado desde una tarea de Agent Kanban.",
-    "fr": "---\nCréé depuis une tâche Agent Kanban.",
-    "zh": "---\n由 Agent Kanban 的任务创建。"
+  "---\nWorktree Kanban のタスクから作成しました。": {
+    "en": "---\nCreated from an Worktree Kanban task.",
+    "es": "---\nCreado desde una tarea de Worktree Kanban.",
+    "fr": "---\nCréé depuis une tâche Worktree Kanban.",
+    "zh": "---\n由 Worktree Kanban 的任务创建。"
   },
   "PR を更新": {
     "en": "Update PR",

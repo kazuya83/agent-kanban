@@ -42,14 +42,17 @@ scripts/build-all.sh --version "$version"
 info "v$version を公開する"
 assets=(dist/*.dmg dist/*.exe dist/*.zip dist/*.AppImage)
 # 説明は前の版からの変更点を Markdown でまとめる（作れなかったら GitHub の自動の説明にする）
-notes="$(mktemp -t agent-kanban-notes)"
-trap 'rm -f "$notes"' EXIT
+notes="$(mktemp -t worktree-kanban-notes)"
+# 改名する前の版が自分を更新できるように、前の名前のファイルも載せる（説明の一覧には出さない）
+legacy_dir="$(mktemp -d -t worktree-kanban-legacy)"
+trap 'rm -rf "$notes" "$legacy_dir"' EXIT
+scripts/legacy-assets.sh "$legacy_dir" "${assets[@]}"
 notes_opt=(--generate-notes)
 node scripts/release-notes.js --version "$version" "${assets[@]}" >"$notes" && notes_opt=(--notes-file "$notes")
 gh release create "v$version" \
   --target "$(git rev-parse HEAD)" \
-  --title "Agent Kanban v$version" \
+  --title "Worktree Kanban v$version" \
   "${notes_opt[@]}" \
-  "${assets[@]}"
+  "${assets[@]}" "$legacy_dir"/*
 git fetch origin --tags --quiet
 info "公開しました: $(gh release view "v$version" --json url -q .url)"

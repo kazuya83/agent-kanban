@@ -59,12 +59,12 @@ CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder "${args[@]}"
 v="${version:-$(node -p "require('./package.json').version")}"
 missing=0
 for f in \
-  "agent-kanban-$v-mac-arm64.dmg" \
-  "agent-kanban-$v-mac-x64.dmg" \
-  "agent-kanban-$v-win-setup.exe" \
-  "agent-kanban-$v-win-portable.exe" \
-  "agent-kanban-$v-win-x64.zip" \
-  "agent-kanban-$v-linux-x86_64.AppImage"; do
+  "worktree-kanban-$v-mac-arm64.dmg" \
+  "worktree-kanban-$v-mac-x64.dmg" \
+  "worktree-kanban-$v-win-setup.exe" \
+  "worktree-kanban-$v-win-portable.exe" \
+  "worktree-kanban-$v-win-x64.zip" \
+  "worktree-kanban-$v-linux-x86_64.AppImage"; do
   [ -f "dist/$f" ] || { echo "見つかりません: dist/$f" >&2; missing=1; }
 done
 [ "$missing" = 0 ] || die "できていないファイルがあります"

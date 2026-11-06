@@ -83,7 +83,7 @@ notify() {
   [ -n "${AFTER_MERGE_NO_NOTIFY:-}" ] && return 0
   command -v osascript >/dev/null 2>&1 || return 0
   osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' \
-    "Agent Kanban: /build-apps" "$1" >/dev/null 2>&1 || true
+    "Worktree Kanban: /build-apps" "$1" >/dev/null 2>&1 || true
 }
 # 今の段階を書いて、通知で知らせる
 step() {
@@ -132,7 +132,7 @@ merge_back() {
 
   dir="$(main_worktree)"
   if [ -z "$dir" ]; then
-    temp="${TMPDIR:-/tmp}/agent-kanban-build-apps/_merge-$short-$$"
+    temp="${TMPDIR:-/tmp}/worktree-kanban-build-apps/_merge-$short-$$"
     "${G[@]}" worktree add "$temp" main >>"$log" 2>&1 || { fail "main の一時的な worktree を作れませんでした"; return 1; }
     dir="$temp"
   else
@@ -222,22 +222,27 @@ release_built() {
   fi
 
   step "v$version を Release として公開しています"
-  local assets=("$dir"/agent-kanban-"$version"-*.dmg "$dir"/agent-kanban-"$version"-*.exe
-    "$dir"/agent-kanban-"$version"-*.zip "$dir"/agent-kanban-"$version"-*.AppImage)
+  local assets=("$dir"/worktree-kanban-"$version"-*.dmg "$dir"/worktree-kanban-"$version"-*.exe
+    "$dir"/worktree-kanban-"$version"-*.zip "$dir"/worktree-kanban-"$version"-*.AppImage)
+  # 改名する前の版が自分を更新できるように、前の名前のファイルも載せる（説明の一覧には出さない）
+  local legacy_dir legacy=()
+  legacy_dir="$(mktemp -d -t worktree-kanban-legacy)"
+  scripts/legacy-assets.sh "$legacy_dir" "${assets[@]}" >>"$log" 2>&1 || { rm -rf "$legacy_dir"; fail "前の名前のファイルを用意できませんでした"; return 1; }
+  legacy=("$legacy_dir"/*)
   # 説明は前の版からの変更点を Markdown でまとめる（作れなかったら GitHub の自動の説明にする）
   local notes notes_opt=(--generate-notes)
-  notes="$(mktemp -t agent-kanban-notes)"
+  notes="$(mktemp -t worktree-kanban-notes)"
   if (cd "$wt" && node scripts/release-notes.js --version "$version" --target "$target" "${assets[@]}") >"$notes" 2>>"$log"; then
     notes_opt=(--notes-file "$notes")
   fi
   (
     cd "$wt" && "$gh_bin" release create "v$version" \
       --target "$target" \
-      --title "Agent Kanban v$version" \
+      --title "Worktree Kanban v$version" \
       "${notes_opt[@]}" \
-      "${assets[@]}"
-  ) >>"$log" 2>&1 || { rm -f "$notes"; fail "v$version の Release を出せませんでした"; return 1; }
-  rm -f "$notes"
+      "${assets[@]}" "${legacy[@]}"
+  ) >>"$log" 2>&1 || { rm -rf "$notes" "$legacy_dir"; fail "v$version の Release を出せませんでした"; return 1; }
+  rm -rf "$notes" "$legacy_dir"
   "${G[@]}" fetch origin --tags --quiet >>"$log" 2>&1
   url="$(cd "$wt" && "$gh_bin" release view "v$version" --json url -q .url 2>>"$log")"
   release_msg="v$version を公開しました${url:+: $url}"
@@ -255,7 +260,7 @@ run_once() {
   cur="$short"
   log="$state/logs/$(date '+%Y%m%d-%H%M%S')-$short.log"
   branch="build-apps/$short"
-  wt="${TMPDIR:-/tmp}/agent-kanban-build-apps/$short"
+  wt="${TMPDIR:-/tmp}/worktree-kanban-build-apps/$short"
 
   step "1/4 テストとビルドを始めました"
   # 版の番号はタグから決まるので、先に新しいタグを取ってくる
@@ -292,7 +297,7 @@ run_once() {
   [ -n "$version" ] || { fail "次の版の番号が分かりませんでした"; return 1; }
   local f missing=""
   for f in "mac-arm64.dmg" "mac-x64.dmg" "win-setup.exe" "win-portable.exe" "win-x64.zip" "linux-x86_64.AppImage"; do
-    [ -f "dist/agent-kanban-$version-$f" ] || missing="$missing agent-kanban-$version-$f"
+    [ -f "dist/worktree-kanban-$version-$f" ] || missing="$missing worktree-kanban-$version-$f"
   done
   [ -z "$missing" ] || { fail "ビルドしたファイルが足りません:$missing"; return 1; }
   # worktree はこのあと消すので、できたファイルは main をチェックアウトしているフォルダの dist/ に写して残す

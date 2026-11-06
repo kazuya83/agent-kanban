@@ -45,6 +45,9 @@ const fs = require('fs');
 // Finder やスタートメニューから起動しても claude / git / node が見つかるようにする
 fixPath();
 if (process.platform === 'win32') app.setAppUserModelId('dev.agentkanban.app'); // Windows の通知に必要
+// データの場所はパッケージ名から決まるので、Agent Kanban のころの場所に固定する（名前を変えてもボードをそのまま使う）。
+// --user-data-dir を渡したときは、そちらを使う（別のデータで動かすとき）
+if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'agent-kanban'));
 
 // 起動したあとにアプリの中身（app.asar）が入れ替えられたか（アップデートを起動中に入れたとき）。
 // 入れ替わったまま古いプロセスで新しいウィンドウを開くと、ファイルの位置がずれて画面が壊れるので、再起動する
@@ -92,7 +95,7 @@ function createWindow() {
     height: 900,
     minWidth: 960,
     minHeight: 600,
-    title: 'Agent Kanban',
+    title: 'Worktree Kanban',
     backgroundColor: '#0f1115',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -397,7 +400,7 @@ async function connectRemote({ code = '' } = {}) {
       throw e;
     }
     if (m === 'ssh' && (err?.code === 'ECONNRESET' || err?.code === 'ECONNREFUSED')) {
-      throw new Error(tr('SSH はつながりましたが、ホストの Agent Kanban に届きませんでした。ホストの Agent Kanban で「ホストを開始」しているか、待ち受けポート（{p}）が合っているかを確かめてください', { p }));
+      throw new Error(tr('SSH はつながりましたが、ホストの Worktree Kanban に届きませんでした。ホストの Worktree Kanban で「ホストを開始」しているか、待ち受けポート（{p}）が合っているかを確かめてください', { p }));
     }
     if (m === 'direct' && !isLoopbackHost(h) && /ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH/.test(String(err?.code || err?.message))) {
       throw new Error(tr('{h}:{p} に直接つながりません。ホストは外に見せないよう 127.0.0.1 でしか待ち受けていないため、Tailscale の IP などへは直接つなげません。接続方法を「SSH 経由」にして、SSH の接続先にその IP を入れてください', { h, p }));

@@ -1,6 +1,6 @@
 [English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-# Agent Kanban
+# Worktree Kanban
 
 A desktop app (Electron, Mac / Windows / Linux) that runs AI coding-agent CLIs (Claude Code / Codex CLI / Gemini CLI / Cursor CLI) in parallel, each task in its own git worktree, and manages them on a kanban board. **It can run tasks from more than one repository at the same time, not only tasks inside a single repository.**
 
@@ -86,7 +86,7 @@ From the menu in the top bar, switch to "Task scheduler" to manage schedules tha
 
 ### Operate from another PC (RC)
 
-You can operate the board on the PC that runs the agents (the host) from Agent Kanban on another PC (the client). Either Mac or Windows can be the host, and either can be the client. On the client you can approve, answer questions, send extra instructions, merge, and so on, the same way as on the host screen.
+You can operate the board on the PC that runs the agents (the host) from Worktree Kanban on another PC (the client). Either Mac or Windows can be the host, and either can be the client. On the client you can approve, answer questions, send extra instructions, merge, and so on, the same way as on the host screen.
 
 - The host app listens only on `127.0.0.1`. The client app connects with an `ssh -N -L` tunnel, so the host only needs an SSH server. Use Tailscale or similar when you connect from outside
 - SSH uses a key. In the client's "RC settings", create an ed25519 key (`~/.ssh/agent-kanban_ed25519`) and register the public key in the host's "RC settings"
@@ -111,13 +111,13 @@ Also included: splitting a large task into subtasks that run in parallel or in o
 **Mac / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.sh | bash
 ```
 
 **Windows** (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex
 ```
 
 The same commands update to the latest version. You can also update from the app: "Settings" → "App update" → "Update to the new version". If you check "Update automatically when a new version is out", it replaces itself and relaunches when no task is running. For pinning a version, uninstalling, installing from a downloaded file, and the first-launch warning, see [docs/install.md](docs/install.md) (Japanese).

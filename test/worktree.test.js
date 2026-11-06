@@ -8,7 +8,7 @@ const { execFileSync } = require('child_process');
 const git = require('../src/git');
 
 test('worktreeStatus: コミット・未コミット・未追跡・ベースの進み具合', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-wt-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-wt-'));
   const repo = path.join(tmp, 'repo');
   fs.mkdirSync(repo);
   const g = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd });
@@ -66,7 +66,7 @@ test('worktreeStatus: コミット・未コミット・未追跡・ベースの�
 });
 
 test('worktreeStatus: 日本語のファイル名がそのまま読める', async () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-wt-'));
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-wt-'));
   const g = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo });
   g('init', '-q', '-b', 'main');
   fs.writeFileSync(path.join(repo, 'メモ.md'), 'a\n');

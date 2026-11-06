@@ -1,4 +1,4 @@
-// Agent Kanban 同士の遠隔操作（ペアリング・RPC・イベント）
+// Worktree Kanban 同士の遠隔操作（ペアリング・RPC・イベント）
 const test = require('node:test');
 const assert = require('node:assert');
 const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, MAX_PAIR_FAILURES, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory, redactForRemote, MAX_CONNECTION_HISTORY, composeTabs } = require('../src/remote');

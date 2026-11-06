@@ -1,6 +1,6 @@
 [English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-# Agent Kanban
+# Worktree Kanban
 
 这是一个桌面应用（Electron，Mac / Windows / Linux）。它把 AI 编程智能体的 CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）按任务放进各自的 git worktree 里并行运行，并用看板管理。**不限于同一个仓库里的任务，多个仓库的任务也可以同时进行。**
 
@@ -86,7 +86,7 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 
 ### 从另一台电脑操作（RC）
 
-可以在另一台电脑（客户端）的 Agent Kanban 上，操作正在运行智能体的那台电脑（主机）的看板。Mac 和 Windows 都可以做主机，也都可以做客户端。在客户端上，批准、回答提问、追加指示、合并等，都可以像主机画面一样使用。
+可以在另一台电脑（客户端）的 Worktree Kanban 上，操作正在运行智能体的那台电脑（主机）的看板。Mac 和 Windows 都可以做主机，也都可以做客户端。在客户端上，批准、回答提问、追加指示、合并等，都可以像主机画面一样使用。
 
 - 主机上的应用只在 `127.0.0.1` 上等待连接。客户端应用用 `ssh -N -L` 建立隧道来连接，所以主机上只需要 SSH 服务器。从外面连接时使用 Tailscale 等
 - SSH 使用密钥登录。在客户端的「RC 设置」里创建 ed25519 密钥（`~/.ssh/agent-kanban_ed25519`），再把公钥登记到主机的「RC 设置」
@@ -111,13 +111,13 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 **Mac / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.sh | bash
 ```
 
 **Windows**（PowerShell）
 
 ```powershell
-irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex
 ```
 
 用同样的命令也可以更新到最新版。也可以从应用里更新：「设置」→「应用更新」→「更新到新版本」。勾选「有新版本时自动更新」后，会在没有任务运行时自动替换并重新启动。指定版本、卸载、从文件安装，以及首次启动时的警告，请看 [docs/install.md](docs/install.md) (Japanese)。

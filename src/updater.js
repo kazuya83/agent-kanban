@@ -10,8 +10,8 @@ const { EventEmitter } = require('events');
 const path = require('path');
 const { tr } = require('../renderer/i18n');
 
-const REPO = 'kazuya83/agent-kanban';
-const APP_NAME = 'Agent Kanban';
+const REPO = 'kazuya83/worktree-kanban';
+const APP_NAME = 'Worktree Kanban';
 const INSTALL_SH = `https://raw.githubusercontent.com/${REPO}/main/install.sh`;
 const INSTALL_PS1 = `https://raw.githubusercontent.com/${REPO}/main/install.ps1`;
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6時間ごとに確かめる
@@ -36,9 +36,9 @@ function versionFromReleaseUrl(url) {
 
 // その OS・CPU 向けにリリースに載せているファイルの名前（対応していなければ null）
 function assetName(platform, arch, version) {
-  if (platform === 'darwin') return arch === 'arm64' || arch === 'x64' ? `agent-kanban-${version}-mac-${arch}.dmg` : null;
-  if (platform === 'linux') return arch === 'x64' ? `agent-kanban-${version}-linux-x86_64.AppImage` : null;
-  if (platform === 'win32') return arch === 'x64' ? `agent-kanban-${version}-win-x64.zip` : null;
+  if (platform === 'darwin') return arch === 'arm64' || arch === 'x64' ? `worktree-kanban-${version}-mac-${arch}.dmg` : null;
+  if (platform === 'linux') return arch === 'x64' ? `worktree-kanban-${version}-linux-x86_64.AppImage` : null;
+  if (platform === 'win32') return arch === 'x64' ? `worktree-kanban-${version}-win-x64.zip` : null;
   return null;
 }
 
@@ -55,7 +55,7 @@ const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 // PowerShell に渡す文字列を ' で囲む
 const psq = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
-// Mac の .app のフォルダ（…/Agent Kanban.app/Contents/MacOS/Agent Kanban → …/Agent Kanban.app）
+// Mac の .app のフォルダ（…/Worktree Kanban.app/Contents/MacOS/Worktree Kanban → …/Worktree Kanban.app）
 function macBundlePath(execPath) {
   const i = String(execPath).indexOf('.app/Contents/MacOS/');
   return i >= 0 ? String(execPath).slice(0, i + 4) : '';
@@ -94,7 +94,7 @@ function installCommand({ platform, pid, version, execPath, env = {} }) {
     relaunchOld = bundle ? `open ${shq(bundle)}` : `open -a ${shq(APP_NAME)}`;
   } else {
     const appImage = env.APPIMAGE || execPath;
-    relaunchNew = `nohup "$HOME/.local/bin/agent-kanban" >/dev/null 2>&1 &`;
+    relaunchNew = `nohup "$HOME/.local/bin/worktree-kanban" >/dev/null 2>&1 &`;
     relaunchOld = `nohup ${shq(appImage)} >/dev/null 2>&1 &`;
   }
   const script = [

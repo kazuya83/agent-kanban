@@ -396,7 +396,7 @@ test('英語にすると、残っていたエラーと通知が日本語のま�
     ['更新しました', null],
     ['エラー: 更新できませんでした', null],
     ['ユーザーが拒否しました', null],
-    ['Agent Kanban に接続できなかったため拒否しました: {message}', { message: 'ECONNREFUSED' }],
+    ['Worktree Kanban に接続できなかったため拒否しました: {message}', { message: 'ECONNREFUSED' }],
     ['Pipelineを終えてレビューに回します', null],
     ['工程{n}「{label}」（{who}）へ進みます', { n: 2, label: 'Next', who: 'Codex CLI' }],
     ['工程{n}「{label}」（{who}）に戻ってやり直します', { n: 1, label: 'Check', who: 'Claude Code' }],
@@ -410,8 +410,8 @@ test('英語にすると、残っていたエラーと通知が日本語のま�
     ['中断されました', null],
     ['ユーザーは質問に答えずに、そのまま進めるよう求めています。妥当だと思う方法で続けてください。', null],
     ['破棄されました', null],
-    ['Agent Kanban のタスクから作成しました。', null],
-    ['Agent Kanban のサブタスクとして作成しました（親: #{number}）。', { number: 9 }],
+    ['Worktree Kanban のタスクから作成しました。', null],
+    ['Worktree Kanban のサブタスクとして作成しました（親: #{number}）。', { number: 9 }],
     ['「{name}」', { name: 'Survey' }],
     ['・', null],
   ];
@@ -631,7 +631,7 @@ test('英語にすると、ログ・Issue のエラー・工程名と更新ロ�
     I18n.setLanguage('es');
     assert.match(installCommand({ platform: 'darwin', pid: 1, version: '1.0.0', execPath: '/x' }).args[1], /Actualizando a v1\.0\.0/);
     I18n.setLanguage('en');
-    const mac = installCommand({ platform: 'darwin', pid: 4, version: '1.2.3', execPath: '/x/Agent Kanban.app/Contents/MacOS/Agent Kanban' });
+    const mac = installCommand({ platform: 'darwin', pid: 4, version: '1.2.3', execPath: '/x/Worktree Kanban.app/Contents/MacOS/Worktree Kanban' });
     assert.doesNotMatch(mac.args[1], /に更新します|更新しました|更新できませんでした/);
     assert.match(mac.args[1], /Updating to v1\.2\.3/);
     assert.match(mac.args[1], /==> Updated/);
@@ -779,8 +779,8 @@ test('英語にすると、判定ログ・分けずに進める・拒否理由�
     assert.match(withKey, /password\. The app cannot/);
 
     const pr = agents.prDefaults({ title: 'T', lastMessage: 'did it' });
-    assert.match(pr.body, /Created from an Agent Kanban task\./);
-    assert.doesNotMatch(pr.body, /Agent Kanban のタスクから作成しました/);
+    assert.match(pr.body, /Created from an Worktree Kanban task\./);
+    assert.doesNotMatch(pr.body, /Worktree Kanban のタスクから作成しました/);
     let subBody = '';
     agents.createSubIssue = async (_repo, parent, issue) => {
       subBody = issue.body;
@@ -801,7 +801,7 @@ test('英語にすると、判定ログ・分けずに進める・拒否理由�
     };
     store.cards.push(sub);
     await agents.acceptSubtasks(sub.id, { createIssues: true });
-    assert.match(subBody, /Created as an Agent Kanban subtask \(parent: #9\)/);
+    assert.match(subBody, /Created as an Worktree Kanban subtask \(parent: #9\)/);
     assert.doesNotMatch(subBody, /サブタスクとして作成しました/);
 
     I18n.setLanguage('ja');

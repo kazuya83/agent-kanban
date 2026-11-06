@@ -12,7 +12,7 @@ const rs = require('../src/repo-setup');
 const FAKE = path.join(__dirname, 'fake-claude.js');
 
 function setup() {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-nogit-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-nogit-'));
   const folder = path.join(tmp, 'videos');
   fs.mkdirSync(folder);
   fs.writeFileSync(path.join(folder, 'script.md'), '台本\n');
@@ -54,7 +54,7 @@ test('isNoGitRepo / markNoGitRepo: git なしのフォルダを覚え、git リ�
 });
 
 test('createRepo: git: false なら、git で管理しない空のフォルダを作るだけ', async () => {
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-nogit-create-'));
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-nogit-create-'));
   const r = await rs.createRepo({ parent, name: 'movie', git: false });
   assert.strictEqual(r.dir, path.join(parent, 'movie'));
   assert.strictEqual(r.git, false);

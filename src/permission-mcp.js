@@ -36,7 +36,7 @@ let CARD = '';
 
 const TOOL = {
   name: 'approve',
-  description: 'Ask the human operator on the Agent Kanban board to approve or deny a tool call.',
+  description: 'Ask the human operator on the Worktree Kanban board to approve or deny a tool call.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -99,7 +99,7 @@ async function handle(msg) {
       result: {
         protocolVersion: (params && params.protocolVersion) || '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'agent-kanban', version: '0.1.0' },
+        serverInfo: { name: 'worktree-kanban', version: '0.1.0' },
       },
     });
   }
@@ -110,7 +110,7 @@ async function handle(msg) {
     try {
       decision = await ask((params && params.arguments) || {});
     } catch (err) {
-      decision = { behavior: 'deny', message: tr('Agent Kanban に接続できなかったため拒否しました: {message}', { message: err.message }) };
+      decision = { behavior: 'deny', message: tr('Worktree Kanban に接続できなかったため拒否しました: {message}', { message: err.message }) };
     }
     return send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(decision) }] } });
   }

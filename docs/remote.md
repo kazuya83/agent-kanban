@@ -1,6 +1,6 @@
 # 遠隔操作（SSH トンネルで別の PC からボードを操作する）
 
-エージェントを動かす PC（**ホスト**）のボードを、別の PC（**クライアント**）の Agent Kanban から、**ほぼそのまま表示・操作**できます。
+エージェントを動かす PC（**ホスト**）のボードを、別の PC（**クライアント**）の Worktree Kanban から、**ほぼそのまま表示・操作**できます。
 
 - ホストもクライアントも、**Mac でも Windows でも** かまいません（Windows → Mac、Windows → Windows、Mac → Windows、Mac → Mac のどれでもつなげます）。どのマシンもホストにもクライアントにもなれます
 - ホストのアプリは `127.0.0.1` だけで待ち受けるので、インターネットへ直接は出ません。**SSH のポート転送**を通してつなぎます（クライアントのアプリが `ssh` を起動してトンネルを張ります）
@@ -13,9 +13,9 @@
 | | ホスト（作業する PC） | クライアント（操作する PC） |
 | --- | --- | --- |
 | 1 | Tailscale を入れてログイン | Tailscale を入れて同じアカウントでログイン |
-| 2 | SSH サーバーをオンにする | Agent Kanban の「RC設定」で **鍵を作る** |
+| 2 | SSH サーバーをオンにする | Worktree Kanban の「RC設定」で **鍵を作る** |
 | 3 | 受け取った公開鍵を「RC設定」で選んで登録する | パスワードなしで `ssh` で入れるか確かめる |
-| 4 | Agent Kanban で「ホストを開始」 | Agent Kanban で「SSH 経由」で接続 |
+| 4 | Worktree Kanban で「ホストを開始」 | Worktree Kanban で「SSH 経由」で接続 |
 
 1〜3 は最初の1回だけです。
 
@@ -60,7 +60,7 @@ New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled Tru
 
 ### 確かめる
 
-ホストの Agent Kanban で上部の **「RC設定」** を開くと、**クライアントに入れる SSH の接続先（Tailscale の IP）・ユーザー名・SSH サーバーが動いているか** が表示されます。「動いていません」と出ていたら、上の手順をやり直してください。
+ホストの Worktree Kanban で上部の **「RC設定」** を開くと、**クライアントに入れる SSH の接続先（Tailscale の IP）・ユーザー名・SSH サーバーが動いているか** が表示されます。「動いていません」と出ていたら、上の手順をやり直してください。
 
 ## 3. SSH の鍵を作って、ホストに登録する
 
@@ -68,7 +68,7 @@ New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled Tru
 
 ### クライアントで鍵を作る（アプリでできます）
 
-1. クライアントの Agent Kanban で上部の **「RC設定」** を開き、「クライアント」の接続方法を **SSH 経由** にします
+1. クライアントの Worktree Kanban で上部の **「RC設定」** を開き、「クライアント」の接続方法を **SSH 経由** にします
 2. 「① SSH の鍵を作る」の **「鍵を作る」** を押します。パスフレーズなしの ed25519 の鍵が `~/.ssh/agent-kanban_ed25519`（Windows は `C:\Users\<you>\.ssh\agent-kanban_ed25519`）にでき、「鍵ファイル」の欄に入ります
 3. 公開鍵と、ホストに登録するコマンド（ホストが Mac / Windows の管理者 / Windows の管理者ではないユーザー）が出るので、**「コピー」** で写します
 
@@ -76,13 +76,13 @@ New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled Tru
 
 Windows で「ssh-keygen が見つかりません」と出るときは、「設定 → システム → オプション機能」で「OpenSSH クライアント」を追加します。
 
-### 公開鍵をホストに登録する（ホストの Agent Kanban で）
+### 公開鍵をホストに登録する（ホストの Worktree Kanban で）
 
 1. クライアントでできた **公開鍵のファイル**（`agent-kanban_ed25519.pub`。RC設定の「① SSH の鍵」に場所が出ています）を、USB メモリ・共有フォルダ・メールなどで、ホストの PC の好きな場所に置きます。**秘密鍵（`.pub` の付かない方）は渡さないでください**
-2. ホストの Agent Kanban で上部の **「RC設定」** を開き、「ホスト」の **「操作側の公開鍵を登録する」** で **「ファイルを選択…」** から、置いた `.pub` を選びます
+2. ホストの Worktree Kanban で上部の **「RC設定」** を開き、「ホスト」の **「操作側の公開鍵を登録する」** で **「ファイルを選択…」** から、置いた `.pub` を選びます
 3. **「登録する」** を押すと、SSH で入れるように設定されます
    - Mac: `~/.ssh/authorized_keys` に足して、権限を 600 にします
-   - Windows で管理者のユーザー: `C:\ProgramData\ssh\administrators_authorized_keys` に足して、`icacls` で権限を絞ります。書き込めないと出たときは、Agent Kanban を「管理者として実行」で開き直すか、表示されたコマンドを管理者の PowerShell で実行します
+   - Windows で管理者のユーザー: `C:\ProgramData\ssh\administrators_authorized_keys` に足して、`icacls` で権限を絞ります。書き込めないと出たときは、Worktree Kanban を「管理者として実行」で開き直すか、表示されたコマンドを管理者の PowerShell で実行します
    - Windows で管理者ではないユーザー: `C:\Users\<you>\.ssh\authorized_keys` に足します
 
 同じ鍵がもう登録されていれば、二重には足しません。秘密鍵を選んだときは登録せずに止めます。
@@ -142,8 +142,8 @@ ssh -i ~/.ssh/agent-kanban_ed25519 <ユーザー名>@<ホストの IP> exit
 
 ## 4. つなぐ
 
-1. **ホスト** の Agent Kanban で上部の「RC設定」→「ホストを開始」を押します（ペアリング用の 6 桁コードが出ます。待ち受けポートの既定は `17831`）
-2. **クライアント** の Agent Kanban で上部の「RC設定」→ クライアントで次を入れて接続します
+1. **ホスト** の Worktree Kanban で上部の「RC設定」→「ホストを開始」を押します（ペアリング用の 6 桁コードが出ます。待ち受けポートの既定は `17831`）
+2. **クライアント** の Worktree Kanban で上部の「RC設定」→ クライアントで次を入れて接続します
    - 接続方法: **SSH 経由**
    - SSH の接続先: ホストの Tailscale の IP（`100.x.x.x`）か名前（ホストの設定画面に出ている値）
    - ユーザー名: ホストのログイン名（ホストの設定画面に出ている値）
@@ -179,9 +179,9 @@ ssh -i ~/.ssh/agent-kanban_ed25519 <ユーザー名>@<ホストの IP> exit
 | SSH の接続を **断られました** | ホストで SSH サーバーが動いていません（Mac は「リモートログイン」、Windows はサービス `sshd`）。SSH のポートが 22 以外なら、設定の「SSH ポート」も合わせます |
 | SSH の **認証に失敗** しました | 鍵が登録されていないか、ユーザー名が違います。上の「3.」をやり直し、`ssh <ユーザー名>@<IP> exit` がパスワードなしで通るか確かめます。ホストが Windows で管理者のユーザーなら、`administrators_authorized_keys` に入れて `icacls` で権限を絞る必要があります |
 | ホストの鍵が以前と違う | ホストを入れ直したなどで鍵が変わりました。クライアントで `ssh-keygen -R <IP>` を実行してから、もう一度つなぎます |
-| SSH はつながりましたが、ホストの Agent Kanban に届きませんでした | ホストで「ホストを開始」していないか、待ち受けポートが違います |
+| SSH はつながりましたが、ホストの Worktree Kanban に届きませんでした | ホストで「ホストを開始」していないか、待ち受けポートが違います |
 | ポート転送を断られました | ホストの `sshd_config`（Mac は `/etc/ssh/sshd_config`、Windows は `C:\ProgramData\ssh\sshd_config`）で `AllowTcpForwarding no` になっています |
-| ホストの Agent Kanban の版が古いため、次の設定を保存できませんでした | ホストのアプリが古く、カスタムエージェントや Pipeline のフローチャートなどの新しい設定を知りません。ホストの Agent Kanban を新しい版に更新して（設定の「アプリの更新」）、もう一度保存します |
+| ホストの Worktree Kanban の版が古いため、次の設定を保存できませんでした | ホストのアプリが古く、カスタムエージェントや Pipeline のフローチャートなどの新しい設定を知りません。ホストの Worktree Kanban を新しい版に更新して（設定の「アプリの更新」）、もう一度保存します |
 | ssh コマンドが見つかりません | Windows は「OpenSSH クライアント」を追加します。設定の「ssh コマンド」にフルパスを入れることもできます |
 
 ## そのほか

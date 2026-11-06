@@ -28,7 +28,7 @@ function initRepo(dir) {
 
 // current が開いているリポジトリ、other が開いていないリポジトリ（設定だけが保存されている）
 function setup({ other: otherSettings = {}, current: currentSettings = {} } = {}) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-sched-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-sched-'));
   const current = initRepo(path.join(tmp, 'current'));
   const other = initRepo(path.join(tmp, 'other'));
   const bin = (name, script, pre = '') => {

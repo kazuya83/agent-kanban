@@ -3514,7 +3514,7 @@ async function openPr(c) {
   const def = c.prBase && others.includes(c.prBase) ? c.prBase : c.baseBranch;
   const opt = (b) => `<option value="${esc(b)}" ${b === def ? 'selected' : ''}>${esc(b)}${b === c.baseBranch ? tr('（ベース）') : ''}</option>`;
   const title = c.issue ? c.title.replace(/^#\d+\s*/, '') : c.title;
-  const body = [c.issue ? `Closes #${c.issue.number}\n` : '', c.lastMessage ? `${c.lastMessage}\n` : '', tr('---\nAgent Kanban のタスクから作成しました。')].join('\n').trim();
+  const body = [c.issue ? `Closes #${c.issue.number}\n` : '', c.lastMessage ? `${c.lastMessage}\n` : '', tr('---\nWorktree Kanban のタスクから作成しました。')].join('\n').trim();
   const updating = !!c.prUrl;
   openModal(
     `<h2>${updating ? tr('PR を更新') : tr('PR を作成')}</h2>
@@ -3616,7 +3616,7 @@ function openRemoteSettings() {
         kb.innerHTML = `<div>${tr('<strong>① SSH の鍵</strong>: {v1}（できています）', { v1: (esc(st.path)) })}</div>
           <div class="remote-key-row"><div class="remote-ssh" id="rPubKey">${esc(st.publicKey)}</div>${copyBtn('rPubKey', tr('公開鍵をコピー'))}</div>
           <div>${tr('<strong>② 公開鍵をホストに渡す</strong>（ここはご自身で行ってください）')}</div>
-          <small class="muted">${tr('公開鍵のファイル <b>{v1}</b> を、USB・共有フォルダ・メールなどでホストの PC の好きな場所に置き、ホストの Agent Kanban の「RC設定」→「操作側の公開鍵を登録する」で選んで登録します。秘密鍵（{v2}）は渡さないでください。アプリを使わずに登録するなら、ホストの OS に合ったコマンドをホストで実行します:', { v1: (esc(st.pubPath)), v2: (esc(st.path)) })}</small>
+          <small class="muted">${tr('公開鍵のファイル <b>{v1}</b> を、USB・共有フォルダ・メールなどでホストの PC の好きな場所に置き、ホストの Worktree Kanban の「RC設定」→「操作側の公開鍵を登録する」で選んで登録します。秘密鍵（{v2}）は渡さないでください。アプリを使わずに登録するなら、ホストの OS に合ったコマンドをホストで実行します:', { v1: (esc(st.pubPath)), v2: (esc(st.path)) })}</small>
           <div><small>${tr('ホストが Mac（ターミナルで）')}</small></div>
           <div class="remote-key-row"><div class="remote-ssh" id="rCmdMac">${esc(cmd.mac || '')}</div>${copyBtn('rCmdMac')}</div>
           <div><small>${tr('ホストが Windows で、ユーザーが管理者（ふつうの個人の PC。PowerShell を「管理者として実行」で）')}</small></div>
@@ -3754,7 +3754,7 @@ function openRemoteSettings() {
                  <label class="field">${tr('<span>鍵ファイル（空ならこのアプリで作る ~/.ssh/agent-kanban_ed25519）</span>')}<input id="rSshKey" placeholder="~/.ssh/agent-kanban_ed25519" value="${esc(c.sshKey || '')}" /></label>
                  <label class="field">${tr('<span>ssh コマンド</span>')}<input id="rSshPath" value="${esc(c.sshPath || 'ssh')}" /></label>
                </div>
-               <small class="muted">${tr('SSH は鍵で入れる必要があります（パスワードは入力できません）。ホスト側で SSH サーバーをオンにしてください（Mac は「リモートログイン」、Windows は「OpenSSH サーバー」）。接続先とユーザー名は、ホストの Agent Kanban のこの画面に出ています。')}</small>
+               <small class="muted">${tr('SSH は鍵で入れる必要があります（パスワードは入力できません）。ホスト側で SSH サーバーをオンにしてください（Mac は「リモートログイン」、Windows は「OpenSSH サーバー」）。接続先とユーザー名は、ホストの Worktree Kanban のこの画面に出ています。')}</small>
                <div class="remote-key" id="rKeyBox">${tr('SSH の鍵を確かめています…')}</div>
              </div>
              <div class="row">
@@ -5129,7 +5129,7 @@ function updatePanelHtml(u) {
   return `<p>${cur}</p>${msg}
     <div class="upd-actions">${actions}<button class="btn small" id="updCheck" type="button" ${busy ? 'disabled' : ''}>${tr('新しい版を確かめる')}</button></div>
     <label class="check"><input type="checkbox" id="updAuto" ${u.autoUpdate ? 'checked' : ''} /> ${tr('新しい版が出たら自動で更新する')}</label>
-    <small>${tr('アプリは起動したときと6時間ごとに新しい版を確かめます。自動で更新するときは、実行中・待機中のタスクがなくなるのを待ってから、アプリを終了して入れ替え、起動し直します。更新すると、手で入れたときと同じ場所（{v1}）に入ります。', { v1: (u.platform === 'win32' ? '%LOCALAPPDATA%\\Programs\\Agent Kanban' : tr('/Applications または ~/.local/bin')) })}</small>`;
+    <small>${tr('アプリは起動したときと6時間ごとに新しい版を確かめます。自動で更新するときは、実行中・待機中のタスクがなくなるのを待ってから、アプリを終了して入れ替え、起動し直します。更新すると、手で入れたときと同じ場所（{v1}）に入ります。', { v1: (u.platform === 'win32' ? '%LOCALAPPDATA%\\Programs\\Worktree Kanban' : tr('/Applications または ~/.local/bin')) })}</small>`;
 }
 
 function bindUpdatePanel() {
@@ -5193,7 +5193,7 @@ $('updateBadge')?.addEventListener('click', () => openSettings('update'));
 api.appInfo().then(
   (i) => {
     $('appVersion').textContent = `v${i.version}${i.packaged ? '' : tr('（開発版）')}`;
-    $('appVersion').title = `Agent Kanban v${i.version}`;
+    $('appVersion').title = `Worktree Kanban v${i.version}`;
   },
   () => {},
 );

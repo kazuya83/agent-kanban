@@ -19,7 +19,7 @@ const FAKE_CLAUDE = path.join(__dirname, 'fake-claude.js');
 const FAKE_CLI = path.join(__dirname, 'fake-agent-cli.js');
 
 function setup() {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-kanban-orch-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-kanban-orch-'));
   const repo = path.join(tmp, 'repo');
   fs.mkdirSync(repo);
   const g = (...a) => execFileSync('git', a, { cwd: repo });

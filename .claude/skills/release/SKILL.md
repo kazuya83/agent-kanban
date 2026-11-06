@@ -1,6 +1,6 @@
 ---
 name: release
-description: Agent Kanban の新しい版を、この Mac でビルドして GitHub Release として公開する。テストと3つの OS のビルド → 落ちたら直す → 直したところを main にマージして push → できたファイルで Release を公開、までを scripts/after-merge-build.sh でその場で動かす。「リリースして」「新しい版を出して」「ビルドしてリリースして push して」「Release を出して」と頼まれたときに使う。
+description: Worktree Kanban の新しい版を、この Mac でビルドして GitHub Release として公開する。テストと3つの OS のビルド → 落ちたら直す → 直したところを main にマージして push → できたファイルで Release を公開、までを scripts/after-merge-build.sh でその場で動かす。「リリースして」「新しい版を出して」「ビルドしてリリースして push して」「Release を出して」と頼まれたときに使う。
 ---
 
 # /release — ビルドして、直して、push して、Release を出す

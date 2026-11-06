@@ -1,6 +1,6 @@
 // パッケージしたアプリを実際に起動して、画面がちゃんと出るかを確かめる（CI 用）
 //   node test/smoke-packaged.js <アプリの実行ファイル> [スクリーンショットの保存先]
-// 画面に Agent Kanban のボードが出ていなければ失敗にする。
+// 画面に Worktree Kanban のボードが出ていなければ失敗にする。
 const path = require('path');
 const fs = require('fs');
 const os = require('os');

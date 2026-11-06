@@ -1,6 +1,6 @@
 [English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-# Agent Kanban
+# Worktree Kanban
 
 AI コーディングエージェントの CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を、タスクごとに別々の git worktree で並列に動かし、カンバンボードで管理するデスクトップアプリです（Electron、Mac / Windows / Linux）。**1 つのリポジトリの中だけでなく、複数のリポジトリのタスクも同時に動かせます**。
 
@@ -76,7 +76,7 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 トップバーのメニューから「タスクスケジューラ」に切り替えると、決めた日時（1回だけ・毎時・毎日・毎週・毎月）にタスクを作って動かすスケジュールを、カードで管理できます。カンバンのタスクからそのままスケジュールに登録でき、スケジュールから今すぐタスクを作ることもできます。アプリを起動しているあいだだけ動きます（詳しくは [docs/usage.md](docs/usage.md)）。
 
 ### 別の PC から操作する（RC）
-エージェントを動かしている PC（ホスト）のボードを、別の PC（クライアント）の Agent Kanban から操作できます。Mac と Windows のどちらがホストでも、どちらがクライアントでもかまいません。クライアントでは、承認・質問への回答・追加の指示・マージなどを、ホストの画面と同じように使えます。
+エージェントを動かしている PC（ホスト）のボードを、別の PC（クライアント）の Worktree Kanban から操作できます。Mac と Windows のどちらがホストでも、どちらがクライアントでもかまいません。クライアントでは、承認・質問への回答・追加の指示・マージなどを、ホストの画面と同じように使えます。
 
 - ホストのアプリは `127.0.0.1` だけで待ち受けます。クライアントのアプリが `ssh -N -L` でトンネルを張ってつなぐので、ホストで必要なのは SSH サーバーだけです。外出先からつなぐときは Tailscale などを使います
 - SSH は鍵で入ります。クライアントの「RC設定」で ed25519 の鍵（`~/.ssh/agent-kanban_ed25519`）を作り、公開鍵をホストの「RC設定」で登録します
@@ -101,13 +101,13 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 **Mac / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.sh | bash
 ```
 
 **Windows**（PowerShell）
 
 ```powershell
-irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex
 ```
 
 同じコマンドで、最新版へのアップデートもできます。アプリの「設定」→「アプリの更新」の「新しいバージョンに更新」からも更新でき、「新しい版が出たら自動で更新する」にチェックを付けると、タスクが動いていないときに自動で入れ替えて起動し直します。バージョンの指定・アンインストール・ファイルからのインストール・初回起動の警告は [docs/install.md](docs/install.md) を見てください。
