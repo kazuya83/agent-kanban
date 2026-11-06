@@ -1,18 +1,56 @@
-[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+<div align="center">
+
+<img src="docs/images/icon.png" alt="" width="96" />
 
 # Worktree Kanban
 
-> 并行运行 AI 编程代理，并从另一台电脑操作：Mac 和 Windows 可以互相远程控制。
+<strong>并行运行 AI 编程代理，并从另一台电脑操作。</strong><br />
+Mac 和 Windows 可以互相远程控制。
 
-[官网](https://kazuya83.github.io/worktree-kanban/)
+[官网](https://kazuya83.github.io/worktree-kanban/) · [下载](https://github.com/kazuya83/worktree-kanban/releases/latest)
+
+[![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
+[![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
+[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
+[![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
+
+[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+
+</div>
+
+<div align="center">
 
 ![演示：创建任务、卡片并行运行、批准、查看差异并合并，然后远程操作看板](docs/images/zh/demo.gif)
+
+</div>
 
 这是一个桌面应用（Electron，Mac / Windows / Linux）。它把 AI 编程智能体的 CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）按任务放进各自的 git worktree 里并行运行，并用看板管理。**不限于同一个仓库里的任务，多个仓库的任务也可以同时进行。**
 
 ![看板：待办、执行中、评审、完成四列。执行中的卡片会显示提问、等待批准和正在工作](docs/images/zh/board.png)
 
+## 为什么选择 Worktree Kanban
+
+- **Mac ⇄ Windows 互相远程控制** — 在一台电脑上运行代理，在另一台电脑上操作同一个看板：批准、回答问题、发送指示、合并。
+- **一个任务，一个 worktree** — 每个任务都有自己的 git worktree 和分支，任务之间、任务与你的工作区都不会冲突。
+- **同时处理多个仓库** — 最多可用标签页打开 3 个仓库，切换标签页不会中断任何任务。
+- **沿用你现有的 CLI** — Claude Code、Codex CLI、Gemini CLI、Cursor CLI，登录和设置保持不变。
+- **最终由你决定** — 合并或创建 PR 前可以查看差异。使用 Claude Code 时，还可以在卡片上批准操作。
+- **完全本地** — 看板状态保存在你的电脑上，不使用外部服务器。
+
 ## 工作方式
+
+```mermaid
+flowchart LR
+    C["客户端电脑"] -- "SSH 隧道" --> B
+    subgraph H["主机电脑"]
+        B["看板"] --> W1["worktree 和分支 1"] --> A1["代理 CLI"]
+        B --> W2["worktree 和分支 2"] --> A2["代理 CLI"]
+        A1 --> R["你的仓库"]
+        A2 --> R
+    end
+    R -- "合并 / PR" --> O(("main"))
+```
 
 - **1 个任务 = 1 个 worktree = 1 个分支。** 在仓库旁边的 `<repo>.worktrees/<id>` 创建 worktree，并在名为 `agent/<概要>-<id>` 的分支上工作。进行中的任务彼此不会冲突，也不会和你手头的工作树冲突
 - **智能体就是原样启动的 CLI。** Claude Code 以 `claude -p --input-format stream-json --output-format stream-json` 运行，输出作为日志显示在卡片上。登录、模型、`CLAUDE.md` 和技能，与你在终端里使用的是同一套
@@ -56,51 +94,91 @@
 
 需要许可的操作，可以在卡片和详情面板里看完将要执行的命令和全部输入，再选择允许、拒绝，或在这个任务里始终允许。拒绝时可以把理由返回给智能体。
 
+<details>
+<summary>查看截图</summary>
+
 ![等待批准的卡片和详情面板](docs/images/zh/detail-permission.png)
+
+</details>
 
 ### 从 GitHub Issue 创建任务
 
 在「新建任务」的「从 GitHub Issue 创建」标签里填入编号（如 `21, 22, 24`）。它会根据 Issue 的标题、正文和评论生成指示，每个 Issue 一张卡片。分支名为 `agent/issue-21-…`，PR 正文里会写入 `Closes #21`。使用 `gh`。
 
+<details>
+<summary>查看截图</summary>
+
 ![从 Issue 创建任务的对话框](docs/images/zh/issue-dialog.png)
+
+</details>
 
 ### 来自智能体的提问
 
 Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现回答表单。支持多选和自由输入（其他）。
 
+<details>
+<summary>查看截图</summary>
+
 ![提问的回答表单](docs/images/zh/question.png)
+
+</details>
 
 ### worktree 与 diff
 
 「worktree」标签会显示分支的提交、未提交的更改、与基线的关系，以及同一仓库的其他 worktree。「diff」标签里，可以按文件夹树选择改过的文件，逐个查看差异。
 
+<details>
+<summary>查看截图</summary>
+
 ![worktree 标签页](docs/images/zh/worktree.png)
 
 ![差异标签页](docs/images/zh/diff.png)
+
+</details>
 
 ### 对话
 
 在「对话」里，不必创建任务（worktree），就可以向智能体询问这个仓库。回复以 Markdown 显示。想让它开始干活时，用「变成任务」，把这段对话接着做成任务。
 
+<details>
+<summary>查看截图</summary>
+
 ![对话](docs/images/zh/chat.png)
+
+</details>
 
 ### 通知
 
 等待批准、提问、等待回答、等待评审和完成，会积在右上角的铃铛图标里，同时也会发出桌面通知。按下通知就会打开那个任务。
 
+<details>
+<summary>查看截图</summary>
+
 ![通知列表](docs/images/zh/notifications.png)
+
+</details>
 
 ### 解决冲突
 
 合并发生冲突时，卡片会变成冲突。先把基线分支并入任务分支，然后可以选择让智能体解决，或自己在编辑器里修改。无论哪种方式，在你合并之前，基线分支都不会改变。
 
+<details>
+<summary>查看截图</summary>
+
 ![解决冲突](docs/images/zh/conflict.png)
+
+</details>
 
 ### 技能与过去的对话
 
 创建任务时，可以选择一项 Claude Code 的技能（以 `/技能名` 传入）。也可以选择过去的 Claude Code 对话（会话），从那里继续。
 
+<details>
+<summary>查看截图</summary>
+
 ![新建任务（已选中一项技能和一段过去的对话）](docs/images/zh/new-task.png)
+
+</details>
 
 ### 任务调度
 

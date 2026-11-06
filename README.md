@@ -1,18 +1,56 @@
-[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+<div align="center">
+
+<img src="docs/images/icon.png" alt="" width="96" />
 
 # Worktree Kanban
 
-> Run AI coding agents in parallel, then control them from another PC: Mac and Windows can each remotely operate the other.
+<strong>Run AI coding agents in parallel, then control them from another PC.</strong><br />
+Mac and Windows can each remotely operate the other.
 
-[Website](https://kazuya83.github.io/worktree-kanban/)
+[Website](https://kazuya83.github.io/worktree-kanban/) · [Download](https://github.com/kazuya83/worktree-kanban/releases/latest)
+
+[![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
+[![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
+[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
+[![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
+
+[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+
+</div>
+
+<div align="center">
 
 ![Demo: create a task, watch cards run in parallel, approve, review the diff, merge, then operate the board remotely](docs/images/en/demo.gif)
+
+</div>
 
 A desktop app (Electron, Mac / Windows / Linux) that runs AI coding-agent CLIs (Claude Code / Codex CLI / Gemini CLI / Cursor CLI) in parallel, each task in its own git worktree, and manages them on a kanban board. **It can run tasks from more than one repository at the same time, not only tasks inside a single repository.**
 
 ![Board: Todo, Running, Review, and Done columns. Cards in Running show question, waiting-for-approval, and working states](docs/images/en/board.png)
 
+## Why Worktree Kanban?
+
+- **Mac ⇄ Windows remote control** — run agents on one PC and operate the same board from the other: approve, answer questions, send instructions, and merge.
+- **One task, one worktree** — each task gets its own git worktree and branch, so tasks never collide with each other or with your working tree.
+- **Several repositories at once** — keep up to 3 repositories open as tabs; switching tabs does not stop anything.
+- **The CLIs you already use** — Claude Code, Codex CLI, Gemini CLI, and Cursor CLI, with the sign-in and settings you have today.
+- **You stay in charge** — check the diff before you merge or open a PR. With Claude Code, you also approve actions on the card.
+- **Local by design** — board state stays on your machine. There is no external server.
+
 ## How it works
+
+```mermaid
+flowchart LR
+    C["Client PC"] -- "SSH tunnel" --> B
+    subgraph H["Host PC"]
+        B["Board"] --> W1["worktree + branch 1"] --> A1["Agent CLI"]
+        B --> W2["worktree + branch 2"] --> A2["Agent CLI"]
+        A1 --> R["Your repository"]
+        A2 --> R
+    end
+    R -- "Merge / PR" --> O(("main"))
+```
 
 - **1 task = 1 worktree = 1 branch.** It creates a worktree at `<repo>.worktrees/<id>` next to the repository and works on a branch named `agent/<summary>-<id>`. Tasks do not collide with each other or with the working tree you have open
 - **The agent is the CLI, started as-is.** Claude Code runs as `claude -p --input-format stream-json --output-format stream-json`, and its output is shown on the card as the log. Sign-in, model, `CLAUDE.md`, and skills are the same ones you use in the terminal
@@ -56,51 +94,91 @@ You can open a folder that is not a git repository (video production and other w
 
 When an action needs permission, you can read the full command and input on the card and in the detail panel, then choose allow, deny, or always allow for this task. When you deny, you can send a reason back to the agent.
 
+<details>
+<summary>Screenshot</summary>
+
 ![A card waiting for approval, and the detail panel](docs/images/en/detail-permission.png)
+
+</details>
 
 ### Create tasks from GitHub Issues
 
 On the "Create from GitHub Issue" tab of "New task", enter numbers (`21, 22, 24`, and so on). It builds the instructions from the Issue title, body, and comments, and creates one card per Issue. The branch is named `agent/issue-21-…`, and the PR body includes `Closes #21`. This uses `gh`.
 
+<details>
+<summary>Screenshot</summary>
+
 ![Dialog that creates tasks from Issues](docs/images/en/issue-dialog.png)
+
+</details>
 
 ### Questions from the agent
 
 When Claude Code asks with `AskUserQuestion`, the card becomes a question and an answer form appears. Multiple choice and free text (Other) are both supported.
 
+<details>
+<summary>Screenshot</summary>
+
 ![Question answer form](docs/images/en/question.png)
+
+</details>
 
 ### worktree and diff
 
 The "worktree" tab shows the branch commits, uncommitted changes, how the branch relates to the base, and the other worktrees in the same repository. On the "diff" tab you pick changed files in a tree grouped by folder and read the diff file by file.
 
+<details>
+<summary>Screenshot</summary>
+
 ![worktree tab](docs/images/en/worktree.png)
 
 ![Diff tab](docs/images/en/diff.png)
+
+</details>
 
 ### Chat
 
 In "Chat" you can ask the agent about the repository without creating a task (worktree). Replies are shown as Markdown. When you want it to start working, "Make this a task" continues that conversation as a task.
 
+<details>
+<summary>Screenshot</summary>
+
 ![Chat](docs/images/en/chat.png)
+
+</details>
 
 ### Notifications
 
 Waiting for approval, questions, waiting for an answer, waiting for review, and completion collect on the bell icon at the top right, and a desktop notification is shown. Clicking a notification opens that task.
 
+<details>
+<summary>Screenshot</summary>
+
 ![Notifications](docs/images/en/notifications.png)
+
+</details>
 
 ### Resolving conflicts
 
 If a merge conflicts, the card becomes a conflict. After the base branch is merged into the task branch, you can have the agent resolve it or fix it yourself in an editor. Either way, the base branch stays unchanged until you merge.
 
+<details>
+<summary>Screenshot</summary>
+
 ![Resolving a conflict](docs/images/en/conflict.png)
+
+</details>
 
 ### Skills and past conversations
 
 When you create a task, you can pick one Claude Code skill (it is passed as `/skill-name`). You can also pick a past Claude Code conversation (session) and start from where it left off.
 
+<details>
+<summary>Screenshot</summary>
+
 ![New task (a skill and a conversation selected)](docs/images/en/new-task.png)
+
+</details>
 
 ### Task scheduler
 

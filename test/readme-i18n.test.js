@@ -301,7 +301,7 @@ test('5つの README は見出しとリンク先が一致し、言語リンク�
   for (let i = 1; i < texts.length; i++) {
     assert.equal(sameShape(texts[0], texts[i]), true, README_FILES[i]);
   }
-  assert.deepEqual(headingLevels(texts[0]), [1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2]);
+  assert.deepEqual(headingLevels(texts[0]), [1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2]);
 });
 
 test('冒頭の太字・承認・自動更新は、5言語で同じ事実を言う', () => {
@@ -315,7 +315,7 @@ test('冒頭の太字・承認・自動更新は、5言語で同じ事実を言�
 
 test('英語・西・仏の README は本文が翻訳され、docs には (Japanese) が付く', () => {
   for (const file of ['README.md', 'README.es.md', 'README.fr.md']) {
-    const body = read(file).replace(/^\[[^\n]*\n+/, '');
+    const body = read(file).replace(/^.*\[English\]\(README\.md\).*$/m, '');
     assert.equal(hasJapanese(body), false, file);
     assert.deepEqual(docNoteProblems(read(file), true), [], file);
   }
@@ -323,7 +323,7 @@ test('英語・西・仏の README は本文が翻訳され、docs には (Japan
   assert.equal(hasJapanese(ja), true);
   assert.deepEqual(docNoteProblems(ja, false), []);
   assert.ok(docNoteProblems(ja, true).length > 0);
-  const zh = read('README.zh-CN.md').replace(/^\[[^\n]*\n+/, '');
+  const zh = read('README.zh-CN.md').replace(/^.*\[English\]\(README\.md\).*$/m, '');
   assert.equal(hasJapanese(zh), true);
   assert.deepEqual(docNoteProblems(read('README.zh-CN.md'), true), []);
 });

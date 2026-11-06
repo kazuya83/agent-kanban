@@ -1,18 +1,56 @@
-[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+<div align="center">
+
+<img src="docs/images/icon.png" alt="" width="96" />
 
 # Worktree Kanban
 
-> Lancez des agents de code IA en parallèle et pilotez-les depuis un autre PC : Mac et Windows peuvent se contrôler mutuellement à distance.
+<strong>Lancez des agents de code IA en parallèle et pilotez-les depuis un autre PC.</strong><br />
+Mac et Windows peuvent se contrôler mutuellement à distance.
 
-[Site web](https://kazuya83.github.io/worktree-kanban/)
+[Site web](https://kazuya83.github.io/worktree-kanban/) · [Télécharger](https://github.com/kazuya83/worktree-kanban/releases/latest)
+
+[![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
+[![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
+[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
+[![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
+
+[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+
+</div>
+
+<div align="center">
 
 ![Démonstration : créer une tâche, voir les cartes avancer en parallèle, approuver, relire le diff, fusionner, puis piloter le tableau à distance](docs/images/fr/demo.gif)
+
+</div>
 
 Application de bureau (Electron, Mac / Windows / Linux) qui lance en parallèle les CLI d'agents de code IA (Claude Code / Codex CLI / Gemini CLI / Cursor CLI), chaque tâche dans son propre git worktree, et les suit sur un tableau kanban. **Elle ne se limite pas à un seul dépôt : elle peut aussi faire avancer en même temps des tâches de plusieurs dépôts.**
 
 ![Tableau : colonnes À faire, En cours, Revue et Terminé. Les cartes en cours affichent une question, une attente d'approbation ou un travail en cours](docs/images/fr/board.png)
 
+## Pourquoi Worktree Kanban ?
+
+- **Contrôle à distance Mac ⇄ Windows** — faites tourner les agents sur un PC et pilotez le même tableau depuis l'autre : approuvez, répondez aux questions, envoyez des instructions et fusionnez.
+- **Une tâche, un worktree** — chaque tâche a son propre worktree git et sa branche : elles n'entrent en conflit ni entre elles ni avec votre arbre de travail.
+- **Plusieurs dépôts à la fois** — ouvrez jusqu'à 3 dépôts en onglets ; changer d'onglet n'arrête rien.
+- **Les CLI que vous utilisez déjà** — Claude Code, Codex CLI, Gemini CLI et Cursor CLI, avec votre connexion et vos réglages actuels.
+- **Vous gardez la main** — vérifiez le diff avant de fusionner ou d'ouvrir une PR. Avec Claude Code, vous approuvez aussi les actions sur la carte.
+- **Tout en local** — l'état du tableau reste sur votre machine. Il n'y a pas de serveur externe.
+
 ## Fonctionnement
+
+```mermaid
+flowchart LR
+    C["PC client"] -- "Tunnel SSH" --> B
+    subgraph H["PC hôte"]
+        B["Tableau"] --> W1["worktree et branche 1"] --> A1["CLI de l'agent"]
+        B --> W2["worktree et branche 2"] --> A2["CLI de l'agent"]
+        A1 --> R["Votre dépôt"]
+        A2 --> R
+    end
+    R -- "Fusion / PR" --> O(("main"))
+```
 
 - **1 tâche = 1 worktree = 1 branche.** Elle crée un worktree dans `<repo>.worktrees/<id>`, à côté du dépôt, et travaille sur une branche `agent/<résumé>-<id>`. Les tâches ne se gênent pas entre elles, ni avec l'arbre de travail que vous avez ouvert
 - **L'agent est la CLI, lancée telle quelle.** Claude Code s'exécute avec `claude -p --input-format stream-json --output-format stream-json`, et sa sortie s'affiche sur la carte comme journal. La connexion, le modèle, `CLAUDE.md` et les skills sont ceux que vous utilisez dans le terminal
@@ -56,51 +94,91 @@ Vous pouvez ouvrir un dossier qui n'est pas un dépôt git (production vidéo et
 
 Quand une action a besoin d'une permission, vous lisez la commande et l'entrée en entier sur la carte et dans le panneau de détail, puis vous choisissez autoriser, refuser, ou toujours autoriser pour cette tâche. En cas de refus, vous pouvez renvoyer une raison à l'agent.
 
+<details>
+<summary>Voir l'écran</summary>
+
 ![Carte en attente d'approbation et panneau de détail](docs/images/fr/detail-permission.png)
+
+</details>
 
 ### Créer des tâches depuis des GitHub Issues
 
 Dans l'onglet « Créer depuis une GitHub Issue » de « Nouvelle tâche », saisissez des numéros (`21, 22, 24`, etc.). Les instructions sont construites à partir du titre, du corps et des commentaires de l'Issue, et une carte est créée par Issue. La branche s'appelle `agent/issue-21-…`, et le corps du PR contient `Closes #21`. Cela utilise `gh`.
 
+<details>
+<summary>Voir l'écran</summary>
+
 ![Dialogue de création de tâches depuis des Issues](docs/images/fr/issue-dialog.png)
+
+</details>
 
 ### Questions de l'agent
 
 Quand Claude Code pose une question avec `AskUserQuestion`, la carte devient une question et un formulaire de réponse s'affiche. Le choix multiple et le texte libre (Autre) sont pris en charge.
 
+<details>
+<summary>Voir l'écran</summary>
+
 ![Formulaire de réponse à une question](docs/images/fr/question.png)
+
+</details>
 
 ### worktree et diff
 
 L'onglet « worktree » montre les commits de la branche, les changements non commités, le rapport avec la base, et les autres worktrees du même dépôt. Dans l'onglet « diff », vous choisissez les fichiers modifiés dans un arbre groupé par dossier et vous lisez le diff fichier par fichier.
 
+<details>
+<summary>Voir l'écran</summary>
+
 ![Onglet worktree](docs/images/fr/worktree.png)
 
 ![Onglet diff](docs/images/fr/diff.png)
+
+</details>
 
 ### Conversation
 
 Dans « Conversation », vous pouvez interroger l'agent sur le dépôt sans créer de tâche (worktree). Les réponses s'affichent en Markdown. Quand vous voulez qu'il se mette au travail, « En faire une tâche » poursuit cette conversation comme une tâche.
 
+<details>
+<summary>Voir l'écran</summary>
+
 ![Conversation](docs/images/fr/chat.png)
+
+</details>
 
 ### Notifications
 
 L'attente d'approbation, les questions, l'attente d'une réponse, l'attente de revue et la fin de tâche s'accumulent sur l'icône de cloche en haut à droite, et une notification de bureau s'affiche aussi. Un clic sur une notification ouvre cette tâche.
 
+<details>
+<summary>Voir l'écran</summary>
+
 ![Liste des notifications](docs/images/fr/notifications.png)
+
+</details>
 
 ### Résoudre les conflits
 
 Si un merge entre en conflit, la carte devient un conflit. Une fois la branche de base intégrée dans la branche de la tâche, vous pouvez faire résoudre le conflit par l'agent ou le corriger vous-même dans un éditeur. Dans les deux cas, la branche de base ne change pas tant que vous n'avez pas mergé.
 
+<details>
+<summary>Voir l'écran</summary>
+
 ![Résolution d'un conflit](docs/images/fr/conflict.png)
+
+</details>
 
 ### Skills et conversations passées
 
 À la création d'une tâche, vous pouvez choisir une skill de Claude Code (elle est passée comme `/nom-de-la-skill`). Vous pouvez aussi choisir une conversation passée de Claude Code (session) et reprendre là où elle s'était arrêtée.
 
+<details>
+<summary>Voir l'écran</summary>
+
 ![Nouvelle tâche (une skill et une conversation sont choisies)](docs/images/fr/new-task.png)
+
+</details>
 
 ### Planificateur de tâches
 
