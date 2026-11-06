@@ -256,7 +256,7 @@ test('名前の列と箇条書きの区切りは、空や1件でも崩れない'
   assert.match(src, /tr\('「\{name\}」', \{ name: esc\(r\.pipeline\.name\) \}\)/);
   assert.match(src, /tr\('<span class="muted small">（\{at\}）<\/span>', \{ at: esc\(/);
   assert.match(src, /tr\('（\{at\}）', \{ at: esc\(hhmm\(x\.mergedAt\)\) \}\)/);
-  assert.match(src, /label: esc\(st\.label\),\s*who: esc\(whoShort\(st\.agent, st\.persona\)\),\s*state: esc\(RELAY_STATE\[stt\]\[1\]\)/);
+  assert.match(src, /label: esc\(FlowModel\.displayText\(st\.label, 'step'\)\),\s*who: esc\(whoShort\(st\.agent, st\.persona\)\),\s*state: esc\(RELAY_STATE\[stt\]\[1\]\)/);
   assert.match(src, /id: esc\(k\.id\), label: esc\(k\.relay\.branchOf\.label\), who: esc\(agentShort\(agentOf\(k\)\)\), st: esc\(st\)/);
 
   I18n.setLanguage('ja');
@@ -375,7 +375,7 @@ test('分岐・並列・合流の行き先は種別名を訳し、付けた名�
   assert.strictEqual(flowGoto(node('if', 'レビュー判定')), 'To Branch “レビュー判定”');
   assert.strictEqual(flowGoto(node('parallel', '分岐')), 'To Parallel “分岐”');
   assert.strictEqual(flowGoto(node('join', '<b>')), 'To Join “<b>”');
-  assert.strictEqual(flowGoto(node('if', '  ')), 'To Branch “  ”');
+  assert.strictEqual(flowGoto(node('if', '  ')), 'To Branch “”');
   assert.strictEqual(flowGoto(node('start', '開始')), 'To Start “Start”');
   assert.strictEqual(flowGoto(node('end', '終了')), 'To End “End”');
   assert.strictEqual(flowGoto(node('nope', 'Custom')), 'To  “Custom”');
@@ -384,7 +384,7 @@ test('分岐・並列・合流の行き先は種別名を訳し、付けた名�
   assert.strictEqual(flowGoto(node('if', '分岐')), 'To Branch “Branch”');
 
   I18n.setLanguage('es');
-  assert.strictEqual(flowGoto(node('if', '分岐')), 'A Rama «Rama»');
+  assert.strictEqual(flowGoto(node('if', '分岐')), 'A Bifurcación «Bifurcación»');
   assert.strictEqual(flowGoto(node('parallel', 'Mi rama')), 'A Paralelo «Mi rama»');
   I18n.setLanguage('fr');
   assert.strictEqual(flowGoto(node('join', '合流')), 'Vers Jonction « Jonction »');

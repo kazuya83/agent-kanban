@@ -1895,12 +1895,6 @@
     "fr": "{v1} en attente",
     "zh": "等待中 {v1} 件"
   },
-  "・": {
-    "en": " · ",
-    "es": " · ",
-    "fr": " · ",
-    "zh": " · "
-  },
   "v{v1} に更新します。アプリを終了して新しい版に入れ替え、起動し直します（1分ほどかかります）。{v2}\n\n更新しますか？": {
     "en": "Update to v{v1}. The app will quit, be replaced with the new version, and start again (about a minute).{v2}\n\nUpdate now?",
     "es": "Actualizar a v{v1}. La aplicación se cerrará, se sustituirá por la versión nueva y volverá a abrirse (tarda cerca de un minuto).{v2}\n\n¿Actualizar?",

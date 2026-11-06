@@ -513,7 +513,7 @@ test('権限モードと「を使う」は描画時に tr を通り、4言語の
     'すべて自動で許可する（注意）',
   ];
   const head = src.slice(0, src.indexOf('function openRemoteSettings()'));
-  const listed = [...head.matchAll(/^\s+\['(?:default|acceptEdits|plan|bypassPermissions)', '([^']+)'\],$/gm)].map((m) => m[1]);
+  const listed = [...head.matchAll(/^\s+\['(?:default|acceptEdits|plan|bypassPermissions)', tr\('([^']+)'\)\],$/gm)].map((m) => m[1]);
   assert.deepStrictEqual(listed, modes);
   const view = sliceBetween(src, 'function renderSettingsView()', 'function pickRepo(');
   const perm = view.slice(view.indexOf('permission:'), view.indexOf('task:'));
