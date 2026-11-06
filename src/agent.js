@@ -18,6 +18,7 @@ const { agentLabel, agentShort } = providers;
 const { isNoGitRepo, cleanRelayFlow, pipelineOf } = require('./store');
 const FlowModel = require('../renderer/flow-model');
 const Subtasks = require('./subtasks');
+const Checkpoints = require('./checkpoints');
 const I18n = require('../renderer/i18n');
 const { tr } = I18n;
 
@@ -727,6 +728,7 @@ class AgentManager extends EventEmitter {
     this.opts = opts;
     this.procs = new Map(); // cardId -> child process
     this.pending = new Map(); // permission request id -> { cardId, toolName, input, resolve }
+    this.rewinding = new Set(); // 戻しているカード。そのあいだ send / merge / PR / 移動 / 破棄は受け付けない
     this.permission = null; // { port, token }
     // 指示に添付したファイルの置き場所（作業フォルダの外）
     this.attachRoot = (opts && opts.attachDir) || path.join(os.tmpdir(), 'worktree-kanban-attachments');
@@ -847,7 +849,35 @@ class AgentManager extends EventEmitter {
   publicCards(repoPath) {
     return this.store.cards
       .filter((c) => !repoPath || c.repoPath === repoPath)
-      .map(({ logs, finalDiff, ...rest }) => rest);
+      .map((c) => {
+        // checkpoints はそのまま渡さない（指示文が入っている）。画面は rewind だけを見る
+        const { logs, finalDiff, checkpoints, ...rest } = c;
+        return { ...rest, rewind: Checkpoints.publicView(c, this.rewindContext(c)) };
+      });
+  }
+
+  // 画面と rewind が同じ理由を使う
+  rewindContext(c) {
+    return {
+      rewinding: this.rewinding.has(c.id),
+      worktreeMissing: !!(c.worktreePath && !fs.existsSync(c.worktreePath)),
+      parentMerged: this.branchParentMerged(c),
+    };
+  }
+
+  // 並列の枝で、親がもうこの枝をマージした（または枝のカードが親から外れた）
+  branchParentMerged(c) {
+    const b = c && c.relay && c.relay.branchOf;
+    if (!b) return false;
+    const p = this.store.card(b.parent);
+    if (!p || p.status === 'done' || (p.mergedInto && p.mergedInto.length) || p.mergedAt) return true;
+    const w = p.relay && p.relay.waiting;
+    if (!w || !(w.children || []).includes(c.id)) return true;
+    return (w.merged || []).includes(c.id);
+  }
+
+  assertNotRewinding(c) {
+    if (this.rewinding.has(c.id)) throw new Error(tr('戻しているところです'));
   }
 
   must(id) {
@@ -1879,6 +1909,7 @@ class AgentManager extends EventEmitter {
    */
   moveCard(id, to) {
     const c = this.must(id);
+    this.assertNotRewinding(c);
     if (isChat(c)) throw new Error(tr('会話は列を動かせません'));
     if (this.subtaskParentOf(c)) throw new Error(tr('サブタスクの状態は、親のタスクの「サブタスク」タブで変えてください'));
     if (c.afterDone) throw new Error(tr('完了したタスクについて話しているあいだは動かせません'));
@@ -2243,6 +2274,7 @@ class AgentManager extends EventEmitter {
 
   send(id, message, skill, files) {
     const c = this.must(id);
+    this.assertNotRewinding(c);
     if (!['review', 'failed', 'done'].includes(c.status)) throw new Error(tr('実行中・待機中は追加指示を送れません'));
     if (!message || !message.trim()) throw new Error(tr('追加指示を入力してください'));
     if (c.relay && c.relay.waiting) throw new Error(c.conflict ? tr('合流でのコンフリクトを、上の「コンフリクト」の欄から解消してください') : tr('Pipelineの並列の枝が終わるのを待っています。直したいときは、枝のタスクに追加指示を送ってください'));
@@ -2626,6 +2658,135 @@ class AgentManager extends EventEmitter {
     return mode === 'plan' ? 'plan' : 'default';
   }
 
+  // エージェントを起動する直前の状態を1件記録する。戻すときの時点になる
+  async recordCheckpoint(c) {
+    const prompt = c.pendingPrompt || '';
+    if (prompt === RESUME_PROMPT || prompt === CHAT_RESUME_PROMPT || prompt === FOLDER_RESUME_PROMPT) return;
+    if (!Checkpoints.shouldRecord(c)) return;
+    let commit = null;
+    if (!isChat(c) && !isNoGit(c) && c.worktreePath) {
+      // 手で直した未コミットの変更を、戻す先のコミットに含める
+      if (await git.isDirty(c.worktreePath, { untracked: true })) await git.commitAll(c.worktreePath, this.commitMessage(c));
+      commit = await git.revParse(c.worktreePath, 'HEAD');
+    }
+    const session = await this.checkpointSession(c);
+    const prev = c.checkpoints || [];
+    const cp = Checkpoints.create({
+      seq: prev.reduce((m, x) => Math.max(m, Number(x.seq) || 0), 0) + 1,
+      prompt,
+      attachments: c.pendingAttachments,
+      label: Checkpoints.labelFor(c, prompt),
+      commit,
+      session,
+      forkNext: !!c.forkNext,
+      agent: agentOf(c),
+      model: c.model || null,
+      persona: c.persona,
+      specState: c.specState,
+      relay: Checkpoints.relaySnapshot(c.relay),
+      stepStart: Checkpoints.stepStart(c),
+    });
+    c.checkpoints = Checkpoints.trim([...prev, cp]);
+  }
+
+  async checkpointSession(c) {
+    if (!c.sessionId || !isSessionId(c.sessionId)) return null;
+    if (agentOf(c) !== 'claude') return { id: c.sessionId };
+    const sessions = require('./sessions');
+    const size = sessions.sessionSize(c.sessionId, { configDir: await this.claudeConfigDir(c.repoPath) });
+    return typeof size === 'number' ? { id: c.sessionId, size } : { id: c.sessionId };
+  }
+
+  // このカード以外が、その会話を使っているか（切り詰めると相手の続きが壊れる）
+  sessionUsedByOther(c, id) {
+    if (!id) return false;
+    for (const o of this.store.cards) {
+      if (!o || o.id === c.id) continue;
+      if (this.cardSessionIds(o).has(id)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * チェックポイントの時点へ戻し、そのときの指示でもう一度動かす。
+   * ファイルの戻しに失敗したときは、カードを変えずにエラーにする
+   */
+  async rewind(id, checkpointId) {
+    const c = this.must(id);
+    if (this.rewinding.has(id)) throw new Error(tr('戻しているところです'));
+    const reason = Checkpoints.blockReason(c, this.rewindContext(c));
+    if (reason) throw new Error(reason);
+    const list = c.checkpoints || [];
+    const idx = list.findIndex((x) => x && x.id === checkpointId);
+    if (idx < 0) throw new Error(tr('戻す時点が見つかりません'));
+    const cp = list[idx];
+    this.rewinding.add(id);
+    let applied = false;
+    try {
+      await this.restoreFiles(c, cp);
+      const plan = await this.planConversation(c, cp);
+      let prompt = cp.prompt || '';
+      if (plan.handoff) {
+        const text = Checkpoints.handoffText(c.logs, { before: cp.at });
+        if (text) prompt = `${text}${prompt}`;
+      }
+      this.applyRewind(c, cp, idx, plan);
+      applied = true;
+      this.enqueue(c, prompt, cp.attachments || undefined);
+    } finally {
+      this.rewinding.delete(id);
+    }
+    // 戻しているあいだの印を外した状態を、画面に渡す
+    if (applied) this.changed(c);
+  }
+
+  // ファイルを戻す。失敗したら例外（カードはまだ変えない）
+  async restoreFiles(c, cp) {
+    if (!cp.commit) throw new Error(tr('戻す時点のコミットがありません'));
+    const wt = c.worktreePath;
+    if (!(await git.commitExists(wt, cp.commit))) throw new Error(tr('戻す時点のコミットが見つかりません'));
+    const branch = await git.currentBranch(wt);
+    if (branch !== c.branch) throw new Error(tr('worktree のブランチがタスクのブランチと違うので戻せません'));
+    const op = await git.operationInProgress(wt);
+    if (op) throw new Error(tr('git の操作（{op}）が途中なので戻せません', { op }));
+    await git.resetHardClean(wt, cp.commit);
+  }
+
+  // 会話の戻し方。ファイルを切り詰めるのは、条件がすべて揃った Claude の会話だけ
+  async planConversation(c, cp) {
+    const sess = cp.session;
+    if (!sess || !sess.id) return { sessionId: null, forkNext: false, handoff: false };
+    if (cp.forkNext) return { sessionId: sess.id, forkNext: true, handoff: false };
+    if ((cp.agent || 'claude') === 'claude' && typeof sess.size === 'number' && !this.sessionUsedByOther(c, sess.id)) {
+      const sessions = require('./sessions');
+      const ok = sessions.truncateSession(sess.id, sess.size, { configDir: await this.claudeConfigDir(c.repoPath) });
+      if (ok) return { sessionId: sess.id, forkNext: false, handoff: false };
+    }
+    return { sessionId: null, forkNext: false, handoff: true };
+  }
+
+  applyRewind(c, cp, idx, plan) {
+    c.agent = cp.agent || agentOf(c);
+    if (cp.model) c.model = cp.model;
+    else delete c.model;
+    if (cp.persona) c.persona = { ...cp.persona };
+    else delete c.persona;
+    if (cp.specState) c.specState = cp.specState;
+    else delete c.specState;
+    delete c.todos;
+    delete c.subtaskProposal;
+    delete c.btw;
+    c.sessionId = plan.sessionId;
+    c.forkNext = !!plan.forkNext;
+    c.stopRequested = false;
+    if (c.relay && cp.relay) Checkpoints.applyRelay(c.relay, cp.relay);
+    c.logs = (c.logs || []).filter((l) => typeof l.t === 'number' && l.t < cp.at);
+    c.checkpoints = (c.checkpoints || []).slice(0, idx);
+    c.logsVersion = (c.logsVersion || 0) + 1;
+    // 実際に使った金額は戻さない
+    this.log(c, 'system', tr('「{label}」の時点に戻しました。続きを自動で始めます', { label: cp.label || String(cp.seq || '') }));
+  }
+
   async launch(c) {
     const chat = isChat(c);
     // 完了したタスクについての会話: worktree は作らずリポジトリのフォルダで、ファイルを変えない計画モードで動かす
@@ -2636,6 +2797,8 @@ class AgentManager extends EventEmitter {
       if (!c.repoPath || !fs.existsSync(c.repoPath)) throw new Error(isNoGit(c) ? tr('フォルダが見つかりません: {path}', { path: c.repoPath }) : tr('リポジトリのフォルダが見つかりません: {path}', { path: c.repoPath }));
     } else if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
     const cwd = inFolder ? c.repoPath : c.worktreePath;
+    // 起動直前の状態を記録する。pendingPrompt を消す前、会話の引き継ぎを変える前
+    await this.recordCheckpoint(c);
     const s = this.store.settings;
     const rs = this.store.repoSettings(c.repoPath); // 権限モード・許可しておくツールは、そのタスクのプロジェクトの設定
     const agent = agentOf(c);
@@ -3325,6 +3488,7 @@ class AgentManager extends EventEmitter {
    */
   async merge(id, opts = {}) {
     const c = this.must(id);
+    this.assertNotRewinding(c);
     if (isChat(c)) throw new Error(tr('会話はマージできません（タスクにすると、worktree で作業してマージできます）'));
     if (isNoGit(c)) throw new Error(tr('git で管理していないフォルダのタスクはマージできません。「完了にする」で完了にしてください'));
     this.assertNotInRelayJoin(c);
@@ -3456,6 +3620,7 @@ class AgentManager extends EventEmitter {
    */
   async createPullRequest(id, opts = {}) {
     const c = this.must(id);
+    this.assertNotRewinding(c);
     if (isChat(c)) throw new Error(tr('会話からは PR を作れません（タスクにすると、worktree で作業して PR を作れます）'));
     if (isNoGit(c)) throw new Error(tr('git で管理していないフォルダのタスクからは PR を作れません。「完了にする」で完了にしてください'));
     this.assertNotInRelayJoin(c);
@@ -3897,6 +4062,7 @@ class AgentManager extends EventEmitter {
 
   async discard(id) {
     const c = this.must(id);
+    this.assertNotRewinding(c);
     if (this.isUndeletable(c)) throw new Error(tr('完了したタスクは削除できません'));
     // 並列の枝を待っているカードを消すときは、枝のタスクも消す。枝のタスクを消したら、親は合流できなくなる
     const kids = c.relay && c.relay.waiting ? [...c.relay.waiting.children] : [];

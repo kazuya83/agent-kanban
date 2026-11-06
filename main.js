@@ -1029,6 +1029,7 @@ app.whenReady().then(async () => {
   handle('card:markSeen', (id) => agents.markSeen(id));
   handle('card:stop', (id) => agents.stop(id));
   handle('card:send', ({ id, message, skill, attachments }) => agents.send(id, message, skill, attachments));
+  handle('card:rewind', ({ id, checkpointId }) => agents.rewind(id, checkpointId));
   handle('compete:adopt', (id) => agents.adoptCompetitor(id));
   // サブタスク: 開始前に決める・提案に答える・確かめたサブタスクを親のブランチに取り込む
   handle('subtasks:set', ({ id, items, merge }) => agents.setSubtasks(id, { items, merge }));

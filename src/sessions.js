@@ -165,4 +165,60 @@ function deleteSessions(ids, opts = {}) {
   return [...removed];
 }
 
-module.exports = { listSessions, deleteSessions, projectsDir };
+function projectsRoot(opts) {
+  return opts && opts.configDir ? path.join(opts.configDir, 'projects') : projectsDir();
+}
+
+// id の会話ファイル（projects/<フォルダ>/<id>.jsonl）。新しい順
+function sessionFiles(id, opts = {}) {
+  if (!isValidId(id)) return [];
+  const dir = projectsRoot(opts);
+  let projects = [];
+  try {
+    projects = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const found = [];
+  for (const p of projects) {
+    const file = path.join(dir, p, `${id}.jsonl`);
+    try {
+      const st = fs.statSync(file);
+      if (st.isFile()) found.push({ file, mtime: st.mtimeMs, size: st.size });
+    } catch {
+      /* ない */
+    }
+  }
+  found.sort((a, b) => b.mtime - a.mtime);
+  return found;
+}
+
+// その時点の会話ファイルのバイト数。無い・ID が不正なら null
+function sessionSize(id, opts = {}) {
+  const files = sessionFiles(id, opts);
+  return files.length ? files[0].size : null;
+}
+
+// 会話ファイルを size バイトに切り詰める。size の直前が改行で、ファイルがそれ以上のときだけ
+// 条件に合わなければ何もせず false（行の途中・小さすぎる・ID が不正）
+function truncateSession(id, size, opts = {}) {
+  if (!isValidId(id)) return false;
+  if (!Number.isInteger(size) || size <= 0) return false;
+  const files = sessionFiles(id, opts);
+  if (!files.length) return false;
+  for (const f of files) {
+    if (f.size < size) return false;
+    const fd = fs.openSync(f.file, 'r');
+    try {
+      const buf = Buffer.alloc(1);
+      const n = fs.readSync(fd, buf, 0, 1, size - 1);
+      if (n !== 1 || buf[0] !== 0x0a) return false;
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+  for (const f of files) if (f.size !== size) fs.truncateSync(f.file, size);
+  return true;
+}
+
+module.exports = { listSessions, deleteSessions, projectsDir, isValidId, sessionSize, truncateSession };
