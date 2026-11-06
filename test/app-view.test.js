@@ -5,6 +5,8 @@ const path = require('path');
 const vm = require('node:vm');
 const { VIEWS, VIEW_KEY, SETTINGS_NAV, normalizeView, loadView, saveView, isPipelineSubtask, canSchedule, bindNavMenu, settingsNavHtml, activeSection, bindSettingsNav } = require('../renderer/app-view.js');
 const { icon, ICON_NAMES, NOTIF_ICON } = require('../renderer/icons.js');
+const { tr } = require('../renderer/i18n.js');
+const { displayText } = require('../renderer/flow-model.js');
 
 const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8');
 
@@ -450,7 +452,8 @@ test('subtaskChipHtml: 並列の枝は AppView.isPipelineSubtask で「サブタ
   assert.ok(start >= 0 && end > start);
   const fn = src.slice(start, end);
   assert.ok(fn.indexOf('if (c.subtaskOf)') < fn.indexOf('AppView.isPipelineSubtask(c)'), '手動のサブタスクを先に判定する');
-  assert.match(fn, /「\$\{esc\(p\.title\)\}」のサブタスク（Pipeline の並列の枝）/);
+  assert.match(fn, /「\{title\}」のサブタスク（Pipeline の並列の枝）/);
+  assert.match(fn, /title: esc\(p\.title\)/);
   assert.match(fn, /Pipeline の並列の枝のサブタスク/);
   assert.match(fn, /class="orch-chip sub"/);
   assert.match(fn, /card\(c\.relay\.branchOf\.parent\)/);
@@ -474,6 +477,8 @@ function loadChipFns(cards) {
   const ctx = {
     AppView: { isPipelineSubtask },
     icon,
+    tr,
+    displayText,
     state: { board: { cards } },
   };
   vm.createContext(ctx);
@@ -497,7 +502,7 @@ function loadChipFns(cards) {
       'function agentIcon() { return ""; }',
       'function relayBarHtml() { return `<div class="relay-bar"></div>`; }',
       'function subtaskBarHtml() { return `<div class="sub-bar"></div>`; }',
-      'const FlowModel = { nodeOf: () => ({ label: "実装" }) };',
+      'const FlowModel = { nodeOf: () => ({ label: "実装" }), displayText };',
       'function competitors(c) { return c ? [c] : []; }',
       rendererFn('orchChipsHtml'),
       'Object.assign(this, { subtaskChipHtml, orchChipsHtml, isHiddenSubtask, esc });',
