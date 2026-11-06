@@ -26,6 +26,7 @@ const I18n = require('../renderer/i18n');
 // GitHub の Issue は、これまでどおり番号だけを渡す（fetchIssue などはテストで差し替えるので、形を変えない）
 const issueArg = (ref) => (IssueRef.providerOf(ref) === IssueRef.DEFAULT_PROVIDER ? ref.number : ref);
 const issueRef = (arg) => (arg && typeof arg === 'object' ? arg : IssueRef.cleanIssue({ number: arg }));
+const prNoun = (url) => (IssueRef.reviewHostOf(url) === 'gitlab' ? 'MR' : 'PR');
 const { tr } = I18n;
 
 // 内部の指示は日本語のまま。ja 以外のときだけ、返事の言語を先頭に足す（ログには出さない。ブランチ名の生成には使わない）
@@ -99,7 +100,7 @@ function buildSkillSuggestPrompt(c, similar = []) {
   if (c.issue) info.push(`- Issue: ${IssueRef.keyOf(c.issue)} ${c.issue.url || ''}`.trim());
   if (c.branch) info.push(`- ブランチ: ${c.branch}`);
   if ((c.mergedInto || []).length) info.push(`- 取り込み先: ${c.mergedInto.join(', ')}（git log で変更を確かめられます）`);
-  if (c.prUrl) info.push(`- PR: ${c.prUrl}`);
+  if (c.prUrl) info.push(`- ${prNoun(c.prUrl)}: ${c.prUrl}`);
   if (c.worktreePath && !isChat(c)) info.push(`- 作業フォルダ: ${c.worktreePath}`);
   if (info.length) lines.push('## 結果', ...info, '');
   if (similar.length) {
@@ -127,7 +128,7 @@ function buildChatContext(chat) {
     : `## 完了したタスク「${chat.title}」のやりとり（このタスクは、完了したこのタスクの修正です）`;
   const info = [];
   if (!isChat(chat) && (chat.mergedInto || []).length) info.push(`- 取り込み先: ${chat.mergedInto.join(', ')}（git log で前の変更を確かめられます）`);
-  if (!isChat(chat) && chat.prUrl) info.push(`- PR: ${chat.prUrl}`);
+  if (!isChat(chat) && chat.prUrl) info.push(`- ${prNoun(chat.prUrl)}: ${chat.prUrl}`);
   return [head, '', ...picked, ...(info.length ? ['', ...info] : [])].join('\n');
 }
 
@@ -145,13 +146,16 @@ const AFTER_DONE_NOTE = [
 const CI_FIX_MAX_ATTEMPTS = 3;
 
 function buildCiFixPrompt(c, ch) {
+  const gitlab = IssueRef.reviewHostOf(c.prUrl) === 'gitlab';
   return [
-    `この PR（${c.prUrl}）の CI が失敗しました（コミット ${String(ch.sha).slice(0, 7)}）。`,
+    `この ${prNoun(c.prUrl)}（${c.prUrl}）の CI が失敗しました（コミット ${String(ch.sha).slice(0, 7)}）。`,
     '',
     '失敗したチェック:',
     ...ch.failed.map((x) => `- ${x.name}${x.url ? `: ${x.url}` : ''}`),
     '',
-    '原因をログで確かめてから直してください。GitHub Actions のチェックは `gh run view <run id> --log-failed` でログを読めます（run id は URL の /runs/ のあとの数字です）。',
+    gitlab
+      ? '原因を確かめてから直してください。GitLab CI のジョブのログは、上の URL のページにあります。読めないときは、.gitlab-ci.yml のジョブと同じコマンドを手元で動かして確かめてください。'
+      : '原因をログで確かめてから直してください。GitHub Actions のチェックは `gh run view <run id> --log-failed` でログを読めます（run id は URL の /runs/ のあとの数字です）。',
     'テストを消す・スキップする、CI の設定を緩めるといった方法で通すのはやめてください。コードで直せない原因（CI の環境や秘密の値など）なら、変更せずにその理由を書いてください。',
     '直したらテストを実行して確かめてください。コミットと push はアプリが行うので、しなくてかまいません。',
     '最後に、原因とどう直したかを短くまとめてください。',
@@ -166,7 +170,7 @@ function buildAfterDonePrompt(c, message) {
   if (c.issue) info.push(`- Issue: ${IssueRef.keyOf(c.issue)} ${c.issue.url || ''}`.trim());
   if (c.branch) info.push(`- ブランチ: ${c.branch}`);
   if ((c.mergedInto || []).length) info.push(`- 取り込み先: ${c.mergedInto.join(', ')}（git log で変更を確かめられます）`);
-  if (c.prUrl) info.push(`- PR: ${c.prUrl}`);
+  if (c.prUrl) info.push(`- ${prNoun(c.prUrl)}: ${c.prUrl}`);
   if (info.length) lines.push('### 結果', ...info, '');
   lines.push('---', '', '## ユーザーのメッセージ', '', message);
   return lines.join('\n');
@@ -904,7 +908,10 @@ class AgentManager extends EventEmitter {
   changed(card) {
     this.store.save();
     this.emit('changed', card ? card.id : null);
-    if (card) this.queueIssueSync(card);
+    if (card) {
+      this.queueIssueSync(card);
+      this.queueIssueComments(card);
+    }
   }
 
   // ---------- Issue のステータス ----------
@@ -940,13 +947,57 @@ class AgentManager extends EventEmitter {
     c.issueSync = c.issueSync || {};
     if (c.issueSync.wanted === key) return;
     c.issueSync.wanted = key;
+    this.queueIssueWork(c, () => this.runIssueSync(c, key));
+  }
+
+  // カードごとに、サービスへの書き込みを順番に動かす
+  queueIssueWork(c, work) {
     this.issueSyncs = this.issueSyncs || new Map();
     const prev = this.issueSyncs.get(c.id) || Promise.resolve();
-    const next = prev.then(() => this.runIssueSync(c, key));
+    const next = prev.then(work);
     this.issueSyncs.set(c.id, next);
     next.then(() => {
       if (this.issueSyncs.get(c.id) === next) this.issueSyncs.delete(c.id);
     });
+  }
+
+  // カードの状態を見て、まだ書いていない出来事を返す（書く文つき）
+  issueCommentEvents(c) {
+    const seen = c.issueComments || {};
+    const out = [];
+    if (c.status === 'running' && !seen.started) out.push({ event: 'started', value: true, body: c.branch ? tr('Worktree Kanban でタスクを開始しました（ブランチ: {branch}）', { branch: c.branch }) : tr('Worktree Kanban でタスクを開始しました') });
+    if (c.prUrl && seen.pr !== c.prUrl) out.push({ event: 'pr', value: c.prUrl, body: this.prText(c, tr('PR を作成しました: {url}'), { url: c.prUrl }) });
+    if (this.issueStatusKey(c) === 'done' && !seen.done) out.push({ event: 'done', value: true, body: tr('Worktree Kanban のタスクが完了しました') });
+    return out;
+  }
+
+  // タスクの開始・PR の作成・完了を Issue にコメントで書き戻す（commentEvents を持つサービスだけ）。
+  // 切っているあいだの出来事も「書いた」ことにする（あとで入れたときに、古い出来事をまとめて書かない）
+  queueIssueComments(c) {
+    if (!c.issue) return;
+    const provider = this.issueProvider(c);
+    if (!provider || !provider.commentEvents || typeof provider.addComment !== 'function') return;
+    const events = this.issueCommentEvents(c);
+    if (!events.length) return;
+    c.issueComments = c.issueComments || {};
+    const enabled = this.store.repoSettings(c.repoPath).issueComments !== false;
+    for (const { event, value, body } of events) {
+      c.issueComments[event] = value;
+      if (enabled) this.queueIssueWork(c, () => this.runIssueComment(c, body));
+    }
+  }
+
+  async runIssueComment(c, body) {
+    if (!this.store.card(c.id)) return; // 破棄された
+    try {
+      await this.addIssueComment(c, body);
+    } catch (err) {
+      if (!this.store.card(c.id)) return;
+      const provider = this.issueProvider(c);
+      this.log(c, 'error', tr('{label} にコメントを書けませんでした: {message}', { label: provider ? provider.label : IssueRef.providerOf(c.issue), message: err.message }));
+      this.store.save();
+      this.emit('changed', c.id);
+    }
   }
 
   async runIssueSync(c, key) {
@@ -1077,7 +1128,7 @@ class AgentManager extends EventEmitter {
   // タスクが「完了」に入ったときに呼ぶ。完了の通知を出す。
   // 前に完了したタスクに似た作業があれば（同じような作業が続いていれば）、スキルにしませんか？の通知も出す
   completed(c) {
-    const body = (c.mergedInto || []).length ? tr('{targets} に取り込みました', { targets: c.mergedInto.join(', ') }) : c.prUrl ? tr('PR を作って片付けました: {url}', { url: c.prUrl }) : tr('タスクを完了にしました');
+    const body = (c.mergedInto || []).length ? tr('{targets} に取り込みました', { targets: c.mergedInto.join(', ') }) : c.prUrl ? this.prText(c, tr('PR を作って片付けました: {url}'), { url: c.prUrl }) : tr('タスクを完了にしました');
     this.notify(c, 'done', tr('完了: {title}', { title: c.title }), body);
     if (this.store.settings.suggestSkillsOnDone === false || !c.sessionId || c.skillSuggestNotified) return;
     const similar = this.similarDoneTasks(c);
@@ -1974,7 +2025,7 @@ class AgentManager extends EventEmitter {
     }
     if (to === 'review') {
       if (from !== 'done') throw new Error(tr('レビューへは、完了したタスクだけ戻せます'));
-      if (!isNoGit(c) && !(c.worktreePath && fs.existsSync(c.worktreePath))) throw new Error(tr('マージや PR で作業場所（worktree）を片付けたので、レビューに戻せません。続きは「修正タスクを作る」から進めてください'));
+      if (!isNoGit(c) && !(c.worktreePath && fs.existsSync(c.worktreePath))) throw new Error(this.prText(c, tr('マージや PR で作業場所（worktree）を片付けたので、レビューに戻せません。続きは「修正タスクを作る」から進めてください')));
       c.status = 'review';
       c.manualDone = false;
       c.completedAt = null;
@@ -3665,18 +3716,18 @@ class AgentManager extends EventEmitter {
    */
   async createPullRequest(id, opts = {}) {
     const c = this.must(id);
-    if (isChat(c)) throw new Error(tr('会話からは PR を作れません（タスクにすると、worktree で作業して PR を作れます）'));
-    if (isNoGit(c)) throw new Error(tr('git で管理していないフォルダのタスクからは PR を作れません。「完了にする」で完了にしてください'));
+    if (isChat(c)) throw new Error(this.prText(c, tr('会話からは PR を作れません（タスクにすると、worktree で作業して PR を作れます）')));
+    if (isNoGit(c)) throw new Error(this.prText(c, tr('git で管理していないフォルダのタスクからは PR を作れません。「完了にする」で完了にしてください')));
     this.assertNotInRelayJoin(c);
-    if (!['review', 'failed'].includes(c.status)) throw new Error(tr('レビュー中のタスクだけ PR を作れます'));
+    if (!['review', 'failed'].includes(c.status)) throw new Error(this.prText(c, tr('レビュー中のタスクだけ PR を作れます')));
     if (!c.worktreePath) throw new Error(tr('worktree がありません'));
     if (this.merging?.has(id)) throw new Error(tr('処理中です'));
     const top = c.repoPath;
     const base = String(opts.base || c.prBase || c.baseBranch || '').trim();
-    if (!base) throw new Error(tr('PR のマージ先のブランチを指定してください'));
-    if (base === c.branch) throw new Error(tr('タスク自身のブランチには PR を作れません'));
-    git.assertSafeRef(base, tr('PR のマージ先のブランチ名'));
-    if (!(await git.hasRemote(top, 'origin'))) throw new Error(tr('このリポジトリに origin がありません。GitHub のリポジトリを origin に設定してください'));
+    if (!base) throw new Error(this.prText(c, tr('PR のマージ先のブランチを指定してください')));
+    if (base === c.branch) throw new Error(this.prText(c, tr('タスク自身のブランチには PR を作れません')));
+    git.assertSafeRef(base, this.prText(c, tr('PR のマージ先のブランチ名')));
+    if (!(await git.hasRemote(top, 'origin'))) throw new Error(this.prText(c, tr('このリポジトリに origin がありません。GitHub のリポジトリを origin に設定してください')));
     if (await git.mergeInProgress(c.worktreePath)) throw new Error(tr('コンフリクトの解消が終わっていません。「解消した」を押すか、取り込みを中止してください'));
 
     this.merging = this.merging || new Set();
@@ -3684,22 +3735,26 @@ class AgentManager extends EventEmitter {
     try {
       await git.commitAll(c.worktreePath, this.commitMessage(c));
       if ((await git.countCommits(top, `${base}..${c.branch}`)) === 0 && (await git.branchExists(top, base))) {
-        throw new Error(tr('{base} との差分がないので PR を作れません', { base }));
+        throw new Error(this.prText(c, tr('{base} との差分がないので PR を作れません'), { base }));
       }
       await git.push(c.worktreePath, 'origin', c.branch, true);
       this.log(c, 'system',tr('ブランチ {branch} を origin に push しました', { branch: c.branch }));
       const def = this.prDefaults(c);
-      const slug = await github.repoSlug(top).catch(() => null);
-      const pr = await ghCli.createPullRequest({
-        cwd: c.worktreePath,
-        repo: slug ? `${slug.owner}/${slug.repo}` : undefined,
+      const fields = {
         head: c.branch,
         base,
         title: String(opts.title || '').trim() || def.title,
         body: opts.body != null && String(opts.body).trim() ? String(opts.body) : def.body,
-        gh: this.opts.ghPath,
-      });
-      this.log(c, 'system', pr.created ? tr('PR を作成しました: {url}', { url: pr.url }) : tr('開いている PR を更新しました: {url}', { url: pr.url }));
+      };
+      const host = await this.codeHostOf(top);
+      let pr;
+      if (host) {
+        pr = await this.trackers.call(host, 'createMergeRequest', { repoPath: top }, fields);
+      } else {
+        const slug = await github.repoSlug(top).catch(() => null);
+        pr = await ghCli.createPullRequest({ ...fields, cwd: c.worktreePath, repo: slug ? `${slug.owner}/${slug.repo}` : undefined, gh: this.opts.ghPath });
+      }
+      this.log(c, 'system', pr.created ? this.prText(c, tr('PR を作成しました: {url}'), { url: pr.url }) : this.prText(c, tr('開いている PR を更新しました: {url}'), { url: pr.url }));
       c.prUrl = pr.url;
       c.prBase = base;
       c.prState = 'OPEN';
@@ -3733,7 +3788,25 @@ class AgentManager extends EventEmitter {
 
   // テストで差し替えられるようにメソッドにしておく
   pullRequestState(c) {
+    const host = IssueRef.reviewHostOf(c.prUrl);
+    if (host) return this.trackers.call(host, 'mergeRequestState', { repoPath: c.repoPath }, { url: c.prUrl });
     return ghCli.pullRequestState({ url: c.prUrl, cwd: c.worktreePath || c.repoPath, gh: this.opts.ghPath });
+  }
+
+  // origin を gh の代わりに扱うコードのホスト（gitlab）。GitHub なら ''
+  async codeHostOf(repoPath) {
+    const url = await git.git(repoPath, ['remote', 'get-url', 'origin']).catch(() => '');
+    return url ? this.trackers.codeHostOf(url.trim()) : '';
+  }
+
+  // カードのコードのホスト。MR を作ったあとは URL で、作る前はプロジェクトの設定で決める
+  reviewHost(c) {
+    return (c.prUrl ? IssueRef.reviewHostOf(c.prUrl) : this.store.repoSettings(c.repoPath).codeHost) || '';
+  }
+
+  // PR の文言を、カードのコードのホストに合わせる（GitLab なら MR）。template は tr() の結果
+  prText(c, template, vars) {
+    return I18n.forHost(template, this.reviewHost(c), vars);
   }
 
   // 一定の間隔で、作った PR がマージされたかを確かめる
@@ -3765,7 +3838,7 @@ class AgentManager extends EventEmitter {
           if (await this.checkPullRequest(c)) n++;
         } catch (err) {
           if (!this.store.card(c.id)) continue;
-          if (c.prCheckError !== err.message) this.log(c, 'error',tr('PR の状態を確かめられませんでした: {message}', { message: err.message }));
+          if (c.prCheckError !== err.message) this.log(c, 'error',this.prText(c, tr('PR の状態を確かめられませんでした: {message}'), { message: err.message }));
           c.prCheckError = err.message;
           this.store.save();
         }
@@ -3789,7 +3862,7 @@ class AgentManager extends EventEmitter {
     if (pr.state !== 'MERGED') {
       let changed = false;
       if (c.prState !== pr.state) {
-        if (pr.state === 'CLOSED') this.log(c, 'system',tr('PR はマージされずに閉じられました: {url}', { url }));
+        if (pr.state === 'CLOSED') this.log(c, 'system',this.prText(c, tr('PR はマージされずに閉じられました: {url}'), { url }));
         c.prState = pr.state;
         changed = true;
       }
@@ -3807,7 +3880,7 @@ class AgentManager extends EventEmitter {
       c.mergedInto = [...new Set([...(c.mergedInto || []), base])];
       c.lastMergeTarget = base;
     }
-    this.log(c, 'system', base ? tr('PR がマージされました（{base}）: {url}', { base, url }) : tr('PR がマージされました: {url}', { url }));
+    this.log(c, 'system', base ? this.prText(c, tr('PR がマージされました（{base}）: {url}'), { base, url }) : this.prText(c, tr('PR がマージされました: {url}'), { url }));
 
     if (c.status !== 'done' && c.worktreePath) {
       if (this.merging?.has(c.id)) {
@@ -3817,7 +3890,7 @@ class AgentManager extends EventEmitter {
       const keep = await this.unmergedWork(c, pr.headRefOid);
       if (!this.store.card(c.id) || !['review', 'failed'].includes(c.status)) return false;
       if (keep) {
-        this.log(c, 'system',tr('worktree に PR に入っていない変更（{keep}）があるので、タスクはレビュー中のまま残します。不要なら「破棄」、続きは追加指示か PR の作成で進められます', { keep }));
+        this.log(c, 'system',this.prText(c, tr('worktree に PR に入っていない変更（{keep}）があるので、タスクはレビュー中のまま残します。不要なら「破棄」、続きは追加指示か PR の作成で進められます'), { keep }));
         this.changed(c);
         return false;
       }
@@ -3842,7 +3915,7 @@ class AgentManager extends EventEmitter {
     c.interrupted = null;
     c.mergedAt = c.prMergedAt;
     if (!wasDone) this.completed(c);
-    else this.notify(c, 'done', tr('PR がマージされました: {title}', { title: c.title }), url);
+    else this.notify(c, 'done', this.prText(c, tr('PR がマージされました: {title}'), { title: c.title }), url);
     await this.deleteTaskSessions(c);
     this.changed(c);
     return true;
@@ -3866,10 +3939,10 @@ class AgentManager extends EventEmitter {
       // 新しくコンフリクトした。worktree があればアプリの中で解消できる
       if (c.worktreePath && ['review', 'failed'].includes(c.status) && base && !(c.conflict && !c.conflict.pr)) {
         if (!active) this.raisePrConflict(c, base);
-        this.log(c, 'error',tr('PR が {base} とコンフリクトしています。「エージェントに解消してもらう」か「自分で解消する」で直して、PR を更新してください: {prUrl}', { base, prUrl: c.prUrl }));
-        this.notify(c, 'conflict', tr('PR がコンフリクトしています: {title}', { title: c.title }), c.prUrl);
+        this.log(c, 'error',this.prText(c, tr('PR が {base} とコンフリクトしています。「エージェントに解消してもらう」か「自分で解消する」で直して、PR を更新してください: {prUrl}'), { base, prUrl: c.prUrl }));
+        this.notify(c, 'conflict', this.prText(c, tr('PR がコンフリクトしています: {title}'), { title: c.title }), c.prUrl);
       } else if (!c.worktreePath) {
-        this.log(c, 'error',tr('PR が {v} とコンフリクトしています（worktree を片付けたので、GitHub 上で解消してください）: {prUrl}', { v: base || tr('マージ先'), prUrl: c.prUrl }));
+        this.log(c, 'error',this.prText(c, tr('PR が {v} とコンフリクトしています（worktree を片付けたので、GitHub 上で解消してください）: {prUrl}'), { v: base || tr('マージ先'), prUrl: c.prUrl }));
       }
       changed = true;
     } else if (now !== 'CONFLICTING' && c.conflict && c.conflict.pr && !active) {
@@ -3946,7 +4019,7 @@ class AgentManager extends EventEmitter {
   fixCi(id) {
     const c = this.must(id);
     if (!c.prUrl || c.prState !== 'OPEN' || c.prChecks?.state !== 'FAILURE') throw new Error(tr('CI は失敗していません'));
-    if (!c.worktreePath) throw new Error(tr('worktree がないので、アプリの中では直せません。GitHub 上で直してください'));
+    if (!c.worktreePath) throw new Error(this.prText(c, tr('worktree がないので、アプリの中では直せません。GitHub 上で直してください')));
     if (!['review', 'failed'].includes(c.status)) throw new Error(tr('実行中は直し始められません'));
     if (c.conflict) throw new Error(tr('コンフリクトを解消してから直してください'));
     if (this.merging?.has(id)) throw new Error(tr('処理中です'));
@@ -3986,8 +4059,8 @@ class AgentManager extends EventEmitter {
   // 閉じたコンフリクトの案内を、もう一度出す（PR がコンフリクトしているあいだだけ）
   reopenPrConflict(id) {
     const c = this.must(id);
-    if (!c.prUrl || c.prState !== 'OPEN' || c.prMergeable !== 'CONFLICTING') throw new Error(tr('PR はコンフリクトしていません'));
-    if (!c.worktreePath) throw new Error(tr('worktree がないので、アプリの中では解消できません。GitHub 上で解消してください'));
+    if (!c.prUrl || c.prState !== 'OPEN' || c.prMergeable !== 'CONFLICTING') throw new Error(this.prText(c, tr('PR はコンフリクトしていません')));
+    if (!c.worktreePath) throw new Error(this.prText(c, tr('worktree がないので、アプリの中では解消できません。GitHub 上で解消してください')));
     if (!['review', 'failed'].includes(c.status)) throw new Error(tr('実行中は解消を始められません'));
     if (c.conflict) return c.conflict;
     this.raisePrConflict(c, c.prBase || c.baseBranch);
@@ -4002,12 +4075,12 @@ class AgentManager extends EventEmitter {
     try {
       if (await git.mergeInProgress(wt)) return tr('コンフリクトの解消中');
       if (await git.isDirty(wt, { untracked: true })) return tr('未コミットの変更');
-      if (!headRefOid) return tr('PR の最後のコミットが分からない');
+      if (!headRefOid) return this.prText(c, tr('PR の最後のコミットが分からない'));
       const ahead = await git.countCommits(c.repoPath, `${headRefOid}..${c.branch}`);
-      return ahead > 0 ? tr('PR にないコミット {n} 件', { n: ahead }) : null;
+      return ahead > 0 ? this.prText(c, tr('PR にないコミット {n} 件'), { n: ahead }) : null;
     } catch {
       // PR の最後のコミットが手元にないなど。消してよいか分からないので残す
-      return tr('PR と手元のブランチを比べられない');
+      return this.prText(c, tr('PR と手元のブランチを比べられない'));
     }
   }
 
@@ -4019,7 +4092,7 @@ class AgentManager extends EventEmitter {
     try {
       has = await git.fetchBranch(top, remote, target);
     } catch (err) {
-      throw new Error(tr('origin の最新を取ってこられませんでした（ネットワークや GitHub のログインを確認してください）。\n{message}', { message: err.message }));
+      throw new Error(this.prText(c, tr('origin の最新を取ってこられませんでした（ネットワークや GitHub のログインを確認してください）。\n{message}'), { message: err.message }));
     }
     if (!has) return false;
     const behind = await git.countCommits(top, `${target}..${remote}/${target}`);
@@ -4061,7 +4134,7 @@ class AgentManager extends EventEmitter {
         try {
           has = await git.fetchBranch(c.repoPath, 'origin', target);
         } catch (err) {
-          throw new Error(tr('origin の最新を取ってこられませんでした（ネットワークや GitHub のログインを確認してください）。\n{message}', { message: err.message }));
+          throw new Error(this.prText(c, tr('origin の最新を取ってこられませんでした（ネットワークや GitHub のログインを確認してください）。\n{message}'), { message: err.message }));
         }
         if (!has) throw new Error(tr('origin に {target} が見つかりません', { target }));
         ref = `origin/${target}`;
@@ -4157,7 +4230,7 @@ class AgentManager extends EventEmitter {
     const pr = !!c.conflict.pr;
     c.conflictResolved = { target: c.conflict.target, push: c.conflict.push, keep: c.conflict.keep, ...(pr ? { pr: true } : {}) };
     c.conflict = null;
-    this.log(c, 'system', pr ? tr('{msg}。PR を更新（push）すると、GitHub 上のコンフリクトも解消されます', { msg }) : tr('{msg}。もう一度マージすると、コンフリクトなしでマージできます', { msg }));
+    this.log(c, 'system', pr ? this.prText(c, tr('{msg}。PR を更新（push）すると、GitHub 上のコンフリクトも解消されます'), { msg }) : tr('{msg}。もう一度マージすると、コンフリクトなしでマージできます', { msg }));
     this.changed(c);
   }
 
@@ -4187,7 +4260,7 @@ class AgentManager extends EventEmitter {
    */
   complete(id) {
     const c = this.must(id);
-    if (!isNoGit(c)) throw new Error(tr('git のリポジトリのタスクは、マージか PR の作成で完了にしてください'));
+    if (!isNoGit(c)) throw new Error(this.prText(c, tr('git のリポジトリのタスクは、マージか PR の作成で完了にしてください')));
     if (!['review', 'failed'].includes(c.status)) throw new Error(tr('レビュー中のタスクだけ完了にできます'));
     c.status = 'done';
     c.error = null;

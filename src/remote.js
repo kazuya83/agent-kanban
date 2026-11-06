@@ -675,6 +675,7 @@ function publicConnectionHistory(list) {
 function settingLabel(k) {
   if (k === 'customAgents') return tr('カスタムエージェント');
   if (k === 'issueProvider') return tr('使う課題管理サービス');
+  if (k === 'issueComments') return tr('タスクの開始・PR の作成・完了を Issue にコメントする');
   if (k === 'relayFlow') return tr('Pipelineのフローチャート');
   if (k === 'relayFlows') return tr('Pipelineの一覧');
   if (k === 'relayFlowId') return tr('既定のPipeline');

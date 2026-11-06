@@ -33,6 +33,9 @@
     return `${keyOf(issue)} ${issue.url || ''}`.trim();
   }
 
+  // PR の URL から、コードのホストを読む（GitLab の MR の URL は /-/merge_requests/ を含む）。それ以外は ''
+  const reviewHostOf = (url) => (/\/-\/merge_requests\/\d+/.test(String(url || '')) ? 'gitlab' : '');
+
   // 保存する形にそろえる（前の版の { number, title, url } も受け取る）。読み取れなければ null
   function cleanIssue(x) {
     if (!x || typeof x !== 'object') return null;
@@ -46,5 +49,5 @@
     return out;
   }
 
-  return { DEFAULT_PROVIDER, providerOf, keyOf, sameIssue, stripKey, branchPart, linkLine, cleanIssue };
+  return { DEFAULT_PROVIDER, providerOf, keyOf, sameIssue, stripKey, branchPart, linkLine, reviewHostOf, cleanIssue };
 });

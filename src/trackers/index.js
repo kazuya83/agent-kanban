@@ -20,6 +20,8 @@
 //   statusLabel: 'GitHub Projects'   状態同期のログに出す名前（無ければ label）
 //   refPlaceholder: '例: ENG-123'   Issue の入力欄の例（日本語の原文で書く）
 //   linkLine(ref) → string   PR / MR の本文に入れる1行（無ければ「キー URL」。ref は fetchIssue の結果）
+//   statusHelp: '…'   プロジェクトの設定で、状態同期の説明に出す文（日本語の原文で書く）
+//   commentEvents: true   タスクの開始・PR の作成・完了のときに addComment で書き戻す（プロジェクトの設定 issueComments で切れる）
 //
 //   課題管理サービスは次を持つ（parseRefs と fetchIssue の両方があるものが、プロジェクトの設定で選べる）
 //   parseRefs(ctx, text) → ref[]   入力の番号や URL から Issue の参照を取り出す。読めない入力は例外にする
@@ -30,6 +32,10 @@
 //   addComment(ctx, ref, body) → { url? }
 //   createSubIssue(ctx, parentRef, { title, body }) → { key, number?, title, url }
 //   fetchSubIssues(ctx, parentRef) → fetchIssue と同じ形の配列（comments は無くてよい）
+//
+//   コードのホスト（origin が matchesRemote に合うリポジトリの MR を、gh の代わりに扱う）は次を持つ
+//   createMergeRequest(ctx, { head, base, title, body }) → { url, number, created }   開いている MR があれば created: false で返す
+//   mergeRequestState(ctx, { url }) → gh.pullRequestState と同じ形
 //
 // 上の ref には、カードの c.issue（renderer/issue-ref.js の形）もそのまま渡る。
 // チャットサービス（parseRefs・fetchIssue を持たない）は、configFields と testConnection で「連携」の欄にだけ出る。
@@ -123,6 +129,8 @@ function issueProviderMeta() {
     refPlaceholder: p.refPlaceholder || '',
     canSync: typeof p.setStatus === 'function',
     canSubIssue: typeof p.createSubIssue === 'function',
+    canComment: !!p.commentEvents && typeof p.addComment === 'function',
+    statusHelp: p.statusHelp || '',
   }));
 }
 
@@ -165,6 +173,12 @@ class Trackers extends EventEmitter {
   guessFromRemote(url) {
     const hit = issueProviders().find((p) => typeof p.matchesRemote === 'function' && p.matchesRemote(url, this.configOf(p.id)));
     return hit ? hit.id : DEFAULT_PROVIDER;
+  }
+
+  // origin の URL のリポジトリを、gh の代わりに扱うコードのホスト。無ければ ''（GitHub・それ以外）
+  codeHostOf(url) {
+    const hit = list().find((p) => typeof p.createMergeRequest === 'function' && typeof p.matchesRemote === 'function' && p.matchesRemote(url, this.configOf(p.id)));
+    return hit ? hit.id : '';
   }
 
   // draft: 接続テストで使う、画面に入力中の値 { config, secrets }
@@ -291,7 +305,7 @@ class Trackers extends EventEmitter {
 }
 
 // 組み込みのプロバイダ。サービスを足すときは、ここに1行足す
-const BUILTIN = ['./github'];
+const BUILTIN = ['./github', './gitlab'];
 for (const file of BUILTIN) register(require(file));
 
 module.exports = { Trackers, register, unregister, get, list, issueProviders, isIssueProvider, issueProviderMeta, cleanConfig, secretName };

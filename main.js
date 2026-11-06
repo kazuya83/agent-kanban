@@ -808,19 +808,32 @@ app.whenReady().then(async () => {
     switchRepoSettings(s, dir);
     s.repoTabs = tabs;
   };
-  // 初めて開いたプロジェクトは初期値から始める。取り込み方は PR を作成。ただし origin が GitHub でない・git なしなら直接マージ。
+  // 初めて開いたプロジェクトは初期値から始める。取り込み方は PR を作成。ただし origin が GitHub でも GitLab でもない・git なしなら直接マージ。
   // 使う課題管理サービスは origin から推定する（分からなければ GitHub のまま）
   const initRepoSettings = async (dir) => {
     const noGit = isNoGitRepo(store.settings, dir);
     const gh = noGit ? false : await git.isGitHubRemote(dir).catch(() => false);
     const url = noGit ? '' : await git.git(dir, ['remote', 'get-url', 'origin']).catch(() => '');
     const issueProvider = url ? trackers.guessFromRemote(url.trim()) : 'github';
-    const patch = { ...(gh ? {} : { integration: 'merge' }), ...(issueProvider === 'github' ? {} : { issueProvider }) };
+    const canReview = gh || (!!url && !!trackers.codeHostOf(url.trim()));
+    const patch = { ...(canReview ? {} : { integration: 'merge' }), ...(issueProvider === 'github' ? {} : { issueProvider }) };
     if (!Object.keys(patch).length) return;
     store.setRepoSettings(dir, patch);
     store.save();
     notifyBoard();
   };
+  // origin のコードのホストを覚える（画面の PR / MR の文言に使う。origin や接続先は変わることがあるので、開くたびに確かめる）
+  const refreshCodeHost = async (dir) => {
+    if (!dir || isNoGitRepo(store.settings, dir)) return;
+    const url = await git.git(dir, ['remote', 'get-url', 'origin']).catch(() => '');
+    const codeHost = url ? trackers.codeHostOf(url.trim()) : '';
+    if ((store.repoSettings(dir).codeHost || '') === codeHost) return;
+    store.setRepoSettings(dir, { codeHost });
+    store.save();
+    notifyBoard();
+  };
+  trackers.on('changed', () => refreshCodeHost(store.settings.repoPath).catch(() => {}));
+  refreshCodeHost(store.settings.repoPath).catch(() => {});
   const openRepo = (dir, { tab } = {}) => {
     const s = store.settings;
     const fresh = !!dir && !hasRepoSettings(s, dir);
@@ -828,7 +841,7 @@ app.whenReady().then(async () => {
     s.recentRepoPaths = touchRecentRepo(s.recentRepoPaths, dir);
     store.save();
     notifyBoard();
-    if (fresh) initRepoSettings(dir).catch(() => {});
+    (fresh ? initRepoSettings(dir).catch(() => {}) : Promise.resolve()).then(() => refreshCodeHost(dir)).catch(() => {});
     return dir;
   };
   // タブを切り替える（タブにあるリポジトリだけ）
@@ -908,7 +921,7 @@ app.whenReady().then(async () => {
     return { branches, current, hasOrigin };
   });
   handle('settings:update', (patch) => {
-    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueProvider', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'deleteSessionsOnMerge', 'specCheck', 'ciAutoFix', 'subtaskMerge', 'branchNamingRule', 'setupScript', 'teardownScript', 'runScript', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'relayFlow', 'relayFlows', 'relayFlowId', 'competeAgents', 'competeCustomAgents', 'customAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
+    const allowed = ['baseBranch', 'permissionMode', 'allowedTools', 'model', 'claudePath', 'maxParallel', 'defaultSkill', 'integration', 'issueProvider', 'issueComments', 'issueStatusSync', 'statusFieldName', 'statusMapping', 'suggestSkillsOnDone', 'deleteSessionsOnMerge', 'specCheck', 'ciAutoFix', 'subtaskMerge', 'branchNamingRule', 'setupScript', 'teardownScript', 'runScript', 'defaultAgent', 'codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel', 'relaySteps', 'relayFlow', 'relayFlows', 'relayFlowId', 'competeAgents', 'competeCustomAgents', 'customAgents', 'orchestration', 'enabledAgents', 'weeklyResetDay', 'weeklyResetTime'];
     if (patch && 'branchNamingRule' in patch) patch = { ...patch, branchNamingRule: String(patch.branchNamingRule || '').trim() };
     for (const k of ['setupScript', 'teardownScript', 'runScript']) if (patch && k in patch) patch = { ...patch, [k]: cleanScript(patch[k]) };
     if (patch && 'integration' in patch && !['merge', 'pr'].includes(patch.integration)) patch = { ...patch, integration: 'merge' };
@@ -919,6 +932,7 @@ app.whenReady().then(async () => {
     if (patch && 'weeklyResetDay' in patch) patch = { ...patch, weeklyResetDay: /^[0-6]$/.test(String(patch.weeklyResetDay)) ? String(patch.weeklyResetDay) : '' };
     if (patch && 'weeklyResetTime' in patch) patch = { ...patch, weeklyResetTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(String(patch.weeklyResetTime)) ? String(patch.weeklyResetTime) : '00:00' };
     if (patch && 'issueStatusSync' in patch) patch = { ...patch, issueStatusSync: !!patch.issueStatusSync };
+    if (patch && 'issueComments' in patch) patch = { ...patch, issueComments: !!patch.issueComments };
     if (patch && 'issueProvider' in patch && !trackersRegistry.isIssueProvider(patch.issueProvider)) throw new Error(tr('連携先「{id}」は使えません', { id: String(patch.issueProvider) }));
     if (patch && 'baseBranch' in patch) {
       const b = String(patch.baseBranch || '').trim();
