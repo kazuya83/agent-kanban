@@ -164,6 +164,8 @@ The "worktree" tab shows the branch commits, uncommitted changes, how the branch
 
 In "Chat" you can ask the agent about the repository without creating a task (worktree). Replies are shown as Markdown. When you want it to start working, "Make this a task" continues that conversation as a task.
 
+![Asking about the code in a conversation, then turning it into a task](docs/images/en/feature-chat.gif)
+
 <details>
 <summary>Screenshot</summary>
 
@@ -174,6 +176,8 @@ In "Chat" you can ask the agent about the repository without creating a task (wo
 ### Notifications
 
 Waiting for approval, questions, waiting for an answer, waiting for review, and completion collect on the bell icon at the top right, and a desktop notification is shown. Clicking a notification opens that task.
+
+![Opening a notification to go to the card that needs you](docs/images/en/feature-notifications.gif)
 
 <details>
 <summary>Screenshot</summary>
@@ -186,6 +190,8 @@ Waiting for approval, questions, waiting for an answer, waiting for review, and 
 
 If a merge conflicts, the card becomes a conflict. After the base branch is merged into the task branch, you can have the agent resolve it or fix it yourself in an editor. Either way, the base branch stays unchanged until you merge.
 
+![Having the agent resolve a conflict, then merging](docs/images/en/feature-conflict.gif)
+
 <details>
 <summary>Screenshot</summary>
 
@@ -196,6 +202,8 @@ If a merge conflicts, the card becomes a conflict. After the base branch is merg
 ### Skills and past conversations
 
 When you create a task, you can pick one Claude Code skill (it is passed as `/skill-name`). You can also pick a past Claude Code conversation (session) and start from where it left off.
+
+![Choosing a skill and a past conversation for a new task](docs/images/en/feature-skills.gif)
 
 <details>
 <summary>Screenshot</summary>

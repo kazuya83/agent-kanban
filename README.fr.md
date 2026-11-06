@@ -164,6 +164,8 @@ L'onglet « worktree » montre les commits de la branche, les changements non co
 
 Dans « Conversation », vous pouvez interroger l'agent sur le dépôt sans créer de tâche (worktree). Les réponses s'affichent en Markdown. Quand vous voulez qu'il se mette au travail, « En faire une tâche » poursuit cette conversation comme une tâche.
 
+![Poser une question sur le code dans une conversation, puis en faire une tâche](docs/images/fr/feature-chat.gif)
+
 <details>
 <summary>Voir l'écran</summary>
 
@@ -174,6 +176,8 @@ Dans « Conversation », vous pouvez interroger l'agent sur le dépôt sans cré
 ### Notifications
 
 L'attente d'approbation, les questions, l'attente d'une réponse, l'attente de revue et la fin de tâche s'accumulent sur l'icône de cloche en haut à droite, et une notification de bureau s'affiche aussi. Un clic sur une notification ouvre cette tâche.
+
+![Ouvrir une notification pour aller à la carte qui vous attend](docs/images/fr/feature-notifications.gif)
 
 <details>
 <summary>Voir l'écran</summary>
@@ -186,6 +190,8 @@ L'attente d'approbation, les questions, l'attente d'une réponse, l'attente de r
 
 Si un merge entre en conflit, la carte devient un conflit. Une fois la branche de base intégrée dans la branche de la tâche, vous pouvez faire résoudre le conflit par l'agent ou le corriger vous-même dans un éditeur. Dans les deux cas, la branche de base ne change pas tant que vous n'avez pas mergé.
 
+![Laisser l’agent résoudre un conflit, puis fusionner](docs/images/fr/feature-conflict.gif)
+
 <details>
 <summary>Voir l'écran</summary>
 
@@ -196,6 +202,8 @@ Si un merge entre en conflit, la carte devient un conflit. Une fois la branche d
 ### Skills et conversations passées
 
 À la création d'une tâche, vous pouvez choisir une skill de Claude Code (elle est passée comme `/nom-de-la-skill`). Vous pouvez aussi choisir une conversation passée de Claude Code (session) et reprendre là où elle s'était arrêtée.
+
+![Choisir une skill et une conversation passée pour une nouvelle tâche](docs/images/fr/feature-skills.gif)
 
 <details>
 <summary>Voir l'écran</summary>

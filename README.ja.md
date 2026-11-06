@@ -157,6 +157,8 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 ### 会話
 「会話」では、タスク（worktree）を作らずに、リポジトリについてエージェントに質問できます。返事は Markdown で表示します。作業させたくなったら「タスクにする」で、その会話の続きとしてタスクにできます。
 
+![タスクを作らずに相談し、続きをタスクにする](docs/images/ja/feature-chat.gif)
+
 <details>
 <summary>画面を見る</summary>
 
@@ -166,6 +168,8 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 
 ### 通知
 承認待ち・質問・回答待ち・レビュー待ち・完了は、右上のベルのアイコンに通知が溜まり、デスクトップ通知も出ます。通知を押すと、そのタスクが開きます。
+
+![通知から、対応が必要なカードを開く](docs/images/ja/feature-notifications.gif)
 
 <details>
 <summary>画面を見る</summary>
@@ -177,6 +181,8 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 ### コンフリクトの解消
 マージでコンフリクトが起きると、カードが「コンフリクト」になります。ベースのブランチをタスクのブランチに取り込んだうえで、エージェントに解消させるか、自分でエディタで直すかを選べます。どちらの方法でも、ベースのブランチはマージするまで変わりません。
 
+![コンフリクトをエージェントに解消してもらい、マージする](docs/images/ja/feature-conflict.gif)
+
 <details>
 <summary>画面を見る</summary>
 
@@ -186,6 +192,8 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 
 ### スキルと過去の会話
 タスクを作るときに、Claude Code のスキルを 1 つ選べます（`/スキル名` として渡します）。過去の Claude Code の会話（セッション）を選んで、その続きから始めることもできます。
+
+![スキルと過去の会話を選んでタスクを作る](docs/images/ja/feature-skills.gif)
 
 <details>
 <summary>画面を見る</summary>

@@ -301,6 +301,108 @@ function features(ctx) {
       await settle();
       await snap(2.4);
     }),
+
+    // タスクを作らずに相談して、続きをタスクにする
+    chat: (outFile) => record(outFile, async ({ snap, moveTo, typeInto }) => {
+      const others = { logs: c.logs, paging: c.paging, csv: c.csv, speed: c.speed };
+      await show({ cards: onlyCards(others) });
+      await settle();
+      await snap(0.8);
+      await moveTo('#chatBtn');
+      await page.evaluate(() => openChats());
+      await page.waitForSelector('#cMsg');
+      await settle();
+      await snap(0.3);
+      await typeInto('#cMsg', t.pPay, 0.8);
+      await moveTo('#cOk', { n: 4 });
+      await snap(0.4);
+      await page.evaluate(() => closeModal());
+      await show({ cards: onlyCards({ ...others, pay: c.pay }) });
+      await open('pay');
+      await settle(400);
+      await page.evaluate(() => { $('detailBody').scrollTop = 0; });
+      await snap(3.2);
+      await moveTo('[data-act=toTask]');
+      await snap(0.5);
+      await page.evaluate(() => newTask({ fromChat: card('pay') }));
+      await page.waitForSelector('#nPrompt');
+      await settle();
+      await page.fill('#nPrompt', t.payEnd.replace(/`/g, ''));
+      await snap(2.6);
+    }),
+
+    // 通知から、対応が必要なカードへ移る
+    notifications: (outFile) => record(outFile, async ({ snap, moveTo }) => {
+      await show({ cards: list() });
+      await settle();
+      await snap(1.0);
+      await moveTo('#notifBtn');
+      await page.evaluate(() => $('notifBtn').click());
+      await page.waitForSelector('.notif-item');
+      await settle();
+      await snap(2.2);
+      await moveTo('.notif-item[data-card=limit]');
+      await snap(0.5);
+      await page.click('.notif-item[data-card=limit]');
+      await settle(400);
+      await snap(2.8);
+    }),
+
+    // コンフリクトをエージェントに解消してもらう
+    conflict: (outFile) => record(outFile, async ({ snap, moveTo }) => {
+      const stage = async (patch, sec) => {
+        await show({ cards: list({ enter: { ...c.enter, lastMessage: '', ...patch } }) });
+        await page.evaluate(async () => {
+          renderDetailHead();
+          await renderDetailBody();
+        });
+        await settle();
+        await snap(sec);
+      };
+      const conflict = { target: 'main', files: ['src/components/LoginForm.jsx'] };
+      await show({ cards: list({ enter: { ...c.enter, lastMessage: '', conflict } }) });
+      await open('enter');
+      await settle(400);
+      await snap(1.8);
+      await moveTo('[data-cact=agent]');
+      await snap(0.6);
+      await stage({ status: 'running', startedAt: now() - 2000, conflict: { ...conflict, resolving: true } }, 2.4);
+      await stage({ conflictResolved: { target: 'main', push: false } }, 1.2);
+      await moveTo('[data-cact=remerge]');
+      await snap(2.2);
+    }),
+
+    // スキルと過去の会話を選んでタスクを作る
+    skills: (outFile) => record(outFile, async ({ snap, moveTo, typeInto }) => {
+      await show({ cards: list({ logs: null, enter: null }) });
+      await settle();
+      await snap(0.6);
+      await moveTo('#newBtn', { n: 4 });
+      await page.evaluate(() => newTask());
+      await page.waitForSelector('#nPrompt');
+      await settle();
+      await page.fill('#nTitle', t.tStock);
+      await typeInto('#nPrompt', t.pStock, 0.7);
+      await moveTo('#nSkill button', { n: 4 });
+      await page.click('#nSkill button');
+      await page.waitForSelector('.skill-card');
+      await settle();
+      await snap(1.6);
+      await moveTo('.skill-card[data-skill=test-writer]');
+      await snap(0.4);
+      await page.click('.skill-card[data-skill=test-writer]');
+      await settle();
+      await snap(0.5);
+      await page.selectOption('#nSession', 's-stock');
+      await moveTo('#nSession', { n: 4 });
+      await snap(1.4);
+      await moveTo('#nOk', { n: 3 });
+      await snap(0.3);
+      await page.evaluate(() => closeModal());
+      await show({ cards: list({ logs: null, enter: null, stock: { ...c.csv, id: 'stock', title: t.tStock, issue: undefined, btw: [], skill: 'test-writer', branch: 'agent/task-a41f07c2', lastMessage: 'Read src/api/orders.js', startedAt: now() - 2000, createdAt: now() } }) });
+      await settle();
+      await snap(2.4);
+    }),
   };
 }
 

@@ -164,6 +164,8 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 
 在「对话」里，不必创建任务（worktree），就可以向智能体询问这个仓库。回复以 Markdown 显示。想让它开始干活时，用「变成任务」，把这段对话接着做成任务。
 
+![在对话中询问代码，然后把它转成任务](docs/images/zh/feature-chat.gif)
+
 <details>
 <summary>查看截图</summary>
 
@@ -174,6 +176,8 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 ### 通知
 
 等待批准、提问、等待回答、等待评审和完成，会积在右上角的铃铛图标里，同时也会发出桌面通知。按下通知就会打开那个任务。
+
+![打开通知，前往需要你处理的卡片](docs/images/zh/feature-notifications.gif)
 
 <details>
 <summary>查看截图</summary>
@@ -186,6 +190,8 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 
 合并发生冲突时，卡片会变成冲突。先把基线分支并入任务分支，然后可以选择让智能体解决，或自己在编辑器里修改。无论哪种方式，在你合并之前，基线分支都不会改变。
 
+![让智能体解决冲突，然后合并](docs/images/zh/feature-conflict.gif)
+
 <details>
 <summary>查看截图</summary>
 
@@ -196,6 +202,8 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 ### 技能与过去的对话
 
 创建任务时，可以选择一项 Claude Code 的技能（以 `/技能名` 传入）。也可以选择过去的 Claude Code 对话（会话），从那里继续。
+
+![为新任务选择技能和过去的对话](docs/images/zh/feature-skills.gif)
 
 <details>
 <summary>查看截图</summary>

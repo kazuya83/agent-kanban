@@ -164,6 +164,8 @@ La pestaña «worktree» muestra los commits de la rama, los cambios sin commit,
 
 En «Conversación» puedes preguntar al agente sobre el repositorio sin crear una tarea (worktree). Las respuestas se muestran en Markdown. Cuando quieras que empiece a trabajar, «Convertir en tarea» continúa esa conversación como tarea.
 
+![Preguntar sobre el código en una conversación y convertirla en tarea](docs/images/es/feature-chat.gif)
+
 <details>
 <summary>Ver pantalla</summary>
 
@@ -174,6 +176,8 @@ En «Conversación» puedes preguntar al agente sobre el repositorio sin crear u
 ### Notificaciones
 
 La espera de aprobación, las preguntas, la espera de respuesta, la espera de revisión y la finalización se acumulan en el icono de la campana, arriba a la derecha, y también sale una notificación de escritorio. Al pulsar una notificación se abre esa tarea.
+
+![Abrir una notificación para ir a la tarjeta que te necesita](docs/images/es/feature-notifications.gif)
 
 <details>
 <summary>Ver pantalla</summary>
@@ -186,6 +190,8 @@ La espera de aprobación, las preguntas, la espera de respuesta, la espera de re
 
 Si un merge entra en conflicto, la tarjeta pasa a ser un conflicto. Después de incorporar la rama base en la rama de la tarea, puedes pedir al agente que lo resuelva o corregirlo tú en un editor. En ambos casos, la rama base no cambia hasta que hagas el merge.
 
+![Pedir al agente que resuelva un conflicto y fusionar](docs/images/es/feature-conflict.gif)
+
 <details>
 <summary>Ver pantalla</summary>
 
@@ -196,6 +202,8 @@ Si un merge entra en conflicto, la tarjeta pasa a ser un conflicto. Después de 
 ### Skills y conversaciones anteriores
 
 Al crear una tarea puedes elegir una skill de Claude Code (se pasa como `/nombre-de-la-skill`). También puedes elegir una conversación anterior de Claude Code (sesión) y continuar desde ahí.
+
+![Elegir una skill y una conversación anterior para una tarea nueva](docs/images/es/feature-skills.gif)
 
 <details>
 <summary>Ver pantalla</summary>
