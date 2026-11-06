@@ -2,6 +2,7 @@
 // エージェントに1回聞いて JSON のフローを返してもらい、FlowModel で整えて確かめる。
 // 形が正しくなければ、直すところを伝えて1回だけ作り直してもらう（それでも残るところは、編集画面の「直すところ」に出る）
 const FlowModel = require('../renderer/flow-model');
+const { tr } = require('../renderer/i18n');
 
 const REQUEST_MAX = 2000;
 
@@ -134,7 +135,7 @@ function finishFlow(raw, { flow, enabled, customAgents, defaultAgent }) {
  */
 async function generateFlow(ask, input) {
   const request = String(input.request || '').trim().slice(0, REQUEST_MAX);
-  if (!request) throw new Error('作りたいフローや直したいところを書いてください');
+  if (!request) throw new Error(tr('作りたいフローや直したいところを書いてください'));
   const ctx = {
     flow: FlowModel.cleanFlow(input.flow) || { nodes: [], edges: [] },
     enabled: Array.isArray(input.enabled) ? input.enabled : [],
@@ -149,7 +150,7 @@ async function generateFlow(ask, input) {
     reply = await ask(prompt + buildRepairPrompt(reply, errors));
     next = finishFlow(parseFlowReply(reply), ctx) || next;
   }
-  if (!next) throw new Error(`フローの形で返ってきませんでした: ${String(reply).trim().slice(0, 200)}`);
+  if (!next) throw new Error(tr('フローの形で返ってきませんでした: {text}', { text: String(reply).trim().slice(0, 200) }));
   return next;
 }
 

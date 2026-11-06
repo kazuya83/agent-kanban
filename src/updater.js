@@ -8,6 +8,7 @@
 // releases/latest のリダイレクト先（.../releases/tag/v0.1.9）から最新版を調べる
 const { EventEmitter } = require('events');
 const path = require('path');
+const { tr } = require('../renderer/i18n');
 
 const REPO = 'kazuya83/agent-kanban';
 const APP_NAME = 'Agent Kanban';
@@ -43,9 +44,9 @@ function assetName(platform, arch, version) {
 
 // この環境でアプリから更新できるか。できなければ理由を返す
 function unsupportedReason({ packaged, platform, arch, env }) {
-  if (!packaged) return '開発版（npm start）では更新できません。git pull で最新にしてください';
-  if (!assetName(platform, arch, '0')) return `この OS・CPU（${platform} ${arch}）向けの版はリリースしていません`;
-  if (platform === 'linux' && !(env && env.APPIMAGE)) return 'AppImage で起動したときだけ、アプリから更新できます';
+  if (!packaged) return tr('開発版（npm start）では更新できません。git pull で最新にしてください');
+  if (!assetName(platform, arch, '0')) return tr('この OS・CPU（{platform} {arch}）向けの版はリリースしていません', { platform, arch });
+  if (platform === 'linux' && !(env && env.APPIMAGE)) return tr('AppImage で起動したときだけ、アプリから更新できます');
   return null;
 }
 
@@ -63,9 +64,9 @@ function macBundlePath(execPath) {
 // アプリを終了したあとに裏で動かす、入れ替えのスクリプト（spawn に渡す command と args）
 function installCommand({ platform, pid, version, execPath, env = {} }) {
   const v = String(version).replace(/^v/, '');
-  if (!/^\d+(\.\d+)*$/.test(v)) throw new Error(`版の番号が正しくありません: ${version}`);
+  if (!/^\d+(\.\d+)*$/.test(v)) throw new Error(tr('版の番号が正しくありません: {version}', { version }));
   const n = parseInt(pid, 10);
-  if (!(n > 0)) throw new Error('プロセス番号が正しくありません');
+  if (!(n > 0)) throw new Error(tr('プロセス番号が正しくありません'));
   if (platform === 'win32') {
     const script = [
       "$ErrorActionPreference = 'Stop'",
@@ -168,7 +169,7 @@ class Updater extends EventEmitter {
       try {
         const res = await this.fetch(`https://github.com/${REPO}/releases/latest`, { method: 'HEAD', redirect: 'follow' });
         const latest = versionFromReleaseUrl(res.url);
-        if (!latest) throw new Error(`最新のリリースが見つかりませんでした（${res.status}）`);
+        if (!latest) throw new Error(tr('最新のリリースが見つかりませんでした（{status}）', { status: res.status }));
         let state = compareVersions(latest, this.currentVersion) > 0 ? 'available' : 'latest';
         // Mac の dmg は公開のあとに追加されるので、この OS 向けのファイルがそろっているかも確かめる
         const name = state === 'available' && assetName(this.platform, this.arch, latest);
@@ -204,7 +205,7 @@ class Updater extends EventEmitter {
   // 入れ替えのスクリプトを裏で起動する。このあと呼んだ側がアプリを終了すると、スクリプトが入れ替えて起動し直す
   install({ pid = process.pid, execPath = process.execPath } = {}) {
     if (this.reason) throw new Error(this.reason);
-    if (this.state !== 'available') throw new Error(this.state === 'preparing' ? `v${this.latestVersion} のこの OS 向けのファイルはまだ準備中です。しばらくしてからもう一度試してください` : '新しい版はありません');
+    if (this.state !== 'available') throw new Error(this.state === 'preparing' ? tr('v{version} のこの OS 向けのファイルはまだ準備中です。しばらくしてからもう一度試してください', { version: this.latestVersion }) : tr('新しい版はありません'));
     const { command, args } = installCommand({ platform: this.platform, pid, version: this.latestVersion, execPath, env: this.env });
     let out = 'ignore';
     if (this.logFile) {

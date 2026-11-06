@@ -5,6 +5,8 @@
 const net = require('net');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
+const I18n = require('../renderer/i18n');
+const { tr } = I18n;
 
 const DEFAULT_PORT = 17831;
 const PAIR_TTL_MS = 10 * 60 * 1000;
@@ -17,13 +19,25 @@ const AUTH_TIMEOUT_MS = 30 * 1000;
 const CONNECT_TIMEOUT_MS = 10 * 1000;
 // 遠隔へ渡さない設定（トークンなどの秘密）
 const SECRET_SETTINGS = ['remotePairTokens', 'remoteClientToken', 'remoteClientHistory'];
+// マシンごとの設定。ホストへ転送しない（ホストのエラー文はホストの言語のまま）
+const LOCAL_SETTINGS = ['language'];
 
 // board:get / board:changed などで渡すボードから、秘密の設定を抜く
 function redactForRemote(data) {
   if (!data || typeof data !== 'object' || !data.settings || typeof data.settings !== 'object') return data;
   const settings = { ...data.settings };
   for (const k of SECRET_SETTINGS) delete settings[k];
+  for (const k of LOCAL_SETTINGS) delete settings[k];
   return { ...data, settings };
+}
+
+// ホストへ送る設定の更新から、このマシンだけの項目を外す
+function stripLocalSettings(patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return patch;
+  if (!LOCAL_SETTINGS.some((k) => k in patch)) return patch;
+  const out = { ...patch };
+  for (const k of LOCAL_SETTINGS) delete out[k];
+  return out;
 }
 
 function genPairCode() {
@@ -152,7 +166,7 @@ const PROXY_CHANNELS = new Set([
 
 // 遠隔に接続中でも、操作側のマシンで動かすチャンネル（それ以外の非転送チャンネルは接続中は使えない）
 function isLocalChannel(channel) {
-  return channel === 'app:info' || channel === 'open:external' || String(channel).startsWith('file:') || String(channel).startsWith('remote:') || String(channel).startsWith('update:');
+  return channel === 'app:info' || channel === 'app:language' || channel === 'app:setLanguage' || channel === 'open:external' || String(channel).startsWith('file:') || String(channel).startsWith('remote:') || String(channel).startsWith('update:');
 }
 
 function isProxyChannel(channel) {
@@ -409,7 +423,7 @@ class RemoteClient extends EventEmitter {
             this.token = token;
             data = await this.request({ type: 'auth', token });
           } else {
-            throw new Error('ペアリングコードかトークンが必要です');
+            throw new Error(tr('ペアリングコードかトークンが必要です'));
           }
           this.connected = true;
           this.emit('changed');
@@ -435,7 +449,7 @@ class RemoteClient extends EventEmitter {
         // 再接続で入れ替わった古いソケットの close は、新しい接続の状態を消さない
         if (this.socket && this.socket !== socket) return;
         const was = this.connected;
-        this.failPending('ホストとの接続が切れました');
+        this.failPending(tr('ホストとの接続が切れました'), 'ECONNRESET');
         this.socket = null;
         this.connected = false;
         if (was) this.emit('disconnected');
@@ -445,7 +459,7 @@ class RemoteClient extends EventEmitter {
   }
 
   disconnect() {
-    this.failPending('切断しました');
+    this.failPending(tr('切断しました'));
     const s = this.socket;
     this.socket = null;
     this.connected = false;
@@ -459,8 +473,12 @@ class RemoteClient extends EventEmitter {
     this.emit('changed');
   }
 
-  failPending(message) {
-    for (const [, p] of this.pending) p.reject(new Error(message));
+  failPending(message, code) {
+    for (const [, p] of this.pending) {
+      const err = new Error(message);
+      if (code) err.code = code;
+      p.reject(err);
+    }
     this.pending.clear();
   }
 
@@ -476,7 +494,7 @@ class RemoteClient extends EventEmitter {
       this.pending.delete(msg.id);
       if (msg.ok) p.resolve(msg.data);
       else {
-        const err = new Error(msg.error || '遠隔操作に失敗しました');
+        const err = new Error(msg.error || tr('遠隔操作に失敗しました'));
         if (msg.code) err.code = msg.code;
         p.reject(err);
       }
@@ -486,14 +504,14 @@ class RemoteClient extends EventEmitter {
   request(fields) {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      if (!this.socket || this.socket.destroyed) return reject(new Error('ホストに接続していません'));
+      if (!this.socket || this.socket.destroyed) return reject(new Error(tr('ホストに接続していません')));
       this.pending.set(id, { resolve, reject });
       send(this.socket, { id, ...fields });
     });
   }
 
   invoke(channel, arg) {
-    if (!this.connected) return Promise.reject(new Error('ホストに接続していません'));
+    if (!this.connected) return Promise.reject(new Error(tr('ホストに接続していません')));
     return this.request({ type: 'invoke', channel, arg });
   }
 }
@@ -626,19 +644,31 @@ function publicConnectionHistory(list) {
 
 // 保存を頼んだ設定のうち、保存先（ホスト）が受け取らなかった項目
 // 古い版のホストは知らない設定を黙って捨てるので、返ってきた設定に無い項目を探す
-const SETTING_LABELS = { customAgents: 'カスタムエージェント', relayFlow: 'Pipelineのフローチャート', relayFlows: 'Pipelineの一覧', relayFlowId: '既定のPipeline', competeCustomAgents: '競争させるカスタムエージェント', enabledAgents: '使うエージェント', orchestration: 'オーケストレーション' };
+function settingLabel(k) {
+  if (k === 'customAgents') return tr('カスタムエージェント');
+  if (k === 'relayFlow') return tr('Pipelineのフローチャート');
+  if (k === 'relayFlows') return tr('Pipelineの一覧');
+  if (k === 'relayFlowId') return tr('既定のPipeline');
+  if (k === 'competeCustomAgents') return tr('競争させるカスタムエージェント');
+  if (k === 'enabledAgents') return tr('使うエージェント');
+  if (k === 'orchestration') return tr('オーケストレーション');
+  return k;
+}
 function droppedSettingKeys(patch, result) {
   if (!patch || typeof patch !== 'object' || !result || typeof result !== 'object') return [];
   return Object.keys(patch).filter((k) => patch[k] !== undefined && result[k] === undefined);
 }
 function droppedSettingsMessage(keys) {
-  const names = [...new Set(keys.map((k) => SETTING_LABELS[k] || k))];
-  return `ホストの Agent Kanban の版が古いため、次の設定を保存できませんでした: ${names.join('、')}。ホストのアプリを新しい版に更新してから、もう一度保存してください。`;
+  const sep = I18n.getLanguage() === 'ja' || I18n.getLanguage() === 'zh' ? '、' : ', ';
+  const names = [...new Set(keys.map((k) => settingLabel(k)))];
+  return tr('ホストの Agent Kanban の版が古いため、次の設定を保存できませんでした: {names}。ホストのアプリを新しい版に更新してから、もう一度保存してください。', { names: names.join(sep) });
 }
 
 module.exports = {
   droppedSettingKeys,
   droppedSettingsMessage,
+  stripLocalSettings,
+  LOCAL_SETTINGS,
   MAX_CONNECTION_HISTORY,
   normalizeConnection,
   connectionKey,

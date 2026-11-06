@@ -14,6 +14,8 @@
 // Claude Code は承認（--permission-prompt-tool）や実行中のメッセージ（btw）に対応しているので、
 // これまでどおり agent.js の中で直接扱う
 
+const { tr } = require('../renderer/i18n');
+
 const AGENTS = {
   claude: { label: 'Claude Code', short: 'Claude', defaultCmd: 'claude', pathKey: 'claudePath', modelKey: 'model' },
   codex: { label: 'Codex CLI', short: 'Codex', defaultCmd: 'codex', pathKey: 'codexPath', modelKey: 'codexModel' },
@@ -99,7 +101,7 @@ function buildArgs(a, { mode, model, sessionId, prompt, includeDirs = [] } = {})
     args.push(p.startsWith('-') ? ` ${p}` : p);
     return args;
   }
-  throw new Error(`このエージェントには対応していません: ${a}`);
+  throw new Error(tr('このエージェントには対応していません: {a}', { a }));
 }
 
 function trunc(s, n) {
@@ -376,20 +378,24 @@ function createParser(a, opts = {}) {
   if (a === 'codex') return codexParser(o);
   if (a === 'gemini') return geminiParser(o);
   if (a === 'cursor') return cursorParser(o);
-  throw new Error(`このエージェントには対応していません: ${a}`);
+  throw new Error(tr('このエージェントには対応していません: {a}', { a }));
 }
 
 // ---------- オーケストレーション ----------
 
-// Pipeline（順番に引き継ぐ）の工程の初期値
-const DEFAULT_RELAY_STEPS = [
-  { agent: 'codex', label: '実装', instruction: 'タスクの指示に沿って実装してください。必要ならテストも追加・実行してください。' },
-  {
-    agent: 'claude',
-    label: 'レビュー',
-    instruction: '前の工程の変更をレビューしてください（git log / git diff でベースブランチからの変更を確かめられます）。バグ・抜け・テスト不足があれば直し、最後に何を確かめて何を直したかを短く報告してください。',
-  },
-];
+// Pipeline（順番に引き継ぐ）の工程の初期値。呼んだときの言語で作る（新規インストールと、新しいリポジトリ）
+function defaultRelaySteps() {
+  return [
+    { agent: 'codex', label: tr('実装'), instruction: tr('タスクの指示に沿って実装してください。必要ならテストも追加・実行してください。') },
+    {
+      agent: 'claude',
+      label: tr('レビュー'),
+      instruction: tr('前の工程の変更をレビューしてください（git log / git diff でベースブランチからの変更を確かめられます）。バグ・抜け・テスト不足があれば直し、最後に何を確かめて何を直したかを短く報告してください。'),
+    },
+  ];
+}
+// 読み込み時の言語（テストは原文）で固めたもの。実行中に言語を変えたあとは defaultRelaySteps() を使う
+const DEFAULT_RELAY_STEPS = defaultRelaySteps();
 // 競争（同じタスクを複数のエージェントで並列に解く）の初期値
 const DEFAULT_COMPETE_AGENTS = ['claude', 'codex'];
 
@@ -568,6 +574,7 @@ module.exports = {
   codexPolicy,
   geminiApproval,
   cursorPolicy,
+  defaultRelaySteps,
   DEFAULT_RELAY_STEPS,
   DEFAULT_COMPETE_AGENTS,
   cleanRelaySteps,

@@ -5,18 +5,19 @@ const { execFile } = require('child_process');
 const git = require('./git');
 const wsl = require('./wsl');
 const { resolveCommand } = require('./env');
+const { tr } = require('../renderer/i18n');
 
 // 受け付ける URL: https:// / http:// / ssh:// / git://、git@host:owner/repo、owner/repo（GitHub とみなす）
 // ext:: や file:// など、コマンドを動かせたり手元のファイルを読めたりする形は受け付けない
 function normalizeCloneUrl(input) {
   const s = String(input || '').trim();
-  if (!s) throw new Error('クローンする URL を入れてください');
-  if (/\s/.test(s)) throw new Error('URL に空白が入っています');
+  if (!s) throw new Error(tr('クローンする URL を入れてください'));
+  if (/\s/.test(s)) throw new Error(tr('URL に空白が入っています'));
   if (/^(https?|ssh|git):\/\/[^\s/]+\/.+/i.test(s)) return s;
   if (/^[A-Za-z0-9_][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9.-]*:[^\s/-][^\s]*$/.test(s)) return s; // git@github.com:owner/repo.git
   const short = s.match(/^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(\.git)?$/);
   if (short && !short[2].startsWith('.')) return `https://github.com/${short[1]}/${short[2]}.git`;
-  throw new Error(`この URL ではクローンできません（${s}）。https://github.com/owner/repo や git@github.com:owner/repo.git、owner/repo の形で入れてください`);
+  throw new Error(tr('この URL ではクローンできません（{s}）。https://github.com/owner/repo や git@github.com:owner/repo.git、owner/repo の形で入れてください', { s }));
 }
 
 // URL からフォルダ名を決める（https://github.com/owner/repo.git → repo）
@@ -28,26 +29,26 @@ function repoNameFromUrl(url) {
 
 function validateName(name) {
   const n = String(name || '').trim();
-  if (!n) throw new Error('フォルダ名を入れてください');
-  if (/[\\/:*?"<>|\0]/.test(n) || /[\x00-\x1f]/.test(n)) throw new Error(`フォルダ名に使えない文字が入っています（${n}）`);
-  if (/^[.-]/.test(n)) throw new Error('フォルダ名は「.」や「-」で始められません');
-  if (n.length > 100) throw new Error('フォルダ名が長すぎます');
+  if (!n) throw new Error(tr('フォルダ名を入れてください'));
+  if (/[\\/:*?"<>|\0]/.test(n) || /[\x00-\x1f]/.test(n)) throw new Error(tr('フォルダ名に使えない文字が入っています（{n}）', { n }));
+  if (/^[.-]/.test(n)) throw new Error(tr('フォルダ名は「.」や「-」で始められません'));
+  if (n.length > 100) throw new Error(tr('フォルダ名が長すぎます'));
   return n;
 }
 
 // 置き場所（親フォルダ）の中に name のフォルダを作る場所。すでに中身があればエラー
 function targetDir(parent, name) {
   const p = String(parent || '').trim();
-  if (!p) throw new Error('置き場所のフォルダを選んでください');
+  if (!p) throw new Error(tr('置き場所のフォルダを選んでください'));
   let st;
   try {
     st = fs.statSync(p);
   } catch {
-    throw new Error(`置き場所のフォルダが見つかりません（${p}）`);
+    throw new Error(tr('置き場所のフォルダが見つかりません（{p}）', { p }));
   }
-  if (!st.isDirectory()) throw new Error(`置き場所がフォルダではありません（${p}）`);
+  if (!st.isDirectory()) throw new Error(tr('置き場所がフォルダではありません（{p}）', { p }));
   const dir = (wsl.isWslPath(p) ? path.win32 : path).join(p, validateName(name));
-  if (fs.existsSync(dir) && (!fs.statSync(dir).isDirectory() || fs.readdirSync(dir).length)) throw new Error(`同じ名前のフォルダがすでにあります（${dir}）`);
+  if (fs.existsSync(dir) && (!fs.statSync(dir).isDirectory() || fs.readdirSync(dir).length)) throw new Error(tr('同じ名前のフォルダがすでにあります（{dir}）', { dir }));
   return dir;
 }
 
@@ -66,9 +67,9 @@ async function cloneFrom(u, parent, name) {
   } catch (err) {
     const msg = String(err.stderr || err.message || '');
     if (/Authentication failed|could not read Username|terminal prompts disabled|Permission denied \(publickey\)|Host key verification failed/i.test(msg)) {
-      throw new Error(`認証できなかったのでクローンできませんでした。非公開のリポジトリなら、ターミナルで一度 git clone して認証を済ませるか、gh にログインしてください。\n${msg.trim()}`);
+      throw new Error(tr('認証できなかったのでクローンできませんでした。非公開のリポジトリなら、ターミナルで一度 git clone して認証を済ませるか、gh にログインしてください。\n{v}', { v: msg.trim() }));
     }
-    if (/not found|does not exist/i.test(msg)) throw new Error(`リポジトリが見つかりませんでした（${u}）\n${msg.trim()}`);
+    if (/not found|does not exist/i.test(msg)) throw new Error(tr('リポジトリが見つかりませんでした（{u}）\n{v}', { u, v: msg.trim() }));
     throw err;
   }
   return dir;
@@ -86,10 +87,10 @@ async function hasCommit(dir) {
 
 function runGh(args, cwd) {
   const gh = resolveCommand('gh');
-  if (!gh) return Promise.reject(new Error('GitHub にも作るには gh（GitHub CLI）が必要です。設定の画面からインストール・ログインしてください'));
+  if (!gh) return Promise.reject(new Error(tr('GitHub にも作るには gh（GitHub CLI）が必要です。設定の画面からインストール・ログインしてください')));
   return new Promise((resolve, reject) => {
     execFile(gh, args, { cwd, windowsHide: true, timeout: 180000, env: { ...process.env, GH_PROMPT_DISABLED: '1' } }, (err, stdout, stderr) => {
-      if (err) return reject(new Error(`GitHub にリポジトリを作れませんでした: ${String(stderr || err.message).trim()}`));
+      if (err) return reject(new Error(tr('GitHub にリポジトリを作れませんでした: {message}', { message: String(stderr || err.message).trim() })));
       resolve(String(stdout || ''));
     });
   });
@@ -103,9 +104,9 @@ function runGh(args, cwd) {
  */
 async function createRepo({ parent, name, github = '', git: useGit = true }) {
   const n = validateName(name);
-  if (!useGit && github) throw new Error('git で管理しないフォルダは、GitHub には作れません');
-  if (github && !['private', 'public'].includes(github)) throw new Error('GitHub の公開範囲が正しくありません');
-  if (github && wsl.isWslPath(parent)) throw new Error('WSL のフォルダでは、GitHub にも作ることはできません。手元に作ってから、WSL の中で gh repo create してください');
+  if (!useGit && github) throw new Error(tr('git で管理しないフォルダは、GitHub には作れません'));
+  if (github && !['private', 'public'].includes(github)) throw new Error(tr('GitHub の公開範囲が正しくありません'));
+  if (github && wsl.isWslPath(parent)) throw new Error(tr('WSL のフォルダでは、GitHub にも作ることはできません。手元に作ってから、WSL の中で gh repo create してください'));
   const dir = targetDir(parent, n);
   fs.mkdirSync(dir, { recursive: true });
   if (!useGit) return { dir, github: '', git: false };

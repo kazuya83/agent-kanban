@@ -18,11 +18,40 @@ const { agentLabel, agentShort } = providers;
 const { isNoGitRepo, cleanRelayFlow, pipelineOf } = require('./store');
 const FlowModel = require('../renderer/flow-model');
 const Subtasks = require('./subtasks');
+const I18n = require('../renderer/i18n');
+const { tr } = I18n;
+
+// 内部の指示は日本語のまま。ja 以外のときだけ、返事の言語を先頭に足す（ログには出さない。ブランチ名の生成には使わない）
+const REPLY_LANG_NAME = { en: 'English', es: 'español', fr: 'français', zh: '简体中文' };
+function withReplyLanguage(prompt) {
+  const text = String(prompt ?? '');
+  if (!text || I18n.getLanguage() === 'ja') return text;
+  if (text.startsWith('【返事の言語】')) return text;
+  const name = REPLY_LANG_NAME[I18n.getLanguage()] || I18n.getLanguage();
+  return `【返事の言語】ユーザーへの返事・質問・報告は${name}で書いてください。\n\n${text}`;
+}
 
 const MAX_LOGS = 2000;
 const MCP_SERVER_NAME = 'agent_kanban';
 const PERMISSION_TOOL = `mcp__${MCP_SERVER_NAME}__approve`;
 const INTERRUPTED_MESSAGE = 'アプリの終了で中断されました。「再開」で中断したところから続けられます（追加指示を送っても再開できます）。';
+function quitInterruptMessage() {
+  return tr('アプリの終了で中断されました。「再開」で中断したところから続けられます（追加指示を送っても再開できます）。');
+}
+// 保存済みの文は、中断したときの言語のまま残っていることがある
+function isQuitInterrupt(s) {
+  if (s === INTERRUPTED_MESSAGE) return true;
+  const prev = I18n.getLanguage();
+  try {
+    for (const { code } of I18n.LANGUAGES) {
+      I18n.setLanguage(code);
+      if (s === tr('アプリの終了で中断されました。「再開」で中断したところから続けられます（追加指示を送っても再開できます）。')) return true;
+    }
+    return false;
+  } finally {
+    I18n.setLanguage(prev);
+  }
+}
 // 作業のあとに「スキルにしておくとよいもの」を提案してもらうときの指示
 const SKILL_SUGGEST_PROMPT = [
   'ここまでの作業を振り返って、次から同じような作業をもっと速く・確実にできるように、スキル（SKILL.md）として残しておくとよさそうなものを提案してください。',
@@ -184,6 +213,17 @@ function extractSpecQuestions(text) {
 //      - A（おすすめ）: 選択肢の説明
 //      - B: …
 // 選択肢が2つ以上あるか、質問（？で終わる）のものだけを拾う。読めなければ null
+// 「その他」は自由入力なので選択肢にしない（各言語の表記）
+function isOtherOption(s) {
+  const core = String(s || '')
+    .replace(/^[A-Za-z]\s*[:：.)）]\s*/, '') // 「C: その他」「A. Other」の記号だけ外す（Other の先頭は残す）
+    .replace(/^[A-Za-z]\s+(?=\S)/, '')
+    .replace(/^(?:（|\()([^)）]+)(?:）|\))\s*/, '$1 ')
+    .replace(/^[:：.)）]\s*/, '')
+    .trim();
+  // 日本語・中国語は \b が効かないので、直後が文字でなければ「その他」とする（Otherwise などは残す）
+  return /^(?:その他|ほか|其他|[Oo]ther|[Oo]tro|[Aa]utre)(?![\p{L}\p{N}_])/u.test(core);
+}
 function parseMarkdownQuestions(text) {
   const qs = [];
   let cur = null;
@@ -198,11 +238,11 @@ function parseMarkdownQuestions(text) {
     const opt = cur && line.match(/^\s*[-*・]\s+(.+)$/);
     if (opt) {
       let s = plain(opt[1]);
-      if (/^(その他|ほか)/.test(s.replace(/^[A-Za-z][:：.)）]\s*/, ''))) continue; // 自由入力の欄はフォームに必ずある
-      const m = s.match(/^([A-Za-z]|\d{1,2})\s*((?:（|\()おすすめ(?:）|\)))?\s*[:：.)）]\s*(.+)$/);
-      const rec = /おすすめ/.test(m ? m[2] || '' : '') || /^(?:（|\()おすすめ(?:）|\))/.test(s);
+      if (isOtherOption(s)) continue; // 自由入力の欄はフォームに必ずある
+      const m = s.match(/^([A-Za-z]|\d{1,2})\s*((?:（|\()(?:おすすめ|推荐|[Rr]ecommended|[Rr]ecomendado|[Rr]ecommandé)(?:）|\)))?\s*[:：.)）]\s*(.+)$/);
+      const rec = /(?:おすすめ|推荐|[Rr]ecommended|[Rr]ecomendado|[Rr]ecommandé)/.test(m ? m[2] || '' : '') || /^(?:（|\()(?:おすすめ|推荐|[Rr]ecommended|[Rr]ecomendado|[Rr]ecommandé)(?:）|\))/.test(s);
       if (m) s = m[3];
-      s = s.replace(/^(?:（|\()おすすめ(?:）|\))\s*[:：]?\s*/, '').trim();
+      s = s.replace(/^(?:（|\()(?:おすすめ|推荐|[Rr]ecommended|[Rr]ecomendado|[Rr]ecommandé)(?:）|\))\s*[:：]?\s*/, '').trim();
       if (!s) continue;
       // 長い選択肢は、最初の文を見出しに、残りを説明にする
       let label = s;
@@ -212,7 +252,7 @@ function parseMarkdownQuestions(text) {
         label = s.slice(0, cut);
         description = s.slice(cut + 1).trim();
       }
-      if (rec) label += '（おすすめ）';
+      if (rec) label += tr('（おすすめ）');
       if (m) label = `${m[1]}: ${label}`; // 「A と同じ」のように記号で指すことがあるので残す
       cur.options.push({ label, description });
       continue;
@@ -288,7 +328,7 @@ function isSessionId(id) {
   return typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id);
 }
 function assertSessionId(id) {
-  if (!isSessionId(id)) throw new Error('会話（セッション）の ID が正しくありません');
+  if (!isSessionId(id)) throw new Error(tr('会話（セッション）の ID が正しくありません'));
   return id;
 }
 
@@ -296,7 +336,7 @@ function assertSessionId(id) {
 // cmd.exe では " の中でも % の展開が効き、\" ではクオートを抜けられてしまうので、そうした文字を含む引数は拒否する
 function quoteForCmd(a) {
   const s = String(a);
-  if (/["%!\r\n\0]/.test(s)) throw new Error(`この値はコマンドの引数に使えません: ${truncate(s, 60)}`);
+  if (/["%!\r\n\0]/.test(s)) throw new Error(tr('この値はコマンドの引数に使えません: {truncate}', { truncate: truncate(s, 60) }));
   return /[\s&|<>^()]/.test(s) || !s ? `"${s}"` : s;
 }
 
@@ -334,8 +374,8 @@ function toolResultImages(content) {
     const src = c.source || {};
     const mediaType = String(src.media_type || '').toLowerCase();
     const data = typeof src.data === 'string' ? src.data.replace(/\s+/g, '') : '';
-    if (src.type !== 'base64' || !IMAGE_TYPES.has(mediaType) || !data || !/^[A-Za-z0-9+/]+=*$/.test(data)) out.push({ omitted: '表示できない形式の画像です' });
-    else if (data.length > MAX_IMAGE_BYTES) out.push({ omitted: '大きすぎるので保存しませんでした' });
+    if (src.type !== 'base64' || !IMAGE_TYPES.has(mediaType) || !data || !/^[A-Za-z0-9+/]+=*$/.test(data)) out.push({ omitted: tr('表示できない形式の画像です') });
+    else if (data.length > MAX_IMAGE_BYTES) out.push({ omitted: tr('大きすぎるので保存しませんでした') });
     else out.push({ mediaType, data });
   }
   return out;
@@ -350,14 +390,14 @@ function pruneImages(logs) {
     for (let j = ims.length - 1; j >= 0; j--) {
       if (!ims[j].data) continue;
       if (kept < MAX_IMAGES_PER_CARD) kept++;
-      else ims[j] = { omitted: '古い画像なので消しました' };
+      else ims[j] = { omitted: tr('古い画像なので消しました') };
     }
   }
 }
 
 function notFoundMessage(cmd, agent = 'claude') {
   const name = providers.AGENTS[agent] ? providers.AGENTS[agent].defaultCmd : 'claude';
-  return `${name} コマンドが見つかりません（${cmd}）。${agentLabel(agent)} をインストールするか、設定で ${name} のパスを指定してください。`;
+  return tr('{name} コマンドが見つかりません（{cmd}）。{label} をインストールするか、設定で {name} のパスを指定してください。', { name, cmd, label: agentLabel(agent) });
 }
 
 // カードを動かすエージェント（古いカードは Claude Code）
@@ -370,7 +410,7 @@ function agentOf(c) {
 function cleanModel(model) {
   const m = String(model || '').trim();
   if (!m) return '';
-  if (m.length > 100 || !/^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$/.test(m)) throw new Error(`モデル名に使えない文字が入っています: ${m}`);
+  if (m.length > 100 || !/^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$/.test(m)) throw new Error(tr('モデル名に使えない文字が入っています: {m}', { m }));
   return m;
 }
 
@@ -692,7 +732,7 @@ class AgentManager extends EventEmitter {
         if (c.status === 'running' && c.sessionId) c.afterDoneSession = c.sessionId;
         c.afterDone = false;
         c.status = 'done';
-        c.error = '前回の返事は、アプリの終了で途中で中断されました。もう一度送ってください';
+        c.error = tr('前回の返事は、アプリの終了で途中で中断されました。もう一度送ってください');
       }
       if (c.status === 'queued') {
         // まだ claude に渡していない指示なので、そのまま渡し直せばよい
@@ -705,7 +745,7 @@ class AgentManager extends EventEmitter {
         const resumePrompt = isChat(c) ? CHAT_RESUME_PROMPT : isNoGit(c) ? FOLDER_RESUME_PROMPT : RESUME_PROMPT;
         c.interrupted = { at: now, kind: 'running', prompt: c.sessionId ? resumePrompt : c.lastPromptSent || this.firstPrompt(c), attachments: c.sessionId ? undefined : (c.lastPromptSent ? c.lastAttachmentsSent : c.attachments) || undefined };
         c.status = 'failed';
-        c.error = INTERRUPTED_MESSAGE;
+        c.error = quitInterruptMessage();
       }
       c.pendingPrompt = null;
       c.pendingAttachments = null;
@@ -722,10 +762,10 @@ class AgentManager extends EventEmitter {
   resume(id) {
     const c = this.must(id);
     const it = c.interrupted;
-    if (!it) throw new Error('このタスクは中断されていません');
-    if (c.status === 'running' || c.status === 'queued') throw new Error('このタスクはもう動いています');
-    if (it.kind === 'running') this.log(c, 'user', [RESUME_PROMPT, CHAT_RESUME_PROMPT, FOLDER_RESUME_PROMPT].includes(it.prompt) ? '（中断したところから再開）' : it.prompt);
-    else this.log(c, 'system', '中断されていた指示で再開します');
+    if (!it) throw new Error(tr('このタスクは中断されていません'));
+    if (c.status === 'running' || c.status === 'queued') throw new Error(tr('このタスクはもう動いています'));
+    if (it.kind === 'running') this.log(c, 'user', [RESUME_PROMPT, CHAT_RESUME_PROMPT, FOLDER_RESUME_PROMPT].includes(it.prompt) ? tr('（中断したところから再開）') : it.prompt);
+    else this.log(c, 'system',tr('中断されていた指示で再開します'));
     this.enqueue(c, it.prompt, it.attachments);
   }
 
@@ -739,8 +779,8 @@ class AgentManager extends EventEmitter {
   dismissInterrupted(id) {
     const c = this.must(id);
     c.interrupted = null;
-    if (c.status === 'failed' && c.error === INTERRUPTED_MESSAGE) c.status = 'review';
-    if (c.error === INTERRUPTED_MESSAGE) c.error = null;
+    if (c.status === 'failed' && isQuitInterrupt(c.error)) c.status = 'review';
+    if (isQuitInterrupt(c.error)) c.error = null;
     this.changed(c);
   }
 
@@ -770,7 +810,7 @@ class AgentManager extends EventEmitter {
     const runs = [...(this.runs || new Map()).values()];
     for (const [id, child] of this.procs) {
       const c = this.store.card(id);
-      if (c) this.log(c, 'system', 'アプリを終了するため中断しました。次に起動したときに「再開」できます');
+      if (c) this.log(c, 'system',tr('アプリを終了するため中断しました。次に起動したときに「再開」できます'));
       this.denyAllPending(id, 'アプリを終了します');
       killTree(child);
     }
@@ -789,7 +829,7 @@ class AgentManager extends EventEmitter {
 
   must(id) {
     const c = this.store.card(id);
-    if (!c) throw new Error('タスクが見つかりません');
+    if (!c) throw new Error(tr('タスクが見つかりません'));
     return c;
   }
 
@@ -844,20 +884,20 @@ class AgentManager extends EventEmitter {
       if (!this.store.card(c.id)) return;
       c.issueSync.synced = key;
       c.issueSync.error = null;
-      for (const u of r.updated) this.log(c, 'system', `GitHub Projects「${u.project}」で #${c.issue.number} のステータスを ${u.to} にしました${u.from ? `（前は ${u.from}）` : ''}`);
+      for (const u of r.updated) this.log(c, 'system', u.from ? tr('GitHub Projects「{project}」で #{number} のステータスを {to} にしました（前は {from}）', { project: u.project, number: c.issue.number, to: u.to, from: u.from }) : tr('GitHub Projects「{project}」で #{number} のステータスを {to} にしました', { project: u.project, number: c.issue.number, to: u.to }));
       for (const s of r.skipped) {
-        const msg = `GitHub Projects「${s.project}」のステータスは変えませんでした: ${s.reason}`;
+        const msg = tr('GitHub Projects「{project}」のステータスは変えませんでした: {reason}', { project: s.project, reason: s.reason });
         if (c.issueSync.lastSkip !== msg) this.log(c, 'system', msg);
         c.issueSync.lastSkip = msg;
       }
       if (!r.projects && !c.issueSync.noProject) {
         c.issueSync.noProject = true;
-        this.log(c, 'system', `#${c.issue.number} はどの GitHub Projects にも入っていないので、ステータスは変えませんでした`);
+        this.log(c, 'system',tr('#{number} はどの GitHub Projects にも入っていないので、ステータスは変えませんでした', { number: c.issue.number }));
       }
     } catch (err) {
       if (!this.store.card(c.id)) return;
       // 同じエラーは何度も出さない
-      if (c.issueSync.error !== err.message) this.log(c, 'error', `GitHub Projects のステータスを変えられませんでした: ${err.message}`);
+      if (c.issueSync.error !== err.message) this.log(c, 'error',tr('GitHub Projects のステータスを変えられませんでした: {message}', { message: err.message }));
       c.issueSync.error = err.message;
     }
     this.store.save();
@@ -939,11 +979,11 @@ class AgentManager extends EventEmitter {
   // 通知のボタン（「スキルを提案してもらう」など）を押したとき
   actNotification(id) {
     const n = this.store.notifications.find((x) => x.id === id);
-    if (!n) throw new Error('通知が見つかりません');
-    if (!n.action || n.actedAt) throw new Error('この通知はもう対応済みです');
+    if (!n) throw new Error(tr('通知が見つかりません'));
+    if (!n.action || n.actedAt) throw new Error(tr('この通知はもう対応済みです'));
     let result = null;
     if (n.action === 'suggestSkills') result = { cardId: this.suggestSkills(n.cardId).id };
-    else throw new Error(`知らない操作です: ${n.action}`);
+    else throw new Error(tr('知らない操作です: {action}', { action: n.action }));
     n.actedAt = Date.now();
     n.read = true;
     this.store.save();
@@ -954,20 +994,21 @@ class AgentManager extends EventEmitter {
   // タスクが「完了」に入ったときに呼ぶ。完了の通知を出す。
   // 前に完了したタスクに似た作業があれば（同じような作業が続いていれば）、スキルにしませんか？の通知も出す
   completed(c) {
-    const body = (c.mergedInto || []).length ? `${c.mergedInto.join(', ')} に取り込みました` : c.prUrl ? `PR を作って片付けました: ${c.prUrl}` : 'タスクを完了にしました';
-    this.notify(c, 'done', `完了: ${c.title}`, body);
+    const body = (c.mergedInto || []).length ? tr('{targets} に取り込みました', { targets: c.mergedInto.join(', ') }) : c.prUrl ? tr('PR を作って片付けました: {url}', { url: c.prUrl }) : tr('タスクを完了にしました');
+    this.notify(c, 'done', tr('完了: {title}', { title: c.title }), body);
     if (this.store.settings.suggestSkillsOnDone === false || !c.sessionId || c.skillSuggestNotified) return;
     const similar = this.similarDoneTasks(c);
     if (!similar.length) return;
     c.skillSuggestNotified = true;
     c.skillSuggestSimilar = similar.map((x) => x.id);
-    const names = similar.slice(0, 3).map((x) => `「${x.title}」`).join('、') + (similar.length > 3 ? ` ほか ${similar.length - 3} 件` : '');
+    const shown = similar.slice(0, 3).map((x) => `「${x.title}」`).join(I18n.getLanguage() === 'ja' || I18n.getLanguage() === 'zh' ? '、' : ', ');
+    const names = similar.length > 3 ? tr('{shown} ほか {n} 件', { shown, n: similar.length - 3 }) : shown;
     this.notify(
       c,
       'skill',
-      `似たタスクが続いています。スキルにしませんか？: ${c.title}`,
-      `前に完了した ${names} と似た作業でした。繰り返している作業を、次から速く・確実にできるスキル（SKILL.md）にするよう ${agentShort(this.helperAgent(c))} に提案してもらえます。`,
-      { action: 'suggestSkills', actionLabel: 'スキルを提案してもらう' },
+      tr('似たタスクが続いています。スキルにしませんか？: {title}', { title: c.title }),
+      tr('前に完了した {names} と似た作業でした。繰り返している作業を、次から速く・確実にできるスキル（SKILL.md）にするよう {agentShort} に提案してもらえます。', { names, agentShort: agentShort(this.helperAgent(c)) }),
+      { action: 'suggestSkills', actionLabel: tr('スキルを提案してもらう') },
     );
   }
 
@@ -1027,24 +1068,24 @@ class AgentManager extends EventEmitter {
     if ((mode === 'relay' || mode === 'compete') && providers.cleanOrchestration(s.orchestration) !== mode) {
       const name = (m) => (m === 'relay' ? 'Pipeline' : '競争');
       const why = providers.cleanOrchestration(s.orchestration) === 'none' ? 'オーケストレーションを使わない設定' : 'Pipelineと競争はどちらか1つだけ使えます';
-      throw new Error(`${name(mode)}は使わない設定になっています（${why}）。「設定」の「オーケストレーション」で${name(mode)}を選んでください`);
+      throw new Error(tr('{name}は使わない設定になっています（{why}）。「設定」の「オーケストレーション」で{name2}を選んでください', { name: name(mode), why, name2: name(mode) }));
     }
-    if (readOnly && mode === 'compete') throw new Error('ソースを変更しないタスクでは、競争は使えません。ほかのエージェントを選んでください');
+    if (readOnly && mode === 'compete') throw new Error(tr('ソースを変更しないタスクでは、競争は使えません。ほかのエージェントを選んでください'));
     if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from, parsed, ...extra });
     if (mode === 'relay') {
       // Pipelineのフローチャートは、プロジェクトごとの設定（複数あれば、選んだもの。選んでいなければ既定の Pipeline）
       const pipe = pipelineOf(this.store.repoSettings(repo), pipelineId);
-      if (!pipe) throw new Error('選んだ Pipeline が見つかりません（消されたかもしれません）。選び直してください');
+      if (!pipe) throw new Error(tr('選んだ Pipeline が見つかりません（消されたかもしれません）。選び直してください'));
       const flow = cleanRelayFlow(pipe.flow);
       const errs = FlowModel.validateFlow(flow);
-      if (errs.length) throw new Error(`Pipeline「${pipe.name}」のフローチャートを直してください（設定の「フローチャートを編集」）: ${errs[0]}`);
+      if (errs.length) throw new Error(tr('Pipeline「{name}」のフローチャートを直してください（設定の「フローチャートを編集」）: {v}', { name: pipe.name, v: errs[0] }));
       const steps = relayStepsOf(flow, this.customAgents(repo));
       const lost = steps.find((st) => st.missing);
-      if (lost) throw new Error(`Pipelineの工程「${lost.label}」のカスタムエージェントが見つかりません（消されたかもしれません）。「設定」のフローチャートで、工程のエージェントを選び直してください`);
+      if (lost) throw new Error(tr('Pipelineの工程「{label}」のカスタムエージェントが見つかりません（消されたかもしれません）。「設定」のフローチャートで、工程のエージェントを選び直してください', { label: lost.label }));
       const off = steps.find((st) => !providers.isEnabled(s, st.agent));
-      if (off) throw new Error(`Pipelineの工程「${off.label}」の ${whoLabel(off.agent, off.persona)} は使わない設定になっています。「設定」で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
-      if (isNoGitRepo(s, repo) && flow.nodes.some((n) => n.type === 'parallel')) throw new Error('git で管理していないフォルダでは、並列のあるPipelineは使えません（枝ごとに別の作業場所を作れないため）。フローチャートから並列を外してください');
-      if (readOnly && flow.nodes.some((n) => n.type === 'parallel')) throw new Error('ソースを変更しないタスクでは、並列のあるPipelineは使えません。フローチャートから並列を外すか、ほかのエージェントを選んでください');
+      if (off) throw new Error(tr('Pipelineの工程「{label}」の {whoLabel} は使わない設定になっています。「設定」で工程のエージェントを変えるか、使うエージェントにチェックを付けてください', { label: off.label, whoLabel: whoLabel(off.agent, off.persona) }));
+      if (isNoGitRepo(s, repo) && flow.nodes.some((n) => n.type === 'parallel')) throw new Error(tr('git で管理していないフォルダでは、並列のあるPipelineは使えません（枝ごとに別の作業場所を作れないため）。フローチャートから並列を外してください'));
+      if (readOnly && flow.nodes.some((n) => n.type === 'parallel')) throw new Error(tr('ソースを変更しないタスクでは、並列のあるPipelineは使えません。フローチャートから並列を外すか、ほかのエージェントを選んでください'));
       const first = FlowModel.route(flow, FlowModel.startNode(flow).id, {});
       const index = relayStepIndex({ relay: { steps } }, first.node.id);
       const st = steps[index];
@@ -1060,9 +1101,9 @@ class AgentManager extends EventEmitter {
   createCompetition({ title, prompt, issue, session, skill, fromChat, parsed, repoPath, skipSpecCheck, scheduleId, scheduleTitle }) {
     const s = this.store.settings;
     const repo = this.targetRepo(repoPath);
-    if (isNoGitRepo(s, repo)) throw new Error('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください');
+    if (isNoGitRepo(s, repo)) throw new Error(tr('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください'));
     const list = this.competeEntries(repo);
-    if (list.length < 2) throw new Error('競争させるエージェントを、設定で2つ以上選んでください（使うエージェントにチェックを付けたものと、カスタムエージェントから選べます）');
+    if (list.length < 2) throw new Error(tr('競争させるエージェントを、設定で2つ以上選んでください（使うエージェントにチェックを付けたものと、カスタムエージェントから選べます）'));
     const group = crypto.randomBytes(4).toString('hex');
     const base = (title && title.trim()) || truncate(String(prompt || '').trim().split('\n')[0], 40);
     return list.map((x, index) =>
@@ -1087,7 +1128,7 @@ class AgentManager extends EventEmitter {
   targetRepo(repoPath) {
     const dir = String(repoPath || '').trim();
     if (!dir) return this.store.settings.repoPath;
-    if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`リポジトリのフォルダが見つかりません: ${dir}`);
+    if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(tr('リポジトリのフォルダが見つかりません: {dir}', { dir }));
     return dir;
   }
 
@@ -1099,15 +1140,15 @@ class AgentManager extends EventEmitter {
   // 「custom:<ID>」のカスタムエージェント（なければ・元の CLI が使わない設定ならエラー）
   customAgent(ref, repoPath) {
     const ca = providers.findCustomAgent(this.customAgents(repoPath), ref);
-    if (!ca) throw new Error('カスタムエージェントが見つかりません（消されたかもしれません）。選び直してください');
-    if (!providers.isEnabled(this.store.settings, ca.agent)) throw new Error(`カスタムエージェント「${ca.name}」の ${agentLabel(ca.agent)} は使わない設定になっています。「設定」の「使うエージェント」でチェックを付けてください`);
+    if (!ca) throw new Error(tr('カスタムエージェントが見つかりません（消されたかもしれません）。選び直してください'));
+    if (!providers.isEnabled(this.store.settings, ca.agent)) throw new Error(tr('カスタムエージェント「{name}」の {agentLabel} は使わない設定になっています。「設定」の「使うエージェント」でチェックを付けてください', { name: ca.name, agentLabel: agentLabel(ca.agent) }));
     return ca;
   }
 
   // 使うエージェントか（設定でチェックを付けていなければエラー）
   assertEnabled(agent) {
-    if (!providers.isAgent(agent)) throw new Error(`知らないエージェントです: ${agent}`);
-    if (!providers.isEnabled(this.store.settings, agent)) throw new Error(`${agentLabel(agent)} は使わない設定になっています。「設定」の「使うエージェント」でチェックを付けてください`);
+    if (!providers.isAgent(agent)) throw new Error(tr('知らないエージェントです: {agent}', { agent }));
+    if (!providers.isEnabled(this.store.settings, agent)) throw new Error(tr('{agentLabel} は使わない設定になっています。「設定」の「使うエージェント」でチェックを付けてください', { agentLabel: agentLabel(agent) }));
   }
 
   // アプリが頼む作業（比較・スキルの提案など）を任せるエージェント。元のカードのエージェントが使えるならそれ、なければ最初から選んでおくエージェント
@@ -1120,12 +1161,12 @@ class AgentManager extends EventEmitter {
   createCard({ title, prompt, issue, session, skill, agent, model, persona, relay, compete, fromChat, parsed, readOnly, repoPath, skipSpecCheck, scheduleId, scheduleTitle }) {
     const s = this.store.settings;
     const repo = this.targetRepo(repoPath);
-    if (!repo) throw new Error('先にリポジトリを選んでください');
-    if (!prompt || !prompt.trim()) throw new Error('指示を入力してください');
+    if (!repo) throw new Error(tr('先にリポジトリを選んでください'));
+    if (!prompt || !prompt.trim()) throw new Error(tr('指示を入力してください'));
     if (agent) this.assertEnabled(agent);
     const noGit = isNoGitRepo(s, repo);
-    if (readOnly && compete) throw new Error('ソースを変更しないタスクでは、競争は使えません。ほかのエージェントを選んでください');
-    if (noGit && compete) throw new Error('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください');
+    if (readOnly && compete) throw new Error(tr('ソースを変更しないタスクでは、競争は使えません。ほかのエージェントを選んでください'));
+    if (noGit && compete) throw new Error(tr('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください'));
     const card = {
       id: crypto.randomBytes(4).toString('hex'),
       title: (title && title.trim()) || truncate(prompt.trim().split('\n')[0], 40),
@@ -1201,13 +1242,13 @@ class AgentManager extends EventEmitter {
     r.lastResult = plan.result;
     if (plan.judge) {
       const where = plan.branch ? ` → ${relayTargetText(c, plan.branch.edge)}` : '';
-      if (plan.missing) this.log(c, 'system', `Pipeline: 工程「${st.label}」の返事に判定の値（[[RESULT:値]]）がなかったので、分岐「${plan.judge.node.label}」の「どれにも合わないとき」の線へ進みます${where}`);
-      else this.log(c, 'system', `Pipeline: 工程「${st.label}」の判定は「${plan.result}」でした${plan.branch && plan.branch.edge.value && FlowModel.normValue(plan.branch.edge.value) === plan.result ? where : plan.branch ? `（どの期待値にも合わないので「どれにも合わないとき」の線へ）${where}` : ''}`);
+      if (plan.missing) this.log(c, 'system',tr('Pipeline: 工程「{label}」の返事に判定の値（[[RESULT:値]]）がなかったので、分岐「{label2}」の「どれにも合わないとき」の線へ進みます{where}', { label: st.label, label2: plan.judge.node.label, where }));
+      else this.log(c, 'system', plan.branch && plan.branch.edge.value && FlowModel.normValue(plan.branch.edge.value) === plan.result ? tr('Pipeline: 工程「{label}」の判定は「{result}」でした{where}', { label: st.label, result: plan.result, where }) : plan.branch ? tr('Pipeline: 工程「{label}」の判定は「{result}」でした（どの期待値にも合わないので「どれにも合わないとき」の線へ）{where}', { label: st.label, result: plan.result, where }) : tr('Pipeline: 工程「{label}」の判定は「{result}」でした', { label: st.label, result: plan.result }));
     }
     if (plan.kind === 'nomatch') {
       const vals = plan.judge ? plan.judge.options.map((o) => o.value).join(' / ') : '';
-      const msg = `分岐「${plan.node.label}」で、判定の値「${plan.result || '（なし）'}」に合う線がないので止まりました（期待値: ${vals || 'なし'}）。追加指示で判定の値を書き直してもらうか、フローチャートに「どれにも合わないとき」の線を足してください`;
-      this.log(c, 'error', `Pipeline: ${msg}`);
+      const msg = tr('分岐「{label}」で、判定の値「{result}」に合う線がないので止まりました（期待値: {vals}）。追加指示で判定の値を書き直してもらうか、フローチャートに「どれにも合わないとき」の線を足してください', { label: plan.node.label, result: plan.result || tr('（なし）'), vals: vals || tr('なし') });
+      this.log(c, 'error', tr('Pipeline: {msg}', { msg }));
       return { stop: msg };
     }
     r.counts = plan.counts;
@@ -1219,13 +1260,13 @@ class AgentManager extends EventEmitter {
       // 並列の枝の中のループが上限に達したら、その時点の変更で合流する（Pipelineは止めない）
       if (r.branchOf) {
         r.limitReached = true;
-        this.log(c, 'error', `Pipeline: 「${FlowModel.labelOf(back)}」へ戻れる上限（${plan.edge.maxLoops}回）に達したので、この枝はここまでの変更で合流します`);
-        return { join: true, limitMsg: `並列の枝「${r.branchOf.label}」がループの上限に達したので、ここまでの変更で合流します` };
+        this.log(c, 'error',tr('Pipeline: 「{v}」へ戻れる上限（{maxLoops}回）に達したので、この枝はここまでの変更で合流します', { v: FlowModel.labelOf(back), maxLoops: plan.edge.maxLoops }));
+        return { join: true, limitMsg: tr('並列の枝「{label}」がループの上限に達したので、ここまでの変更で合流します', { label: r.branchOf.label }) };
       }
       r.done = true;
       r.limitReached = true;
-      const limitMsg = `「${FlowModel.labelOf(back)}」へ戻れる上限（${plan.edge.maxLoops}回）に達したので、Pipelineを終えてレビューに回しました。差分と最後の報告を確かめてください`;
-      this.log(c, 'error', `Pipeline: ${limitMsg}`);
+      const limitMsg = tr('「{label}」へ戻れる上限（{max}回）に達したので、Pipelineを終えてレビューに回しました。差分と最後の報告を確かめてください', { label: FlowModel.labelOf(back), max: plan.edge.maxLoops });
+      this.log(c, 'error', tr('Pipeline: {msg}', { msg: limitMsg }));
       return { to: null, limitMsg };
     }
     r.done = true;
@@ -1263,7 +1304,7 @@ class AgentManager extends EventEmitter {
     c.forkNext = false;
     delete c.todos; // TODO リストは工程（エージェント）ごと
     const n = relayRunNo(c, r.index);
-    this.log(c, 'system', `Pipeline: 工程 ${r.index + 1}/${r.steps.length}「${st.label}」${n > 1 ? `（${n}回目）` : ''}を ${whoLabel(st.agent, st.persona)} に引き継ぎます`);
+    this.log(c, 'system', n > 1 ? tr('Pipeline: 工程 {i}/{total}「{label}」（{n}回目）を {who} に引き継ぎます', { i: r.index + 1, total: r.steps.length, label: st.label, n, who: whoLabel(st.agent, st.persona) }) : tr('Pipeline: 工程 {i}/{total}「{label}」を {who} に引き継ぎます', { i: r.index + 1, total: r.steps.length, label: st.label, who: whoLabel(st.agent, st.persona) }));
     this.enqueue(c, c.readOnly ? withReadOnlyNote(buildRelayStepPrompt(c, r.index)) : buildRelayStepPrompt(c, r.index));
   }
 
@@ -1280,10 +1321,10 @@ class AgentManager extends EventEmitter {
     const kids = info.branches.map((b, k) => this.createBranchCard(c, node, info.join, k, relayStepIndex(c, b.edge.to)));
     r.waiting.children = kids.map((k) => k.id);
     const join = FlowModel.nodeOf(r.flow, info.join);
-    this.log(c, 'system', `Pipeline: 並列「${node.label}」で、${kids.length} 本の枝（${kids.map((k) => `「${k.relay.branchOf.label}」`).join('・')}）を別々の worktree で同時に動かします。すべての枝が終わったら、合流「${FlowModel.labelOf(join)}」でこのブランチにマージします`);
+    this.log(c, 'system', tr('Pipeline: 並列「{label}」で、{n} 本の枝（{names}）を別々の worktree で同時に動かします。すべての枝が終わったら、合流「{join}」でこのブランチにマージします', { label: node.label, n: kids.length, names: kids.map((k) => `「${k.relay.branchOf.label}」`).join('・'), join: FlowModel.labelOf(join) }));
     this.changed(c);
     for (const k of kids) {
-      this.log(k, 'system', `Pipeline: 「${c.title}」の並列「${node.label}」の枝 ${k.relay.branchOf.index + 1} です。ブランチ ${c.branch} から分けた worktree で動かします`);
+      this.log(k, 'system',tr('Pipeline: 「{title}」の並列「{label}」の枝 {v} です。ブランチ {branch} から分けた worktree で動かします', { title: c.title, label: node.label, v: k.relay.branchOf.index + 1, branch: c.branch }));
       this.enqueue(k, buildRelayStepPrompt(k, k.relay.index));
     }
   }
@@ -1293,7 +1334,7 @@ class AgentManager extends EventEmitter {
     const st = parent.relay.steps[index];
     const card = {
       id: crypto.randomBytes(4).toString('hex'),
-      title: `${parent.title} [枝${k + 1}: ${st.label}]`,
+      title: tr('{title} [枝{n}: {label}]', { title: parent.title, n: k + 1, label: st.label }),
       prompt: parent.prompt,
       status: 'todo',
       repoPath: parent.repoPath,
@@ -1345,7 +1386,7 @@ class AgentManager extends EventEmitter {
     const kids = w.children.map((cid) => this.store.card(cid));
     if (kids.some((k) => !k)) {
       p.status = 'failed';
-      p.error = '並列の枝のタスクが削除されたので、合流できません。このタスクを削除して、もう一度Pipelineで作り直してください';
+      p.error = tr('並列の枝のタスクが削除されたので、合流できません。このタスクを削除して、もう一度Pipelineで作り直してください');
       this.log(p, 'error', p.error);
       this.changed(p);
       return;
@@ -1365,13 +1406,13 @@ class AgentManager extends EventEmitter {
           p.conflict = { target: k.branch, files: err.conflictFiles, join: k.id, at: Date.now() };
           p.conflictResolved = null;
           p.status = 'failed';
-          p.error = `合流「${FlowModel.labelOf(join)}」で、並列の枝「${label}」のマージがコンフリクトしました（${err.conflictFiles.join(', ')}）。解消すると、残りの枝のマージと次の工程へ進みます`;
+          p.error = tr('合流「{join}」で、並列の枝「{label}」のマージがコンフリクトしました（{files}）。解消すると、残りの枝のマージと次の工程へ進みます', { join: FlowModel.labelOf(join), label, files: err.conflictFiles.join(', ') });
           this.log(p, 'error', p.error);
-          this.notify(p, 'conflict', `合流でコンフリクト: ${p.title}`, p.error);
+          this.notify(p, 'conflict', tr('合流でコンフリクト: {title}', { title: p.title }), p.error);
           return;
         }
         w.merged.push(k.id);
-        this.log(p, 'system', `Pipeline: 並列の枝「${label}」の変更をマージしました（${k.branch}）`);
+        this.log(p, 'system',tr('Pipeline: 並列の枝「{label}」の変更をマージしました（{branch}）', { label, branch: k.branch }));
       }
       // すべてマージできた: 枝の記録を引き取って、枝のタスクを片付ける
       for (const k of kids) {
@@ -1381,8 +1422,8 @@ class AgentManager extends EventEmitter {
       r.waiting = null;
       r.lastResult = null;
       p.error = null;
-      this.log(p, 'system', `Pipeline: 合流「${FlowModel.labelOf(join)}」で、${kids.length} 本の枝をすべてマージしました`);
-      for (const k of kids) await this.discard(k.id).catch((err) => this.log(p, 'error', `枝のタスク「${k.title}」を片付けられませんでした: ${err.message}`));
+      this.log(p, 'system',tr('Pipeline: 合流「{v}」で、{length} 本の枝をすべてマージしました', { v: FlowModel.labelOf(join), length: kids.length }));
+      for (const k of kids) await this.discard(k.id).catch((err) => this.log(p, 'error',tr('枝のタスク「{title}」を片付けられませんでした: {message}', { title: k.title, message: err.message })));
       const plan = FlowModel.route(r.flow, w.join, { counts: r.counts });
       r.counts = plan.counts;
       if (plan.kind === 'step') return this.advanceRelay(p, relayStepIndex(p, plan.node.id), { record: false });
@@ -1391,15 +1432,15 @@ class AgentManager extends EventEmitter {
       p.status = 'review';
       if (plan.kind === 'limit') {
         r.limitReached = true;
-        const msg = `「${FlowModel.labelOf(FlowModel.nodeOf(r.flow, plan.edge.to))}」へ戻れる上限（${plan.edge.maxLoops}回）に達したので、Pipelineを終えてレビューに回しました`;
-        this.log(p, 'error', `Pipeline: ${msg}`);
-        this.notify(p, 'review', `ループの上限: ${p.title}`, msg);
-      } else this.notify(p, 'review', `レビュー待ち: ${p.title}`, '並列の枝をすべてマージして、Pipelineが終わりました。差分を確かめてください');
+        const msg = tr('「{label}」へ戻れる上限（{max}回）に達したので、Pipelineを終えてレビューに回しました', { label: FlowModel.labelOf(FlowModel.nodeOf(r.flow, plan.edge.to)), max: plan.edge.maxLoops });
+        this.log(p, 'error', tr('Pipeline: {msg}', { msg }));
+        this.notify(p, 'review', tr('ループの上限: {title}', { title: p.title }), msg);
+      } else this.notify(p, 'review', tr('レビュー待ち: {title}', { title: p.title }), tr('並列の枝をすべてマージして、Pipelineが終わりました。差分を確かめてください'));
     } catch (err) {
       p.status = 'failed';
-      p.error = `合流に失敗しました: ${err.message}`;
+      p.error = tr('合流に失敗しました: {message}', { message: err.message });
       this.log(p, 'error', p.error);
-      this.notify(p, 'failed', `失敗: ${p.title}`, p.error);
+      this.notify(p, 'failed', tr('失敗: {title}', { title: p.title }), p.error);
     } finally {
       this.joining.delete(id);
       if (this.store.card(id)) this.changed(p);
@@ -1439,8 +1480,8 @@ class AgentManager extends EventEmitter {
       st.items = Subtasks.applyPlan(st.items, plan);
       st.phase = 'run';
       st.note = truncate(c.lastText || '', 4000);
-      if (!plan) this.log(c, 'system', 'サブタスクの順番が返ってこなかったので、並んでいる順に1つずつ（直列で）進めます');
-      this.log(c, 'system', `サブタスク ${st.items.length} 個を動かし始めます（${Subtasks.describeOrder(st.items)}）。それぞれ、このブランチ ${c.branch} から分けた worktree で動かし、終わったものからこのブランチにマージします`);
+      if (!plan) this.log(c, 'system',tr('サブタスクの順番が返ってこなかったので、並んでいる順に1つずつ（直列で）進めます'));
+      this.log(c, 'system',tr('サブタスク {length} 個を動かし始めます（{v}）。それぞれ、このブランチ {branch} から分けた worktree で動かし、終わったものからこのブランチにマージします', { length: st.items.length, v: Subtasks.describeOrder(st.items), branch: c.branch }));
       return 'started';
     }
     if (!st && plan && plan.length >= 2) {
@@ -1456,15 +1497,15 @@ class AgentManager extends EventEmitter {
    */
   setSubtasks(id, { items, merge } = {}) {
     const c = this.must(id);
-    if (c.status !== 'todo') throw new Error('開始前のタスクだけ、サブタスクを編集できます');
-    if (!this.canHaveSubtasks(c)) throw new Error('このタスクはサブタスクに分けられません（Pipeline・競争・git で管理していないフォルダのタスクと、サブタスク自身は分けられません）');
+    if (c.status !== 'todo') throw new Error(tr('開始前のタスクだけ、サブタスクを編集できます'));
+    if (!this.canHaveSubtasks(c)) throw new Error(tr('このタスクはサブタスクに分けられません（Pipeline・競争・git で管理していないフォルダのタスクと、サブタスク自身は分けられません）'));
     const list = Subtasks.cleanItems(items);
     if (!list.length) {
-      if (c.subtasks) this.log(c, 'system', 'サブタスクをやめて、このタスクのまま進めます');
+      if (c.subtasks) this.log(c, 'system',tr('サブタスクをやめて、このタスクのまま進めます'));
       delete c.subtasks;
     } else {
       c.subtasks = { items: list.map((x) => ({ ...x, state: 'pending' })), merge: Subtasks.cleanMergeMode(merge || (c.subtasks && c.subtasks.merge) || this.defaultSubtaskMerge(c)), phase: 'plan' };
-      this.log(c, 'system', `サブタスクを ${list.length} 個にしました（${c.subtasks.merge === 'review' ? '終わったら確かめてからマージ' : '終わったら自動でマージ'}）。開始すると、順番を ${agentShort(agentOf(c))} が決めてから動かします`);
+      this.log(c, 'system', c.subtasks.merge === 'review' ? tr('サブタスクを {n} 個にしました（終わったら確かめてからマージ）。開始すると、順番を {who} が決めてから動かします', { n: list.length, who: agentShort(agentOf(c)) }) : tr('サブタスクを {n} 個にしました（終わったら自動でマージ）。開始すると、順番を {who} が決めてから動かします', { n: list.length, who: agentShort(agentOf(c)) }));
     }
     this.changed(c);
   }
@@ -1476,14 +1517,14 @@ class AgentManager extends EventEmitter {
    */
   async acceptSubtasks(id, { items, merge, createIssues } = {}) {
     const c = this.must(id);
-    if (!c.subtaskProposal) throw new Error('サブタスクの提案はありません');
-    if (!['review', 'failed'].includes(c.status)) throw new Error('実行中は選べません');
-    if (!c.worktreePath) throw new Error('worktree がありません');
+    if (!c.subtaskProposal) throw new Error(tr('サブタスクの提案はありません'));
+    if (!['review', 'failed'].includes(c.status)) throw new Error(tr('実行中は選べません'));
+    if (!c.worktreePath) throw new Error(tr('worktree がありません'));
     this.accepting = this.accepting || new Set();
-    if (this.accepting.has(id)) throw new Error('サブタスクを作っています');
+    if (this.accepting.has(id)) throw new Error(tr('サブタスクを作っています'));
     const list = Subtasks.cleanItems(items || c.subtaskProposal.items);
-    if (!list.length) throw new Error('サブタスクを1つ以上入れてください');
-    if (createIssues && !c.issue) throw new Error('GitHub Issue から作ったタスクだけ、サブIssue を作れます');
+    if (!list.length) throw new Error(tr('サブタスクを1つ以上入れてください'));
+    if (createIssues && !c.issue) throw new Error(tr('GitHub Issue から作ったタスクだけ、サブIssue を作れます'));
     this.accepting.add(id);
     try {
       if (createIssues) {
@@ -1493,15 +1534,15 @@ class AgentManager extends EventEmitter {
           x.issue = { number: made.number, title: made.title, url: made.url };
           // 途中で失敗しても、作ったサブIssue は覚えておく（もう一度押したときに二重に作らない）
           c.subtaskProposal.items = list;
-          this.log(c, 'system', `サブIssue #${made.number}「${x.title}」を作って、#${c.issue.number} にぶら下げました`);
+          this.log(c, 'system',tr('サブIssue #{number}「{title}」を作って、#{number2} にぶら下げました', { number: made.number, title: x.title, number2: c.issue.number }));
         }
       }
       if (!this.store.card(id) || !c.subtaskProposal) return;
       c.subtasks = { items: list.map((x) => ({ ...x, state: 'pending' })), merge: Subtasks.cleanMergeMode(merge || this.defaultSubtaskMerge(c)), phase: 'run', note: truncate(c.lastText || '', 4000) };
       c.subtaskProposal = null;
       c.awaitingReply = false;
-      this.log(c, 'user', `サブタスクに分けて進めます（${list.length} 個・${c.subtasks.merge === 'review' ? '終わったら確かめてからマージ' : '終わったら自動でマージ'}）`);
-      this.log(c, 'system', `サブタスク ${list.length} 個を動かし始めます（${Subtasks.describeOrder(c.subtasks.items)}）。それぞれ、このブランチ ${c.branch} から分けた worktree で動かし、終わったものからこのブランチにマージします`);
+      this.log(c, 'user', c.subtasks.merge === 'review' ? tr('サブタスクに分けて進めます（{n} 個・終わったら確かめてからマージ）', { n: list.length }) : tr('サブタスクに分けて進めます（{n} 個・終わったら自動でマージ）', { n: list.length }));
+      this.log(c, 'system',tr('サブタスク {length} 個を動かし始めます（{v}）。それぞれ、このブランチ {branch} から分けた worktree で動かし、終わったものからこのブランチにマージします', { length: list.length, v: Subtasks.describeOrder(c.subtasks.items), branch: c.branch }));
       this.changed(c);
     } catch (err) {
       this.changed(c);
@@ -1515,7 +1556,7 @@ class AgentManager extends EventEmitter {
   // サブタスクの提案に「分けずに進める」と答える
   declineSubtasks(id) {
     const c = this.must(id);
-    if (!c.subtaskProposal) throw new Error('サブタスクの提案はありません');
+    if (!c.subtaskProposal) throw new Error(tr('サブタスクの提案はありません'));
     c.subtaskProposal = null;
     this.send(id, 'サブタスクに分けずに、このタスクのまま開発を進めてください（もうサブタスクの提案はしないでください）。');
   }
@@ -1531,12 +1572,12 @@ class AgentManager extends EventEmitter {
   async approveSubtask(id) {
     const k = this.must(id);
     const p = this.subtaskParentOf(k);
-    if (!p) throw new Error('このタスクはサブタスクではありません');
-    if (!this.subtaskReady(k, { manual: true })) throw new Error('このサブタスクは、まだ取り込める状態ではありません（作業中・質問への回答待ち・コンフリクトなど）');
+    if (!p) throw new Error(tr('このタスクはサブタスクではありません'));
+    if (!this.subtaskReady(k, { manual: true })) throw new Error(tr('このサブタスクは、まだ取り込める状態ではありません（作業中・質問への回答待ち・コンフリクトなど）'));
     const item = p.subtasks.items.find((x) => x.cardId === k.id);
-    if (!(p.subtasks.merge === 'review' || (item && item.manual))) throw new Error('このサブタスクは、終わったら自動で親のブランチにマージします');
+    if (!(p.subtasks.merge === 'review' || (item && item.manual))) throw new Error(tr('このサブタスクは、終わったら自動で親のブランチにマージします'));
     k.subtaskOf.approved = true;
-    this.log(k, 'system', `親のタスク「${p.title}」のブランチに取り込みます`);
+    this.log(k, 'system',tr('親のタスク「{title}」のブランチに取り込みます', { title: p.title }));
     this.changed(k);
     await this.advanceSubtasks(p.id);
   }
@@ -1564,9 +1605,9 @@ class AgentManager extends EventEmitter {
     this.store.cards.push(card);
     item.cardId = card.id;
     item.state = 'running';
-    this.log(p, 'system', `サブタスク「${item.title}」を始めます`);
+    this.log(p, 'system',tr('サブタスク「{title}」を始めます', { title: item.title }));
     const check = p.subtasks.merge === 'review' || item.manual;
-    this.log(card, 'system', `「${p.title}」のサブタスクです。ブランチ ${p.branch} から分けた worktree で動かし、終わったら${check ? '、確かめてから（「取り込む」を押してから）' : ''}親のブランチにマージします`);
+    this.log(card, 'system', check ? tr('「{title}」のサブタスクです。ブランチ {branch} から分けた worktree で動かし、終わったら、確かめてから（「取り込む」を押してから）親のブランチにマージします', { title: p.title, branch: p.branch }) : tr('「{title}」のサブタスクです。ブランチ {branch} から分けた worktree で動かし、終わったら親のブランチにマージします', { title: p.title, branch: p.branch }));
     this.changed(card);
     this.start(card.id);
   }
@@ -1582,7 +1623,7 @@ class AgentManager extends EventEmitter {
     item.report = truncate(k.lastText || k.lastMessage || '', 4000);
     item.costUsd = k.costUsd || 0;
     item.agent = agentOf(k);
-    await this.discard(k.id).catch((err) => this.log(p, 'error', `サブタスクのカード「${k.title}」を片付けられませんでした: ${err.message}`));
+    await this.discard(k.id).catch((err) => this.log(p, 'error',tr('サブタスクのカード「{title}」を片付けられませんでした: {message}', { title: k.title, message: err.message })));
   }
 
   /**
@@ -1602,9 +1643,9 @@ class AgentManager extends EventEmitter {
       await this.advanceSubtasksOnce(p);
     } catch (err) {
       if (this.store.card(id)) {
-        p.error = `サブタスクを進められませんでした: ${err.message}`;
+        p.error = tr('サブタスクを進められませんでした: {message}', { message: err.message });
         this.log(p, 'error', p.error);
-        this.notify(p, 'failed', `失敗: ${p.title}`, p.error);
+        this.notify(p, 'failed', tr('失敗: {title}', { title: p.title }), p.error);
       }
     } finally {
       const again = this.subAdvancing.get(id);
@@ -1618,14 +1659,14 @@ class AgentManager extends EventEmitter {
   async advanceSubtasksOnce(p) {
     const st = p.subtasks;
     if (p.status === 'running' || p.status === 'queued' || p.conflict) return;
-    if (!p.worktreePath) throw new Error('親のタスクの worktree がありません');
+    if (!p.worktreePath) throw new Error(tr('親のタスクの worktree がありません'));
     // 終わったサブタスクを、親のブランチに1つずつマージする
     for (const item of st.items) {
       if (item.state !== 'running') continue;
       const k = item.cardId && this.store.card(item.cardId);
       if (!k) {
         item.state = 'skipped';
-        this.log(p, 'system', `サブタスク「${item.title}」のカードが見つからないので、マージせずに先へ進みます`);
+        this.log(p, 'system',tr('サブタスク「{title}」のカードが見つからないので、マージせずに先へ進みます', { title: item.title }));
         continue;
       }
       const approved = !!k.subtaskOf.approved;
@@ -1640,12 +1681,12 @@ class AgentManager extends EventEmitter {
         // ほかのサブタスクの変更とぶつかった: 親のエージェントに解消してもらう（解消したら markResolved から続ける）
         p.conflict = { target: k.branch, files: err.conflictFiles, subtask: k.id, at: Date.now() };
         p.conflictResolved = null;
-        this.log(p, 'error', `サブタスク「${item.title}」のマージが、ほかのサブタスクの変更とコンフリクトしました（${err.conflictFiles.join(', ')}）。${agentShort(agentOf(p))} に解消してもらいます`);
+        this.log(p, 'error',tr('サブタスク「{title}」のマージが、ほかのサブタスクの変更とコンフリクトしました（{v}）。{agentShort} に解消してもらいます', { title: item.title, v: err.conflictFiles.join(', '), agentShort: agentShort(agentOf(p)) }));
         this.changed(p);
         await this.resolveConflict(p.id, 'agent');
         return;
       }
-      this.log(p, 'system', `サブタスク「${item.title}」の変更を、このブランチにマージしました（${k.branch}）`);
+      this.log(p, 'system',tr('サブタスク「{title}」の変更を、このブランチにマージしました（{branch}）', { title: item.title, branch: k.branch }));
       await this.settleSubtaskMerge(p, item, k);
       if (!this.store.card(p.id)) return;
     }
@@ -1662,12 +1703,12 @@ class AgentManager extends EventEmitter {
     st.phase = 'done';
     p.error = null;
     if (!st.items.some((x) => x.state === 'merged')) {
-      this.log(p, 'system', 'サブタスクがすべて完了になりました（親のブランチにマージしたものはないので、仕上げはしません）');
+      this.log(p, 'system',tr('サブタスクがすべて完了になりました（親のブランチにマージしたものはないので、仕上げはしません）'));
       this.changed(p);
       return;
     }
     const prompt = Subtasks.buildFinishPrompt(p, { withTask: !p.sessionId });
-    this.log(p, 'system', 'サブタスクがすべて完了になりました。全体の仕上げ（テスト・つなぎの直し）をしてから、レビューに回します');
+    this.log(p, 'system',tr('サブタスクがすべて完了になりました。全体の仕上げ（テスト・つなぎの直し）をしてから、レビューに回します'));
     this.log(p, 'user', prompt);
     this.enqueue(p, prompt);
   }
@@ -1679,15 +1720,15 @@ class AgentManager extends EventEmitter {
   async startSubtaskOnly(id, key) {
     const p = this.must(id);
     const st = p.subtasks;
-    if (!st) throw new Error('このタスクにはサブタスクがありません');
+    if (!st) throw new Error(tr('このタスクにはサブタスクがありません'));
     const item = st.items.find((x) => x.key === key);
-    if (!item) throw new Error('サブタスクが見つかりません');
-    if (item.state !== 'pending') throw new Error('まだ始めていないサブタスクだけ開始できます');
-    if (p.status === 'running' || p.status === 'queued') throw new Error(st.phase === 'plan' ? 'サブタスクの順番を決めています。終わってから開始してください' : '親のタスクが動いているあいだは開始できません。終わってから開始してください');
-    if (p.conflict) throw new Error('コンフリクトを解消してから開始してください');
-    if (p.status === 'done') throw new Error('完了したタスクのサブタスクは開始できません。レビューの列に戻してから開始してください');
+    if (!item) throw new Error(tr('サブタスクが見つかりません'));
+    if (item.state !== 'pending') throw new Error(tr('まだ始めていないサブタスクだけ開始できます'));
+    if (p.status === 'running' || p.status === 'queued') throw new Error(st.phase === 'plan' ? tr('サブタスクの順番を決めています。終わってから開始してください') : tr('親のタスクが動いているあいだは開始できません。終わってから開始してください'));
+    if (p.conflict) throw new Error(tr('コンフリクトを解消してから開始してください'));
+    if (p.status === 'done') throw new Error(tr('完了したタスクのサブタスクは開始できません。レビューの列に戻してから開始してください'));
     this.subStarting = this.subStarting || new Set();
-    if (this.subStarting.has(id)) throw new Error('サブタスクを開始しています');
+    if (this.subStarting.has(id)) throw new Error(tr('サブタスクを開始しています'));
     this.subStarting.add(id);
     try {
       if (p.status === 'todo') {
@@ -1700,7 +1741,7 @@ class AgentManager extends EventEmitter {
         p.startedAt = Date.now();
         p.specState = null;
         st.auto = false;
-        this.log(p, 'system', `サブタスク「${item.title}」だけを開始します。ほかのサブタスクは、サブタスクタブから1つずつ開始するか「残りを自動で進める」で動かします`);
+        this.log(p, 'system',tr('サブタスク「{title}」だけを開始します。ほかのサブタスクは、サブタスクタブから1つずつ開始するか「残りを自動で進める」で動かします', { title: item.title }));
       }
       if (st.phase !== 'run') st.phase = 'run';
       if (item.state !== 'pending') return;
@@ -1719,19 +1760,19 @@ class AgentManager extends EventEmitter {
   editSubtask(id, key, { title, prompt } = {}) {
     const p = this.must(id);
     const st = p.subtasks;
-    if (!st) throw new Error('このタスクにはサブタスクがありません');
+    if (!st) throw new Error(tr('このタスクにはサブタスクがありません'));
     const item = st.items.find((x) => x.key === key);
-    if (!item) throw new Error('サブタスクが見つかりません');
-    if (item.state !== 'pending') throw new Error('まだ始めていないサブタスクだけ変えられます');
+    if (!item) throw new Error(tr('サブタスクが見つかりません'));
+    if (item.state !== 'pending') throw new Error(tr('まだ始めていないサブタスクだけ変えられます'));
     const t = truncate(String(title ?? '').trim(), 120);
     const body = truncate(String(prompt ?? '').trim(), 20000);
-    if (!t) throw new Error('名前を入れてください');
-    if (!body) throw new Error('やることを入れてください');
+    if (!t) throw new Error(tr('名前を入れてください'));
+    if (!body) throw new Error(tr('やることを入れてください'));
     if (t === item.title && body === item.prompt) return item;
     const before = item.title;
     item.title = t;
     item.prompt = body;
-    this.log(p, 'user', before === t ? `サブタスク「${t}」の内容を変えました` : `サブタスク「${before}」を「${t}」に変えました`);
+    this.log(p, 'user', before === t ? tr('サブタスク「{title}」の内容を変えました', { title: t }) : tr('サブタスク「{before}」を「{title}」に変えました', { before, title: t }));
     this.changed(p);
     return item;
   }
@@ -1740,9 +1781,9 @@ class AgentManager extends EventEmitter {
   async autoRunSubtasks(id) {
     const p = this.must(id);
     const st = p.subtasks;
-    if (!st || st.phase !== 'run') throw new Error('サブタスクを進めているタスクではありません');
+    if (!st || st.phase !== 'run') throw new Error(tr('サブタスクを進めているタスクではありません'));
     st.auto = true;
-    this.log(p, 'user', '残りのサブタスクを自動で進めます');
+    this.log(p, 'user',tr('残りのサブタスクを自動で進めます'));
     this.changed(p);
     await this.advanceSubtasks(id);
   }
@@ -1754,26 +1795,26 @@ class AgentManager extends EventEmitter {
   async moveSubtask(id, key, to) {
     const p = this.must(id);
     const st = p.subtasks;
-    if (!st) throw new Error('このタスクにはサブタスクがありません');
+    if (!st) throw new Error(tr('このタスクにはサブタスクがありません'));
     const item = st.items.find((x) => x.key === key);
-    if (!item) throw new Error('サブタスクが見つかりません');
+    if (!item) throw new Error(tr('サブタスクが見つかりません'));
     if (to === 'running') {
       if (item.state === 'pending') return this.startSubtaskOnly(id, key);
-      throw new Error('作業中へは、まだ始めていないサブタスクだけ動かせます。直してほしいときは、サブタスクを開いて追加の指示を送ってください');
+      throw new Error(tr('作業中へは、まだ始めていないサブタスクだけ動かせます。直してほしいときは、サブタスクを開いて追加の指示を送ってください'));
     }
-    if (p.status === 'todo') throw new Error('親のタスクを開始する前は、サブタスクの開始だけできます（作業中の列へドラッグ）');
-    if (p.status === 'running' || p.status === 'queued') throw new Error('親のタスクが動いているあいだは、サブタスクの状態を変えられません');
+    if (p.status === 'todo') throw new Error(tr('親のタスクを開始する前は、サブタスクの開始だけできます（作業中の列へドラッグ）'));
+    if (p.status === 'running' || p.status === 'queued') throw new Error(tr('親のタスクが動いているあいだは、サブタスクの状態を変えられません'));
     const k = item.cardId && item.state === 'running' ? this.store.card(item.cardId) : null;
-    if (k && (k.status === 'running' || k.status === 'queued' || k.status === 'todo')) throw new Error('作業中のサブタスクは動かせません。止めてから動かしてください');
-    if (k && p.conflict && p.conflict.subtask === k.id) throw new Error('このサブタスクのマージでのコンフリクトを解消してから動かしてください');
+    if (k && (k.status === 'running' || k.status === 'queued' || k.status === 'todo')) throw new Error(tr('作業中のサブタスクは動かせません。止めてから動かしてください'));
+    if (k && p.conflict && p.conflict.subtask === k.id) throw new Error(tr('このサブタスクのマージでのコンフリクトを解消してから動かしてください'));
     if (to === 'done') {
       if (Subtasks.SETTLED.includes(item.state)) return;
       if (item.state === 'pending') {
         item.state = 'done';
-        this.log(p, 'user', `サブタスク「${item.title}」を、始めずに完了にしました`);
+        this.log(p, 'user',tr('サブタスク「{title}」を、始めずに完了にしました', { title: item.title }));
       } else if (item.state === 'review') {
         item.state = 'merged';
-        this.log(p, 'user', `サブタスク「${item.title}」を完了にしました`);
+        this.log(p, 'user',tr('サブタスク「{title}」を完了にしました', { title: item.title }));
       } else {
         // まだ取り込んでいないサブタスク: 取り込まずに完了にする（サブタスクのカードと worktree は片付ける）
         item.state = 'done';
@@ -1783,27 +1824,27 @@ class AgentManager extends EventEmitter {
           item.costUsd = k.costUsd || 0;
           item.agent = agentOf(k);
         }
-        this.log(p, 'user', `サブタスク「${item.title}」を、親のブランチに取り込まずに完了にしました`);
-        if (k) await this.discard(k.id).catch((err) => this.log(p, 'error', `サブタスクのカード「${k.title}」を片付けられませんでした: ${err.message}`));
+        this.log(p, 'user',tr('サブタスク「{title}」を、親のブランチに取り込まずに完了にしました', { title: item.title }));
+        if (k) await this.discard(k.id).catch((err) => this.log(p, 'error',tr('サブタスクのカード「{title}」を片付けられませんでした: {message}', { title: k.title, message: err.message })));
         if (!this.store.card(id)) return;
       }
     } else if (to === 'todo') {
       if (item.state === 'pending') return;
-      if (k) throw new Error('取り込んでいないサブタスクは、未着手に戻せません。完了にするか、サブタスクを開いて破棄してください');
+      if (k) throw new Error(tr('取り込んでいないサブタスクは、未着手に戻せません。完了にするか、サブタスクを開いて破棄してください'));
       item.state = 'pending';
       delete item.cardId;
       delete item.manual;
-      this.log(p, 'user', `サブタスク「${item.title}」を未着手に戻しました${item.merged ? '（前にマージした変更は、親のブランチに残っています）' : ''}`);
+      this.log(p, 'user', item.merged ? tr('サブタスク「{title}」を未着手に戻しました（前にマージした変更は、親のブランチに残っています）', { title: item.title }) : tr('サブタスク「{title}」を未着手に戻しました', { title: item.title }));
       if (st.phase === 'done') st.phase = 'run';
     } else if (to === 'review') {
       if (item.state === 'merged' && item.merged) {
         item.state = 'review';
-        this.log(p, 'user', `サブタスク「${item.title}」をレビューに戻しました`);
+        this.log(p, 'user',tr('サブタスク「{title}」をレビューに戻しました', { title: item.title }));
         if (st.phase === 'done') st.phase = 'run';
       } else if (item.state !== 'review' && !(k && (k.status === 'review' || k.status === 'failed'))) {
-        throw new Error('レビューへは、取り込んだサブタスクだけ戻せます');
+        throw new Error(tr('レビューへは、取り込んだサブタスクだけ戻せます'));
       }
-    } else throw new Error('知らない列です');
+    } else throw new Error(tr('知らない列です'));
     this.changed(p);
     this.finishSubtasksIfSettled(p);
     if (this.store.card(id)) this.changed(p);
@@ -1815,24 +1856,24 @@ class AgentManager extends EventEmitter {
    */
   moveCard(id, to) {
     const c = this.must(id);
-    if (isChat(c)) throw new Error('会話は列を動かせません');
-    if (this.subtaskParentOf(c)) throw new Error('サブタスクの状態は、親のタスクの「サブタスク」タブで変えてください');
-    if (c.afterDone) throw new Error('完了したタスクについて話しているあいだは動かせません');
+    if (isChat(c)) throw new Error(tr('会話は列を動かせません'));
+    if (this.subtaskParentOf(c)) throw new Error(tr('サブタスクの状態は、親のタスクの「サブタスク」タブで変えてください'));
+    if (c.afterDone) throw new Error(tr('完了したタスクについて話しているあいだは動かせません'));
     const from = c.status;
     const shown = c.subtasks && c.subtasks.phase === 'run' && (from === 'review' || from === 'failed') ? 'running' : from;
     if (shown === to || (to === 'review' && from === 'failed')) return;
     if (to === 'running') {
       if (from === 'todo') return this.start(id);
-      throw new Error('開始したタスクを動かすときは、追加の指示を送ってください');
+      throw new Error(tr('開始したタスクを動かすときは、追加の指示を送ってください'));
     }
-    if (to === 'todo') throw new Error('開始したタスクは Todo に戻せません');
-    if (from === 'running' || from === 'queued') throw new Error('実行中のタスクは動かせません。止めてから動かしてください');
+    if (to === 'todo') throw new Error(tr('開始したタスクは Todo に戻せません'));
+    if (from === 'running' || from === 'queued') throw new Error(tr('実行中のタスクは動かせません。止めてから動かしてください'));
     if (to === 'done') {
-      if (from === 'todo') throw new Error('開始していないタスクは完了にできません');
+      if (from === 'todo') throw new Error(tr('開始していないタスクは完了にできません'));
       if (isNoGit(c)) return this.complete(id);
-      if (c.subtasks && c.subtasks.phase === 'run') throw new Error('サブタスクが残っています。サブタスクタブでサブタスクをすべて完了にしてから動かしてください');
-      if (c.conflict) throw new Error('コンフリクトを解消するか、取り込みを中止してから完了にしてください');
-      if (c.relay && c.relay.waiting) throw new Error('Pipelineの並列の枝が終わるのを待っています');
+      if (c.subtasks && c.subtasks.phase === 'run') throw new Error(tr('サブタスクが残っています。サブタスクタブでサブタスクをすべて完了にしてから動かしてください'));
+      if (c.conflict) throw new Error(tr('コンフリクトを解消するか、取り込みを中止してから完了にしてください'));
+      if (c.relay && c.relay.waiting) throw new Error(tr('Pipelineの並列の枝が終わるのを待っています'));
       c.status = 'done';
       c.manualDone = true;
       c.error = null;
@@ -1840,22 +1881,22 @@ class AgentManager extends EventEmitter {
       c.awaitingReply = false;
       c.subtaskProposal = null;
       c.completedAt = Date.now();
-      this.log(c, 'user', `完了にしました${c.worktreePath ? `（マージはしていません。worktree とブランチ ${c.branch} は残しています。続けるときは「レビュー」の列へ戻します）` : ''}`);
+      this.log(c, 'user', c.worktreePath ? tr('完了にしました（マージはしていません。worktree とブランチ {branch} は残しています。続けるときは「レビュー」の列へ戻します）', { branch: c.branch }) : tr('完了にしました'));
       this.completed(c);
       this.changed(c);
       return;
     }
     if (to === 'review') {
-      if (from !== 'done') throw new Error('レビューへは、完了したタスクだけ戻せます');
-      if (!isNoGit(c) && !(c.worktreePath && fs.existsSync(c.worktreePath))) throw new Error('マージや PR で作業場所（worktree）を片付けたので、レビューに戻せません。続きは「修正タスクを作る」から進めてください');
+      if (from !== 'done') throw new Error(tr('レビューへは、完了したタスクだけ戻せます'));
+      if (!isNoGit(c) && !(c.worktreePath && fs.existsSync(c.worktreePath))) throw new Error(tr('マージや PR で作業場所（worktree）を片付けたので、レビューに戻せません。続きは「修正タスクを作る」から進めてください'));
       c.status = 'review';
       c.manualDone = false;
       c.completedAt = null;
-      this.log(c, 'user', 'レビューに戻しました');
+      this.log(c, 'user',tr('レビューに戻しました'));
       this.changed(c);
       return;
     }
-    throw new Error('知らない列です');
+    throw new Error(tr('知らない列です'));
   }
 
   // 競争の同じグループのカード（自分も含む）
@@ -1873,7 +1914,7 @@ class AgentManager extends EventEmitter {
     if (list.some((x) => x.compete.notified)) return;
     for (const x of list) x.compete.notified = true;
     const summary = list.map((x) => `${whoShort(agentOf(x), x.persona)}: ${x.status === 'failed' ? 'エラー' : 'できた'}`).join(' / ');
-    this.notify(c, 'review', `競争の結果がそろいました: ${c.compete.title || c.title}`, `${summary}。差分を比べて、採用する案を選んでください`);
+    this.notify(c, 'review', tr('競争の結果がそろいました: {v}', { v: c.compete.title || c.title }), tr('{summary}。差分を比べて、採用する案を選んでください', { summary }));
   }
 
   /**
@@ -1882,12 +1923,12 @@ class AgentManager extends EventEmitter {
    */
   async adoptCompetitor(id) {
     const c = this.must(id);
-    if (!c.compete) throw new Error('このタスクは競争のタスクではありません');
+    if (!c.compete) throw new Error(tr('このタスクは競争のタスクではありません'));
     // 動いている候補も止めて破棄する（discard が止めるのを待つ）。もう取り込んだ（完了の）候補は削除できないので残す
     const others = this.competitors(id).filter((x) => x.id !== id && !this.isUndeletable(x));
     for (const x of others) await this.discard(x.id);
     c.compete = { ...c.compete, adopted: true, total: 1 };
-    this.log(c, 'system', `この案（${whoLabel(agentOf(c), c.persona)}）を採用しました。ほかの ${others.length} 件の候補は破棄しました`);
+    this.log(c, 'system',tr('この案（{whoLabel}）を採用しました。ほかの {length} 件の候補は破棄しました', { whoLabel: whoLabel(agentOf(c), c.persona), length: others.length }));
     this.changed(c);
     return others.length;
   }
@@ -1895,9 +1936,9 @@ class AgentManager extends EventEmitter {
   // 競争の候補を、エージェント（最初から選んでおくエージェント）に比べてもらう会話を作る
   compareCompetitors(id) {
     const list = this.competitors(id);
-    if (list.length < 2) throw new Error('比べる候補がありません');
+    if (list.length < 2) throw new Error(tr('比べる候補がありません'));
     const title = list[0].compete.title || list[0].title;
-    const chat = this.createChat({ message: buildComparePrompt(title, list), title: `比較: ${title}`, agent: providers.defaultAgentOf(this.store.settings) });
+    const chat = this.createChat({ message: buildComparePrompt(title, list), title: tr('比較: {title}', { title }), agent: providers.defaultAgentOf(this.store.settings) });
     for (const x of list) x.compete.compareChat = chat.id;
     this.changed(chat);
     return chat;
@@ -1910,9 +1951,9 @@ class AgentManager extends EventEmitter {
    */
   createChat({ message, title, session, skill, agent, model, attachments: files }) {
     const s = this.store.settings;
-    if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
+    if (!s.repoPath) throw new Error(tr('先にリポジトリを選んでください'));
     const text = String(message || '').trim();
-    if (!text) throw new Error('メッセージを入力してください');
+    if (!text) throw new Error(tr('メッセージを入力してください'));
     const parsed = attachments.parseAttachments(files);
     const custom = providers.isCustomRef(agent) ? this.customAgent(agent) : null;
     const a = custom ? custom.agent : agent || providers.defaultAgentOf(s);
@@ -1951,7 +1992,7 @@ class AgentManager extends EventEmitter {
    */
   async createFromIssues({ numbers, extra, session, skill, agent, model }) {
     const s = this.store.settings;
-    if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
+    if (!s.repoPath) throw new Error(tr('先にリポジトリを選んでください'));
     const list = github.parseIssueNumbers(numbers);
     const cards = [];
     const errors = [];
@@ -1994,7 +2035,7 @@ class AgentManager extends EventEmitter {
     try {
       subs = (await this.fetchSubIssues(c.repoPath, issue.number)).filter((x) => x.state !== 'closed');
     } catch (err) {
-      this.log(c, 'system', `#${issue.number} のサブIssue を読めなかったので、サブタスクなしで作りました（${err.message.split('\n')[0]}）`);
+      this.log(c, 'system',tr('#{number} のサブIssue を読めなかったので、サブタスクなしで作りました（{v}）', { number: issue.number, v: err.message.split('\n')[0] }));
       this.changed(c);
       return;
     }
@@ -2010,7 +2051,7 @@ class AgentManager extends EventEmitter {
       items.push({ key: `issue-${x.number}`, title: `#${x.number} ${full.title}`, prompt: github.buildIssuePrompt(full), issue: { number: x.number, title: full.title, url: full.url || x.url } });
     }
     c.subtasks = { items: Subtasks.cleanItems(items).map((x) => ({ ...x, state: 'pending' })), merge: this.defaultSubtaskMerge(c), phase: 'plan' };
-    this.log(c, 'system', `#${issue.number} のサブIssue ${c.subtasks.items.length} 件（${c.subtasks.items.map((x) => `#${x.issue.number}`).join(', ')}）を、サブタスクにしました。開始すると、順番を決めてからサブタスクごとに動かします`);
+    this.log(c, 'system', tr('#{number} のサブIssue {n} 件（{list}）を、サブタスクにしました。開始すると、順番を決めてからサブタスクごとに動かします', { number: issue.number, n: c.subtasks.items.length, list: c.subtasks.items.map((x) => `#${x.issue.number}`).join(', ') }));
     this.changed(c);
   }
 
@@ -2040,7 +2081,7 @@ class AgentManager extends EventEmitter {
     const own = c.sessions.find((x) => x.id === session.id && x.origin === 'task');
     // ほかのエージェントの会話は続けられない（Claude Code 以外は、このカードの会話だけ選べる）
     if (own ? (own.agent || 'claude') !== agentOf(c) : agentOf(c) !== 'claude') {
-      throw new Error(`${agentLabel(agentOf(c))} では、この会話を続けられません`);
+      throw new Error(tr('{agentLabel} では、この会話を続けられません', { agentLabel: agentLabel(agentOf(c)) }));
     }
     c.sessionId = session.id;
     c.forkNext = !own; // ほかの会話はフォーク、このカードの会話はそのまま続ける
@@ -2055,10 +2096,10 @@ class AgentManager extends EventEmitter {
    */
   setSession(id, session) {
     const c = this.must(id);
-    if (c.status === 'running' || c.status === 'queued') throw new Error('実行中・待機中は会話を切り替えられません');
+    if (c.status === 'running' || c.status === 'queued') throw new Error(tr('実行中・待機中は会話を切り替えられません'));
     this.applySession(c, session);
-    const label = !c.sessionId ? '新しい会話' : c.forkNext ? `既存の会話（${(session.title || session.id).slice(0, 40)}）を引き継ぐ` : `このカードの会話 ${c.sessionId.slice(0, 8)}`;
-    this.log(c, 'system', `次の実行は「${label}」で始めます`);
+    const label = !c.sessionId ? tr('新しい会話') : c.forkNext ? tr('既存の会話（{name}）を引き継ぐ', { name: (session.title || session.id).slice(0, 40) }) : tr('このカードの会話 {id}', { id: c.sessionId.slice(0, 8) });
+    this.log(c, 'system',tr('次の実行は「{label}」で始めます', { label }));
     this.changed(c);
   }
 
@@ -2124,7 +2165,7 @@ class AgentManager extends EventEmitter {
    */
   async deleteSessions(ids, repoPath = this.store.settings.repoPath) {
     const list = [...new Set((Array.isArray(ids) ? ids : []).filter(isSessionId))];
-    if (!list.length) throw new Error('消す会話を選んでください');
+    if (!list.length) throw new Error(tr('消す会話を選んでください'));
     const usage = this.sessionUsage();
     const skipped = list.filter((id) => (usage.get(id) || []).some((u) => u.busy));
     const target = list.filter((id) => !skipped.includes(id));
@@ -2149,9 +2190,9 @@ class AgentManager extends EventEmitter {
     try {
       const removed = require('./sessions').deleteSessions(ids, { configDir: await this.claudeConfigDir(c.repoPath) });
       this.forgetSessions(ids, c);
-      if (removed.length) this.log(c, 'system', `マージしたので、このタスクの会話（${removed.length} 件）を消しました`);
+      if (removed.length) this.log(c, 'system',tr('マージしたので、このタスクの会話（{length} 件）を消しました', { length: removed.length }));
     } catch (err) {
-      this.log(c, 'error', `会話を消せませんでした: ${err.message}`);
+      this.log(c, 'error',tr('会話を消せませんでした: {message}', { message: err.message }));
     }
   }
 
@@ -2161,7 +2202,7 @@ class AgentManager extends EventEmitter {
 
   updateCard(id, { title, prompt, skill }) {
     const c = this.must(id);
-    if (c.status !== 'todo') throw new Error('開始前のタスクだけ編集できます');
+    if (c.status !== 'todo') throw new Error(tr('開始前のタスクだけ編集できます'));
     if (skill !== undefined) c.skill = cleanSkill(skill);
     if (typeof title === 'string' && title.trim()) c.title = title.trim();
     if (typeof prompt === 'string' && prompt.trim()) c.prompt = prompt.trim();
@@ -2170,7 +2211,7 @@ class AgentManager extends EventEmitter {
 
   start(id) {
     const c = this.must(id);
-    if (c.status !== 'todo') throw new Error('このタスクはもう開始しています');
+    if (c.status !== 'todo') throw new Error(tr('このタスクはもう開始しています'));
     this.log(c, 'user', c.prompt, userLogExtra(c.skill, c.attachments, c.attachmentsParsed));
     delete c.attachmentsParsed;
     if (inSpecCheck(c) && this.store.repoSettings(c.repoPath).specCheck === false) c.specState = null; // 作ったあとで設定を切った
@@ -2179,10 +2220,10 @@ class AgentManager extends EventEmitter {
 
   send(id, message, skill, files) {
     const c = this.must(id);
-    if (!['review', 'failed', 'done'].includes(c.status)) throw new Error('実行中・待機中は追加指示を送れません');
-    if (!message || !message.trim()) throw new Error('追加指示を入力してください');
-    if (c.relay && c.relay.waiting) throw new Error(c.conflict ? '合流でのコンフリクトを、上の「コンフリクト」の欄から解消してください' : 'Pipelineの並列の枝が終わるのを待っています。直したいときは、枝のタスクに追加指示を送ってください');
-    if (c.subtasks && c.subtasks.phase === 'run') throw new Error(c.conflict ? 'サブタスクのマージでのコンフリクトを、上の「コンフリクト」の欄から解消してください' : 'サブタスクが終わるのを待っています。直したいときは、サブタスクに追加指示を送ってください');
+    if (!['review', 'failed', 'done'].includes(c.status)) throw new Error(tr('実行中・待機中は追加指示を送れません'));
+    if (!message || !message.trim()) throw new Error(tr('追加指示を入力してください'));
+    if (c.relay && c.relay.waiting) throw new Error(c.conflict ? tr('合流でのコンフリクトを、上の「コンフリクト」の欄から解消してください') : tr('Pipelineの並列の枝が終わるのを待っています。直したいときは、枝のタスクに追加指示を送ってください'));
+    if (c.subtasks && c.subtasks.phase === 'run') throw new Error(c.conflict ? tr('サブタスクのマージでのコンフリクトを、上の「コンフリクト」の欄から解消してください') : tr('サブタスクが終わるのを待っています。直したいときは、サブタスクに追加指示を送ってください'));
     if (c.subtaskProposal) c.subtaskProposal = null; // 提案に文章で答えた: 提案は閉じて、エージェントに任せる
     skill = cleanSkill(skill);
     const parsed = attachments.parseAttachments(files);
@@ -2218,7 +2259,7 @@ class AgentManager extends EventEmitter {
   suggestSkills(id) {
     const src = this.must(id);
     const similar = (src.skillSuggestSimilar || []).map((x) => this.store.card(x)).filter(Boolean);
-    const chat = this.createChat({ message: buildSkillSuggestPrompt(src, similar), title: `スキルの提案: ${src.title}`, agent: this.helperAgent(src) });
+    const chat = this.createChat({ message: buildSkillSuggestPrompt(src, similar), title: tr('スキルの提案: {title}', { title: src.title }), agent: this.helperAgent(src) });
     chat.skillSuggestFrom = src.id;
     // 提案に使ったタスクは、あとで似たタスクが完了しても、もう一度は数えない（同じ提案を何度も出さない）
     const now = Date.now();
@@ -2241,7 +2282,7 @@ class AgentManager extends EventEmitter {
    */
   sendAfterDone(c, message, skill, atts, parsed) {
     const first = !c.afterDoneSession;
-    if (first) this.log(c, 'system', '完了したタスクについて話します（ファイルは変えません。修正が必要なときは「修正タスクを作る」から別のタスクにしてください）');
+    if (first) this.log(c, 'system',tr('完了したタスクについて話します（ファイルは変えません。修正が必要なときは「修正タスクを作る」から別のタスクにしてください）'));
     this.log(c, 'user', message, userLogExtra(skill, atts, parsed));
     // 前の作業の会話は worktree のフォルダに保存されているので使わない。完了後の会話はその会話だけを続ける
     c.sessionId = c.afterDoneSession || null;
@@ -2252,7 +2293,7 @@ class AgentManager extends EventEmitter {
 
   // atts: この指示に添付したファイル（Claude Code には画像をそのまま渡す。パスは prompt に書いてある）
   enqueue(c, prompt, atts) {
-    if (this.shuttingDown) throw new Error('アプリを終了しています');
+    if (this.shuttingDown) throw new Error(tr('アプリを終了しています'));
     c.pendingAttachments = atts && atts.length ? atts : null;
     c.interrupted = null;
     c.awaitingReply = false;
@@ -2316,7 +2357,7 @@ class AgentManager extends EventEmitter {
       return;
     }
     const child = this.procs.get(id);
-    if (!child) throw new Error('実行中ではありません');
+    if (!child) throw new Error(tr('実行中ではありません'));
     c.stopRequested = true;
     this.denyAllPending(id, '停止されました');
     killTree(child);
@@ -2334,12 +2375,12 @@ class AgentManager extends EventEmitter {
 
   async prepareWorktree(c) {
     const top = await git.toplevel(c.repoPath);
-    if (!top) throw new Error(`${c.repoPath} は git リポジトリではありません`);
+    if (!top) throw new Error(tr('{repoPath} は git リポジトリではありません', { repoPath: c.repoPath }));
     const reopen = c.reopenBase && (await git.branchExists(top, c.reopenBase)) ? c.reopenBase : null;
     // Pipelineの並列の枝は、親のカードのブランチから分ける
-    if (c.flowBase && !(await git.branchExists(top, c.flowBase))) throw new Error(`並列の枝を分ける元のブランチ ${c.flowBase} が見つかりません`);
+    if (c.flowBase && !(await git.branchExists(top, c.flowBase))) throw new Error(tr('並列の枝を分ける元のブランチ {flowBase} が見つかりません', { flowBase: c.flowBase }));
     const base = c.flowBase || reopen || this.store.repoSettings(c.repoPath).baseBranch || (await git.currentBranch(top));
-    if (base === 'HEAD') throw new Error('ベースブランチが決まりません（detached HEAD）。設定でベースブランチを指定してください');
+    if (base === 'HEAD') throw new Error(tr('ベースブランチが決まりません（detached HEAD）。設定でベースブランチを指定してください'));
     const baseCommit = await git.revParse(top, base);
     let branch = c.issue ? `agent/issue-${c.issue.number}-${c.id}` : `agent/${slugify(c.title)}-${c.id}`;
     const rule = c.flowBase ? '' : String(this.store.repoSettings(c.repoPath).branchNamingRule || '').trim(); // 並列の枝は、あとでマージして消すのでいつもの名前
@@ -2352,7 +2393,7 @@ class AgentManager extends EventEmitter {
         branch = named;
         c.namedBranch = named;
       } catch (err) {
-        this.log(c, 'error', `命名規則からブランチ名を決められなかったので、いつもの名前にします: ${err.message}`);
+        this.log(c, 'error',tr('命名規則からブランチ名を決められなかったので、いつもの名前にします: {message}', { message: err.message }));
       }
     }
     if (c.namedBranch && branch === c.namedBranch && c.reopenFrom === undefined) {
@@ -2381,7 +2422,7 @@ class AgentManager extends EventEmitter {
       delete c.reopenBase;
       delete c.reopenFrom;
     }
-    this.log(c, 'system', `worktree を作成しました: ${wt}（ブランチ ${branch} / ベース ${base}）`);
+    this.log(c, 'system',tr('worktree を作成しました: {wt}（ブランチ {branch} / ベース {base}）', { wt, branch, base }));
     this.changed(c);
   }
 
@@ -2390,10 +2431,10 @@ class AgentManager extends EventEmitter {
    * @returns {Promise<string>}
    */
   async generateBranchName(c, rule, cwd) {
-    this.log(c, 'system', `命名規則に従ってブランチ名を ${agentShort(agentOf(c))} に考えてもらっています…`);
+    this.log(c, 'system',tr('命名規則に従ってブランチ名を {agentShort} に考えてもらっています…', { agentShort: agentShort(agentOf(c)) }));
     const out = await this.askOnce(agentOf(c), cwd, buildBranchNamePrompt(rule, c), c.model);
     const name = cleanBranchName(out);
-    if (!name) throw new Error('ブランチ名が返ってきませんでした');
+    if (!name) throw new Error(tr('ブランチ名が返ってきませんでした'));
     return name;
   }
 
@@ -2441,7 +2482,7 @@ class AgentManager extends EventEmitter {
       };
       const timer = setTimeout(() => {
         killTree(child);
-        reject(new Error('時間がかかりすぎました'));
+        reject(new Error(tr('時間がかかりすぎました')));
       }, timeoutMs);
       child.stdout.setEncoding('utf8');
       child.stdout.on('data', (d) => {
@@ -2568,7 +2609,7 @@ class AgentManager extends EventEmitter {
     // git で管理していないフォルダは、worktree を作らずにそのフォルダでそのまま動かす
     const inFolder = chat || afterDone || isNoGit(c);
     if (inFolder) {
-      if (!c.repoPath || !fs.existsSync(c.repoPath)) throw new Error(`${isNoGit(c) ? '' : 'リポジトリの'}フォルダが見つかりません: ${c.repoPath}`);
+      if (!c.repoPath || !fs.existsSync(c.repoPath)) throw new Error(isNoGit(c) ? tr('フォルダが見つかりません: {path}', { path: c.repoPath }) : tr('リポジトリのフォルダが見つかりません: {path}', { path: c.repoPath }));
     } else if (!c.worktreePath || !fs.existsSync(c.worktreePath)) await this.prepareWorktree(c);
     const cwd = inFolder ? c.repoPath : c.worktreePath;
     const s = this.store.settings;
@@ -2576,6 +2617,9 @@ class AgentManager extends EventEmitter {
     const agent = agentOf(c);
     const label = agentLabel(agent);
     const mode = afterDone ? 'plan' : chat ? this.chatPermissionMode(rs.permissionMode) : c.readOnly ? this.readOnlyPermissionMode(agentOf(c), rs.permissionMode) : rs.permissionMode;
+    const prompt = c.pendingPrompt || '';
+    // 言語の指示はエージェントにだけ渡し、ログ（lastPromptSent）には残さない
+    const spoken = withReplyLanguage(prompt);
     let args;
     if (agent === 'claude') {
       // stdin を開いたままにして、実行中でもメッセージ（btw）を送れるようにする
@@ -2602,17 +2646,16 @@ class AgentManager extends EventEmitter {
         c.forkNext = false;
       }
       const attachDir = this.attachDirOf(c);
-      args = providers.buildArgs(agent, { mode, model: modelOf(c, s), sessionId: c.sessionId ? assertSessionId(c.sessionId) : null, prompt: c.pendingPrompt || '', includeDirs: attachDir ? [attachDir] : [] });
+      args = providers.buildArgs(agent, { mode, model: modelOf(c, s), sessionId: c.sessionId ? assertSessionId(c.sessionId) : null, prompt: spoken, includeDirs: attachDir ? [attachDir] : [] });
     }
 
-    const prompt = c.pendingPrompt || '';
     const sentAtts = c.pendingAttachments || null;
     c.pendingPrompt = null;
     c.pendingAttachments = null;
     c.lastPromptSent = prompt;
     c.lastAttachmentsSent = sentAtts;
     for (const m of c.btw || []) if (m.state === 'queued') m.state = 'delivered';
-    if (agent !== 'claude') this.log(c, 'system', `${label} で動かします${c.sessionId ? `（会話 ${c.sessionId.slice(0, 8)} の続き）` : ''}`);
+    if (agent !== 'claude') this.log(c, 'system', c.sessionId ? tr('{label} で動かします（会話 {id} の続き）', { label, id: c.sessionId.slice(0, 8) }) : tr('{label} で動かします', { label }));
     // 承認待ちの MCP ツール呼び出しがタイムアウトしないようにする
     const child = await this.spawnAgent(agent, cwd, args, { MCP_TOOL_TIMEOUT: '86400000' });
     const cmd = child.agentCmd;
@@ -2641,11 +2684,11 @@ class AgentManager extends EventEmitter {
       if (t) this.log(c, 'stderr', truncate(t, 2000));
     });
     child.stdin.on('error', () => {});
-    if (agent === 'claude') this.writeMessage(run, prompt, null, attachments.imageBlocks(sentAtts));
+    if (agent === 'claude') this.writeMessage(run, spoken, null, attachments.imageBlocks(sentAtts));
     else {
       // Codex / Gemini は指示を stdin で1回だけ受け取る（Cursor は引数で受け取ったので空で閉じる）。実行中の btw は終了後の追加指示にする
       run.stdinClosed = true;
-      child.stdin.end(providers.promptViaArg(agent) ? '' : prompt);
+      child.stdin.end(providers.promptViaArg(agent) ? '' : spoken);
     }
 
     const finish = async (code, spawnError) => {
@@ -2672,9 +2715,9 @@ class AgentManager extends EventEmitter {
       if (!spawnError && !chat && !isNoGit(c)) {
         try {
           const canCommit = await this.afterConflictRun(c);
-          if (canCommit && (await git.commitAll(c.worktreePath, this.commitMessage(c)))) this.log(c, 'system', '変更を worktree のブランチにコミットしました');
+          if (canCommit && (await git.commitAll(c.worktreePath, this.commitMessage(c)))) this.log(c, 'system',tr('変更を worktree のブランチにコミットしました'));
         } catch (err) {
-          this.log(c, 'error', `コミットに失敗しました: ${err.message}`);
+          this.log(c, 'error',tr('コミットに失敗しました: {message}', { message: err.message }));
         }
         if (!this.store.card(c.id)) return;
       }
@@ -2696,13 +2739,13 @@ class AgentManager extends EventEmitter {
       } else if (c.stopRequested) {
         c.status = 'review';
         c.error = null;
-        this.log(c, 'system', '停止しました。追加指示を送ると続きから再開できます。');
+        this.log(c, 'system',tr('停止しました。追加指示を送ると続きから再開できます。'));
       } else if (code === 0 && !run.resultError) {
         c.status = 'review';
         c.error = null;
         // 仕様の確認: 返事に印があれば「仕様の確認」のまま答えを待つ。なければ仕様は詰まったとみなす
         if (inSpecCheck(c)) {
-          if (!c.lastSpecUnclear && c.specState === 'pending') this.log(c, 'system', '仕様が詰まったので、開発を進めました');
+          if (!c.lastSpecUnclear && c.specState === 'pending') this.log(c, 'system',tr('仕様が詰まったので、開発を進めました'));
           c.specState = c.lastSpecUnclear ? 'pending' : 'settled';
         }
         if (c.specState !== 'pending') c.specQuestions = null;
@@ -2724,35 +2767,35 @@ class AgentManager extends EventEmitter {
           this.recordRelayStep(c); // 枝の最後の工程の報告を、親が引き取って次の工程に渡す
           c.relay.atJoin = true;
           c.relay.done = true;
-          this.log(c, 'system', 'Pipeline: この枝の工程が終わりました。合流で、ほかの枝が終わるのを待ってマージします');
-          if (plan.limitMsg) this.notify(c, 'review', `ループの上限: ${c.title}`, plan.limitMsg);
+          this.log(c, 'system',tr('Pipeline: この枝の工程が終わりました。合流で、ほかの枝が終わるのを待ってマージします'));
+          if (plan.limitMsg) this.notify(c, 'review', tr('ループの上限: {title}', { title: c.title }), plan.limitMsg);
         } else if (plan && plan.stop) {
-          this.notify(c, 'review', `分岐の行き先がありません: ${c.title}`, plan.stop);
+          this.notify(c, 'review', tr('分岐の行き先がありません: {title}', { title: c.title }), plan.stop);
         } else if (c.relay && c.relay.waiting) {
           /* 合流のコンフリクトを解消した: 残りの枝のマージと次の工程へ（tryJoin） */
         } else if (subPlan === 'proposed') {
-          this.log(c, 'question', `${agentShort(agent)} が、サブタスクに分けて進めることを提案しています。上の「サブタスクの提案」で、サブタスクでやるか、分けずに進めるかを選んでください`);
+          this.log(c, 'question',tr('{agentShort} が、サブタスクに分けて進めることを提案しています。上の「サブタスクの提案」で、サブタスクでやるか、分けずに進めるかを選んでください', { agentShort: agentShort(agent) }));
           this.emit('awaiting', c);
-          this.notify(c, 'awaiting', `サブタスクの提案: ${c.title}`, c.lastText || 'サブタスクに分けて進めることを提案しています');
+          this.notify(c, 'awaiting', tr('サブタスクの提案: {title}', { title: c.title }), c.lastText || 'サブタスクに分けて進めることを提案しています');
         } else if (c.subtasks && c.subtasks.phase === 'run') {
           /* サブタスクを動かしている（始めた・マージのコンフリクトを解消した）: advanceSubtasks で続ける */
-          if (c.conflict && !c.conflict.resolving) this.notify(c, 'conflict', `サブタスクのマージでコンフリクト: ${c.title}`, `${c.conflict.target} のマージでコンフリクトが残っています。もう一度エージェントに頼むか、自分で直してください`);
+          if (c.conflict && !c.conflict.resolving) this.notify(c, 'conflict', tr('サブタスクのマージでコンフリクト: {title}', { title: c.title }), tr('{target} のマージでコンフリクトが残っています。もう一度エージェントに頼むか、自分で直してください', { target: c.conflict.target }));
         } else if (c.specState === 'pending') {
-          this.log(c, 'question', `内容が詰まっていないので、開発を開始できません。${agentShort(agent)} の質問に下の欄から答えて、仕様を詰めてください（詰まったら、そのまま開発を始めます）`);
+          this.log(c, 'question',tr('内容が詰まっていないので、開発を開始できません。{agentShort} の質問に下の欄から答えて、仕様を詰めてください（詰まったら、そのまま開発を始めます）', { agentShort: agentShort(agent) }));
           this.emit('awaiting', c);
-          this.notify(c, 'awaiting', `仕様の確認: ${c.title}`, `内容が詰まっていないので、開発を開始できません。\n${c.lastText || ''}`.trim());
+          this.notify(c, 'awaiting', tr('仕様の確認: {title}', { title: c.title }), tr('内容が詰まっていないので、開発を開始できません。\n{v}', { v: c.lastText || '' }).trim());
         } else if (c.awaitingReply) {
-          this.log(c, 'question', `${agentShort(agent)} が質問しています。下の欄から答えると、続きから進めます`);
+          this.log(c, 'question',tr('{agentShort} が質問しています。下の欄から答えると、続きから進めます', { agentShort: agentShort(agent) }));
           this.emit('awaiting', c);
-          this.notify(c, 'awaiting', `回答待ち: ${c.title}`, c.lastText || `${agentShort(agent)} が質問しています`);
+          this.notify(c, 'awaiting', tr('回答待ち: {title}', { title: c.title }), c.lastText || `${agentShort(agent)} が質問しています`);
         } else if (c.subtaskOf) {
           // サブタスク: 自動でマージするときは知らせない（親が仕上げてから知らせる）
           const sp = this.subtaskParentOf(c);
-          if (sp && sp.subtasks.merge === 'review') this.notify(c, 'review', `サブタスクの確認: ${c.title}`, `差分を確かめて、「親のタスクに取り込む」を押してください。${c.lastText || ''}`.trim());
+          if (sp && sp.subtasks.merge === 'review') this.notify(c, 'review', tr('サブタスクの確認: {title}', { title: c.title }), tr('差分を確かめて、「親のタスクに取り込む」を押してください。{v}', { v: c.lastText || '' }).trim());
         } else {
-          if (isChat(c)) this.notify(c, 'awaiting', `返事: ${c.title}`, c.lastText || `${agentShort(agent)} が返事をしました`);
-          else if (plan && plan.limitMsg) this.notify(c, 'review', `ループの上限: ${c.title}`, plan.limitMsg);
-          else this.notify(c, 'review', `レビュー待ち: ${c.title}`, c.lastText || (isNoGit(c) ? '作業が終わりました。フォルダの中身を確かめてください' : '作業が終わりました。差分を確かめてください'));
+          if (isChat(c)) this.notify(c, 'awaiting', tr('返事: {title}', { title: c.title }), c.lastText || tr('{who} が返事をしました', { who: agentShort(agent) }));
+          else if (plan && plan.limitMsg) this.notify(c, 'review', tr('ループの上限: {title}', { title: c.title }), plan.limitMsg);
+          else this.notify(c, 'review', tr('レビュー待ち: {title}', { title: c.title }), c.lastText || (isNoGit(c) ? tr('作業が終わりました。フォルダの中身を確かめてください') : tr('作業が終わりました。差分を確かめてください')));
         }
       } else {
         c.status = 'failed';
@@ -2760,10 +2803,10 @@ class AgentManager extends EventEmitter {
           run.resultError ||
           run.lastError ||
           (child.viaWsl && code === 127
-            ? `${child.viaWsl}（WSL）の中に ${cmd} が見つかりません。${child.viaWsl} のターミナルで ${label} をインストールしてログインしてください`
-            : `${cmd} が終了コード ${code} で終了しました`);
+            ? tr('{distro}（WSL）の中に {cmd} が見つかりません。{distro} のターミナルで {label} をインストールしてログインしてください', { distro: child.viaWsl, cmd, label })
+            : tr('{cmd} が終了コード {code} で終了しました', { cmd, code }));
       }
-      if (c.status === 'failed') this.notify(c, 'failed', `失敗: ${c.title}`, c.error);
+      if (c.status === 'failed') this.notify(c, 'failed', tr('失敗: {title}', { title: c.title }), c.error);
       // 停止・失敗したときは、予約した btw を勝手に送らない（停止したのにまた動き出さないように）
       const keepFollow = !c.stopRequested && c.status !== 'failed';
       // 会話の返事（またはエラー）が来たら、開いて読むまで「未読」にする（自分で止めたときは除く）
@@ -2778,12 +2821,12 @@ class AgentManager extends EventEmitter {
       const relayParent = this.relayParentOf(c);
       if (relayParent) {
         if (c.relay.atJoin) this.tryJoin(relayParent.id);
-        else if (c.status === 'failed' || c.awaitingReply) this.log(relayParent, 'system', `Pipeline: 並列の枝「${c.relay.branchOf.label}」が止まっています（${c.status === 'failed' ? '失敗' : '回答待ち'}）。枝のタスクで直すか答えると、続きから進みます`);
+        else if (c.status === 'failed' || c.awaitingReply) this.log(relayParent, 'system', c.status === 'failed' ? tr('Pipeline: 並列の枝「{label}」が止まっています（失敗）。枝のタスクで直すか答えると、続きから進みます', { label: c.relay.branchOf.label }) : tr('Pipeline: 並列の枝「{label}」が止まっています（回答待ち）。枝のタスクで直すか答えると、続きから進みます', { label: c.relay.branchOf.label }));
       }
       this.checkCompetitionDone(c);
       if (c.subtaskOf) {
         const sp = this.subtaskParentOf(c);
-        if (sp && (c.status === 'failed' || c.awaitingReply)) this.log(sp, 'system', `サブタスク「${c.title}」が止まっています（${c.status === 'failed' ? '失敗' : '回答待ち'}）。サブタスクを開いて、直すか答えると続きから進みます`);
+        if (sp && (c.status === 'failed' || c.awaitingReply)) this.log(sp, 'system', c.status === 'failed' ? tr('サブタスク「{title}」が止まっています（失敗）。サブタスクを開いて、直すか答えると続きから進みます', { title: c.title }) : tr('サブタスク「{title}」が止まっています（回答待ち）。サブタスクを開いて、直すか答えると続きから進みます', { title: c.title }));
         this.advanceSubtasks(c.subtaskOf.parent);
       }
       if (c.subtasks && c.subtasks.phase === 'run') this.advanceSubtasks(c.id);
@@ -2810,15 +2853,15 @@ class AgentManager extends EventEmitter {
     if (spawnError) {
       c.error = spawnError.code === 'ENOENT' ? notFoundMessage(cmd, run.agent) : spawnError.message;
     } else if (c.stopRequested) {
-      this.log(c, 'system', '停止しました。');
+      this.log(c, 'system',tr('停止しました。'));
     } else if (code === 0 && !run.resultError) {
-      this.notify(c, 'awaiting', `返事: ${c.title}`, c.lastText || `${agentShort(run.agent)} が返事をしました`);
+      this.notify(c, 'awaiting', tr('返事: {title}', { title: c.title }), c.lastText || tr('{who} が返事をしました', { who: agentShort(run.agent) }));
     } else {
       c.error = run.resultError || run.lastError || `${cmd} が終了コード ${code} で終了しました`;
     }
     if (c.error) {
       this.log(c, 'error', c.error);
-      this.notify(c, 'failed', `失敗: ${c.title}`, c.error);
+      this.notify(c, 'failed', tr('失敗: {title}', { title: c.title }), c.error);
     }
     const keepFollow = !c.stopRequested && !c.error;
     c.stopRequested = false;
@@ -2844,7 +2887,7 @@ class AgentManager extends EventEmitter {
       case 'system':
         if (ev.subtype === 'init') {
           if (ev.session_id) this.recordSession(c, ev.session_id);
-          this.log(c, 'system', `セッション開始（モデル: ${ev.model || '不明'} / 権限モード: ${ev.permissionMode || '不明'}）`);
+          this.log(c, 'system', tr('セッション開始（モデル: {model} / 権限モード: {mode}）', { model: ev.model || tr('不明'), mode: ev.permissionMode || tr('不明') }));
           this.changed(c);
         }
         break;
@@ -2886,13 +2929,13 @@ class AgentManager extends EventEmitter {
         this.store.addCost(c.repoPath, cost);
         const secs = Math.round((Number(ev.duration_ms) || 0) / 1000);
         if (ev.is_error || (ev.subtype && ev.subtype !== 'success')) {
-          run.resultError = (typeof ev.result === 'string' && ev.result) || `エラー（${ev.subtype}）`;
-          this.log(c, 'error', `エラーで終了しました: ${run.resultError}`);
+          run.resultError = (typeof ev.result === 'string' && ev.result) || tr('エラー（{subtype}）', { subtype: ev.subtype });
+          this.log(c, 'error', tr('エラーで終了しました: {resultError}', { resultError: run.resultError }));
         } else {
           // 仕様の確認の印・質問フォーム用のブロックは、カードの一言には出さない
           const said = typeof ev.result === 'string' ? Subtasks.stripSubtasks(extractSpecQuestions(stripSpecMarker(ev.result)).text).trim() : '';
           if (said) c.lastMessage = truncate(said, 200);
-          this.log(c, 'result', `完了しました（${secs}秒 / $${cost.toFixed(3)}）`);
+          this.log(c, 'result', tr('完了しました（{secs}秒 / ${amount}）', { secs, amount: cost.toFixed(3) }));
         }
         this.changed(c);
         this.afterResult(c, run, !!run.resultError);
@@ -2919,7 +2962,7 @@ class AgentManager extends EventEmitter {
       case 'session':
         if (!isSessionId(a.id)) break;
         this.recordSession(c, a.id);
-        this.log(c, 'system', `セッション開始（${agentLabel(run.agent)}${a.model ? ` / モデル: ${a.model}` : ''}）`);
+        this.log(c, 'system', a.model ? tr('セッション開始（{agent} / モデル: {model}）', { agent: agentLabel(run.agent), model: a.model }) : tr('セッション開始（{agent}）', { agent: agentLabel(run.agent) }));
         this.changed(c);
         break;
       case 'text': {
@@ -2951,8 +2994,8 @@ class AgentManager extends EventEmitter {
       case 'result':
         if (a.error) {
           run.resultError = truncate(a.error, 1000);
-          this.log(c, 'error', `エラーで終了しました: ${run.resultError}`);
-        } else this.log(c, 'result', `完了しました（${agentLabel(run.agent)}）`);
+          this.log(c, 'error',tr('エラーで終了しました: {resultError}', { resultError: run.resultError }));
+        } else this.log(c, 'result',tr('完了しました（{agentLabel}）', { agentLabel: agentLabel(run.agent) }));
         this.changed(c);
         break;
       default:
@@ -2988,7 +3031,7 @@ class AgentManager extends EventEmitter {
       if (b) {
         b.state = 'delivered';
         b.deliveredAt = Date.now();
-        this.log(c, 'system', 'btw のメッセージを Claude Code が受け取りました');
+        this.log(c, 'system',tr('btw のメッセージを Claude Code が受け取りました'));
         this.changed(c);
       }
     }
@@ -3023,7 +3066,7 @@ class AgentManager extends EventEmitter {
     const pending = (c.btw || []).filter((m) => m.state === 'follow');
     if (!pending.length) return false;
     for (const m of pending) m.state = 'lost';
-    this.log(c, 'system', '停止・失敗したので、btw で予約したメッセージは送りませんでした。続けるときは「追加指示」で送ってください');
+    this.log(c, 'system',tr('停止・失敗したので、btw で予約したメッセージは送りませんでした。続けるときは「追加指示」で送ってください'));
     this.changed(c);
     return false;
   }
@@ -3041,11 +3084,11 @@ class AgentManager extends EventEmitter {
       this.changed(c);
       return false;
     }
-    this.log(c, 'system', 'btw で予約したメッセージを追加指示として送ります');
+    this.log(c, 'system',tr('btw で予約したメッセージを追加指示として送ります'));
     // user ログは btw 時に済んでいる。send() と同じ続き方で enqueue する
     if (c.status === 'done' && !isChat(c)) {
       const first = !c.afterDoneSession;
-      if (first) this.log(c, 'system', '完了したタスクについて話します（ファイルは変えません。修正が必要なときは「修正タスクを作る」から別のタスクにしてください）');
+      if (first) this.log(c, 'system',tr('完了したタスクについて話します（ファイルは変えません。修正が必要なときは「修正タスクを作る」から別のタスクにしてください）'));
       c.sessionId = c.afterDoneSession || null;
       c.forkNext = false;
       c.afterDone = true;
@@ -3069,7 +3112,7 @@ class AgentManager extends EventEmitter {
   btw(id, text) {
     const c = this.must(id);
     text = String(text || '').trim();
-    if (!text) throw new Error('メッセージを入力してください');
+    if (!text) throw new Error(tr('メッセージを入力してください'));
     const entry = { id: crypto.randomBytes(4).toString('hex'), text, at: Date.now(), state: 'sent' };
     const wrapped = `（作業中のユーザーからの追加メッセージ）\n${text}`;
     if (c.status === 'queued') {
@@ -3081,7 +3124,7 @@ class AgentManager extends EventEmitter {
     } else {
       const run = this.runs && this.runs.get(id);
       if (c.status !== 'running' || !run || run.finished || run.stdinClosed) {
-        throw new Error('btw はエージェントの実行中だけ送れます。終わったあとは下の「追加指示」を使ってください');
+        throw new Error(tr('btw はエージェントの実行中だけ送れます。終わったあとは下の「追加指示」を使ってください'));
       }
       clearTimeout(run.idleTimer);
       this.writeMessage(run, wrapped, entry.id);
@@ -3120,7 +3163,7 @@ class AgentManager extends EventEmitter {
     input = input && typeof input === 'object' ? input : {};
     if (toolName === 'AskUserQuestion') return this.askQuestion(c, input, toolUseId, signal);
     if ((c.alwaysAllow || []).includes(toolName)) {
-      this.log(c, 'permission', `自動で許可しました: ${toolName}  ${summarizeInput(input)}`);
+      this.log(c, 'permission',tr('自動で許可しました: {toolName}  {summarizeInput}', { toolName, summarizeInput: summarizeInput(input) }));
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
     }
     return new Promise((resolve) => {
@@ -3129,10 +3172,10 @@ class AgentManager extends EventEmitter {
       this.pending.set(id, { cardId, toolName, input, resolve });
       c.permissions = c.permissions || [];
       c.permissions.push(req);
-      this.log(c, 'permission', `承認待ち: ${toolName}  ${req.summary}`);
+      this.log(c, 'permission',tr('承認待ち: {toolName}  {summary}', { toolName, summary: req.summary }));
       this.changed(c);
       this.emit('permission', c, req);
-      this.notify(c, 'permission', `承認待ち: ${c.title}`, `${toolName}  ${req.summary}`);
+      this.notify(c, 'permission', tr('承認待ち: {title}', { title: c.title }), `${toolName}  ${req.summary}`);
       signal?.addEventListener('abort', () => {
         if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: '中断されました' }, null);
       });
@@ -3156,10 +3199,10 @@ class AgentManager extends EventEmitter {
       const id = crypto.randomBytes(6).toString('hex');
       this.pending.set(id, { cardId: c.id, toolName: 'AskUserQuestion', input, resolve, kind: 'question', questions });
       c.questions = [...(c.questions || []), { id, toolUseId, questions, at: Date.now() }];
-      this.log(c, 'question', `質問: ${questions.map((q) => q.question).join(' / ')}`);
+      this.log(c, 'question',tr('質問: {v}', { v: questions.map((q) => q.question).join(' / ') }));
       this.changed(c);
       this.emit('question', c, questions);
-      this.notify(c, 'question', `質問: ${c.title}`, questions.map((q) => q.question).join(' / '));
+      this.notify(c, 'question', tr('質問: {title}', { title: c.title }), questions.map((q) => q.question).join(' / '));
       signal?.addEventListener('abort', () => {
         if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: '中断されました' }, null);
       });
@@ -3173,38 +3216,38 @@ class AgentManager extends EventEmitter {
   answerQuestion(cardId, reqId, answers) {
     this.must(cardId);
     const p = this.pending.get(reqId);
-    if (!p || p.cardId !== cardId || p.kind !== 'question') throw new Error('この質問はもう終わっています');
+    if (!p || p.cardId !== cardId || p.kind !== 'question') throw new Error(tr('この質問はもう終わっています'));
     if (!answers) {
-      this.settle(reqId, { behavior: 'deny', message: 'ユーザーは質問に答えずに、そのまま進めるよう求めています。妥当だと思う方法で続けてください。' }, '答えずに続ける');
+      this.settle(reqId, { behavior: 'deny', message: 'ユーザーは質問に答えずに、そのまま進めるよう求めています。妥当だと思う方法で続けてください。' }, tr('答えずに続ける'));
       return;
     }
     const clean = {};
     for (const q of p.questions) {
       const a = String(answers[q.question] ?? '').trim();
-      if (!a) throw new Error(`「${q.header || q.question}」に答えてください`);
+      if (!a) throw new Error(tr('「{v}」に答えてください', { v: q.header || q.question }));
       clean[q.question] = a;
     }
     const c = this.store.card(cardId);
     this.log(c, 'user', Object.entries(clean).map(([q, a]) => `${q} → ${a}`).join('\n'), { answer: true });
-    this.settle(reqId, { behavior: 'allow', updatedInput: { ...p.input, answers: clean } }, '回答しました');
+    this.settle(reqId, { behavior: 'allow', updatedInput: { ...p.input, answers: clean } }, tr('回答しました'));
   }
 
   // decision: 'allow' | 'deny' | 'always'
   answerPermission(cardId, reqId, decision, message) {
     const c = this.must(cardId);
     const p = this.pending.get(reqId);
-    if (!p || p.cardId !== cardId || p.kind === 'question') throw new Error('この承認リクエストはもう終わっています');
+    if (!p || p.cardId !== cardId || p.kind === 'question') throw new Error(tr('この承認リクエストはもう終わっています'));
     if (decision === 'always') {
       c.alwaysAllow = c.alwaysAllow || [];
       if (!c.alwaysAllow.includes(p.toolName)) c.alwaysAllow.push(p.toolName);
       // 同じツールで待っている他のリクエストもまとめて許可
       for (const [id, other] of this.pending) {
-        if (other.cardId === cardId && other.toolName === p.toolName) this.settle(id, { behavior: 'allow', updatedInput: other.input }, '許可（常に許可）');
+        if (other.cardId === cardId && other.toolName === p.toolName) this.settle(id, { behavior: 'allow', updatedInput: other.input }, tr('許可（常に許可）'));
       }
       return;
     }
-    if (decision === 'allow') this.settle(reqId, { behavior: 'allow', updatedInput: p.input }, '許可');
-    else this.settle(reqId, { behavior: 'deny', message: (message && message.trim()) || 'ユーザーが拒否しました' }, '拒否');
+    if (decision === 'allow') this.settle(reqId, { behavior: 'allow', updatedInput: p.input }, tr('許可'));
+    else this.settle(reqId, { behavior: 'deny', message: (message && message.trim()) || 'ユーザーが拒否しました' }, tr('拒否'));
   }
 
   settle(reqId, result, label) {
@@ -3258,19 +3301,19 @@ class AgentManager extends EventEmitter {
    */
   async merge(id, opts = {}) {
     const c = this.must(id);
-    if (isChat(c)) throw new Error('会話はマージできません（タスクにすると、worktree で作業してマージできます）');
-    if (isNoGit(c)) throw new Error('git で管理していないフォルダのタスクはマージできません。「完了にする」で完了にしてください');
+    if (isChat(c)) throw new Error(tr('会話はマージできません（タスクにすると、worktree で作業してマージできます）'));
+    if (isNoGit(c)) throw new Error(tr('git で管理していないフォルダのタスクはマージできません。「完了にする」で完了にしてください'));
     this.assertNotInRelayJoin(c);
-    if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけマージできます');
-    if (!c.worktreePath) throw new Error('worktree がありません');
-    if (this.merging?.has(id)) throw new Error('マージ中です');
+    if (!['review', 'failed'].includes(c.status)) throw new Error(tr('レビュー中のタスクだけマージできます'));
+    if (!c.worktreePath) throw new Error(tr('worktree がありません'));
+    if (this.merging?.has(id)) throw new Error(tr('マージ中です'));
     const top = c.repoPath;
     const target = String(opts.target || c.baseBranch || '').trim();
-    if (!target) throw new Error('マージ先のブランチを指定してください');
-    if (target === c.branch) throw new Error('タスク自身のブランチにはマージできません');
-    git.assertSafeRef(target, 'マージ先のブランチ名');
+    if (!target) throw new Error(tr('マージ先のブランチを指定してください'));
+    if (target === c.branch) throw new Error(tr('タスク自身のブランチにはマージできません'));
+    git.assertSafeRef(target, tr('マージ先のブランチ名'));
 
-    if (await git.mergeInProgress(c.worktreePath)) throw new Error('コンフリクトの解消が終わっていません。「解消した」を押すか、取り込みを中止してください');
+    if (await git.mergeInProgress(c.worktreePath)) throw new Error(tr('コンフリクトの解消が終わっていません。「解消した」を押すか、取り込みを中止してください'));
 
     this.merging = this.merging || new Set();
     this.merging.add(id);
@@ -3278,11 +3321,11 @@ class AgentManager extends EventEmitter {
       await git.commitAll(c.worktreePath, this.commitMessage(c));
       if (opts.createNew) {
         await git.checkBranchName(top, target);
-        if (await git.branchExists(top, target)) throw new Error(`ブランチ ${target} はもうあります。一覧から選んでください`);
+        if (await git.branchExists(top, target)) throw new Error(tr('ブランチ {target} はもうあります。一覧から選んでください', { target }));
         await git.createBranch(top, target, c.baseBranch);
-        this.log(c, 'system', `ブランチ ${target} を ${c.baseBranch} から作成しました`);
+        this.log(c, 'system',tr('ブランチ {target} を {baseBranch} から作成しました', { target, baseBranch: c.baseBranch }));
       } else if (!(await git.branchExists(top, target))) {
-        throw new Error(`ブランチ ${target} が見つかりません`);
+        throw new Error(tr('ブランチ {target} が見つかりません', { target }));
       }
 
       // origin にも反映するときは、先に origin の最新を取ってきてローカルをそろえる
@@ -3311,8 +3354,8 @@ class AgentManager extends EventEmitter {
         }
         if (!temp) {
           const op = await git.operationInProgress(dir);
-          if (op) throw new Error(`${target} をチェックアウトしている ${dir} で ${op} が途中です。終わらせるか中止してから、もう一度マージしてください。`);
-          if (await git.isDirty(dir)) throw new Error(`${target} をチェックアウトしている ${dir} に未コミットの変更があります。コミットするか退避してからマージしてください。`);
+          if (op) throw new Error(tr('{target} をチェックアウトしている {dir} で {op} が途中です。終わらせるか中止してから、もう一度マージしてください。', { target, dir, op }));
+          if (await git.isDirty(dir)) throw new Error(tr('{target} をチェックアウトしている {dir} に未コミットの変更があります。コミットするか退避してからマージしてください。', { target, dir }));
         }
         try {
           await git.merge(dir, c.branch, (c.issue ? `Merge agent task: ${c.title.replace(/^#\d+\s*/, '')} (#${c.issue.number})` : `Merge agent task: ${c.title}`), target);
@@ -3321,15 +3364,15 @@ class AgentManager extends EventEmitter {
           // コンフリクト: マージは中止済み。カードに出して、解消の方法を選んでもらう
           c.conflict = { target, files: err.conflictFiles, push: !!opts.push, keep: !!opts.keep, at: Date.now() };
           c.conflictResolved = null;
-          this.log(c, 'error', `${target} とコンフリクトしています: ${err.conflictFiles.join(', ')}`);
+          this.log(c, 'error',tr('{target} とコンフリクトしています: {v}', { target, v: err.conflictFiles.join(', ') }));
           this.changed(c);
           return { conflict: c.conflict };
         } finally {
           if (temp) await git.removeWorktree(top, temp);
         }
-        this.log(c, 'system', `${target} にマージしました`);
+        this.log(c, 'system',tr('{target} にマージしました', { target }));
       } else {
-        this.log(c, 'system', `${target} にはもう取り込まれているので、マージする変更はありませんでした`);
+        this.log(c, 'system',tr('{target} にはもう取り込まれているので、マージする変更はありませんでした', { target }));
       }
       c.mergedInto = [...new Set([...(c.mergedInto || []), target])];
       c.lastMergeTarget = target;
@@ -3341,9 +3384,9 @@ class AgentManager extends EventEmitter {
           await git.push(top, remote, target, !remoteHas);
         } catch (err) {
           this.changed(c);
-          throw new Error(`ローカルの ${target} へのマージは済みましたが、origin への push に失敗しました。ターミナルで git push origin ${target} を試してください。\n${err.message}`);
+          throw new Error(tr('ローカルの {target} へのマージは済みましたが、origin への push に失敗しました。ターミナルで git push origin {target2} を試してください。\n{message}', { target, target2: target, message: err.message }));
         }
-        this.log(c, 'system', `origin/${target} に push しました`);
+        this.log(c, 'system',tr('origin/{target} に push しました', { target }));
         c.pushedTo = [...new Set([...(c.pushedTo || []), target])];
       }
 
@@ -3389,29 +3432,29 @@ class AgentManager extends EventEmitter {
    */
   async createPullRequest(id, opts = {}) {
     const c = this.must(id);
-    if (isChat(c)) throw new Error('会話からは PR を作れません（タスクにすると、worktree で作業して PR を作れます）');
-    if (isNoGit(c)) throw new Error('git で管理していないフォルダのタスクからは PR を作れません。「完了にする」で完了にしてください');
+    if (isChat(c)) throw new Error(tr('会話からは PR を作れません（タスクにすると、worktree で作業して PR を作れます）'));
+    if (isNoGit(c)) throw new Error(tr('git で管理していないフォルダのタスクからは PR を作れません。「完了にする」で完了にしてください'));
     this.assertNotInRelayJoin(c);
-    if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけ PR を作れます');
-    if (!c.worktreePath) throw new Error('worktree がありません');
-    if (this.merging?.has(id)) throw new Error('処理中です');
+    if (!['review', 'failed'].includes(c.status)) throw new Error(tr('レビュー中のタスクだけ PR を作れます'));
+    if (!c.worktreePath) throw new Error(tr('worktree がありません'));
+    if (this.merging?.has(id)) throw new Error(tr('処理中です'));
     const top = c.repoPath;
     const base = String(opts.base || c.prBase || c.baseBranch || '').trim();
-    if (!base) throw new Error('PR のマージ先のブランチを指定してください');
-    if (base === c.branch) throw new Error('タスク自身のブランチには PR を作れません');
-    git.assertSafeRef(base, 'PR のマージ先のブランチ名');
-    if (!(await git.hasRemote(top, 'origin'))) throw new Error('このリポジトリに origin がありません。GitHub のリポジトリを origin に設定してください');
-    if (await git.mergeInProgress(c.worktreePath)) throw new Error('コンフリクトの解消が終わっていません。「解消した」を押すか、取り込みを中止してください');
+    if (!base) throw new Error(tr('PR のマージ先のブランチを指定してください'));
+    if (base === c.branch) throw new Error(tr('タスク自身のブランチには PR を作れません'));
+    git.assertSafeRef(base, tr('PR のマージ先のブランチ名'));
+    if (!(await git.hasRemote(top, 'origin'))) throw new Error(tr('このリポジトリに origin がありません。GitHub のリポジトリを origin に設定してください'));
+    if (await git.mergeInProgress(c.worktreePath)) throw new Error(tr('コンフリクトの解消が終わっていません。「解消した」を押すか、取り込みを中止してください'));
 
     this.merging = this.merging || new Set();
     this.merging.add(id);
     try {
       await git.commitAll(c.worktreePath, this.commitMessage(c));
       if ((await git.countCommits(top, `${base}..${c.branch}`)) === 0 && (await git.branchExists(top, base))) {
-        throw new Error(`${base} との差分がないので PR を作れません`);
+        throw new Error(tr('{base} との差分がないので PR を作れません', { base }));
       }
       await git.push(c.worktreePath, 'origin', c.branch, true);
-      this.log(c, 'system', `ブランチ ${c.branch} を origin に push しました`);
+      this.log(c, 'system',tr('ブランチ {branch} を origin に push しました', { branch: c.branch }));
       const def = this.prDefaults(c);
       const slug = await github.repoSlug(top).catch(() => null);
       const pr = await ghCli.createPullRequest({
@@ -3423,7 +3466,7 @@ class AgentManager extends EventEmitter {
         body: opts.body != null && String(opts.body).trim() ? String(opts.body) : def.body,
         gh: this.opts.ghPath,
       });
-      this.log(c, 'system', pr.created ? `PR を作成しました: ${pr.url}` : `開いている PR を更新しました: ${pr.url}`);
+      this.log(c, 'system', pr.created ? tr('PR を作成しました: {url}', { url: pr.url }) : tr('開いている PR を更新しました: {url}', { url: pr.url }));
       c.prUrl = pr.url;
       c.prBase = base;
       c.prState = 'OPEN';
@@ -3488,7 +3531,7 @@ class AgentManager extends EventEmitter {
           if (await this.checkPullRequest(c)) n++;
         } catch (err) {
           if (!this.store.card(c.id)) continue;
-          if (c.prCheckError !== err.message) this.log(c, 'error', `PR の状態を確かめられませんでした: ${err.message}`);
+          if (c.prCheckError !== err.message) this.log(c, 'error',tr('PR の状態を確かめられませんでした: {message}', { message: err.message }));
           c.prCheckError = err.message;
           this.store.save();
         }
@@ -3512,7 +3555,7 @@ class AgentManager extends EventEmitter {
     if (pr.state !== 'MERGED') {
       let changed = false;
       if (c.prState !== pr.state) {
-        if (pr.state === 'CLOSED') this.log(c, 'system', `PR はマージされずに閉じられました: ${url}`);
+        if (pr.state === 'CLOSED') this.log(c, 'system',tr('PR はマージされずに閉じられました: {url}', { url }));
         c.prState = pr.state;
         changed = true;
       }
@@ -3528,7 +3571,7 @@ class AgentManager extends EventEmitter {
       c.mergedInto = [...new Set([...(c.mergedInto || []), base])];
       c.lastMergeTarget = base;
     }
-    this.log(c, 'system', `PR がマージされました${base ? `（${base}）` : ''}: ${url}`);
+    this.log(c, 'system', base ? tr('PR がマージされました（{base}）: {url}', { base, url }) : tr('PR がマージされました: {url}', { url }));
 
     if (c.status !== 'done' && c.worktreePath) {
       if (this.merging?.has(c.id)) {
@@ -3538,7 +3581,7 @@ class AgentManager extends EventEmitter {
       const keep = await this.unmergedWork(c, pr.headRefOid);
       if (!this.store.card(c.id) || !['review', 'failed'].includes(c.status)) return false;
       if (keep) {
-        this.log(c, 'system', `worktree に PR に入っていない変更（${keep}）があるので、タスクはレビュー中のまま残します。不要なら「破棄」、続きは追加指示か PR の作成で進められます`);
+        this.log(c, 'system',tr('worktree に PR に入っていない変更（{keep}）があるので、タスクはレビュー中のまま残します。不要なら「破棄」、続きは追加指示か PR の作成で進められます', { keep }));
         this.changed(c);
         return false;
       }
@@ -3555,7 +3598,7 @@ class AgentManager extends EventEmitter {
     c.interrupted = null;
     c.mergedAt = c.prMergedAt;
     if (!wasDone) this.completed(c);
-    else this.notify(c, 'done', `PR がマージされました: ${c.title}`, url);
+    else this.notify(c, 'done', tr('PR がマージされました: {title}', { title: c.title }), url);
     await this.deleteTaskSessions(c);
     this.changed(c);
     return true;
@@ -3579,10 +3622,10 @@ class AgentManager extends EventEmitter {
       // 新しくコンフリクトした。worktree があればアプリの中で解消できる
       if (c.worktreePath && ['review', 'failed'].includes(c.status) && base && !(c.conflict && !c.conflict.pr)) {
         if (!active) this.raisePrConflict(c, base);
-        this.log(c, 'error', `PR が ${base} とコンフリクトしています。「エージェントに解消してもらう」か「自分で解消する」で直して、PR を更新してください: ${c.prUrl}`);
-        this.notify(c, 'conflict', `PR がコンフリクトしています: ${c.title}`, c.prUrl);
+        this.log(c, 'error',tr('PR が {base} とコンフリクトしています。「エージェントに解消してもらう」か「自分で解消する」で直して、PR を更新してください: {prUrl}', { base, prUrl: c.prUrl }));
+        this.notify(c, 'conflict', tr('PR がコンフリクトしています: {title}', { title: c.title }), c.prUrl);
       } else if (!c.worktreePath) {
-        this.log(c, 'error', `PR が ${base || 'マージ先'} とコンフリクトしています（worktree を片付けたので、GitHub 上で解消してください）: ${c.prUrl}`);
+        this.log(c, 'error',tr('PR が {v} とコンフリクトしています（worktree を片付けたので、GitHub 上で解消してください）: {prUrl}', { v: base || 'マージ先', prUrl: c.prUrl }));
       }
       changed = true;
     } else if (now !== 'CONFLICTING' && c.conflict && c.conflict.pr && !active) {
@@ -3601,9 +3644,9 @@ class AgentManager extends EventEmitter {
   // 閉じたコンフリクトの案内を、もう一度出す（PR がコンフリクトしているあいだだけ）
   reopenPrConflict(id) {
     const c = this.must(id);
-    if (!c.prUrl || c.prState !== 'OPEN' || c.prMergeable !== 'CONFLICTING') throw new Error('PR はコンフリクトしていません');
-    if (!c.worktreePath) throw new Error('worktree がないので、アプリの中では解消できません。GitHub 上で解消してください');
-    if (!['review', 'failed'].includes(c.status)) throw new Error('実行中は解消を始められません');
+    if (!c.prUrl || c.prState !== 'OPEN' || c.prMergeable !== 'CONFLICTING') throw new Error(tr('PR はコンフリクトしていません'));
+    if (!c.worktreePath) throw new Error(tr('worktree がないので、アプリの中では解消できません。GitHub 上で解消してください'));
+    if (!['review', 'failed'].includes(c.status)) throw new Error(tr('実行中は解消を始められません'));
     if (c.conflict) return c.conflict;
     this.raisePrConflict(c, c.prBase || c.baseBranch);
     this.changed(c);
@@ -3615,38 +3658,38 @@ class AgentManager extends EventEmitter {
     const wt = c.worktreePath;
     if (!fs.existsSync(wt)) return null;
     try {
-      if (await git.mergeInProgress(wt)) return 'コンフリクトの解消中';
-      if (await git.isDirty(wt, { untracked: true })) return '未コミットの変更';
-      if (!headRefOid) return 'PR の最後のコミットが分からない';
+      if (await git.mergeInProgress(wt)) return tr('コンフリクトの解消中');
+      if (await git.isDirty(wt, { untracked: true })) return tr('未コミットの変更');
+      if (!headRefOid) return tr('PR の最後のコミットが分からない');
       const ahead = await git.countCommits(c.repoPath, `${headRefOid}..${c.branch}`);
-      return ahead > 0 ? `PR にないコミット ${ahead} 件` : null;
+      return ahead > 0 ? tr('PR にないコミット {n} 件', { n: ahead }) : null;
     } catch {
       // PR の最後のコミットが手元にないなど。消してよいか分からないので残す
-      return 'PR と手元のブランチを比べられない';
+      return tr('PR と手元のブランチを比べられない');
     }
   }
 
   // origin の target を取ってきて、ローカルの target を早送りでそろえる。origin に target があれば true
   async syncWithOrigin(c, top, target) {
     const remote = 'origin';
-    if (!(await git.hasRemote(top, remote))) throw new Error('このリポジトリには origin がありません。push せずにマージするか、origin を設定してください');
+    if (!(await git.hasRemote(top, remote))) throw new Error(tr('このリポジトリには origin がありません。push せずにマージするか、origin を設定してください'));
     let has;
     try {
       has = await git.fetchBranch(top, remote, target);
     } catch (err) {
-      throw new Error(`origin の最新を取ってこられませんでした（ネットワークや GitHub のログインを確認してください）。\n${err.message}`);
+      throw new Error(tr('origin の最新を取ってこられませんでした（ネットワークや GitHub のログインを確認してください）。\n{message}', { message: err.message }));
     }
     if (!has) return false;
     const behind = await git.countCommits(top, `${target}..${remote}/${target}`);
     const localAhead = await git.countCommits(top, `${remote}/${target}..${target}`);
     if (behind > 0 && localAhead > 0) {
-      throw new Error(`ローカルの ${target} と origin/${target} が別々に進んでいます。先にターミナルで ${target} を origin/${target} とそろえてから（git pull など）、もう一度マージしてください`);
+      throw new Error(tr('ローカルの {target} と origin/{target2} が別々に進んでいます。先にターミナルで {target3} を origin/{target4} とそろえてから（git pull など）、もう一度マージしてください', { target, target2: target, target3: target, target4: target }));
     }
     if (behind > 0) {
       const dir = await git.worktreeForBranch(top, target);
-      if (dir && (await git.isDirty(dir))) throw new Error(`${target} をチェックアウトしている ${dir} に未コミットの変更があるため、origin の最新を取り込めません`);
+      if (dir && (await git.isDirty(dir))) throw new Error(tr('{target} をチェックアウトしている {dir} に未コミットの変更があるため、origin の最新を取り込めません', { target, dir }));
       await git.fastForward(top, target, `${remote}/${target}`, dir);
-      this.log(c, 'system', `origin/${target} の新しいコミット ${behind} 件をローカルの ${target} に取り込みました`);
+      this.log(c, 'system',tr('origin/{target} の新しいコミット {behind} 件をローカルの {target2} に取り込みました', { target, behind, target2: target }));
     }
     return true;
   }
@@ -3659,9 +3702,9 @@ class AgentManager extends EventEmitter {
    */
   async resolveConflict(id, mode) {
     const c = this.must(id);
-    if (isChat(c)) throw new Error('会話にはコンフリクトはありません');
-    if (!c.conflict) throw new Error('コンフリクトはありません');
-    if (!['review', 'failed'].includes(c.status)) throw new Error('実行中は解消を始められません');
+    if (isChat(c)) throw new Error(tr('会話にはコンフリクトはありません'));
+    if (!c.conflict) throw new Error(tr('コンフリクトはありません'));
+    if (!['review', 'failed'].includes(c.status)) throw new Error(tr('実行中は解消を始められません'));
     const wt = c.worktreePath;
     const target = c.conflict.target;
     let files;
@@ -3676,13 +3719,13 @@ class AgentManager extends EventEmitter {
         try {
           has = await git.fetchBranch(c.repoPath, 'origin', target);
         } catch (err) {
-          throw new Error(`origin の最新を取ってこられませんでした（ネットワークや GitHub のログインを確認してください）。\n${err.message}`);
+          throw new Error(tr('origin の最新を取ってこられませんでした（ネットワークや GitHub のログインを確認してください）。\n{message}', { message: err.message }));
         }
-        if (!has) throw new Error(`origin に ${target} が見つかりません`);
+        if (!has) throw new Error(tr('origin に {target} が見つかりません', { target }));
         ref = `origin/${target}`;
       } else if (c.conflict.push) await this.syncWithOrigin(c, c.repoPath, target);
       files = await git.startMerge(wt, ref);
-      this.log(c, 'system', `${ref} をタスクのブランチに取り込み始めました`);
+      this.log(c, 'system',tr('{ref} をタスクのブランチに取り込み始めました', { ref }));
       if (!files.length) {
         await git.finishMerge(wt);
         this.markResolved(c, 'コンフリクトなしで取り込めました');
@@ -3691,7 +3734,7 @@ class AgentManager extends EventEmitter {
     }
     c.conflict = { ...c.conflict, files, manual: mode === 'manual', resolving: mode === 'agent', unresolved: undefined };
     if (mode === 'manual') {
-      this.log(c, 'system', `自分で解消するモード: ${wt} の ${files.join(', ')} を直してから「解消した」を押してください`);
+      this.log(c, 'system',tr('自分で解消するモード: {wt} の {v} を直してから「解消した」を押してください', { wt, v: files.join(', ') }));
       this.changed(c);
       return { manual: true, path: wt };
     }
@@ -3713,17 +3756,17 @@ class AgentManager extends EventEmitter {
   // 自分で直したあと「解消した」
   async completeConflict(id) {
     const c = this.must(id);
-    if (!c.conflict) throw new Error('コンフリクトはありません');
+    if (!c.conflict) throw new Error(tr('コンフリクトはありません'));
     const wt = c.worktreePath;
     if (!(await git.mergeInProgress(wt))) {
       const marked = await git.filesWithMarkers(wt, c.conflict.files);
-      if (marked.length) throw new Error(`まだコンフリクトの印（<<<<<<< など）が残っています: ${marked.join(', ')}`);
+      if (marked.length) throw new Error(tr('まだコンフリクトの印（<<<<<<< など）が残っています: {v}', { v: marked.join(', ') }));
       this.markResolved(c, 'コンフリクトを解消しました');
       return;
     }
     // git add 済みでも、印が残っていればまだ
     const marked = await git.filesWithMarkers(wt, c.conflict.files);
-    if (marked.length) throw new Error(`まだコンフリクトの印（<<<<<<< など）が残っています: ${marked.join(', ')}`);
+    if (marked.length) throw new Error(tr('まだコンフリクトの印（<<<<<<< など）が残っています: {v}', { v: marked.join(', ') }));
     await git.finishMerge(wt);
     this.markResolved(c, 'コンフリクトを解消して、取り込みを完了しました');
   }
@@ -3732,7 +3775,7 @@ class AgentManager extends EventEmitter {
     const c = this.must(id);
     if (c.worktreePath && (await git.mergeInProgress(c.worktreePath))) await git.abortMerge(c.worktreePath);
     if (c.conflict) c.conflict = { ...c.conflict, manual: false, resolving: false, unresolved: undefined };
-    this.log(c, 'system', '取り込みを中止しました');
+    this.log(c, 'system',tr('取り込みを中止しました'));
     this.changed(c);
   }
 
@@ -3751,7 +3794,7 @@ class AgentManager extends EventEmitter {
       c.conflict = null;
       c.conflictResolved = null;
       c.error = null;
-      this.log(c, 'system', `${msg}。サブタスクの続きへ進みます`);
+      this.log(c, 'system',tr('{msg}。サブタスクの続きへ進みます', { msg }));
       if (item) this.settleSubtaskMerge(c, item, kid);
       this.changed(c);
       setImmediate(() => this.advanceSubtasks(c.id));
@@ -3764,7 +3807,7 @@ class AgentManager extends EventEmitter {
       c.conflict = null;
       c.conflictResolved = null;
       c.error = null;
-      this.log(c, 'system', `${msg}。合流の続き（残りの枝のマージと次の工程）へ進みます`);
+      this.log(c, 'system',tr('{msg}。合流の続き（残りの枝のマージと次の工程）へ進みます', { msg }));
       this.changed(c);
       setImmediate(() => this.tryJoin(c.id)); // エージェントが解消したときは、動き終わってから（tryJoin は動いている間は何もしない）
       return;
@@ -3772,7 +3815,7 @@ class AgentManager extends EventEmitter {
     const pr = !!c.conflict.pr;
     c.conflictResolved = { target: c.conflict.target, push: c.conflict.push, keep: c.conflict.keep, ...(pr ? { pr: true } : {}) };
     c.conflict = null;
-    this.log(c, 'system', pr ? `${msg}。PR を更新（push）すると、GitHub 上のコンフリクトも解消されます` : `${msg}。もう一度マージすると、コンフリクトなしでマージできます`);
+    this.log(c, 'system', pr ? tr('{msg}。PR を更新（push）すると、GitHub 上のコンフリクトも解消されます', { msg }) : tr('{msg}。もう一度マージすると、コンフリクトなしでマージできます', { msg }));
     this.changed(c);
   }
 
@@ -3789,7 +3832,7 @@ class AgentManager extends EventEmitter {
     const left = [...new Set([...marked, ...unmerged])];
     if (left.length) {
       c.conflict = { ...c.conflict, resolving: false, manual: inProgress, unresolved: left };
-      this.log(c, 'error', `コンフリクトがまだ残っています: ${left.join(', ')}。もう一度 ${agentShort(agentOf(c))} に頼むか、自分で直してください`);
+      this.log(c, 'error',tr('コンフリクトがまだ残っています: {v}。もう一度 {agentShort} に頼むか、自分で直してください', { v: left.join(', '), agentShort: agentShort(agentOf(c)) }));
       return false;
     }
     if (inProgress) await git.finishMerge(wt);
@@ -3802,14 +3845,14 @@ class AgentManager extends EventEmitter {
    */
   complete(id) {
     const c = this.must(id);
-    if (!isNoGit(c)) throw new Error('git のリポジトリのタスクは、マージか PR の作成で完了にしてください');
-    if (!['review', 'failed'].includes(c.status)) throw new Error('レビュー中のタスクだけ完了にできます');
+    if (!isNoGit(c)) throw new Error(tr('git のリポジトリのタスクは、マージか PR の作成で完了にしてください'));
+    if (!['review', 'failed'].includes(c.status)) throw new Error(tr('レビュー中のタスクだけ完了にできます'));
     c.status = 'done';
     c.error = null;
     c.interrupted = null;
     c.awaitingReply = false;
     c.completedAt = Date.now();
-    this.log(c, 'system', 'タスクを完了にしました');
+    this.log(c, 'system',tr('タスクを完了にしました'));
     this.completed(c);
     this.changed(c);
     this.checkCompetitionDone(c);
@@ -3822,15 +3865,15 @@ class AgentManager extends EventEmitter {
 
   // Pipelineの並列の途中（枝を待っている・枝のタスク）は、マージ・PR の作成ができない
   assertNotInRelayJoin(c) {
-    if (c.subtaskOf && this.subtaskParentOf(c)) throw new Error('サブタスクは、親のタスクのブランチに取り込みます。「親のタスクに取り込む」を使うか、自動でマージされるのを待ってください');
-    if (c.subtasks && (c.subtasks.phase === 'run' || (c.subtasks.phase === 'plan' && c.status !== 'todo'))) throw new Error('サブタスクがすべて終わって、親のタスクの仕上げが済んでから取り込んでください');
-    if (c.relay && c.relay.waiting) throw new Error('Pipelineの並列の枝が終わるのを待っています。合流してPipelineが終わってから取り込んでください');
-    if (this.relayParentOf(c)) throw new Error('Pipelineの並列の枝のタスクは、合流で元のタスクにマージします。元のタスクから取り込んでください');
+    if (c.subtaskOf && this.subtaskParentOf(c)) throw new Error(tr('サブタスクは、親のタスクのブランチに取り込みます。「親のタスクに取り込む」を使うか、自動でマージされるのを待ってください'));
+    if (c.subtasks && (c.subtasks.phase === 'run' || (c.subtasks.phase === 'plan' && c.status !== 'todo'))) throw new Error(tr('サブタスクがすべて終わって、親のタスクの仕上げが済んでから取り込んでください'));
+    if (c.relay && c.relay.waiting) throw new Error(tr('Pipelineの並列の枝が終わるのを待っています。合流してPipelineが終わってから取り込んでください'));
+    if (this.relayParentOf(c)) throw new Error(tr('Pipelineの並列の枝のタスクは、合流で元のタスクにマージします。元のタスクから取り込んでください'));
   }
 
   async discard(id) {
     const c = this.must(id);
-    if (this.isUndeletable(c)) throw new Error('完了したタスクは削除できません');
+    if (this.isUndeletable(c)) throw new Error(tr('完了したタスクは削除できません'));
     // 並列の枝を待っているカードを消すときは、枝のタスクも消す。枝のタスクを消したら、親は合流できなくなる
     const kids = c.relay && c.relay.waiting ? [...c.relay.waiting.children] : [];
     // サブタスクのある親を消すときは、サブタスクも消す
@@ -3856,7 +3899,7 @@ class AgentManager extends EventEmitter {
       const item = subParent.subtasks.items.find((x) => x.cardId === id);
       if (item && item.state === 'running') {
         item.state = 'skipped';
-        this.log(subParent, 'system', `サブタスク「${item.title}」が破棄されたので、マージせずに先へ進みます`);
+        this.log(subParent, 'system',tr('サブタスク「{title}」が破棄されたので、マージせずに先へ進みます', { title: item.title }));
         this.changed(subParent);
       }
       this.advanceSubtasks(subParent.id);
@@ -3864,4 +3907,4 @@ class AgentManager extends EventEmitter {
   }
 }
 
-module.exports = { READ_ONLY_DISALLOWED_TOOLS, withReadOnlyNote, relayStepsOf, whoLabel, AgentManager, isNoGit, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, SKILL_SUGGEST_PROMPT, SKILL_SUGGEST_REPEAT_NOTE, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt, cleanModel, modelOf };
+module.exports = { READ_ONLY_DISALLOWED_TOOLS, withReadOnlyNote, relayStepsOf, whoLabel, AgentManager, isNoGit, toolResultText, toolResultImages, agentOf, promptWithSkill, buildRelayStepPrompt, buildComparePrompt, PERMISSION_TOOL, endsWithQuestion, SPEC_MARKER, withSpecCheck, stripSpecMarker, extractSpecQuestions, parseMarkdownQuestions, isOtherOption, withReplyLanguage, isQuitInterrupt, SKILL_SUGGEST_PROMPT, SKILL_SUGGEST_REPEAT_NOTE, buildSkillSuggestPrompt, isChat, isSessionId, quoteForCmd, cleanBranchName, buildBranchNamePrompt, cleanModel, modelOf };

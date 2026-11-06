@@ -1,18 +1,51 @@
 // ボードの状態を JSON ファイルに保存する
 const fs = require('fs');
 const path = require('path');
-const { DEFAULT_RELAY_STEPS, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isAgent, cleanEnabledAgents, cleanOrchestration, cleanRelaySteps, cleanCustomAgents } = require('./providers');
+const { DEFAULT_RELAY_STEPS, defaultRelaySteps, DEFAULT_COMPETE_AGENTS, DEFAULT_ENABLED_AGENTS, isAgent, cleanEnabledAgents, cleanOrchestration, cleanRelaySteps, cleanCustomAgents } = require('./providers');
 const FlowModel = require('../renderer/flow-model');
 const { cleanSchedules } = require('../renderer/schedule-model');
+const I18n = require('../renderer/i18n');
+const { tr } = I18n;
 
 // Pipelineのフローチャート（プロジェクトごと）の初期値: 前と同じ「実装 → レビュー」
-const DEFAULT_RELAY_FLOW = FlowModel.flowFromSteps(DEFAULT_RELAY_STEPS);
+// 呼んだときの言語で作る。言語を変えると画面を読み直すので、新しいリポジトリは選んだ言語になる
+function defaultRelayFlow() {
+  return FlowModel.flowFromSteps(defaultRelaySteps());
+}
+const DEFAULT_RELAY_FLOW = defaultRelayFlow();
 function cloneFlow(f) {
   return JSON.parse(JSON.stringify(f));
 }
-// 保存されていたフローを整える（形になっていなければ初期値）
+// 保存されていたフローを整える（形になっていなければ、今の言語の初期値）
 function cleanRelayFlow(f) {
-  return FlowModel.cleanFlow(f, { isAgent }) || cloneFlow(DEFAULT_RELAY_FLOW);
+  return FlowModel.cleanFlow(f, { isAgent }) || cloneFlow(defaultRelayFlow());
+}
+
+// 保存済みの board.json を読む前に、表示の言語を決める（Store は setLanguage しない）
+function languageForBoardFile(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return I18n.DEFAULT_LANGUAGE; // ファイルがない（初めて入れたとき）
+  }
+  try {
+    const raw = JSON.parse(text);
+    const lang = raw && raw.settings && raw.settings.language;
+    return I18n.isLanguage(lang) ? lang : I18n.LEGACY_LANGUAGE;
+  } catch {
+    return I18n.LEGACY_LANGUAGE; // あるが読めない既存ファイルは、これまでの日本語のまま
+  }
+}
+
+// 言語の切り替え。対応していないコードは受け付けない
+function assertLanguage(code) {
+  if (!I18n.isLanguage(code)) {
+    const err = new Error(tr('対応していない言語です: {code}', { code: String(code ?? '') }));
+    err.code = 'BAD_LANGUAGE';
+    throw err;
+  }
+  return code;
 }
 
 // ---------- Pipeline（プロジェクトごとに複数） ----------
@@ -218,6 +251,7 @@ const DEFAULT_SETTINGS = {
   branchNamingRule: '', // ブランチの命名規則（自然言語）。空なら agent/issue-12-xxxx のようないつもの名前
   weeklyResetDay: '', // Claude の週間上限がリセットされる曜日（'0'=日〜'6'=土）。空なら claude が知らせてくる日時を使う
   weeklyResetTime: '00:00', // 週間上限がリセットされる時刻（HH:MM・ローカル時刻）。weeklyResetDay を決めたときに使う
+  language: I18n.DEFAULT_LANGUAGE, // 画面の言葉。初めて入れたときは英語。language のない既存の board.json は読み込み時に ja にする
   autoUpdate: false, // 新しい版が出たら、実行中・待機中のタスクがないときに自動で入れ替えて起動し直す
   updatePending: null, // 更新のために終了したときの { from, to, at }（次の起動で、更新できたかを知らせる）
   // ---- エージェント ----
@@ -279,7 +313,7 @@ const MAX_REPO_SETTINGS = 200;
 // 初めて開いたプロジェクトの設定（初期値。取り込み方は PR を作成。GitHub でないリポジトリは開いたときに直接マージにする）
 function defaultRepoSettings() {
   const out = {};
-  for (const k of REPO_SETTING_KEYS) out[k] = k === 'statusMapping' ? { ...DEFAULT_SETTINGS.statusMapping } : k === 'relayFlow' ? cloneFlow(DEFAULT_RELAY_FLOW) : Array.isArray(DEFAULT_SETTINGS[k]) ? [...DEFAULT_SETTINGS[k]] : DEFAULT_SETTINGS[k];
+  for (const k of REPO_SETTING_KEYS) out[k] = k === 'statusMapping' ? { ...DEFAULT_SETTINGS.statusMapping } : k === 'relayFlow' ? cloneFlow(defaultRelayFlow()) : Array.isArray(DEFAULT_SETTINGS[k]) ? [...DEFAULT_SETTINGS[k]] : DEFAULT_SETTINGS[k];
   return out;
 }
 
@@ -430,12 +464,15 @@ function migrateSettings(settings, raw, cards) {
   settings.repoTabs = cleanRepoTabs(settings.repoTabs, settings.repoPath);
   migrateRepoSettings(settings, raw, cards);
   Object.assign(settings, cleanRelayFlows(settings.relayFlows, settings.relayFlowId, settings.relayFlow));
+  // ファイルに言語がなければ、これまでの表示（日本語）のままにする。新規の初期値 en で上書きしない
+  if (!I18n.isLanguage(raw && raw.language)) settings.language = I18n.LEGACY_LANGUAGE;
 }
 
 class Store {
   constructor(file) {
     this.file = file;
-    this.data = { settings: { ...DEFAULT_SETTINGS }, cards: [], removedCost: {}, costLog: [], weeklyResetAt: 0, notifications: [], schedules: [] };
+    // 言語は main.js が setLanguage したあとに new Store する。ここでは setLanguage しない
+    this.data = { settings: { ...DEFAULT_SETTINGS, relaySteps: defaultRelaySteps(), relayFlow: cloneFlow(defaultRelayFlow()) }, cards: [], removedCost: {}, costLog: [], weeklyResetAt: 0, notifications: [], schedules: [] };
     this.timer = null;
     this.load();
   }
@@ -609,6 +646,9 @@ module.exports = {
   switchRepoSettings,
   setRepoSettings,
   Store,
+  languageForBoardFile,
+  assertLanguage,
+  defaultRelayFlow,
   DEFAULT_SETTINGS,
   MAX_NOTIFICATIONS,
   MAX_RECENT_REPOS,

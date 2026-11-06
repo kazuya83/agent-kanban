@@ -24,14 +24,16 @@ if (!app.requestSingleInstanceLock()) {
   return;
 }
 
-const { Store } = require('./src/store');
+const { Store, languageForBoardFile, assertLanguage } = require('./src/store');
+const I18n = require('./renderer/i18n');
+const { tr } = I18n;
 const { AgentManager } = require('./src/agent');
 const { PermissionServer } = require('./src/permission-server');
 const git = require('./src/git');
 const wsl = require('./src/wsl');
 const { fixPath, resolveCommand } = require('./src/env');
 const providers = require('./src/providers');
-const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, routeSide, stripRouting, droppedSettingKeys, droppedSettingsMessage, composeTabs, VIEW_CHANNELS, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory } = require('./src/remote');
+const { RemoteHost, RemoteClient, Reconnector, DEFAULT_PORT, isProxyChannel, isLocalChannel, routeSide, stripRouting, stripLocalSettings, droppedSettingKeys, droppedSettingsMessage, composeTabs, VIEW_CHANNELS, connectionKey, upsertConnectionHistory, removeConnectionHistory, findConnectionHistory, publicConnectionHistory } = require('./src/remote');
 const { SshTunnel, isLoopbackHost, sshHostInfo } = require('./src/ssh-tunnel');
 const sshKey = require('./src/ssh-key');
 const dirBrowse = require('./src/dir-browse');
@@ -132,8 +134,10 @@ function boardState() {
 // このマシンのタブは画面に出すだけで、ホストへは送らない（ホストの画面にはホストのタブだけが出る）
 function viewBoard() {
   const local = boardState();
-  if (!remoteClient?.connected || !hostBoardCache) return withRemoteSession(composeTabs(null, local, 'local'));
-  return withRemoteSession(composeTabs(hostBoardCache, local, clientView));
+  const board = !remoteClient?.connected || !hostBoardCache ? withRemoteSession(composeTabs(null, local, 'local')) : withRemoteSession(composeTabs(hostBoardCache, local, clientView));
+  // 言語はこのマシンの設定。ホストのボードを見ていても、ホストの言語では置き換えない
+  if (board.settings) return { ...board, settings: { ...board.settings, language: store.settings.language } };
+  return board;
 }
 
 function remoteSession() {
@@ -204,7 +208,8 @@ async function dispatch(channel, arg) {
     const side = routeSide(channel, arg, clientView);
     if (side === 'host') {
       // 手元のボードを触る操作（リポジトリの選択ダイアログなど）は、ホストの画面に出てしまうので止める
-      if (!isProxyChannel(channel)) throw new Error('ホストのタブではこの操作を使えません（このマシンのタブで行うか、ホスト側で行ってください）');
+      if (!isProxyChannel(channel)) throw new Error(tr('ホストのタブではこの操作を使えません（このマシンのタブで行うか、ホスト側で行ってください）'));
+      if (channel === 'settings:update') arg = stripLocalSettings(arg);
       const data = await remoteClient.invoke(channel, stripRouting(arg));
       // 古い版のホストは知らない設定を黙って捨てる。「保存しました」と出て残らないので、エラーにして知らせる
       if (channel === 'settings:update') {
@@ -221,7 +226,7 @@ async function dispatch(channel, arg) {
       return data;
     }
     const fn = localHandlers.get(channel);
-    if (!fn) throw new Error(`未対応の操作です: ${channel}`);
+    if (!fn) throw new Error(tr('未対応の操作です: {channel}', { channel }));
     const data = await fn(arg);
     if (VIEW_CHANNELS.has(channel) && data) setClientView('local');
     // このマシンの最後のタブを閉じたら、ホストのタブを見る
@@ -229,7 +234,7 @@ async function dispatch(channel, arg) {
     return data;
   }
   const fn = localHandlers.get(channel);
-  if (!fn) throw new Error(`未対応の操作です: ${channel}`);
+  if (!fn) throw new Error(tr('未対応の操作です: {channel}', { channel }));
   return fn(arg);
 }
 
@@ -282,7 +287,7 @@ async function startRemoteHost() {
       },
       invoke: (channel, arg) => {
         const fn = localHandlers.get(channel);
-        if (!fn || !isProxyChannel(channel)) throw new Error(`この操作は遠隔では使えません: ${channel}`);
+        if (!fn || !isProxyChannel(channel)) throw new Error(tr('この操作は遠隔では使えません: {channel}', { channel }));
         // 操作側へは、このマシンのボードだけを返す（画面用の viewBoard は、このマシンが別のホストにつないでいると
         // そのホストのタブとカードが混ざり、操作側に「自分の PC のリポジトリ」が出てしまう）
         if (channel === 'board:get') return withRemoteSession(boardState());
@@ -311,7 +316,7 @@ let resumeError = ''; // 自動の再開をあきらめたときの理由（画�
 // 裏で再開している最中に、切断や別の接続をされたら、古い試みは結果を捨てる
 let connectSeq = 0;
 let wantConnected = false;
-const cancelledError = () => Object.assign(new Error('接続を取り消しました'), { cancelled: true });
+const cancelledError = () => Object.assign(new Error(tr('接続を取り消しました')), { cancelled: true });
 
 // いまの設定にある接続先
 function currentConnection() {
@@ -342,7 +347,7 @@ function canResumeRemote() {
 
 // 保存した設定（とトークンかコード）でホストへつなぐ。ssh なら先にトンネルを張る
 async function connectRemote({ code = '' } = {}) {
-  if (remoteHost?.listening()) throw new Error('ホストとして待ち受け中は接続できません。先にホストを停止してください');
+  if (remoteHost?.listening()) throw new Error(tr('ホストとして待ち受け中は接続できません。先にホストを停止してください'));
   const s = store.settings;
   const m = s.remoteClientMode === 'direct' ? 'direct' : 'ssh';
   const h = s.remoteClientHost || '127.0.0.1';
@@ -385,15 +390,15 @@ async function connectRemote({ code = '' } = {}) {
       // これまでの接続からも外す（トークンなしでは選んでもつながらない）
       store.settings.remoteClientHistory = removeConnectionHistory(store.settings.remoteClientHistory, connectionKey(currentConnection()));
       store.save();
-      const e = new Error('保存したトークンがホストで無効になっています。ホストに出ている 6 桁のコードで、もう一度ペアリングしてください');
+      const e = new Error(tr('保存したトークンがホストで無効になっています。ホストに出ている 6 桁のコードで、もう一度ペアリングしてください'));
       e.fatal = true;
       throw e;
     }
-    if (m === 'ssh' && /ECONNRESET|接続が切れました|ECONNREFUSED/.test(String(err?.message))) {
-      throw new Error(`SSH はつながりましたが、ホストの Agent Kanban に届きませんでした。ホストの Agent Kanban で「ホストを開始」しているか、待ち受けポート（${p}）が合っているかを確かめてください`);
+    if (m === 'ssh' && (err?.code === 'ECONNRESET' || err?.code === 'ECONNREFUSED')) {
+      throw new Error(tr('SSH はつながりましたが、ホストの Agent Kanban に届きませんでした。ホストの Agent Kanban で「ホストを開始」しているか、待ち受けポート（{p}）が合っているかを確かめてください', { p }));
     }
     if (m === 'direct' && !isLoopbackHost(h) && /ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH/.test(String(err?.code || err?.message))) {
-      throw new Error(`${h}:${p} に直接つながりません。ホストは外に見せないよう 127.0.0.1 でしか待ち受けていないため、Tailscale の IP などへは直接つなげません。接続方法を「SSH 経由」にして、SSH の接続先にその IP を入れてください`);
+      throw new Error(tr('{h}:{p} に直接つながりません。ホストは外に見せないよう 127.0.0.1 でしか待ち受けていないため、Tailscale の IP などへは直接つなげません。接続方法を「SSH 経由」にして、SSH の接続先にその IP を入れてください', { h, p }));
     }
     throw err;
   }
@@ -456,7 +461,10 @@ function disconnectRemote() {
 
 app.whenReady().then(async () => {
   const userData = app.getPath('userData');
-  store = new Store(path.join(userData, 'board.json'));
+  const boardFile = path.join(userData, 'board.json');
+  // Store のコンストラクタでは setLanguage しない。新規の既定フローを選んだ言語で作るため、先に決める
+  I18n.setLanguage(languageForBoardFile(boardFile));
+  store = new Store(boardFile);
   agents = new AgentManager(store, {
     // パッケージ後は asar の外に出した MCP スクリプトを使う
     mcpScript: path.join(__dirname, 'src', 'permission-mcp.js').replace('app.asar', 'app.asar.unpacked'),
@@ -529,6 +537,17 @@ app.whenReady().then(async () => {
 
   handle('board:get', () => viewBoard());
   handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
+  // 言語はこのマシンの設定。sendSync で読み、選んだらすぐ保存する（画面の読み直しはレンダラが行う）
+  ipcMain.on('app:language', (e) => {
+    e.returnValue = store.settings.language;
+  });
+  handle('app:setLanguage', (code) => {
+    const c = assertLanguage(code);
+    store.settings.language = c;
+    I18n.setLanguage(c);
+    store.save();
+    return c;
+  });
   setupUpdater(userData);
   handle('remote:status', () => remoteSession());
   // このマシンをホストにするとき、操作側に入れてもらう接続先と SSH サーバーの状態
@@ -549,25 +568,25 @@ app.whenReady().then(async () => {
   // ホスト側: 操作側から受け取った公開鍵ファイルを選んで、authorized_keys に登録する
   handle('remote:pickPubKey', async () => {
     const r = await dialog.showOpenDialog(win, {
-      title: '操作側から受け取った公開鍵（.pub）を選択',
+      title: tr('操作側から受け取った公開鍵（.pub）を選択'),
       properties: ['openFile'],
       filters: [{ name: '公開鍵', extensions: ['pub'] }, { name: 'すべてのファイル', extensions: ['*'] }],
     });
     if (r.canceled || !r.filePaths[0]) return null;
     const file = r.filePaths[0];
     const st = fs.statSync(file);
-    if (st.size > 64 * 1024) throw new Error('公開鍵のファイルではないようです（大きすぎます）');
+    if (st.size > 64 * 1024) throw new Error(tr('公開鍵のファイルではないようです（大きすぎます）'));
     const key = sshKey.parsePublicKey(fs.readFileSync(file, 'utf8'));
     return { path: file, key: key.line, type: key.type, comment: key.comment };
   });
   handle('remote:installPubKey', async ({ path: file } = {}) => {
-    if (!file) throw new Error('公開鍵のファイルを選んでください');
+    if (!file) throw new Error(tr('公開鍵のファイルを選んでください'));
     const r = await sshKey.installPublicKey({ text: fs.readFileSync(String(file), 'utf8') });
     notifyRemoteOnly();
     return r;
   });
   handle('remote:startHost', async ({ port } = {}) => {
-    if (remoteClient?.connected) throw new Error('クライアントとして接続中はホストを開始できません。先に切断してください');
+    if (remoteClient?.connected) throw new Error(tr('クライアントとして接続中はホストを開始できません。先に切断してください'));
     // ホストになるなら、クライアントとしての再開はしない
     cancelConnecting();
     store.settings.remoteClientResume = false;
@@ -580,7 +599,7 @@ app.whenReady().then(async () => {
   });
   handle('remote:stopHost', () => stopRemoteHost());
   handle('remote:refreshPair', () => {
-    if (!remoteHost?.listening()) throw new Error('ホストが起動していません');
+    if (!remoteHost?.listening()) throw new Error(tr('ホストが起動していません'));
     const r = remoteHost.refreshPairCode();
     notifyRemoteOnly();
     return r;
@@ -595,7 +614,7 @@ app.whenReady().then(async () => {
     return remoteSession();
   });
   handle('remote:connect', async ({ mode, host, port, code, sshHost, sshUser, sshPort, sshKey, sshPath } = {}) => {
-    if (remoteHost?.listening()) throw new Error('ホストとして待ち受け中は接続できません。先にホストを停止してください');
+    if (remoteHost?.listening()) throw new Error(tr('ホストとして待ち受け中は接続できません。先にホストを停止してください'));
     const s = store.settings;
     const m = (mode || s.remoteClientMode) === 'direct' ? 'direct' : 'ssh';
     const h = String(host || s.remoteClientHost || '127.0.0.1').trim() || '127.0.0.1';
@@ -622,15 +641,15 @@ app.whenReady().then(async () => {
   handle('remote:resume', async ({ id } = {}) => {
     if (remoteClient?.connected) return remoteSession();
     if (id) {
-      if (remoteHost?.listening()) throw new Error('ホストとして待ち受け中は接続できません。先にホストを停止してください');
+      if (remoteHost?.listening()) throw new Error(tr('ホストとして待ち受け中は接続できません。先にホストを停止してください'));
       const entry = findConnectionHistory(store.settings.remoteClientHistory, String(id));
-      if (!entry) throw new Error('その接続は見つかりません。RC設定を開き直してください');
-      if (!entry.token) throw new Error('この接続にはトークンがありません。ホストに出ている 6 桁のコードで、もう一度ペアリングしてください');
+      if (!entry) throw new Error(tr('その接続は見つかりません。RC設定を開き直してください'));
+      if (!entry.token) throw new Error(tr('この接続にはトークンがありません。ホストに出ている 6 桁のコードで、もう一度ペアリングしてください'));
       cancelConnecting();
       sshTunnel?.close();
       useConnection(entry);
     }
-    if (!canResumeRemote()) throw new Error('再開できる前回の接続がありません。RC設定から接続してください');
+    if (!canResumeRemote()) throw new Error(tr('再開できる前回の接続がありません。RC設定から接続してください'));
     reconnector.cancel();
     resumeError = '';
     notifyRemoteOnly();
@@ -658,7 +677,7 @@ app.whenReady().then(async () => {
   handle('remote:forgetConnection', ({ id } = {}) => {
     const key = String(id || '');
     const isCurrent = key === connectionKey(currentConnection());
-    if (isCurrent && (remoteClient?.connected || reconnector?.active())) throw new Error('つないでいる接続は消せません。先に切断してください');
+    if (isCurrent && (remoteClient?.connected || reconnector?.active())) throw new Error(tr('つないでいる接続は消せません。先に切断してください'));
     store.settings.remoteClientHistory = removeConnectionHistory(store.settings.remoteClientHistory, key);
     if (isCurrent) {
       store.settings.remoteClientToken = '';
@@ -711,12 +730,12 @@ app.whenReady().then(async () => {
   // git で管理していないフォルダ（動画づくりなど）は、そのフォルダをそのまま返し、git なしのフォルダとして覚えておく
   const resolveRepoDir = async (picked, { forgetOnMissing = false } = {}) => {
     const fs = require('fs');
-    if (!picked) throw new Error('パスが空です');
+    if (!picked) throw new Error(tr('パスが空です'));
     if (!fs.existsSync(picked)) {
       if (forgetOnMissing) forgetRecentRepo(picked);
-      throw new Error(`フォルダが見つかりません: ${picked}`);
+      throw new Error(tr('フォルダが見つかりません: {picked}', { picked }));
     }
-    if (!fs.statSync(picked).isDirectory()) throw new Error(`フォルダではありません: ${picked}`);
+    if (!fs.statSync(picked).isDirectory()) throw new Error(tr('フォルダではありません: {picked}', { picked }));
     const pw = wsl.parseWslPath(picked);
     const asFolder = () => {
       const dir = pw ? picked.replace(/[\\/]+$/, '') : path.resolve(picked);
@@ -730,10 +749,10 @@ app.whenReady().then(async () => {
       if (/not a git repository/i.test(err.message)) return asFolder();
       // このパソコンに git が入っていなくても、git なしのフォルダとしてなら開ける
       if (!pw && /ENOENT/.test(err.message)) return asFolder();
-      if (pw && /not found|No such file|127/i.test(err.message)) throw new Error(`${pw.distro}（WSL）の中に git が見つかりません。${pw.distro} のターミナルで sudo apt install git を実行してください。\n${err.message}`);
-      throw new Error(`git でフォルダを調べられませんでした（${picked}）\n${err.message}`);
+      if (pw && /not found|No such file|127/i.test(err.message)) throw new Error(tr('{distro}（WSL）の中に git が見つかりません。{distro2} のターミナルで sudo apt install git を実行してください。\n{message}', { distro: pw.distro, distro2: pw.distro, message: err.message }));
+      throw new Error(tr('git でフォルダを調べられませんでした（{picked}）\n{message}', { picked, message: err.message }));
     }
-    if (!top) throw new Error(`git から答えが返ってきませんでした（${picked}）`);
+    if (!top) throw new Error(tr('git から答えが返ってきませんでした（{picked}）', { picked }));
     markNoGitRepo(store.settings, top, false);
     return top;
   };
@@ -742,7 +761,7 @@ app.whenReady().then(async () => {
     const home = distro ? await wsl.homeDir(distro) : '';
     const r = await dialog.showOpenDialog(win, {
       properties: ['openDirectory', 'createDirectory'],
-      title: distro ? `フォルダを選択（${distro}）` : 'フォルダを選択（git リポジトリ、または git で管理していないフォルダ）',
+      title: distro ? tr('フォルダを選択（{distro}）', { distro }) : tr('フォルダを選択（git リポジトリ、または git で管理していないフォルダ）'),
       ...(distro ? { defaultPath: wsl.toUnc(distro, home || '/home') } : {}),
     });
     if (r.canceled || !r.filePaths[0]) return null;
@@ -796,7 +815,7 @@ app.whenReady().then(async () => {
   // タブを切り替える（タブにあるリポジトリだけ）
   handle('repo:switchTab', async ({ path: dir } = {}) => {
     const picked = String(dir || '').trim();
-    if (!cleanRepoTabs(store.settings.repoTabs, store.settings.repoPath).includes(picked)) throw new Error('そのリポジトリはタブにありません');
+    if (!cleanRepoTabs(store.settings.repoTabs, store.settings.repoPath).includes(picked)) throw new Error(tr('そのリポジトリはタブにありません'));
     if (picked === store.settings.repoPath) return picked;
     return openRepo(await resolveRepoDir(picked));
   });
@@ -811,7 +830,7 @@ app.whenReady().then(async () => {
       notifyBoard();
       return '';
     }
-    if (tabs.length <= 1) throw new Error('最後のタブは閉じられません');
+    if (tabs.length <= 1) throw new Error(tr('最後のタブは閉じられません'));
     const r = closeRepoTab(tabs, s.repoPath, dir);
     switchRepo(r.next, r.tabs);
     store.save();
@@ -836,7 +855,7 @@ app.whenReady().then(async () => {
   handle('repo:chooseParent', async (opts = {}) => {
     const r = await dialog.showOpenDialog(win, {
       properties: ['openDirectory', 'createDirectory'],
-      title: '置き場所のフォルダを選択',
+      title: tr('置き場所のフォルダを選択'),
       ...(opts && opts.defaultPath ? { defaultPath: opts.defaultPath } : {}),
     });
     return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
@@ -881,7 +900,7 @@ app.whenReady().then(async () => {
     if (patch && 'issueStatusSync' in patch) patch = { ...patch, issueStatusSync: !!patch.issueStatusSync };
     if (patch && 'baseBranch' in patch) {
       const b = String(patch.baseBranch || '').trim();
-      if (b) git.assertSafeRef(b, 'ベースブランチ名');
+      if (b) git.assertSafeRef(b, tr('ベースブランチ名'));
       patch = { ...patch, baseBranch: b };
     }
     if (patch && 'enabledAgents' in patch) patch = { ...patch, enabledAgents: providers.cleanEnabledAgents(patch.enabledAgents) };
@@ -927,25 +946,25 @@ app.whenReady().then(async () => {
     const e = PACK_EXTS.includes(ext) ? ext : 'json';
     const base = String(name || 'pipeline').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').slice(0, 80) || 'pipeline';
     const r = await dialog.showSaveDialog(win, {
-      title: e === 'zip' ? 'Pipelineとカスタムエージェントをまとめてエクスポート' : 'Pipelineをエクスポート',
+      title: e === 'zip' ? tr('Pipelineとカスタムエージェントをまとめてエクスポート') : tr('Pipelineをエクスポート'),
       defaultPath: path.join(app.getPath('downloads'), base.endsWith(`.${e}`) ? base : `${base}.${e}`),
       filters: [e === 'zip' ? { name: 'zip', extensions: ['zip'] } : { name: 'Pipeline（JSON）', extensions: ['json'] }],
     });
     if (r.canceled || !r.filePath) return null;
     const buf = Buffer.from(String(data || ''), 'base64');
-    if (buf.length > 20 * 1024 * 1024) throw new Error('エクスポートするファイルが大きすぎます');
+    if (buf.length > 20 * 1024 * 1024) throw new Error(tr('エクスポートするファイルが大きすぎます'));
     fs.writeFileSync(r.filePath, buf);
     return { path: r.filePath };
   });
   handle('file:open', async () => {
     const r = await dialog.showOpenDialog(win, {
-      title: 'Pipeline（.json）か、Pipelineとカスタムエージェントをまとめた zip を選択',
+      title: tr('Pipeline（.json）か、Pipelineとカスタムエージェントをまとめた zip を選択'),
       properties: ['openFile'],
       filters: [{ name: 'Pipeline（.json / .zip）', extensions: PACK_EXTS }, { name: 'すべてのファイル', extensions: ['*'] }],
     });
     if (r.canceled || !r.filePaths[0]) return null;
     const file = r.filePaths[0];
-    if (fs.statSync(file).size > 20 * 1024 * 1024) throw new Error('ファイルが大きすぎます（20MB まで）');
+    if (fs.statSync(file).size > 20 * 1024 * 1024) throw new Error(tr('ファイルが大きすぎます（20MB まで）'));
     return { name: path.basename(file), data: fs.readFileSync(file).toString('base64') };
   });
   // agent: claude / codex / gemini / cursor / relay（Pipeline） / compete（競争。カードが複数できる）。返すのは最初のカードの ID
@@ -973,7 +992,7 @@ app.whenReady().then(async () => {
   });
   handle('open:external', async (url) => {
     const target = require('./src/external-url').externalUrl(url);
-    if (!target) throw new Error('開けない URL です');
+    if (!target) throw new Error(tr('開けない URL です'));
     await shell.openExternal(target);
   });
   // gh（GitHub CLI）: 状態の確認・インストール・ログイン
@@ -1062,7 +1081,7 @@ app.whenReady().then(async () => {
   handle('card:open', async (id) => {
     const c = agents.must(id);
     const dir = c.noGit ? c.repoPath : c.worktreePath;
-    if (!dir) throw new Error('worktree がありません');
+    if (!dir) throw new Error(tr('worktree がありません'));
     const err = await shell.openPath(dir);
     if (err) throw new Error(err);
   });
@@ -1221,15 +1240,14 @@ app.on('before-quit', (e) => {
   };
   if ((!running && !queued) || quittingForUpdate) return finish();
   quitState = 'confirming';
-  const parts = [running && `実行中 ${running} 件`, queued && `待機中 ${queued} 件`].filter(Boolean).join('・');
   const opts = {
     type: 'warning',
-    buttons: ['中断して終了', 'キャンセル'],
+    buttons: [tr('中断して終了'), tr('キャンセル')],
     defaultId: 1,
     cancelId: 1,
-    title: '実行中のタスクがあります',
-    message: `${parts}のタスクがあります。終了しますか？`,
-    detail: '終了すると、実行中のタスクは中断されます（それまでの変更はタスクのブランチにコミットします）。\n次にアプリを起動したとき、ボード上部の「すべて再開」やタスクの「再開」で、中断したところから続けられます。',
+    title: tr('実行中のタスクがあります'),
+    message: running && queued ? tr('実行中 {running} 件・待機中 {queued} 件のタスクがあります。終了しますか？', { running, queued }) : running ? tr('実行中 {running} 件のタスクがあります。終了しますか？', { running }) : tr('待機中 {queued} 件のタスクがあります。終了しますか？', { queued }),
+    detail: tr('終了すると、実行中のタスクは中断されます（それまでの変更はタスクのブランチにコミットします）。\n次にアプリを起動したとき、ボード上部の「すべて再開」やタスクの「再開」で、中断したところから続けられます。'),
   };
   const ask = win && !win.isDestroyed() ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts);
   ask.then(

@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
+const { tr } = require('../renderer/i18n');
 
 const KEY_NAME = 'agent-kanban_ed25519';
 
@@ -51,7 +52,7 @@ function keygenCommandFor(sshCommand) {
 async function generateKey({ keyPath = '', command = 'ssh-keygen', prefixArgs = [], comment = '', home = os.homedir() } = {}) {
   const st = keyStatus({ keyPath, home });
   if (st.exists) {
-    if (!st.publicKey) throw new Error(`鍵 ${st.path} はありますが、公開鍵（${st.pubPath}）が読めません。ssh-keygen -y -f "${st.path}" > "${st.pubPath}" で作り直せます`);
+    if (!st.publicKey) throw new Error(tr('鍵 {path} はありますが、公開鍵（{pubPath}）が読めません。ssh-keygen -y -f "{path2}" > "{pubPath2}" で作り直せます', { path: st.path, pubPath: st.pubPath, path2: st.path, pubPath2: st.pubPath }));
     return { ...st, created: false };
   }
   const dir = path.dirname(st.path);
@@ -76,15 +77,15 @@ async function generateKey({ keyPath = '', command = 'ssh-keygen', prefixArgs = 
     execFile(command, args, { windowsHide: true, timeout: 30000 }, (err, _stdout, stderr) => {
       if (err) {
         if (err.code === 'ENOENT') {
-          reject(new Error('ssh-keygen が見つかりません。Windows なら「設定 → システム → オプション機能」で「OpenSSH クライアント」を追加してください'));
+          reject(new Error(tr('ssh-keygen が見つかりません。Windows なら「設定 → システム → オプション機能」で「OpenSSH クライアント」を追加してください')));
           return;
         }
-        reject(new Error(`鍵を作れませんでした: ${String(stderr || err.message).trim()}`));
+        reject(new Error(tr('鍵を作れませんでした: {message}', { message: String(stderr || err.message).trim() })));
         return;
       }
       const after = keyStatus({ keyPath: st.path, home });
       if (!after.exists || !after.publicKey) {
-        reject(new Error(`鍵を作れませんでした（${st.path} ができていません）`));
+        reject(new Error(tr('鍵を作れませんでした（{path} ができていません）', { path: st.path })));
         return;
       }
       resolve({ ...after, created: true });
@@ -122,13 +123,13 @@ const KEY_TYPE = /^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp(256|384|521)|sk
 function parsePublicKey(text) {
   const s = String(text || '');
   if (/PRIVATE KEY-----/.test(s)) {
-    throw new Error('選んだのは秘密鍵です。ホストに渡すのは「.pub」で終わる公開鍵だけです（秘密鍵は操作側の PC から出さないでください）');
+    throw new Error(tr('選んだのは秘密鍵です。ホストに渡すのは「.pub」で終わる公開鍵だけです（秘密鍵は操作側の PC から出さないでください）'));
   }
   const lines = s.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-  if (lines.length !== 1) throw new Error('公開鍵のファイルではないようです（ssh-ed25519 AAAA… の1行が入った .pub ファイルを選んでください）');
+  if (lines.length !== 1) throw new Error(tr('公開鍵のファイルではないようです（ssh-ed25519 AAAA… の1行が入った .pub ファイルを選んでください）'));
   const [type, body, ...rest] = lines[0].split(/\s+/);
   if (!KEY_TYPE.test(type || '') || !/^[A-Za-z0-9+/]+={0,3}$/.test(body || '') || body.length < 40) {
-    throw new Error('公開鍵のファイルではないようです（ssh-ed25519 AAAA… の1行が入った .pub ファイルを選んでください）');
+    throw new Error(tr('公開鍵のファイルではないようです（ssh-ed25519 AAAA… の1行が入った .pub ファイルを選んでください）'));
   }
   return { line: [type, body, ...rest].join(' '), type, body, comment: rest.join(' ') };
 }
@@ -177,7 +178,7 @@ async function installPublicKey({ text, platform = process.platform, isAdmin, ho
     try {
       await icacls('icacls.exe', [file, '/inheritance:r', '/grant', 'Administrators:F', '/grant', 'SYSTEM:F']);
     } catch (err) {
-      throw new Error(`公開鍵は ${file} に入れましたが、権限を絞れませんでした（${err.message}）。管理者の PowerShell で icacls.exe ${file} /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F" を実行してください`);
+      throw new Error(tr('公開鍵は {file} に入れましたが、権限を絞れませんでした（{message}）。管理者の PowerShell で icacls.exe {file2} /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F" を実行してください', { file, message: err.message, file2: file }));
     }
   }
   return { file, added: !already, key: key.line, comment: key.comment, admin };
@@ -186,7 +187,9 @@ async function installPublicKey({ text, platform = process.platform, isAdmin, ho
 function permissionError(err, file, line, admin) {
   if (err && (err.code === 'EACCES' || err.code === 'EPERM')) {
     const cmd = admin ? registerCommands(line).winAdmin : registerCommands(line).mac;
-    return new Error(`${file} に書き込めませんでした（権限がありません）。${admin ? 'このユーザーは管理者なので、公開鍵は管理者用のファイルに入れる必要があります。Agent Kanban を「管理者として実行」で開き直すか、' : ''}次のコマンドを${admin ? '管理者の PowerShell' : 'ターミナル'}で実行してください: ${cmd}`);
+    return new Error(admin
+      ? tr('{file} に書き込めませんでした（権限がありません）。このユーザーは管理者なので、公開鍵は管理者用のファイルに入れる必要があります。Agent Kanban を「管理者として実行」で開き直すか、次のコマンドを管理者の PowerShell で実行してください: {cmd}', { file, cmd })
+      : tr('{file} に書き込めませんでした（権限がありません）。次のコマンドをターミナルで実行してください: {cmd}', { file, cmd }));
   }
   return err;
 }
