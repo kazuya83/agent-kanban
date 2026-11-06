@@ -4997,18 +4997,12 @@ api.onBoard((board) => {
     }
   }
 });
-// ログの中のリンクはブラウザで開く
-$('detailBody').addEventListener('click', (e) => {
-  const a = e.target.closest('.md-link');
+// Markdown の中のリンク（ログ・チャット・モーダル）はデフォルトブラウザで開く。開いてよい URL かは main.js が確かめる
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('.md-link');
   if (!a) return;
   e.preventDefault();
-  const url = a.dataset.url;
-  // 安全のため、ブラウザで開けるのは GitHub の URL だけ（main.js と同じ条件）。それ以外はコピーする
-  if (/^https:\/\/([a-z0-9-]+\.)?github\.com\//.test(url)) return run(() => api.openExternal(url));
-  navigator.clipboard?.writeText(url).then(
-    () => toast('GitHub 以外のリンクは開けないので、URL をコピーしました', 'ok'),
-    () => toast('GitHub 以外のリンクは開けません'),
-  );
+  run(() => api.openExternal(a.dataset.url));
 });
 
 api.onLog(({ id, entry }) => {
