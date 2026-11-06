@@ -483,6 +483,7 @@
   "（マージ済み）": { en: "(merged)", es: "(fusionado)", fr: "(fusionné)", zh: "（已合并）" },
   "（戻った回数 {v}/{v2}）": { en: "(returned {v}/{v2})", es: "(vueltas {v}/{v2})", fr: "(retours {v}/{v2})", zh: "（返回次数 {v}/{v2}）" },
   "（閉じられました）": { en: "(closed)", es: "(cerrado)", fr: "(fermée)", zh: "（已关闭）" },
+  "このタスクのポート: {first}〜{last}（環境変数 WORKTREE_KANBAN_PORT と PORT は {first}）": {"en": "Ports for this task: {first}–{last} (WORKTREE_KANBAN_PORT and PORT are {first})", "es": "Puertos de esta tarea: {first}–{last} (WORKTREE_KANBAN_PORT y PORT valen {first})", "fr": "Ports de cette tâche : {first}–{last} (WORKTREE_KANBAN_PORT et PORT valent {first})", "zh": "此任务的端口：{first}–{last}（环境变量 WORKTREE_KANBAN_PORT 和 PORT 为 {first}）"},
   "実行": {"en": "Run", "es": "Ejecutar", "fr": "Lancer", "zh": "运行"},
   "セットアップ": {"en": "Setup", "es": "Preparación", "fr": "Préparation", "zh": "初始化"},
   "片付け": {"en": "Cleanup", "es": "Limpieza", "fr": "Nettoyage", "zh": "清理"},

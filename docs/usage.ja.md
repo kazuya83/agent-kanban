@@ -64,6 +64,22 @@ MySQL の SQL を作るだけ・調べるだけなど、ソースコードを変
 | `WORKTREE_KANBAN_BRANCH` | このタスクのブランチ |
 | `WORKTREE_KANBAN_BASE_BRANCH` | ベースブランチ |
 | `WORKTREE_KANBAN_TASK_ID` | タスクの ID |
+| `WORKTREE_KANBAN_PORT` | このタスクのポート（下の「タスクごとのポート」） |
+| `PORT` | `WORKTREE_KANBAN_PORT` と同じ番号 |
+
+### タスクごとのポート
+
+worktree はファイルを分けるだけなので、同じ開発サーバーを並列で動かすと、そのままではポートがぶつかります。そこで worktree を作るときに、タスクごとに連続する10個のポートを 20000〜29999 から割り当てます（`WORKTREE_KANBAN_PORT` から +9 まで）。ほかのアプリが使っているポートは避けます。番号はアプリを再起動しても変わらず、worktree を消すと空きに戻ります。今の番号は詳細の「worktree」タブに出ます。
+
+スクリプトだけでなくエージェントにも同じ環境変数を渡すので、エージェントが動かす開発サーバーも、`PORT` を見るものならぶつかりません。`PORT` を見るサーバー（Next.js や Express など）はそのまま動きます。見ないサーバーは、実行スクリプトで番号を渡します。
+
+```sh
+# Vite（2つ目のサーバーは +1 を使う）
+npm run dev -- --port "$WORKTREE_KANBAN_PORT" --strictPort &
+API_PORT=$((WORKTREE_KANBAN_PORT + 1)) npm run api
+```
+
+Windows の cmd では `%WORKTREE_KANBAN_PORT%` と書きます。
 
 ## 詳細パネル（差分・マージ）
 レビュー列のカードでは、ベースブランチからの差分を見てからマージできます。マージ先は、好きなブランチを選べます（新しく作ることもできます）。

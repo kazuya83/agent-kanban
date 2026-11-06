@@ -2733,7 +2733,16 @@ function scriptResultText(r) {
   return tr('{label} が失敗しました（{reason}）', { label, reason: r.error ? esc(r.error) : tr('終了コード {code}', { code: r.code === null ? '?' : r.code }) });
 }
 
+function scriptPortsHtml(data) {
+  if (!data.port) return '';
+  return `<div class="wt-script-bar muted small">${tr('このタスクのポート: {first}〜{last}（環境変数 WORKTREE_KANBAN_PORT と PORT は {first}）', { first: data.port, last: data.port + data.portCount - 1 })}</div>`;
+}
+
 function scriptPanelHtml(data) {
+  return scriptPortsHtml(data) + scriptButtonsHtml(data);
+}
+
+function scriptButtonsHtml(data) {
   if (!Object.values(data.scripts).some(Boolean)) return tr('<div class="wt-script-bar muted small">設定の「ブランチと取り込み」にスクリプトを書くと、ここから動かせます。</div>');
   const r = data.run;
   const busy = !!(r && r.running);
@@ -4140,7 +4149,7 @@ function renderSettingsView() {
       <label class="field">${tr('<span>実行スクリプト（詳細の worktree タブのボタンで動かす）</span>')}
         <textarea id="sRunScript" class="mono" rows="3" spellcheck="false" placeholder="${tr('例: npm run dev')}">${esc(s.runScript || '')}</textarea>
         <small>${tr('開発サーバーなど、タスクの変更を手で確かめるためのコマンドです。worktree タブから動かす・止めることができ、セットアップと片付けも手で動かせます。')}</small></label>
-      <small class="muted s-note">${tr('スクリプトは macOS・Linux・WSL では sh / bash で動き、途中の行が失敗するとそこで止まります。Windows では各行を && でつないで cmd で動かします。環境変数 WORKTREE_KANBAN_ROOT（リポジトリ）、WORKTREE_KANBAN_WORKTREE、WORKTREE_KANBAN_BRANCH、WORKTREE_KANBAN_BASE_BRANCH、WORKTREE_KANBAN_TASK_ID が使えます。')}</small>`,
+      <small class="muted s-note">${tr('スクリプトは macOS・Linux・WSL では sh / bash で動き、途中の行が失敗するとそこで止まります。Windows では各行を && でつないで cmd で動かします。環境変数 WORKTREE_KANBAN_ROOT（リポジトリ）、WORKTREE_KANBAN_WORKTREE、WORKTREE_KANBAN_BRANCH、WORKTREE_KANBAN_BASE_BRANCH、WORKTREE_KANBAN_TASK_ID が使えます。WORKTREE_KANBAN_PORT と PORT にはタスクごとに分けたポートが入り、そこから連続する10個を使えます（並列で動かしてもぶつかりません）。')}</small>`,
     issue: `<div class="field">
         <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> ${tr('Issue のステータスを自動で変える（GitHub Projects）')}</label>
         <small>${tr('Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。')}</small>
