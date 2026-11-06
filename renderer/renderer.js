@@ -899,10 +899,10 @@ async function selectNew(id) {
 async function select(id, { subFrom = null } = {}) {
   state.selected = id;
   state.headSig = '';
-  // サブタスクを親の進捗から開いたときは、閉じると親に戻る
+  // サブタスクを親の「サブタスク」タブから開いたときは、閉じると親に戻る
   state.subFrom = subFrom && card(subFrom) ? subFrom : null;
   if (state.chatListOpen) closeModal();
-  // 会話と、親の進捗から開いたサブタスクは、ボードの横ではなく、画面の中央にモーダルで開く
+  // 会話と、親の「サブタスク」タブから開いたサブタスクは、ボードの横ではなく、画面の中央にモーダルで開く
   const chatModal = isChat(card(id)) || !!state.subFrom;
   $('detail').classList.toggle('as-modal', chatModal);
   $('detailBackdrop').classList.toggle('hidden', !chatModal);
@@ -932,6 +932,10 @@ function updateTabsFor(c) {
     if (t.dataset.tab === 'worktree' || t.dataset.tab === 'diff') t.classList.toggle('hidden', chat);
   });
   if (chat && (state.tab === 'worktree' || state.tab === 'diff')) setTab('chat');
+  // 「サブタスク」タブは、サブタスクがあるタスクにだけ出す
+  const subs = hasSubtasks(c);
+  $('subtasksTab').classList.toggle('hidden', !subs);
+  if (!subs && state.tab === 'subtasks') setTab('progress');
 }
 
 function setTab(tab) {
@@ -947,12 +951,12 @@ function closeDetail() {
   $('detailBackdrop').classList.add('hidden');
   renderBoard();
 }
-// ✕・背景・Esc で閉じる: 親の進捗から開いたサブタスクなら、親のタスクの詳細（進捗タブ）に戻る
+// ✕・背景・Esc で閉じる: 親から開いたサブタスクなら、親のタスクの詳細（サブタスクタブ）に戻る
 function closeDetailOrBack() {
   const back = state.subFrom && card(state.subFrom) ? state.subFrom : null;
   if (!back) return closeDetail();
   state.subFrom = null;
-  setTab('progress');
+  setTab('subtasks');
   select(back);
 }
 
@@ -1069,6 +1073,7 @@ function relayFlowHtml(c) {
 // 親のタスクのブランチから分けて動かし、終わったものから親のブランチにマージする。サブタスクのカードはボードに出さず、親のカードにまとめて出す
 // サブタスクに分けられるタスクか（git のふつうのタスク。Pipeline・競争・会話・サブタスク自身は分けない）
 const canHaveSubtasks = (c) => !!c && !isChat(c) && !isNoGit(c) && !c.relay && !c.compete && !c.subtaskOf;
+const hasSubtasks = (c) => !!(c && c.subtasks && c.subtasks.items.length);
 const subtaskParent = (c) => (c && c.subtaskOf ? card(c.subtaskOf.parent) || null : null);
 // ボードに出さないカード（親が残っているサブタスク）
 const isHiddenSubtask = (c) => !!subtaskParent(c);
@@ -1128,7 +1133,7 @@ function subCounts(c) {
   // done: 完了の列に入っているもの（マージした・取り込まずに完了にした）
   return { total: items.length, merged, done: merged + closed, skipped, running, pending: items.length - merged - closed - skipped - running };
 }
-// サブタスクの進捗タブの列（ドラッグ&ドロップで状態を変える）
+// サブタスクタブの列（ドラッグ&ドロップで状態を変える）
 const SUB_COLUMNS = [
   { key: 'todo', label: '未着手' },
   { key: 'running', label: '作業中' },
@@ -1235,25 +1240,50 @@ function subtaskProposalHtml(c) {
     <div class="d-actions"><button class="btn primary" data-sact="accept">${icon('play')}サブタスクでやる</button><button class="btn" data-sact="decline">分けずに進める</button></div>
     <small>ほかの分け方にしてほしいときは、下の欄に文章で書いて送ってください。</small></div>`;
 }
-// 進捗タブ: サブタスクの一覧（状態・担当・金額・マージしたものの報告）と、動いているサブタスクの TODO
+// サブタスク1つの金額（動いているものはカードの、終わったものは記録した金額）
+function subItemCost(x) {
+  const k = x.cardId && x.state === 'running' ? card(x.cardId) : null;
+  return (k ? k.costUsd : x.costUsd) || 0;
+}
+// 親のタスクとサブタスクを合わせた金額
+function subTotalCost(c) {
+  return (c.subtasks ? c.subtasks.items : []).reduce((sum, x) => sum + subItemCost(x), c.costUsd || 0);
+}
+const subDonePct = (n) => (n.total - n.skipped ? Math.round((n.done / (n.total - n.skipped)) * 100) : 0);
+// 進捗タブ: サブタスクのタスクなら親のタスクとマージのしかた、親のタスクなら全体の進み具合と今動いているサブタスク
 function subtaskProgressHtml(c) {
   if (c.subtaskOf) {
     const p = subtaskParent(c);
     return p ? `<section class="pg-sec">${subtaskChildHtml(c)}</section>` : '';
   }
-  if (!c.subtasks) return '';
+  if (!hasSubtasks(c)) return '';
+  const n = subCounts(c);
+  const pct = subDonePct(n);
+  const counts = [['完了', n.done], ['作業中', n.running], ['未着手', n.pending], ['破棄', n.skipped]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join('・');
+  const active = c.subtasks.items.filter((x) => x.state === 'running' || x.state === 'review').map((x) => {
+    const [mark, label] = subStateInfo(subItemState(c, x));
+    return `<li><span class="td-mark" title="${esc(label)}">${mark}</span><span class="td-text">${esc(x.title)}</span> <span class="muted small">${esc(label)}</span></li>`;
+  });
+  return `<section class="pg-sec"><div class="pg-sec-head"><b>全体の進捗</b> <span class="muted small">サブタスク ${n.done}/${n.total - n.skipped} 完了（${pct}%）</span></div>
+    <div class="pg-bar" title="${pct}%"><span style="width:${pct}%"></span></div>
+    <div class="muted small">${esc(counts)} ・ ${esc(subPhaseText(c))}</div>
+    ${active.length ? `<ul class="pg-todos pg-active">${active.join('')}</ul>` : ''}
+  </section>`;
+}
+// サブタスクタブ: サブタスクの一覧（状態・担当・金額・マージしたものの報告）
+function subtaskListHtml(c) {
+  if (!hasSubtasks(c)) return '';
   const n = subCounts(c);
   const st = c.subtasks;
-  const pct = n.total - n.skipped ? Math.round((n.done / (n.total - n.skipped)) * 100) : 0;
+  const pct = subDonePct(n);
   const auto = st.phase === 'run' && st.auto === false && n.pending && c.status !== 'running' && c.status !== 'queued' && !c.conflict
     ? ` <button class="btn small" data-sact="auto" type="button" title="まだ始めていないサブタスクを、順番（目安）どおりに自動で始めます">${icon('play')}残りを自動で進める</button>`
     : '';
-  const parts = [`<section class="pg-sec"><div class="pg-sec-head"><b>${icon('branch')}サブタスク</b> <span class="muted small">${n.done}/${n.total - n.skipped} 完了${n.merged !== n.done ? `（マージ ${n.merged}）` : ''}${n.skipped ? `・破棄 ${n.skipped}` : ''} ・ ${esc(subPhaseText(c))} ・ ${st.merge === 'review' ? '確かめてからマージ' : '自動でマージ'}</span>${auto}</div>
+  return `<section class="pg-sec"><div class="pg-sec-head"><b>${icon('branch')}サブタスク</b> <span class="muted small">${n.done}/${n.total - n.skipped} 完了${n.merged !== n.done ? `（マージ ${n.merged}）` : ''}${n.skipped ? `・破棄 ${n.skipped}` : ''} ・ ${esc(subPhaseText(c))} ・ ${st.merge === 'review' ? '確かめてからマージ' : '自動でマージ'}</span>${auto}</div>
     <div class="pg-bar" title="${pct}%"><span style="width:${pct}%"></span></div>
-    ${subBoardHtml(c)}</section>`];
-  return parts.join('');
+    ${subBoardHtml(c)}</section>`;
 }
-// 進捗タブ: サブタスクのかんばん（未着手 / 作業中 / レビュー / 完了）
+// サブタスクタブ: サブタスクのかんばん（未着手 / 作業中 / レビュー / 完了）
 function subBoardHtml(c) {
   const st = c.subtasks;
   const title = new Map(st.items.map((x) => [x.key, x.title]));
@@ -1333,7 +1363,7 @@ function bindSubBoard(c, view) {
   });
 }
 // サブタスクの詳細: カードがある（作業中・レビュー）ときは、タスクの詳細と同じものをモーダルで開く。
-// 閉じると親のタスクの詳細（進捗タブ）に戻る。カードがない（未着手・完了）ときは、やることと報告をモーダルで見せる
+// 閉じると親のタスクの詳細（サブタスクタブ）に戻る。カードがない（未着手・完了）ときは、やることと報告をモーダルで見せる
 // 未着手のサブタスクは「編集」で名前とやることを変えられる（editing: true で入力欄を出す）
 function openSubtaskDetail(p, x, { editing = false } = {}) {
   const k = x.cardId && x.state === 'running' ? card(x.cardId) : null;
@@ -1544,7 +1574,8 @@ function progressHtml(c) {
   rows.push(`<dt>状態</dt><dd><span class="badge b-${bcls}">${esc(blabel)}</span>${c.lastMessage && live ? ` <span class="muted small">${esc(c.lastMessage)}</span>` : ''}</dd>`);
   if (c.startedAt && s !== 'todo') rows.push(`<dt>${live ? '開始' : '最後に開始'}</dt><dd>${hhmm(c.startedAt)}${s === 'running' ? `（<span class="elapsed" data-since="${c.startedAt}">${elapsed(c.startedAt)}</span>）` : ''}</dd>`);
   if (!isChat(c) || c.persona) rows.push(`<dt>エージェント</dt><dd>${personaIcon(c.persona, agentOf(c))}${esc(whoLabel(agentOf(c), c.persona))}</dd>`);
-  if (c.costUsd) rows.push(`<dt>コスト</dt><dd>$${c.costUsd.toFixed(3)}</dd>`);
+  const cost = hasSubtasks(c) ? subTotalCost(c) : c.costUsd;
+  if (cost) rows.push(`<dt>コスト</dt><dd>$${cost.toFixed(3)}${hasSubtasks(c) ? ' <span class="muted small">サブタスクを含む</span>' : ''}</dd>`);
   const parts = [`<section class="pg-sec"><dl class="d-meta pg-summary">${rows.join('')}</dl></section>`];
   // 競争の候補（採用・比べてもらう）
   const compete = competeBoxHtml(c);
@@ -1573,27 +1604,38 @@ function bindPromptEdit(c) {
       <div class="field"><span>最初の指示</span><div id="editSkill" class="skill-slot"></div><textarea id="editPrompt" rows="10">${esc(c.prompt)}</textarea>${c.attachments && c.attachments.length ? `<small class="muted">添付ファイル</small>${attachFilesHtml(c.attachments, { all: true })}` : ''}</div>
       <button class="btn primary" id="saveEdit">保存</button>
     </section>
-    ${canHaveSubtasks(c) ? `<section class="pg-sec" id="subEdit">
-      <div class="pg-sec-head"><b>${icon('branch')}サブタスク</b> <span class="muted small">分けて進めるときに足します。順番（直列・並列）は、開始したときに ${esc(agentShort(agentOf(c)))} が決めます</span></div>
-      ${subEditorHtml(c.subtasks ? c.subtasks.items : [])}
-      ${subMergeSelectHtml('editSubMerge', c.subtasks ? c.subtasks.merge : (state.board.settings || {}).subtaskMerge)}
-      <button class="btn" id="saveSubtasks">サブタスクを保存</button>
-    </section>` : ''}`;
-  const subBox = $('subEdit');
-  if (subBox) {
-    subBox.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-sact]');
-      if (b) subtaskAction(c, b);
-    });
-    $('saveSubtasks').onclick = () => {
-      const items = subRowsFrom(subBox);
-      runBusy('保存しています…', () => api.setSubtasks(c.id, { items, merge: $('editSubMerge').value }), items.length ? `サブタスクを ${items.length} 個にしました` : 'サブタスクをやめました');
-    };
-  }
+    <div id="subEditSlot"></div>`;
   let editSkill = c.skill || null;
   const drawEditSkill = () => renderSkillSlot('editSkill', editSkill, (v) => ((editSkill = v), drawEditSkill()), { disabled: false });
   drawEditSkill();
   $('saveEdit').onclick = () => runBusy('保存しています…', () => api.updateCard({ id: c.id, title: $('editTitle').value, prompt: $('editPrompt').value, skill: editSkill || '' }), '保存しました');
+}
+// 開始する前にサブタスクを足す・直す欄（サブタスクがあれば「サブタスク」タブ、なければ「進捗」タブに出す）
+function bindSubEdit(c, slot) {
+  slot.innerHTML = `<section class="pg-sec" id="subEdit">
+      <div class="pg-sec-head"><b>${icon('branch')}サブタスクを編集</b> <span class="muted small">分けて進めるときに足します。順番（直列・並列）は、開始したときに ${esc(agentShort(agentOf(c)))} が決めます</span></div>
+      ${subEditorHtml(c.subtasks ? c.subtasks.items : [])}
+      ${subMergeSelectHtml('editSubMerge', c.subtasks ? c.subtasks.merge : (state.board.settings || {}).subtaskMerge)}
+      <button class="btn" id="saveSubtasks">サブタスクを保存</button>
+    </section>`;
+  const subBox = $('subEdit');
+  subBox.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sact]');
+    if (b) subtaskAction(c, b);
+  });
+  $('saveSubtasks').onclick = () => {
+    const items = subRowsFrom(subBox);
+    runBusy('保存しています…', () => api.setSubtasks(c.id, { items, merge: $('editSubMerge').value }), items.length ? `サブタスクを ${items.length} 個にしました` : 'サブタスクをやめました');
+  };
+}
+// 進捗タブの編集欄: サブタスクがないときだけ、ここで足せるようにする（タイトルと指示の入力中の内容は消さない）
+function syncProgressSubEdit(c) {
+  const slot = $('subEditSlot');
+  if (!slot) return;
+  const want = canHaveSubtasks(c) && !hasSubtasks(c);
+  if (want === !!slot.firstChild) return;
+  slot.innerHTML = '';
+  if (want) bindSubEdit(c, slot);
 }
 // force: 作り直す（タブを開いたとき）。そうでなければ、中身が変わったときだけ描き直す（開いている報告・スクロールは保つ）
 function renderProgress(c, { force = false } = {}) {
@@ -1606,6 +1648,7 @@ function renderProgress(c, { force = false } = {}) {
     body.dataset.progressSig = '';
     if (editable) bindPromptEdit(c);
   }
+  syncProgressSubEdit(c);
   const html = progressHtml(c);
   // 経過時間は1秒ごとに書き換わるので、比べるときは除く
   const sig = html.replace(/(<span class="elapsed"[^>]*>)[^<]*/g, '$1');
@@ -1619,6 +1662,10 @@ function renderProgress(c, { force = false } = {}) {
   bindChartZoom(view);
   const chart = view.querySelector('.pg-chart');
   if (chart && scroll) [chart.scrollLeft, chart.scrollTop] = scroll;
+  bindProgressView(c, view);
+}
+// 進捗タブ・サブタスクタブの中身のボタンやリンク（描き直すたびに付け直す）
+function bindProgressView(c, view) {
   view.querySelectorAll('details[data-rkey]').forEach((d) => (d.ontoggle = () => (d.open ? state.relayOpen.add(d.dataset.rkey) : state.relayOpen.delete(d.dataset.rkey))));
   view.querySelectorAll('[data-open-card]').forEach((a) => (a.onclick = (e) => (e.preventDefault(), card(a.dataset.openCard) && select(a.dataset.openCard))));
   view.querySelectorAll('[data-sact]').forEach((b) => (b.onclick = () => subtaskAction(c, b)));
@@ -1628,6 +1675,24 @@ function renderProgress(c, { force = false } = {}) {
   };
   view.querySelectorAll('.issue-chip').forEach((a) => (a.onclick = () => run(() => api.openExternal(a.dataset.url))));
 }
+// サブタスクタブ。force や描き直しの考え方は renderProgress と同じ
+function renderSubtasksTab(c, { force = false } = {}) {
+  const body = $('detailBody');
+  const editable = c.status === 'todo' && canHaveSubtasks(c);
+  if (force || !$('subtasksView') || body.dataset.subtasksCard !== c.id || body.dataset.subtasksEdit !== String(editable)) {
+    body.innerHTML = `<div class="pad progress"><div id="subtasksView"></div>${editable ? '<div id="subtasksEdit"></div>' : ''}</div>`;
+    body.dataset.subtasksCard = c.id;
+    body.dataset.subtasksEdit = String(editable);
+    body.dataset.subtasksSig = '';
+    if (editable) bindSubEdit(c, $('subtasksEdit'));
+  }
+  const html = subtaskListHtml(c);
+  if (body.dataset.subtasksSig === html) return;
+  body.dataset.subtasksSig = html;
+  const view = $('subtasksView');
+  view.innerHTML = html;
+  bindProgressView(c, view);
+}
 // ログが届くたびに描き直すと重いので、まとめて描き直す
 let progressTimer = null;
 function scheduleProgress() {
@@ -1636,6 +1701,7 @@ function scheduleProgress() {
     progressTimer = null;
     const c = card(state.selected);
     if (c && state.tab === 'progress') renderProgress(c);
+    else if (c && state.tab === 'subtasks') renderSubtasksTab(c);
   }, 300);
 }
 
@@ -1727,7 +1793,7 @@ function renderDetailHead() {
       <h2 class="d-title" id="detailTitleText" title="${esc(c.title)}">${esc(c.title)}</h2>
       <button class="icon" id="closeDetail" title="閉じる">✕</button>
     </div>`;
-  // 上の段はボタンだけ（1行・高さは固定）。Pipeline・サブタスクの進み具合と競争は「進捗」タブ、
+  // 上の段はボタンだけ（1行・高さは固定）。Pipeline・全体の進み具合と競争は「進捗」タブ、サブタスクの一覧は「サブタスク」タブ、
   // 中断・エラー・コンフリクト・サブタスクの提案は「チャット」タブの最後に出す
   $('detailHead').innerHTML = `<div class="d-actions">${btns.join('')}</div>`;
   $('closeDetail').onclick = closeDetailOrBack;
@@ -2617,6 +2683,8 @@ async function renderDetailBody() {
     if (live) $('btwInput').focus();
   } else if (state.tab === 'progress') {
     renderProgress(c, { force: true });
+  } else if (state.tab === 'subtasks') {
+    renderSubtasksTab(c, { force: true });
   }
 }
 
@@ -3876,7 +3944,7 @@ async function openSettings() {
      <div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
        <small>「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
-     <small class="muted s-note">仕様を詰めるときに、分けたほうがよい大きなタスクなら、エージェントがサブタスクに分けることを提案します（「サブタスクでやる」と答えたら分けます）。開始前のタスクには、進捗タブから手動でサブタスクを足せます。</small>
+     <small class="muted s-note">仕様を詰めるときに、分けたほうがよい大きなタスクなら、エージェントがサブタスクに分けることを提案します（「サブタスクでやる」と答えたら分けます）。開始前のタスクには、進捗タブから手動でサブタスクを足せます（足したあとは「サブタスク」タブで見られます）。</small>
      <label class="field"><span>サブタスクが終わったら（既定。タスクごとに開始前に変えられます）</span><select id="sSubtaskMerge"><option value="auto"${s.subtaskMerge !== 'review' ? ' selected' : ''}>自動で親のブランチにマージする</option><option value="review"${s.subtaskMerge === 'review' ? ' selected' : ''}>確かめてからマージする</option></select></label>
 
      <h3 class="s-section">アプリ全体の設定</h3>
@@ -4907,13 +4975,17 @@ api.onBoard((board) => {
     const c = card(state.selected);
     if (c) {
       updateBtwTab(c);
+      // サブタスクがなくなって、今のタブが消えたら開き直す
+      const tabBefore = state.tab;
+      updateTabsFor(c);
+      if (state.tab !== tabBefore) renderDetailBody();
       drawLogActions(c);
       // 実行が終わった・マージしたなど状態が変わったら worktree タブを読み直す
       if (state.tab === 'worktree' && state.wtStatus !== `${c.id}:${c.status}:${c.worktreePath || ''}`) {
         if (state.wtStatus) renderWorktree(c, { quiet: true });
       }
       state.wtStatus = `${c.id}:${c.status}:${c.worktreePath || ''}`;
-      if (state.tab === 'progress') scheduleProgress();
+      if (state.tab === 'progress' || state.tab === 'subtasks') scheduleProgress();
       if (state.tab === 'btw') {
         const list = $('btwList');
         if (list) list.innerHTML = btwListHtml(c);

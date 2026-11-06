@@ -946,6 +946,7 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .pg-bar span { display: block; height: 100%; background: var(--ok); transition: width 0.3s ease; }
 .pg-todos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
 .pg-todos li { display: flex; gap: 8px; align-items: baseline; }
+.pg-active { margin-top: 8px; }
 .td-mark { flex: none; width: 16px; text-align: center; font-weight: 700; color: var(--muted); }
 .td-completed .td-mark { color: var(--ok); }
 .td-completed .td-text { color: var(--muted); text-decoration: line-through; }
