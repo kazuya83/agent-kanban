@@ -3641,7 +3641,7 @@ async function openPr(c) {
 function agentConfigHtml(a, s, body) {
   const on = enabledAgents(s).includes(a);
   return `<div class="agent-cfg ${on ? 'on' : ''}" data-agent="${a}">
-    <label class="check agent-cfg-head"><input type="checkbox" class="sUse" value="${a}" ${on ? 'checked' : ''} /> ${agentIcon(a)}<b>${esc(agentLabel(a))}</b> を使う</label>
+    <label class="check agent-cfg-head"><input type="checkbox" class="sUse" value="${a}" ${on ? 'checked' : ''} /> ${agentIcon(a)}${tr('<b>{v1}</b> を使う', { v1: esc(agentLabel(a)) })}</label>
     <div class="agent-cfg-body" ${on ? '' : 'hidden'}>${body}</div></div>`;
 }
 
@@ -3902,7 +3902,7 @@ function openRemoteSettings() {
           if (!r) return;
           pickedPub = r;
           $('rHostPubPath').textContent = r.path;
-          $('rHostPubInfo').innerHTML = `<small class="muted">${tr('鍵: {v1}{v2}', { v1: (esc(r.type)), v2: (r.comment ? `（${esc(r.comment)}）` : '') })}</small>`;
+          $('rHostPubInfo').innerHTML = `<small class="muted">${tr('鍵: {v1}{v2}', { v1: (esc(r.type)), v2: (r.comment ? tr('（{v1}）', { v1: (esc(r.comment)) }) : '') })}</small>`;
           $('rInstallPub').disabled = false;
         };
         if ($('rInstallPub')) $('rInstallPub').onclick = async () => {
@@ -3987,7 +3987,7 @@ function renderSettingsView() {
       <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> ${tr('タスクが完了したとき、前に完了したタスクと似た作業が続いていたら、スキルにしないか通知で聞く（右上のベル）')}</label>
       <label class="check"><input type="checkbox" id="sDeleteSessions" ${s.deleteSessionsOnMerge !== false ? 'checked' : ''} /> ${tr('マージして完了したら、そのタスクの作業に使った Claude Code の会話（セッション）を消す（引き継いだ元の会話は残します）')}</label>`,
     update: `<div id="updPanel" class="gh-panel upd-panel">${updatePanelHtml(state.update)}</div>`,
-    branch: `<small class="muted s-note">${tr('「このプロジェクト」の項目{v1}は、プロジェクト（リポジトリ）ごとに覚えます。タブを切り替えると、そのプロジェクトの設定に変わります。初めて開いたプロジェクトは初期値から始まります。', { v1: (projectName ? `（<code>${esc(projectName)}</code>）` : '') })}</small>
+    branch: `<small class="muted s-note">${tr('「このプロジェクト」の項目{v1}は、プロジェクト（リポジトリ）ごとに覚えます。タブを切り替えると、そのプロジェクトの設定に変わります。初めて開いたプロジェクトは初期値から始まります。', { v1: (projectName ? tr('（<code>{v1}</code>）', { v1: (esc(projectName)) }) : '') })}</small>
       <label class="field">${tr('<span>ベースブランチ（worktree の作成元・マージ先）</span>')}
         <select id="sBase">${baseOptions({ branches: [], current: '' })}</select></label>
       <label class="field">${tr('<span>レビュー後の取り込み方</span>')}
@@ -4013,7 +4013,7 @@ function renderSettingsView() {
         </div>
         <div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div></div>`,
     permission: `<label class="field">${tr('<span>権限モード</span>')}
-        <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+        <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(tr(l))}</option>`).join('')}</select>
         <small>${tr('自動で許可されない操作は、カードに「承認待ち」として表示されます。')}</small></label>
       <label class="field">${tr('<span>Claude Code に最初から許可しておくツール（カンマか改行で区切る）</span>')}
         <textarea id="sAllowed" rows="2" placeholder="${tr('例: Bash(npm test:*), Bash(git status), WebSearch')}">${esc(s.allowedTools)}</textarea></label>`,
@@ -4921,7 +4921,7 @@ function renderGh(st) {
   }
   if (st.hasProjectScope === false && state.board.settings.issueStatusSync !== false) {
     el.className = 'gh-panel gh-warn';
-    el.innerHTML = `${tr('<span>{v1}gh で GitHub にログインしています{v2}</span>', { v1: (icon('check')), v2: (st.user ? `（<b>${esc(st.user)}</b>）` : '') })}
+    el.innerHTML = `${tr('<span>{v1}gh で GitHub にログインしています{v2}</span>', { v1: (icon('check')), v2: (st.user ? tr('（<b>{v1}</b>）', { v1: (esc(st.user)) }) : '') })}
       <p>${tr('Issue のステータス（GitHub Projects の In progress / In review / Done）を自動で変えるには、project の権限が必要です。')}</p>
       <p><button class="btn primary small" id="ghScope">${tr('Projects の権限を追加')}</button> ${tr('<span class="muted small">ブラウザが開くので、表示されたコードを入力します</span>')}</p>
       <div><button class="btn small ghost" id="ghRecheck">${tr('もう一度確認')}</button></div>${log}`;
@@ -4930,7 +4930,7 @@ function renderGh(st) {
     return;
   }
   el.className = 'gh-panel ok';
-  el.innerHTML = `${tr('<span>{v1}gh で GitHub にログインしています{v2}</span>', { v1: (icon('check')), v2: (st.user ? `（<b>${esc(st.user)}</b>）` : '') })}`;
+  el.innerHTML = `${tr('<span>{v1}gh で GitHub にログインしています{v2}</span>', { v1: (icon('check')), v2: (st.user ? tr('（<b>{v1}</b>）', { v1: (esc(st.user)) }) : '') })}`;
 }
 
 async function ghAction(kind) {

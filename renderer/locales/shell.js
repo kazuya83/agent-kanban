@@ -647,6 +647,12 @@
     "fr": "Clé : {v1}{v2}",
     "zh": "密钥：{v1}{v2}"
   },
+  "（{v1}）": {
+    "en": " ({v1})",
+    "es": " ({v1})",
+    "fr": " ({v1})",
+    "zh": "（{v1}）"
+  },
   "公開鍵のファイルを選んでください": {
     "en": "Choose a public key file",
     "es": "Elige el archivo de la clave pública",
@@ -791,6 +797,12 @@
     "fr": "Les réglages de « Ce projet »{v1} sont mémorisés par dépôt. Changer d’onglet charge les réglages de ce projet. Un projet ouvert pour la première fois part des valeurs initiales.",
     "zh": "「此项目」中的项{v1}会按仓库分别记住。切换标签会换成该项目的设置。第一次打开的项目从初始值开始。"
   },
+  "（<code>{v1}</code>）": {
+    "en": " (<code>{v1}</code>)",
+    "es": " (<code>{v1}</code>)",
+    "fr": " (<code>{v1}</code>)",
+    "zh": "（<code>{v1}</code>）"
+  },
   "<span>ベースブランチ（worktree の作成元・マージ先）</span>": {
     "en": "<span>Base branch (where worktrees are created and merged)</span>",
     "es": "<span>Rama base (origen del worktree y destino del merge)</span>",
@@ -916,6 +928,30 @@
     "es": "Lo que no se permite automáticamente aparece en la tarjeta como «esperando aprobación».",
     "fr": "Ce qui n’est pas autorisé automatiquement apparaît sur la carte comme « en attente d’approbation ».",
     "zh": "不会自动允许的操作会在卡片上显示为「等待批准」。"
+  },
+  "毎回確認する（すべての操作をカードで承認）": {
+    "en": "Ask every time (approve every action on a card)",
+    "es": "Preguntar cada vez (aprobar todas las acciones en una tarjeta)",
+    "fr": "Demander à chaque fois (approuver chaque action sur une carte)",
+    "zh": "每次都确认（所有操作都在卡片上批准）"
+  },
+  "ファイル編集は自動で許可、コマンドなどは確認する（おすすめ）": {
+    "en": "Allow file edits automatically, and confirm commands and the rest (recommended)",
+    "es": "Permitir automáticamente las ediciones de archivos y confirmar los comandos y lo demás (recomendado)",
+    "fr": "Autoriser automatiquement les modifications de fichiers, et confirmer les commandes et le reste (recommandé)",
+    "zh": "自动允许文件编辑，命令等操作需要确认（推荐）"
+  },
+  "計画だけ立てる（ファイルは変更しない）": {
+    "en": "Plan only (do not change files)",
+    "es": "Solo planificar (no modificar archivos)",
+    "fr": "Planifier seulement (ne pas modifier les fichiers)",
+    "zh": "只制定计划（不修改文件）"
+  },
+  "すべて自動で許可する（注意）": {
+    "en": "Allow everything automatically (caution)",
+    "es": "Permitir todo automáticamente (precaución)",
+    "fr": "Tout autoriser automatiquement (attention)",
+    "zh": "全部自动允许（注意）"
   },
   "<span>Claude Code に最初から許可しておくツール（カンマか改行で区切る）</span>": {
     "en": "<span>Tools to allow Claude Code from the start (separate with commas or new lines)</span>",
@@ -1709,6 +1745,12 @@
     "fr": "<span>{v1}Connecté à GitHub avec gh{v2}</span>",
     "zh": "<span>{v1}已用 gh 登录 GitHub{v2}</span>"
   },
+  "（<b>{v1}</b>）": {
+    "en": " (<b>{v1}</b>)",
+    "es": " (<b>{v1}</b>)",
+    "fr": " (<b>{v1}</b>)",
+    "zh": "（<b>{v1}</b>）"
+  },
   "Issue のステータス（GitHub Projects の In progress / In review / Done）を自動で変えるには、project の権限が必要です。": {
     "en": "Changing Issue status (GitHub Projects: In progress / In review / Done) requires the project scope.",
     "es": "Para cambiar el estado del Issue (In progress / In review / Done en GitHub Projects) hace falta el permiso project.",
@@ -1948,6 +1990,12 @@
     "es": "Agentes en uso",
     "fr": "Agents utilisés",
     "zh": "使用的智能体"
+  },
+  "<b>{v1}</b> を使う": {
+    "en": "Use <b>{v1}</b>",
+    "es": "Usar <b>{v1}</b>",
+    "fr": "Utiliser <b>{v1}</b>",
+    "zh": "使用 <b>{v1}</b>"
   },
   "カスタムエージェント": {
     "en": "Custom agents",

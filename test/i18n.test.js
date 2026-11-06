@@ -435,3 +435,143 @@ test('preload: 言語は同期で読み、保存に失敗したら例外にす�
     ['app:setLanguage', 'boom'],
   ]);
 });
+
+test('設定・公開鍵・gh の後ろにつく括弧は、英西仏では空白のあと。空のときと中国語・日本語は空白を足さない', () => {
+  const src = read('renderer/renderer.js');
+  const remote = sliceBetween(src, 'function openRemoteSettings()', 'function pickRepo(');
+  const gh = sliceBetween(src, 'async function refreshGh()', 'function timeAgo(');
+  assert.match(remote, /projectName \? tr\('（<code>\{v1\}<\/code>）'/);
+  assert.match(remote, /r\.comment \? tr\('（\{v1\}）'/);
+  assert.match(gh, /st\.user \? tr\('（<b>\{v1\}<\/b>）'/);
+  assert.doesNotMatch(src, /`（<code>\$\{esc\(projectName\)\}<\/code>）`/);
+  assert.doesNotMatch(src, /`（\$\{esc\(r\.comment\)\}）`/);
+  assert.doesNotMatch(src, /`（<b>\$\{esc\(st\.user\)\}<\/b>）`/);
+
+  const projectKey = '「このプロジェクト」の項目{v1}は、プロジェクト（リポジトリ）ごとに覚えます。タブを切り替えると、そのプロジェクトの設定に変わります。初めて開いたプロジェクトは初期値から始まります。';
+  const compose = (name, comment, user) => ({
+    project: I18n.tr(projectKey, { v1: name ? I18n.tr('（<code>{v1}</code>）', { v1: name }) : '' }),
+    key: I18n.tr('鍵: {v1}{v2}', { v1: 'ssh-ed25519', v2: comment ? I18n.tr('（{v1}）', { v1: comment }) : '' }),
+    gh: I18n.tr('<span>{v1}gh で GitHub にログインしています{v2}</span>', { v1: '', v2: user ? I18n.tr('（<b>{v1}</b>）', { v1: user }) : '' }),
+  });
+  const noExtra = (row) => {
+    for (const s of Object.values(row)) {
+      assert.strictEqual(s, s.trim(), s);
+      assert.doesNotMatch(s, /  /, s);
+    }
+    // 外側の文に元からある括弧（「プロジェクト（リポジトリ）」）は残る。足した括弧だけが無いこと
+    assert.doesNotMatch(row.project, /<code>/);
+    assert.doesNotMatch(row.key, /[（(]/);
+    assert.doesNotMatch(row.gh, /<b>/);
+  };
+
+  I18n.setLanguage('en');
+  assert.deepStrictEqual(compose('repo', 'comment', 'user'), {
+    project: 'Settings under “This project” (<code>repo</code>) are remembered per repository. Switching tabs switches to that project’s settings. A project opened for the first time starts from the defaults.',
+    key: 'Key: ssh-ed25519 (comment)',
+    gh: '<span>Signed in to GitHub with gh (<b>user</b>)</span>',
+  });
+  noExtra(compose('', '', ''));
+
+  I18n.setLanguage('es');
+  assert.deepStrictEqual(compose('repo', 'comment', 'user'), {
+    project: 'Las opciones de «Este proyecto» (<code>repo</code>) se recuerdan por repositorio. Al cambiar de pestaña cambian los ajustes de ese proyecto. Un proyecto abierto por primera vez empieza con los valores iniciales.',
+    key: 'Clave: ssh-ed25519 (comment)',
+    gh: '<span>Sesión iniciada en GitHub con gh (<b>user</b>)</span>',
+  });
+  noExtra(compose('', '', ''));
+
+  I18n.setLanguage('fr');
+  assert.deepStrictEqual(compose('repo', 'comment', 'user'), {
+    project: 'Les réglages de « Ce projet » (<code>repo</code>) sont mémorisés par dépôt. Changer d’onglet charge les réglages de ce projet. Un projet ouvert pour la première fois part des valeurs initiales.',
+    key: 'Clé : ssh-ed25519 (comment)',
+    gh: '<span>Connecté à GitHub avec gh (<b>user</b>)</span>',
+  });
+  noExtra(compose('', '', ''));
+
+  I18n.setLanguage('zh');
+  assert.deepStrictEqual(compose('repo', 'comment', 'user'), {
+    project: '「此项目」中的项（<code>repo</code>）会按仓库分别记住。切换标签会换成该项目的设置。第一次打开的项目从初始值开始。',
+    key: '密钥：ssh-ed25519（comment）',
+    gh: '<span>已用 gh 登录 GitHub（<b>user</b>）</span>',
+  });
+  noExtra(compose('', '', ''));
+
+  I18n.setLanguage('ja');
+  const ja = compose('repo', 'comment', 'user');
+  assert.strictEqual(ja.project, '「このプロジェクト」の項目（<code>repo</code>）は、プロジェクト（リポジトリ）ごとに覚えます。タブを切り替えると、そのプロジェクトの設定に変わります。初めて開いたプロジェクトは初期値から始まります。');
+  assert.strictEqual(ja.key, '鍵: ssh-ed25519（comment）');
+  assert.strictEqual(ja.gh, '<span>gh で GitHub にログインしています（<b>user</b>）</span>');
+  noExtra(compose('', '', ''));
+});
+
+test('権限モードと「を使う」は描画時に tr を通り、4言語の訳がある', () => {
+  const src = read('renderer/renderer.js');
+  const modes = [
+    '毎回確認する（すべての操作をカードで承認）',
+    'ファイル編集は自動で許可、コマンドなどは確認する（おすすめ）',
+    '計画だけ立てる（ファイルは変更しない）',
+    'すべて自動で許可する（注意）',
+  ];
+  const head = src.slice(0, src.indexOf('function openRemoteSettings()'));
+  const listed = [...head.matchAll(/^\s+\['(?:default|acceptEdits|plan|bypassPermissions)', '([^']+)'\],$/gm)].map((m) => m[1]);
+  assert.deepStrictEqual(listed, modes);
+  const view = sliceBetween(src, 'function renderSettingsView()', 'function pickRepo(');
+  const perm = view.slice(view.indexOf('permission:'), view.indexOf('task:'));
+  assert.match(perm, /esc\(tr\(l\)\)/);
+  assert.doesNotMatch(perm, />\$\{esc\(l\)\}</);
+  // tr(l) は文字列リテラルではないので、openRemoteSettings からの漏れ検出には入らない
+  for (const key of modes) assert.ok(!shellKeys().includes(key), key);
+
+  const useKey = '<b>{v1}</b> を使う';
+  const agent = sliceBetween(src, 'function agentConfigHtml(', 'function openRemoteSettings()');
+  assert.match(agent, /\$\{agentIcon\(a\)\}\$\{tr\('<b>\{v1\}<\/b> を使う'/);
+  assert.doesNotMatch(agent, /\$\{esc\(agentLabel\(a\)\)\}<\/b> を使う/);
+  assert.ok(!shellKeys().includes(useKey), 'agentConfigHtml は検出範囲の外');
+
+  const en = {
+    [modes[0]]: 'Ask every time (approve every action on a card)',
+    [modes[1]]: 'Allow file edits automatically, and confirm commands and the rest (recommended)',
+    [modes[2]]: 'Plan only (do not change files)',
+    [modes[3]]: 'Allow everything automatically (caution)',
+  };
+  const es = {
+    [modes[0]]: 'Preguntar cada vez (aprobar todas las acciones en una tarjeta)',
+    [modes[1]]: 'Permitir automáticamente las ediciones de archivos y confirmar los comandos y lo demás (recomendado)',
+    [modes[2]]: 'Solo planificar (no modificar archivos)',
+    [modes[3]]: 'Permitir todo automáticamente (precaución)',
+  };
+  const fr = {
+    [modes[0]]: 'Demander à chaque fois (approuver chaque action sur une carte)',
+    [modes[1]]: 'Autoriser automatiquement les modifications de fichiers, et confirmer les commandes et le reste (recommandé)',
+    [modes[2]]: 'Planifier seulement (ne pas modifier les fichiers)',
+    [modes[3]]: 'Tout autoriser automatiquement (attention)',
+  };
+  const zh = {
+    [modes[0]]: '每次都确认（所有操作都在卡片上批准）',
+    [modes[1]]: '自动允许文件编辑，命令等操作需要确认（推荐）',
+    [modes[2]]: '只制定计划（不修改文件）',
+    [modes[3]]: '全部自动允许（注意）',
+  };
+  for (const [lang, table] of [['en', en], ['es', es], ['fr', fr], ['zh', zh]]) {
+    I18n.setLanguage(lang);
+    for (const key of modes) {
+      assert.strictEqual(I18n.has(key, lang), true, `${lang}: ${key}`);
+      assert.strictEqual(I18n.tr(key), table[key]);
+      assert.notStrictEqual(I18n.tr(key), key);
+    }
+    assert.strictEqual(I18n.has(useKey, lang), true);
+    assert.notStrictEqual(I18n.tr(useKey, { v1: 'Claude Code' }), `${useKey}`);
+  }
+  I18n.setLanguage('en');
+  assert.strictEqual(I18n.tr(useKey, { v1: 'Claude Code' }), 'Use <b>Claude Code</b>');
+  I18n.setLanguage('es');
+  assert.strictEqual(I18n.tr(useKey, { v1: 'Claude Code' }), 'Usar <b>Claude Code</b>');
+  I18n.setLanguage('fr');
+  assert.strictEqual(I18n.tr(useKey, { v1: 'Claude Code' }), 'Utiliser <b>Claude Code</b>');
+  I18n.setLanguage('zh');
+  assert.strictEqual(I18n.tr(useKey, { v1: 'Claude Code' }), '使用 <b>Claude Code</b>');
+  I18n.setLanguage('ja');
+  for (const key of modes) assert.strictEqual(I18n.tr(key), key);
+  assert.strictEqual(I18n.tr(useKey, { v1: 'Claude Code' }), '<b>Claude Code</b> を使う');
+  assert.strictEqual(I18n.tr(useKey, { v1: '' }), '<b></b> を使う');
+});
