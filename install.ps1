@@ -1,18 +1,18 @@
-# Agent Kanban のインストーラー（Windows）
+# Agent Kanban installer (Windows)
 #
 #   irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
 #
-# バージョンを指定する:  $env:AGENT_KANBAN_VERSION = "0.1.2"; irm ... | iex
-# アンインストール:      $env:AGENT_KANBAN_UNINSTALL = "1"; irm ... | iex
+# Pin a version:  $env:AGENT_KANBAN_VERSION = "0.1.2"; irm ... | iex
+# Uninstall:      $env:AGENT_KANBAN_UNINSTALL = "1"; irm ... | iex
 #
-# インストーラー（setup.exe）は使わず、zip を %LOCALAPPDATA%\Programs\Agent Kanban に展開して
-# スタートメニューとデスクトップにショートカットを作る（管理者権限は不要）。
+# This does not use setup.exe. It extracts the zip into %LOCALAPPDATA%\Programs\Agent Kanban
+# and creates Start menu and desktop shortcuts (no administrator privileges required).
 $ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'  # Invoke-WebRequest を速くする
+$ProgressPreference = 'SilentlyContinue'  # makes Invoke-WebRequest faster
 
 $repo = 'kazuya83/agent-kanban'
 $appName = 'Agent Kanban'
-# 前の名前（Claude Agent Kanban）で入れたものは、入れ替えるときに片付ける
+# Builds installed under the previous name (Claude Agent Kanban) are removed on replace
 $oldAppName = 'Claude Agent Kanban'
 $version = if ($env:AGENT_KANBAN_VERSION) { $env:AGENT_KANBAN_VERSION } else { 'latest' }
 $dest = Join-Path $env:LOCALAPPDATA "Programs\$appName"
@@ -26,51 +26,51 @@ $oldLinks = @(
 )
 
 function Info($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
-function Warn($msg) { Write-Host "警告: $msg" -ForegroundColor Yellow }
+function Warn($msg) { Write-Host "Warning: $msg" -ForegroundColor Yellow }
 
 function Stop-App {
   Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ($_.Path -like "$dest\*" -or $_.Path -like "$oldDest\*") } | ForEach-Object {
-    Info "起動中の $appName を終了します"
+    Info "Quitting running $appName"
     $_ | Stop-Process -Force -ErrorAction SilentlyContinue
   }
   Start-Sleep -Milliseconds 500
 }
 
-# 前の名前で入れたアプリとショートカットを消す
+# Remove the app and shortcuts installed under the previous name
 function Remove-OldApp {
   foreach ($p in @($oldDest) + $oldLinks) {
-    if (Test-Path $p) { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue; Info "前の名前のものを削除しました: $p" }
+    if (Test-Path $p) { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue; Info "Removed the previous app: $p" }
   }
 }
 
 if ($env:AGENT_KANBAN_UNINSTALL) {
   Stop-App
   foreach ($p in @($dest, $startMenuLnk, $desktopLnk)) {
-    if (Test-Path $p) { Remove-Item $p -Recurse -Force; Info "削除しました: $p" }
+    if (Test-Path $p) { Remove-Item $p -Recurse -Force; Info "Removed: $p" }
   }
   Remove-OldApp
-  Info 'ボードのデータ（%APPDATA%\agent-kanban）は残しています。不要なら手動で削除してください。'
+  Info 'Board data (%APPDATA%\agent-kanban) was left in place. Delete it manually if you no longer need it.'
   return
 }
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# GitHub API は使わない（未ログインだと回数制限で 403 になることがあるため）。
-# 最新版は github.com/.../releases/latest のリダイレクト先（.../releases/tag/v0.1.2）から調べる
-Info "リリース情報を取得しています（${version}）"
+# Do not use the GitHub API (unauthenticated calls can hit the rate limit and return 403).
+# The latest release is taken from the redirect target of github.com/.../releases/latest (.../releases/tag/v0.1.2).
+Info "Fetching release information (${version})"
 if ($version -eq 'latest') {
   $resp = Invoke-WebRequest -Uri "https://github.com/$repo/releases/latest" -Method Head -UseBasicParsing
-  # Windows PowerShell 5.1 と PowerShell 7 で、最終的な URL の取り方が違う
+  # Windows PowerShell 5.1 and PowerShell 7 expose the final URL differently
   $final = if ($resp.BaseResponse.ResponseUri) { $resp.BaseResponse.ResponseUri.AbsoluteUri } else { $resp.BaseResponse.RequestMessage.RequestUri.AbsoluteUri }
   $tag = ($final.TrimEnd('/') -split '/')[-1]
 } else {
   $tag = "v$($version.TrimStart('v'))"
 }
-if ($tag -notmatch '^v\d') { throw "リリースが見つかりません（$tag）" }
+if ($tag -notmatch '^v\d') { throw "Release not found ($tag)" }
 $tagNum = $tag.TrimStart('v')
 $assetName = "agent-kanban-$tagNum-win-x64.zip"
 $assetUrl = "https://github.com/$repo/releases/download/$tag/$assetName"
-# 前の名前のころのリリース（claude-agent-kanban-…）
+# Release from when the project used the previous name (claude-agent-kanban-…)
 $oldAssetName = "claude-agent-kanban-$tagNum-win-x64.zip"
 $oldAssetUrl = "https://github.com/$repo/releases/download/$tag/$oldAssetName"
 
@@ -78,26 +78,26 @@ $tmpDir = Join-Path $env:TEMP ("agent-kanban-" + [guid]::NewGuid().ToString('N')
 New-Item -ItemType Directory -Path $tmpDir | Out-Null
 try {
   $zip = Join-Path $tmpDir $assetName
-  Info "ダウンロードしています: $assetName"
+  Info "Downloading: $assetName"
   try {
     Invoke-WebRequest -Uri $assetUrl -OutFile $zip -UseBasicParsing
   } catch {
     try {
-      Info "ダウンロードしています: $oldAssetName"
+      Info "Downloading: $oldAssetName"
       Invoke-WebRequest -Uri $oldAssetUrl -OutFile $zip -UseBasicParsing
     } catch {
-      throw "ダウンロードできませんでした: $assetUrl（バージョン $tag に Windows 用の zip があるか、https://github.com/$repo/releases で確認してください。zip は v0.1.1 以降にあります）"
+      throw "Download failed: $assetUrl (check that version $tag has a Windows zip at https://github.com/$repo/releases. The zip exists from v0.1.1 onward)"
     }
   }
   Unblock-File -Path $zip
 
-  Info '展開しています…'
+  Info 'Extracting...'
   $unpacked = Join-Path $tmpDir 'app'
   Expand-Archive -Path $zip -DestinationPath $unpacked -Force
-  # zip の中身がフォルダ1つに入っている場合にも対応する（前の名前のころのリリースなら Claude Agent Kanban.exe）
+  # Also handle a zip whose contents sit in a single folder (Claude Agent Kanban.exe for a release from the previous name)
   $found = Get-ChildItem $unpacked -Recurse -Filter "$appName.exe" | Select-Object -First 1
   if (-not $found) { $found = Get-ChildItem $unpacked -Recurse -Filter "$oldAppName.exe" | Select-Object -First 1 }
-  if (-not $found) { throw "zip の中に $appName.exe が見つかりません" }
+  if (-not $found) { throw "Could not find $appName.exe inside the zip" }
   $root = $found.DirectoryName
   $exe = Join-Path $dest $found.Name
 
@@ -111,7 +111,7 @@ try {
 }
 Get-ChildItem $dest -Recurse -File | Unblock-File
 
-# ショートカット
+# Shortcuts
 $shell = New-Object -ComObject WScript.Shell
 foreach ($lnkPath in @($startMenuLnk, $desktopLnk)) {
   try {
@@ -121,19 +121,19 @@ foreach ($lnkPath in @($startMenuLnk, $desktopLnk)) {
     $lnk.IconLocation = "$exe,0"
     $lnk.Save()
   } catch {
-    Warn "ショートカットを作れませんでした: $lnkPath"
+    Warn "Could not create shortcut: $lnkPath"
   }
 }
 
-Info "インストールしました: $dest（$tag）"
-Info "スタートメニューとデスクトップの「$appName」から起動できます。"
+Info "Installed: $dest ($tag)"
+Info "Launch it from `"$appName`" on the Start menu or the desktop."
 
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Warn 'git が見つかりません。Git for Windows をインストールしてください: https://git-scm.com/' }
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Warn 'git was not found. Install Git for Windows: https://git-scm.com/' }
 if (-not (Get-Command claude -ErrorAction SilentlyContinue) -and -not (Get-Command codex -ErrorAction SilentlyContinue) -and -not (Get-Command gemini -ErrorAction SilentlyContinue) -and -not (Get-Command cursor-agent -ErrorAction SilentlyContinue)) {
-  Warn 'エージェントの CLI（claude / codex / gemini / cursor-agent）が見つかりません。使うものをインストールしてログインしてください（Claude Code・Codex CLI・Gemini CLI・Cursor CLI）。'
+  Warn 'No agent CLI (claude / codex / gemini / cursor-agent) was found. Install the one you use and sign in (Claude Code, Codex CLI, Gemini CLI, or Cursor CLI).'
 }
 
 if (-not $env:AGENT_KANBAN_NO_LAUNCH) {
-  Info '起動します'
+  Info 'Launching'
   Start-Process -FilePath $exe -WorkingDirectory $dest
 }

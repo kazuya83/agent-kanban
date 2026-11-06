@@ -1,100 +1,112 @@
+[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+
 # Agent Kanban
 
-AI コーディングエージェントの CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を、タスクごとに別々の git worktree で並列に動かし、カンバンボードで管理するデスクトップアプリです（Electron、Mac / Windows / Linux）。**1 つのリポジトリの中だけでなく、複数のリポジトリのタスクも同時に動かせます**。
+A desktop app (Electron, Mac / Windows / Linux) that runs AI coding-agent CLIs (Claude Code / Codex CLI / Gemini CLI / Cursor CLI) in parallel, each task in its own git worktree, and manages them on a kanban board. **It can run tasks from more than one repository at the same time, not only tasks inside a single repository.**
 
-![ボード: Todo・実行中・レビュー・完了の列。実行中のカードには、質問・承認待ち・作業中の状態が出ている](docs/board.png)
+![Board: Todo, Running, Review, and Done columns. Cards in Running show question, waiting-for-approval, and working states](docs/board.png)
 
-## しくみ
+## How it works
 
-- **1 タスク = 1 worktree = 1 ブランチ**。リポジトリの隣の `<repo>.worktrees/<id>` に worktree を作り、`agent/<内容>-<id>` のブランチで作業させます。作業中のタスク同士や、手元の作業ツリーとはぶつかりません
-- **エージェントは CLI をそのまま起動します**。Claude Code は `claude -p --input-format stream-json --output-format stream-json` で動かし、出力をログとしてカードに表示します。ログイン・モデル・`CLAUDE.md`・スキルは、ターミナルで使うときと同じものが使われます
-- **承認は Claude Code の `--permission-prompt-tool` で受けます**。権限モードや `--allowedTools` で自動で許可されない操作だけが、カードに「承認待ち」として出ます
-- **終わったら、マージ（`--no-ff`）か PR の作成（`gh`）で取り込みます**。マージ先のブランチは選べ、マージしたあとに origin へ push することもできます
-- ボードの状態は Electron の userData フォルダの `board.json` に保存します。外部のサーバーは使いません
+- **1 task = 1 worktree = 1 branch.** It creates a worktree at `<repo>.worktrees/<id>` next to the repository and works on a branch named `agent/<summary>-<id>`. Tasks do not collide with each other or with the working tree you have open
+- **The agent is the CLI, started as-is.** Claude Code runs as `claude -p --input-format stream-json --output-format stream-json`, and its output is shown on the card as the log. Sign-in, model, `CLAUDE.md`, and skills are the same ones you use in the terminal
+- **Approval goes through Claude Code's `--permission-prompt-tool`.** Only actions that the permission mode or `--allowedTools` does not auto-allow show up on the card as waiting for approval
+- **When it finishes, you bring the work in by merging (`--no-ff`) or opening a PR (`gh`).** You can choose the target branch, and you can push to origin after the merge
+- Board state is stored in `board.json` in Electron's userData folder. There is no external server
 
-Codex / Gemini / Cursor では、CLI の制約から、カードでの承認・選択肢の質問・btw・金額の表示が使えません（詳しくは [docs/agents.md](docs/agents.md)）。
+On Codex / Gemini / Cursor, in-card approval, multiple-choice questions, btw, and cost display are unavailable because of CLI limits (see [docs/agents.md](docs/agents.md) (Japanese)).
 
-## 主な機能
+## Features
 
-### 複数のリポジトリを並列に動かす
-リポジトリはタブで開きます（3 つまで）。タブを切り替えても、ほかのリポジトリのタスクは止まらずに動き続けます。開いていないタブには、**動いているタスクの数**（青）と、**承認・質問などであなたの対応を待っているタスクの数**（橙）が出るので、どのリポジトリで手が必要かがタブだけで分かります。同時に動かすタスクの数の上限（設定の「同時に動かす数」）は、すべてのリポジトリで共有します。
+### Run several repositories in parallel
 
-![3 つのリポジトリをタブで開いているところ。開いていないタブに、動いているタスクの数と、対応を待っているタスクの数が出ている](docs/repo-tabs.png)
+Repositories open as tabs (up to 3). Switching tabs does not stop tasks in the other repositories. A tab that is not selected shows **how many tasks are running** (blue) and **how many tasks are waiting for you** (approval, a question, and so on, in orange), so you can see which repository needs you from the tabs alone. The limit on how many tasks run at once (the setting for how many to run at once) is shared across every repository.
 
-タブの「＋」か、開いているタブを押すと、最近開いたリポジトリから選べます。URL からのクローンや、新しいリポジトリの作成もここからできます。
+![Three repositories open as tabs. Inactive tabs show how many tasks are running and how many are waiting for you](docs/repo-tabs.png)
 
-git で管理していないフォルダ（動画づくりなど、コード以外の作業）も開けます。そのときは worktree を作らずにフォルダの中で直接タスクを動かし、終わったら「完了にする」で完了にします（詳しくは [docs/usage.md](docs/usage.md)）。
+The "+" on the tab bar, or clicking the open tab, lets you pick from recently opened repositories. You can also clone from a URL or create a new repository from there.
 
-![リポジトリを選ぶダイアログ（最近開いたリポジトリと、タブで開いているもの）](docs/repo-switch.png)
+You can open a folder that is not a git repository (video production and other work that is not code). In that case it runs the task directly in the folder without creating a worktree, and you finish it with "Mark done" (see [docs/usage.md](docs/usage.md) (Japanese)).
 
-### 承認
-許可が必要な操作は、実行しようとしているコマンドと入力の全文をカードと詳細パネルで確かめてから、許可・拒否・このタスクでは常に許可、のどれかを選べます。拒否するときは、理由をエージェントに返せます。
+![Repository picker (recent repositories, and the ones open in tabs)](docs/repo-switch.png)
 
-![承認待ちのカードと詳細パネル](docs/detail-permission.png)
+### Approval
 
-### GitHub Issue からタスクを作る
-「新しいタスク」の「GitHub Issue から作成」タブに番号（`21, 22, 24` など）を入れると、Issue のタイトル・本文・コメントから指示を作り、1 Issue につき 1 枚のカードを作ります。ブランチ名は `agent/issue-21-…` になり、PR の本文には `Closes #21` が入ります。`gh` を使います。
+When an action needs permission, you can read the full command and input on the card and in the detail panel, then choose allow, deny, or always allow for this task. When you deny, you can send a reason back to the agent.
 
-![Issue からタスクを作るダイアログ](docs/issue-dialog.png)
+![A card waiting for approval, and the detail panel](docs/detail-permission.png)
 
-### エージェントからの質問
-Claude Code が `AskUserQuestion` で質問すると、カードが「質問」になり、回答フォームが出ます。複数選択と自由入力（その他）にも対応しています。
+### Create tasks from GitHub Issues
 
-![質問の回答フォーム](docs/question.png)
+On the "Create from GitHub Issue" tab of "New task", enter numbers (`21, 22, 24`, and so on). It builds the instructions from the Issue title, body, and comments, and creates one card per Issue. The branch is named `agent/issue-21-…`, and the PR body includes `Closes #21`. This uses `gh`.
 
-### worktree と差分
-「worktree」タブには、ブランチのコミット、未コミットの変更、ベースとの関係、同じリポジトリのほかの worktree が出ます。「差分」タブでは、変わったファイルをフォルダごとのツリーで選んで、ファイルごとに差分を見られます。
+![Dialog that creates tasks from Issues](docs/issue-dialog.png)
 
-![worktree タブ](docs/worktree.png)
+### Questions from the agent
 
-![差分タブ](docs/diff.png)
+When Claude Code asks with `AskUserQuestion`, the card becomes a question and an answer form appears. Multiple choice and free text (Other) are both supported.
 
-### 会話
-「会話」では、タスク（worktree）を作らずに、リポジトリについてエージェントに質問できます。返事は Markdown で表示します。作業させたくなったら「タスクにする」で、その会話の続きとしてタスクにできます。
+![Question answer form](docs/question.png)
 
-![会話](docs/chat.png)
+### worktree and diff
 
-### 通知
-承認待ち・質問・回答待ち・レビュー待ち・完了は、右上のベルのアイコンに通知が溜まり、デスクトップ通知も出ます。通知を押すと、そのタスクが開きます。
+The "worktree" tab shows the branch commits, uncommitted changes, how the branch relates to the base, and the other worktrees in the same repository. On the "diff" tab you pick changed files in a tree grouped by folder and read the diff file by file.
 
-![通知](docs/notifications.png)
+![worktree tab](docs/worktree.png)
 
-### コンフリクトの解消
-マージでコンフリクトが起きると、カードが「コンフリクト」になります。ベースのブランチをタスクのブランチに取り込んだうえで、エージェントに解消させるか、自分でエディタで直すかを選べます。どちらの方法でも、ベースのブランチはマージするまで変わりません。
+![Diff tab](docs/diff.png)
 
-![コンフリクトの解消](docs/conflict.png)
+### Chat
 
-### スキルと過去の会話
-タスクを作るときに、Claude Code のスキルを 1 つ選べます（`/スキル名` として渡します）。過去の Claude Code の会話（セッション）を選んで、その続きから始めることもできます。
+In "Chat" you can ask the agent about the repository without creating a task (worktree). Replies are shown as Markdown. When you want it to start working, "Make this a task" continues that conversation as a task.
 
-![新しいタスク（スキルと会話を選んだところ）](docs/new-task.png)
+![Chat](docs/chat.png)
 
-### タスクスケジューラ
+### Notifications
 
-トップバーのメニューから「タスクスケジューラ」に切り替えると、決めた日時（1回だけ・毎時・毎日・毎週・毎月）にタスクを作って動かすスケジュールを、カードで管理できます。カンバンのタスクからそのままスケジュールに登録でき、スケジュールから今すぐタスクを作ることもできます。アプリを起動しているあいだだけ動きます（詳しくは [docs/usage.md](docs/usage.md)）。
+Waiting for approval, questions, waiting for an answer, waiting for review, and completion collect on the bell icon at the top right, and a desktop notification is shown. Clicking a notification opens that task.
 
-### 別の PC から操作する（RC）
-エージェントを動かしている PC（ホスト）のボードを、別の PC（クライアント）の Agent Kanban から操作できます。Mac と Windows のどちらがホストでも、どちらがクライアントでもかまいません。クライアントでは、承認・質問への回答・追加の指示・マージなどを、ホストの画面と同じように使えます。
+![Notifications](docs/notifications.png)
 
-- ホストのアプリは `127.0.0.1` だけで待ち受けます。クライアントのアプリが `ssh -N -L` でトンネルを張ってつなぐので、ホストで必要なのは SSH サーバーだけです。外出先からつなぐときは Tailscale などを使います
-- SSH は鍵で入ります。クライアントの「RC設定」で ed25519 の鍵（`~/.ssh/agent-kanban_ed25519`）を作り、公開鍵をホストの「RC設定」で登録します
-- 初回は、ホストに出る 6 桁のコードでペアリングします。2 回目からは、保存したトークンで、前回の接続先につなぎ直します
+### Resolving conflicts
 
-![クライアントの RC設定（SSH の接続先・鍵）](docs/rc-settings.png)
+If a merge conflicts, the card becomes a conflict. After the base branch is merged into the task branch, you can have the agent resolve it or fix it yourself in an editor. Either way, the base branch stays unchanged until you merge.
 
-![クライアントから、ホストのボードを操作しているところ（上部に「遠隔操作中 → SSH 100.101.102.103」）](docs/rc-client.png)
+![Resolving a conflict](docs/conflict.png)
 
-手順と、つながらないときの直し方は [docs/remote.md](docs/remote.md) にあります。
+### Skills and past conversations
 
-このほか、大きなタスクをサブタスクに分けて並列・順番に進める機能（親のブランチから分けて、終わったものから親のブランチにマージします。サブタスクだけ開始することもできます。GitHub のサブIssue にも対応）、カードの状態（列）のドラッグ&ドロップでの変更、実行中のエージェントへのメッセージ（btw）、画像・ファイルの添付、Pipeline と競争（複数のエージェントの組み合わせ）、Windows での WSL のリポジトリにも対応しています。使い方は [docs/usage.md](docs/usage.md) にまとめています。
+When you create a task, you can pick one Claude Code skill (it is passed as `/skill-name`). You can also pick a past Claude Code conversation (session) and start from where it left off.
 
-## 必要なもの
+![New task (a skill and a conversation selected)](docs/new-task.png)
+
+### Task scheduler
+
+From the menu in the top bar, switch to "Task scheduler" to manage schedules that create and run a task at a set time (once, hourly, daily, weekly, or monthly) as cards. You can register a kanban task as a schedule directly, and you can create a task from a schedule right away. Schedules run only while the app is open (see [docs/usage.md](docs/usage.md) (Japanese)).
+
+### Operate from another PC (RC)
+
+You can operate the board on the PC that runs the agents (the host) from Agent Kanban on another PC (the client). Either Mac or Windows can be the host, and either can be the client. On the client you can approve, answer questions, send extra instructions, merge, and so on, the same way as on the host screen.
+
+- The host app listens only on `127.0.0.1`. The client app connects with an `ssh -N -L` tunnel, so the host only needs an SSH server. Use Tailscale or similar when you connect from outside
+- SSH uses a key. In the client's "RC settings", create an ed25519 key (`~/.ssh/agent-kanban_ed25519`) and register the public key in the host's "RC settings"
+- The first time, you pair with a 6-digit code shown on the host. After that, a saved token reconnects to the previous destination
+
+![Client RC settings (SSH destination and key)](docs/rc-settings.png)
+
+![Operating the host board from the client (the top shows "Remote control → SSH 100.101.102.103")](docs/rc-client.png)
+
+Steps, and how to fix a connection that fails, are in [docs/remote.md](docs/remote.md) (Japanese).
+
+Also included: splitting a large task into subtasks that run in parallel or in order (branched from the parent branch and merged back when done; you can also start a single subtask; GitHub sub-issues are supported), drag-and-drop changes to a card's state (column), messages to a running agent (btw), image and file attachments, Pipeline and competition (combinations of several agents), and WSL repositories on Windows. Usage is summarized in [docs/usage.md](docs/usage.md) (Japanese).
+
+## Requirements
 
 - git
-- 使うエージェントの CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI のどれか）。ログインを済ませておきます
-- GitHub の Issue・PR の機能を使うときは `gh`（アプリから入れることもできます）
+- The CLI of the agent you use (one of Claude Code / Codex CLI / Gemini CLI / Cursor CLI), already signed in
+- `gh`, if you use GitHub Issues and PRs (you can also install it from the app)
 
-## インストール
+## Install
 
 **Mac / Linux**
 
@@ -102,28 +114,28 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.sh | bash
 ```
 
-**Windows**（PowerShell）
+**Windows** (PowerShell)
 
 ```powershell
 irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
 ```
 
-同じコマンドで、最新版へのアップデートもできます。アプリの「設定」→「アプリの更新」の「新しいバージョンに更新」からも更新でき、「新しい版が出たら自動で更新する」にチェックを付けると、タスクが動いていないときに自動で入れ替えて起動し直します。バージョンの指定・アンインストール・ファイルからのインストール・初回起動の警告は [docs/install.md](docs/install.md) を見てください。
+The same commands update to the latest version. You can also update from the app: "Settings" → "App update" → "Update to the new version". If you check "Update automatically when a new version is out", it replaces itself and relaunches when no task is running. For pinning a version, uninstalling, installing from a downloaded file, and the first-launch warning, see [docs/install.md](docs/install.md) (Japanese).
 
-## 使い方
+## Usage
 
-1. 「リポジトリを選ぶ」で、作業させる git リポジトリを選びます（URL からのクローンや、新しく作ることもできます）
-2. 「新しいタスク」で指示を書いて作成します
-3. 承認待ちになったら、カードで許可します
-4. レビュー列に移ったら、差分を確かめて「マージ」か「PR を作成」を押します
+1. In "Choose a repository", pick the git repository to work in (you can also clone from a URL or create a new one)
+2. In "New task", write the instructions and create it
+3. When it is waiting for approval, allow it on the card
+4. When it moves to the Review column, check the diff and press "Merge" or "Create PR"
 
-## ドキュメント
+## Documentation
 
-| ドキュメント | 内容 |
+| Document | Contents |
 | --- | --- |
-| [画面と使い方](docs/usage.md) | 承認・質問・仕様の確認・タスクスケジューラ・スキル・会話・btw・マージ / PR・Issue のステータス・通知・コンフリクトなど、機能ごとの使い方 |
-| [エージェントとオーケストレーション](docs/agents.md) | Claude Code / Codex / Gemini / Cursor の違い、Pipeline・競争 |
-| [設定](docs/settings.md) | トップバーのメニューから開く設定の画面と項目 |
-| [遠隔操作](docs/remote.md) | 別の PC から SSH トンネルでボードを操作する手順と、つながらないときの直し方 |
-| [インストール](docs/install.md) | インストール・アップデート・アンインストール、Windows で WSL のリポジトリを使う |
-| [開発者向け](docs/development.md) | ソースから動かす・ビルド・リリース・アプリのしくみ・テスト |
+| [Screen and usage](docs/usage.md) (Japanese) | How to use each feature: approval, questions, spec check, task scheduler, skills, chat, btw, merge / PR, Issue status, notifications, conflicts, and more |
+| [Agents and orchestration](docs/agents.md) (Japanese) | Differences between Claude Code / Codex / Gemini / Cursor, Pipeline and competition |
+| [Settings](docs/settings.md) (Japanese) | The settings screen opened from the top-bar menu, and its items |
+| [Remote control](docs/remote.md) (Japanese) | How to operate the board from another PC over an SSH tunnel, and how to fix a connection that fails |
+| [Install](docs/install.md) (Japanese) | Install, update, uninstall, and using a WSL repository on Windows |
+| [For developers](docs/development.md) (Japanese) | Run from source, build, release, how the app is built, and tests |
