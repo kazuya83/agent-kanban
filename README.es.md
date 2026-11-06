@@ -1,18 +1,56 @@
-[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+<div align="center">
+
+<img src="docs/images/icon.png" alt="" width="96" />
 
 # Worktree Kanban
 
-> Ejecuta agentes de programación con IA en paralelo y contrólalos desde otro PC: Mac y Windows pueden manejarse el uno al otro a distancia.
+<strong>Ejecuta agentes de programación con IA en paralelo y contrólalos desde otro PC.</strong><br />
+Mac y Windows pueden manejarse el uno al otro a distancia.
 
-[Sitio web](https://kazuya83.github.io/worktree-kanban/)
+[Sitio web](https://kazuya83.github.io/worktree-kanban/) · [Descargar](https://github.com/kazuya83/worktree-kanban/releases/latest)
+
+[![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
+[![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
+[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
+[![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
+
+[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+
+</div>
+
+<div align="center">
 
 ![Demostración: crear una tarea, ver las tarjetas en paralelo, aprobar, revisar el diff, fusionar y manejar el tablero a distancia](docs/images/es/demo.gif)
+
+</div>
 
 Aplicación de escritorio (Electron, Mac / Windows / Linux) que ejecuta en paralelo las CLI de agentes de programación con IA (Claude Code / Codex CLI / Gemini CLI / Cursor CLI), cada tarea en su propio git worktree, y las gestiona en un tablero kanban. **No solo ejecuta tareas dentro de un repositorio: también puede ejecutar a la vez tareas de varios repositorios.**
 
 ![Tablero: columnas Por hacer, En ejecución, Revisión y Hecho. Las tarjetas en ejecución muestran pregunta, espera de aprobación y en curso](docs/images/es/board.png)
 
+## ¿Por qué Worktree Kanban?
+
+- **Control remoto Mac ⇄ Windows** — ejecuta los agentes en un PC y maneja el mismo tablero desde el otro: aprueba, responde preguntas, envía instrucciones y fusiona.
+- **Una tarea, un worktree** — cada tarea tiene su propio worktree de git y su rama, así que no chocan entre sí ni con tu árbol de trabajo.
+- **Varios repositorios a la vez** — abre hasta 3 repositorios en pestañas; cambiar de pestaña no detiene nada.
+- **Las CLI que ya usas** — Claude Code, Codex CLI, Gemini CLI y Cursor CLI, con tu sesión y tu configuración actuales.
+- **Tú decides** — revisa el diff antes de fusionar o abrir un PR. Con Claude Code, también apruebas las acciones en la tarjeta.
+- **Todo en local** — el estado del tablero se queda en tu máquina. No hay un servidor externo.
+
 ## Cómo funciona
+
+```mermaid
+flowchart LR
+    C["PC cliente"] -- "Túnel SSH" --> B
+    subgraph H["PC host"]
+        B["Tablero"] --> W1["worktree y rama 1"] --> A1["CLI del agente"]
+        B --> W2["worktree y rama 2"] --> A2["CLI del agente"]
+        A1 --> R["Tu repositorio"]
+        A2 --> R
+    end
+    R -- "Fusión / PR" --> O(("main"))
+```
 
 - **1 tarea = 1 worktree = 1 rama.** Crea un worktree en `<repo>.worktrees/<id>`, junto al repositorio, y trabaja en una rama `agent/<resumen>-<id>`. Las tareas no chocan entre sí ni con el árbol de trabajo que tienes abierto
 - **El agente es la CLI, arrancada tal cual.** Claude Code se ejecuta con `claude -p --input-format stream-json --output-format stream-json`, y su salida se muestra en la tarjeta como registro. El inicio de sesión, el modelo, `CLAUDE.md` y las skills son los mismos que usas en la terminal
@@ -56,51 +94,91 @@ Puedes abrir una carpeta que no es un repositorio git (producción de vídeo y o
 
 Cuando una acción necesita permiso, puedes leer el comando y la entrada completos en la tarjeta y en el panel de detalle, y luego elegir permitir, rechazar o permitir siempre en esta tarea. Al rechazar, puedes devolver un motivo al agente.
 
+<details>
+<summary>Ver pantalla</summary>
+
 ![Tarjeta en espera de aprobación y panel de detalle](docs/images/es/detail-permission.png)
+
+</details>
 
 ### Crear tareas desde GitHub Issues
 
 En la pestaña «Crear desde un GitHub Issue» de «Nueva tarea», escribe números (`21, 22, 24`, etc.). Construye las instrucciones a partir del título, el cuerpo y los comentarios del Issue, y crea una tarjeta por Issue. La rama se llama `agent/issue-21-…`, y el cuerpo del PR incluye `Closes #21`. Usa `gh`.
 
+<details>
+<summary>Ver pantalla</summary>
+
 ![Diálogo para crear tareas desde Issues](docs/images/es/issue-dialog.png)
+
+</details>
 
 ### Preguntas del agente
 
 Cuando Claude Code pregunta con `AskUserQuestion`, la tarjeta pasa a ser una pregunta y aparece un formulario de respuesta. Se admiten la selección múltiple y el texto libre (Otro).
 
+<details>
+<summary>Ver pantalla</summary>
+
 ![Formulario de respuesta a una pregunta](docs/images/es/question.png)
+
+</details>
 
 ### worktree y diff
 
 La pestaña «worktree» muestra los commits de la rama, los cambios sin commit, la relación con la base y los otros worktrees del mismo repositorio. En la pestaña «diff» eliges los archivos cambiados en un árbol agrupado por carpeta y ves el diff de cada archivo.
 
+<details>
+<summary>Ver pantalla</summary>
+
 ![Pestaña worktree](docs/images/es/worktree.png)
 
 ![Pestaña diff](docs/images/es/diff.png)
+
+</details>
 
 ### Conversación
 
 En «Conversación» puedes preguntar al agente sobre el repositorio sin crear una tarea (worktree). Las respuestas se muestran en Markdown. Cuando quieras que empiece a trabajar, «Convertir en tarea» continúa esa conversación como tarea.
 
+<details>
+<summary>Ver pantalla</summary>
+
 ![Conversación](docs/images/es/chat.png)
+
+</details>
 
 ### Notificaciones
 
 La espera de aprobación, las preguntas, la espera de respuesta, la espera de revisión y la finalización se acumulan en el icono de la campana, arriba a la derecha, y también sale una notificación de escritorio. Al pulsar una notificación se abre esa tarea.
 
+<details>
+<summary>Ver pantalla</summary>
+
 ![Notificaciones](docs/images/es/notifications.png)
+
+</details>
 
 ### Resolver conflictos
 
 Si un merge entra en conflicto, la tarjeta pasa a ser un conflicto. Después de incorporar la rama base en la rama de la tarea, puedes pedir al agente que lo resuelva o corregirlo tú en un editor. En ambos casos, la rama base no cambia hasta que hagas el merge.
 
+<details>
+<summary>Ver pantalla</summary>
+
 ![Resolución de un conflicto](docs/images/es/conflict.png)
+
+</details>
 
 ### Skills y conversaciones anteriores
 
 Al crear una tarea puedes elegir una skill de Claude Code (se pasa como `/nombre-de-la-skill`). También puedes elegir una conversación anterior de Claude Code (sesión) y continuar desde ahí.
 
+<details>
+<summary>Ver pantalla</summary>
+
 ![Tarea nueva (con una skill y una conversación elegidas)](docs/images/es/new-task.png)
+
+</details>
 
 ### Programador de tareas
 

@@ -1,18 +1,56 @@
-[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+<div align="center">
+
+<img src="docs/images/icon.png" alt="" width="96" />
 
 # Worktree Kanban
 
-> AI コーディングエージェントを並列に動かし、別の PC から操作できます。Mac と Windows を相互に遠隔操作できます。
+<strong>AI コーディングエージェントを並列に動かし、別の PC から操作する。</strong><br />
+Mac と Windows を相互に遠隔操作できます。
 
-[紹介ページ](https://kazuya83.github.io/worktree-kanban/)
+[紹介ページ](https://kazuya83.github.io/worktree-kanban/) · [ダウンロード](https://github.com/kazuya83/worktree-kanban/releases/latest)
+
+[![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
+[![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
+[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
+[![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
+
+[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+
+</div>
+
+<div align="center">
 
 ![デモ: タスクを作り、カードが並列に動き、承認し、差分を確かめてマージし、ボードを遠隔操作する](docs/images/ja/demo.gif)
+
+</div>
 
 AI コーディングエージェントの CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を、タスクごとに別々の git worktree で並列に動かし、カンバンボードで管理するデスクトップアプリです（Electron、Mac / Windows / Linux）。**1 つのリポジトリの中だけでなく、複数のリポジトリのタスクも同時に動かせます**。
 
 ![ボード: Todo・実行中・レビュー・完了の列。実行中のカードには、質問・承認待ち・作業中の状態が出ている](docs/images/ja/board.png)
 
+## Worktree Kanban を選ぶ理由
+
+- **Mac と Windows を相互に遠隔操作** — エージェントを動かす PC のボードを、別の PC からそのまま操作できます。承認、質問への回答、追加の指示、マージもできます。
+- **1 タスクに 1 つの worktree** — タスクごとに別々の git worktree とブランチで動くので、タスク同士や手元の作業ツリーとぶつかりません。
+- **複数のリポジトリを同時に** — 最大 3 つのリポジトリをタブで開けます。タブを切り替えても、ほかのタスクは止まりません。
+- **いつもの CLI をそのまま** — Claude Code、Codex CLI、Gemini CLI、Cursor CLI を、今のログインや設定のまま使えます。
+- **最後は人が決める** — マージや PR の前に差分を確かめられます。Claude Code なら、操作の承認もカードで行えます。
+- **手元で完結** — ボードの状態はこの PC に保存します。外部のサーバーは使いません。
+
 ## しくみ
+
+```mermaid
+flowchart LR
+    C["クライアントの PC"] -- "SSH トンネル" --> B
+    subgraph H["ホストの PC"]
+        B["ボード"] --> W1["worktree とブランチ 1"] --> A1["エージェント CLI"]
+        B --> W2["worktree とブランチ 2"] --> A2["エージェント CLI"]
+        A1 --> R["リポジトリ"]
+        A2 --> R
+    end
+    R -- "マージ / PR" --> O(("main"))
+```
 
 - **1 タスク = 1 worktree = 1 ブランチ**。リポジトリの隣の `<repo>.worktrees/<id>` に worktree を作り、`agent/<内容>-<id>` のブランチで作業させます。作業中のタスク同士や、手元の作業ツリーとはぶつかりません
 - **エージェントは CLI をそのまま起動します**。Claude Code は `claude -p --input-format stream-json --output-format stream-json` で動かし、出力をログとしてカードに表示します。ログイン・モデル・`CLAUDE.md`・スキルは、ターミナルで使うときと同じものが使われます
@@ -53,44 +91,84 @@ git で管理していないフォルダ（動画づくりなど、コード以�
 ### 承認
 許可が必要な操作は、実行しようとしているコマンドと入力の全文をカードと詳細パネルで確かめてから、許可・拒否・このタスクでは常に許可、のどれかを選べます。拒否するときは、理由をエージェントに返せます。
 
+<details>
+<summary>画面を見る</summary>
+
 ![承認待ちのカードと詳細パネル](docs/images/ja/detail-permission.png)
+
+</details>
 
 ### GitHub Issue からタスクを作る
 「新しいタスク」の「GitHub Issue から作成」タブに番号（`21, 22, 24` など）を入れると、Issue のタイトル・本文・コメントから指示を作り、1 Issue につき 1 枚のカードを作ります。ブランチ名は `agent/issue-21-…` になり、PR の本文には `Closes #21` が入ります。`gh` を使います。
 
+<details>
+<summary>画面を見る</summary>
+
 ![Issue からタスクを作るダイアログ](docs/images/ja/issue-dialog.png)
+
+</details>
 
 ### エージェントからの質問
 Claude Code が `AskUserQuestion` で質問すると、カードが「質問」になり、回答フォームが出ます。複数選択と自由入力（その他）にも対応しています。
 
+<details>
+<summary>画面を見る</summary>
+
 ![質問の回答フォーム](docs/images/ja/question.png)
+
+</details>
 
 ### worktree と差分
 「worktree」タブには、ブランチのコミット、未コミットの変更、ベースとの関係、同じリポジトリのほかの worktree が出ます。「差分」タブでは、変わったファイルをフォルダごとのツリーで選んで、ファイルごとに差分を見られます。
+
+<details>
+<summary>画面を見る</summary>
 
 ![worktree タブ](docs/images/ja/worktree.png)
 
 ![差分タブ](docs/images/ja/diff.png)
 
+</details>
+
 ### 会話
 「会話」では、タスク（worktree）を作らずに、リポジトリについてエージェントに質問できます。返事は Markdown で表示します。作業させたくなったら「タスクにする」で、その会話の続きとしてタスクにできます。
 
+<details>
+<summary>画面を見る</summary>
+
 ![会話](docs/images/ja/chat.png)
+
+</details>
 
 ### 通知
 承認待ち・質問・回答待ち・レビュー待ち・完了は、右上のベルのアイコンに通知が溜まり、デスクトップ通知も出ます。通知を押すと、そのタスクが開きます。
 
+<details>
+<summary>画面を見る</summary>
+
 ![通知](docs/images/ja/notifications.png)
+
+</details>
 
 ### コンフリクトの解消
 マージでコンフリクトが起きると、カードが「コンフリクト」になります。ベースのブランチをタスクのブランチに取り込んだうえで、エージェントに解消させるか、自分でエディタで直すかを選べます。どちらの方法でも、ベースのブランチはマージするまで変わりません。
 
+<details>
+<summary>画面を見る</summary>
+
 ![コンフリクトの解消](docs/images/ja/conflict.png)
+
+</details>
 
 ### スキルと過去の会話
 タスクを作るときに、Claude Code のスキルを 1 つ選べます（`/スキル名` として渡します）。過去の Claude Code の会話（セッション）を選んで、その続きから始めることもできます。
 
+<details>
+<summary>画面を見る</summary>
+
 ![新しいタスク（スキルと会話を選んだところ）](docs/images/ja/new-task.png)
+
+</details>
 
 ### タスクスケジューラ
 
