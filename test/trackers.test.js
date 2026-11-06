@@ -366,3 +366,15 @@ test('画面の issue の表示は key を使い、無ければ #number', () => 
   assert.ok(html.indexOf('issue-ref.js') < html.indexOf('renderer.js'));
   assert.ok(html.indexOf('locales/integrations.js') < html.indexOf('renderer.js'));
 });
+
+test('課題管理サービスは、どれも列ごとの名前の指定とコメントの設定を画面に出せる', () => {
+  const meta = Object.fromEntries(trackers.issueProviderMeta().map((p) => [p.id, p]));
+  assert.deepStrictEqual(Object.keys(meta).sort(), ['github', 'gitlab', 'jira', 'linear']);
+  for (const id of ['gitlab', 'linear', 'jira']) {
+    assert.strictEqual(meta[id].canMapStatus, true, id);
+    assert.strictEqual(meta[id].canComment, true, id);
+  }
+  assert.strictEqual(meta.github.canComment, false);
+  assert.ok(meta.jira.statusMapHelp);
+  assert.strictEqual(meta.linear.statusMapHelp, ''); // Jira のトランジションの説明を Linear に出さない
+});

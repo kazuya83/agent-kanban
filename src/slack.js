@@ -142,7 +142,7 @@ const provider = {
     { name: 'notifyChannel', type: 'text', label: '通知を投稿するチャンネル ID', placeholder: 'C0123456789', help: 'チャンネルの詳細の一番下に出る ID です。空なら投稿しません。Slack から頼んだタスクの知らせは、下の種類の設定によらず、そのスレッドに投稿します' },
     { name: 'notifyDone', type: 'checkbox', label: '完了を通知する', default: true },
     { name: 'notifyFailed', type: 'checkbox', label: '失敗を通知する', default: true },
-    { name: 'notifyAwaiting', type: 'checkbox', label: '確認待ちを通知する（仕様の確認・権限の確認・回答待ち・レビュー待ち）', default: true },
+    { name: 'notifyAwaiting', type: 'checkbox', label: '確認待ちを通知する（仕様の確認・権限の確認・回答待ち・レビュー待ち・コンフリクト）', default: true },
     { name: 'allowedUsers', type: 'textarea', label: 'タスクを開始できる Slack ユーザー ID', placeholder: 'U0123456789, U0987654321', help: '空なら誰も開始できません。タスクの開始は、このマシンでエージェントがコードを動かすことになります' },
     { name: 'channelMap', type: 'textarea', label: 'チャンネルとプロジェクトの対応', placeholder: 'C0123456789 /path/to/project', help: '1行に「チャンネル ID」と「プロジェクトのフォルダ」を書きます。書いたチャンネルからだけ開始できます' },
   ],

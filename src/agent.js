@@ -1658,7 +1658,7 @@ class AgentManager extends EventEmitter {
   /**
    * サブタスクの提案に「サブタスクでやる」と答える
    * @param {{ items?: object[], merge?: 'auto'|'review', createIssues?: boolean }} p
-   *   items: 直した一覧（省けば提案のまま） / createIssues: GitHub にもサブIssue を作って、親の Issue にぶら下げる
+   *   items: 直した一覧（省けば提案のまま） / createIssues: 課題管理サービスにもサブIssue を作って、親の Issue にぶら下げる
    */
   async acceptSubtasks(id, { items, merge, createIssues } = {}) {
     const c = this.must(id);

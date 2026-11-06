@@ -4166,7 +4166,7 @@ function renderSettingsView() {
           <option value="merge" ${s.integration !== 'pr' ? 'selected' : ''}>${tr('直接マージする（ローカルで git merge）')}</option>
           <option value="pr" ${s.integration === 'pr' ? 'selected' : ''}>${s.codeHost === 'gitlab' ? tr('MR を作成する（origin に push して GitLab の API で作る）') : tr('PR を作成する（origin に push して gh pr create）')}</option>
         </select>
-        <small>${s.codeHost === 'gitlab' ? tr('レビュー中のタスクに出るボタンが「マージ」か「MR を作成」に変わります。MR の作成には、全般の「連携」で設定した GitLab のトークンを使います。') : tr('レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。')}</small></label>
+        <small>${s.codeHost === 'gitlab' ? tr('レビュー中のタスクに出るボタンが「マージ」か「MR を作成」に変わります。MR の作成には、設定の「連携」で入れた GitLab のトークンを使います。') : tr('レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。')}</small></label>
       <label class="field">${tr('<span>ブランチの命名規則（自然言語で書けます）</span>')}
         <textarea id="sBranchRule" rows="2" placeholder="${tr('例: feature/<Issue番号>-<内容を表す短い英語> にする。Issue がないときは feature/<内容を表す短い英語>')}">${esc(s.branchNamingRule || '')}</textarea>
         <small>${tr('書いておくと、タスクの開始時にそのタスクのエージェントがこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。')}</small></label>
@@ -4182,7 +4182,7 @@ function renderSettingsView() {
       <small class="muted s-note">${tr('スクリプトは macOS・Linux・WSL では sh / bash で動き、途中の行が失敗するとそこで止まります。Windows では各行を && でつないで cmd で動かします。環境変数 WORKTREE_KANBAN_ROOT（リポジトリ）、WORKTREE_KANBAN_WORKTREE、WORKTREE_KANBAN_BRANCH、WORKTREE_KANBAN_BASE_BRANCH、WORKTREE_KANBAN_TASK_ID が使えます。WORKTREE_KANBAN_PORT と PORT にはタスクごとに分けたポートが入り、そこから連続する10個を使えます（並列で動かしてもぶつかりません）。')}</small>`,
     issue: `<label class="field"><span>${tr('使う課題管理サービス')}</span>
         <select id="sIssueProvider">${issueProviders().map((p) => `<option value="${esc(p.id)}" ${p.id === (s.issueProvider || GITHUB_PROVIDER.id) ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>
-        <small>${tr('「＋ 新しいタスク」の Issue の欄で使います。接続先とトークンは、全般の「連携」で設定します。')}</small></label>
+        <small>${tr('「＋ 新しいタスク」の Issue の欄で使います。接続先とトークンは、設定の「連携」で設定します。')}</small></label>
       <div class="field">
         <label class="check" id="sIssueSyncRow"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> <span id="sIssueSyncLabel"></span></label>
         <div id="sGithubIssue"><small>${tr('Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。')}</small></div>
@@ -4197,7 +4197,7 @@ function renderSettingsView() {
           <small id="sStatusMapGithub">${tr('列ごとに使う選択肢の名前を指定できます（カンマ区切りで候補を複数書けます。大文字小文字・絵文字・記号は無視して比べます）。空の列は名前から自動で探します。')}</small>
           <small id="sStatusMapNames" hidden></small>
         </div>
-        <label class="check" id="sIssueCommentsRow"><input type="checkbox" id="sIssueComments" ${s.issueComments !== false ? 'checked' : ''} /> ${tr('タスクの開始・PR の作成・完了を Issue にコメントする')}</label>
+        <label class="check" id="sIssueCommentsRow"><input type="checkbox" id="sIssueComments" ${s.issueComments !== false ? 'checked' : ''} /> ${I18n.forHost(tr('タスクの開始・PR の作成・完了を Issue にコメントする'), s.codeHost)}</label>
         <div id="sGithubPanel"><div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div></div></div>`,
     permission: `<label class="field">${tr('<span>権限モード</span>')}
         <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(tr(l))}</option>`).join('')}</select>
