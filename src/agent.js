@@ -2063,9 +2063,7 @@ class AgentManager extends EventEmitter {
       try {
         const issue = await this.fetchIssue(s.repoPath, n);
         if (issue.state && issue.state !== 'open') errors.push(tr('#{n} はクローズ済みですが、タスクを作りました', { n }));
-        const made = this.createTask({ title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue, session, skill, agent, model });
-        cards.push(...made);
-        if (made.length === 1 && this.canHaveSubtasks(made[0])) await this.addSubIssuesAsSubtasks(made[0], issue);
+        cards.push(...(await this.cardsFromIssue(issue, extra, { session, skill, agent, model })));
       } catch (err) {
         errors.push(`#${n}: ${err.message}`);
       }
@@ -2074,9 +2072,25 @@ class AgentManager extends EventEmitter {
     return { cards, errors };
   }
 
+  // 読み込んだ Issue から、カードを作る（サブIssue があればサブタスクにする）。opts は createTask に渡す
+  async cardsFromIssue(issue, extra, opts) {
+    const made = this.createTask({ ...opts, title: `#${issue.number} ${issue.title}`, prompt: github.buildIssuePrompt(issue, extra), issue });
+    if (made.length === 1 && this.canHaveSubtasks(made[0])) await this.addSubIssuesAsSubtasks(made[0], issue);
+    return made;
+  }
+
+  // スケジュールの Issue の監視から呼ぶ。開いていないリポジトリにも作れる
+  async createFromWatchedIssue(repoPath, number, extra, opts) {
+    return this.cardsFromIssue(await this.fetchIssue(repoPath, number), extra, { ...opts, repoPath });
+  }
+
   // テストで差し替えられるようにメソッドにしておく
   fetchIssue(repoPath, n, opts) {
     return github.fetchIssue(repoPath, n, opts);
+  }
+
+  listIssues(repoPath, filter) {
+    return github.listIssues(repoPath, filter);
   }
 
   fetchSubIssues(repoPath, n) {

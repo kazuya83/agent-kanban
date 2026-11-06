@@ -348,3 +348,19 @@ test('開いていないリポジトリのカードは、そのリポジトリ�
   assert.ok(!worktrees(current).includes(name), worktrees(current));
   assert.strictEqual(store.settings.repoPath, current);
 });
+
+test('Issue の監視: 開いていないリポジトリに、スケジュールの印と Issue の付いたカードを作る', async () => {
+  const { agents, other, store } = setup();
+  agents.fetchIssue = async (repo, n) => {
+    assert.strictEqual(repo, other);
+    return { number: n, title: '直して', body: '本文', url: `https://github.com/a/b/issues/${n}`, labels: [], comments: [], state: 'open' };
+  };
+  agents.fetchSubIssues = async () => [];
+  const [c] = await agents.createFromWatchedIssue(other, 12, '小さく直して', { scheduleId: 's1', scheduleTitle: '監視', skipSpecCheck: true });
+  assert.strictEqual(c.repoPath, other);
+  assert.strictEqual(c.scheduleId, 's1');
+  assert.strictEqual(c.title, '#12 直して');
+  assert.strictEqual(c.issue.number, 12);
+  assert.match(c.prompt, /## 追加の指示\n小さく直して/);
+  assert.strictEqual(store.card(c.id).status, 'todo');
+});
