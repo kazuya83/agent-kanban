@@ -9,11 +9,12 @@ const DEFAULT_TIMEOUT_MS = 15000;
 const MAX_DETAIL = 300;
 
 class HttpError extends Error {
-  constructor(message, { status = 0, data = null } = {}) {
+  constructor(message, { status = 0, data = null, headers = null } = {}) {
     super(message);
     this.name = 'HttpError';
     this.status = status;
     this.data = data;
+    this.headers = headers;
   }
 }
 
@@ -95,11 +96,11 @@ async function request(url, { method = 'GET', headers = {}, query, json, body, t
     /* JSON でない応答。text のまま返す */
   }
   if (res.status >= 300 && res.status < 400) throw new HttpError(tr('{label} から別の場所へ転送されました（{status}）。接続先の URL を確かめてください', { label: name, status: res.status }), { status: res.status });
-  if (res.status === 401 || res.status === 403) throw new HttpError(tr('{label} の認証に失敗しました（{status}）。トークンと権限を確かめてください', { label: name, status: res.status }), { status: res.status, data });
+  if (res.status === 401 || res.status === 403) throw new HttpError(tr('{label} の認証に失敗しました（{status}）。トークンと権限を確かめてください', { label: name, status: res.status }), { status: res.status, data, headers: res.headers });
   if (!res.ok) {
     const detail = redact(detailOf(data), secrets);
     const msg = detail ? tr('{label} がエラーを返しました（{status}）: {message}', { label: name, status: res.status, message: detail }) : tr('{label} がエラーを返しました（{status}）', { label: name, status: res.status });
-    throw new HttpError(msg, { status: res.status, data });
+    throw new HttpError(msg, { status: res.status, data, headers: res.headers });
   }
   return { status: res.status, data, text, headers: res.headers };
 }

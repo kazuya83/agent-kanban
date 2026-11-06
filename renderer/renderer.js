@@ -4179,9 +4179,10 @@ function renderSettingsView() {
         <small>${tr('「＋ 新しいタスク」の Issue の欄で使います。接続先とトークンは、全般の「連携」で設定します。')}</small></label>
       <div class="field">
         <label class="check" id="sIssueSyncRow"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> <span id="sIssueSyncLabel"></span></label>
-        <div id="sGithubIssue"><small>${tr('Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。')}</small>
+        <div id="sGithubIssue"><small>${tr('Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。')}</small></div>
+        <div id="sTrackerSyncHelp" hidden><small></small></div>
         <div class="status-map" id="sStatusMap" ${s.issueStatusSync !== false ? '' : 'hidden'}>
-          <label class="field">${tr('<span>変える項目（Project の単一選択フィールド名。空なら Status）</span>')}<input id="sStatusField" placeholder="Status" value="${esc(s.statusFieldName || '')}" /></label>
+          <label class="field" id="sStatusFieldRow">${tr('<span>変える項目（Project の単一選択フィールド名。空なら Status）</span>')}<input id="sStatusField" placeholder="Status" value="${esc(s.statusFieldName || '')}" /></label>
           <div class="row">
             <label class="field">${tr('<span>実行中 →</span>')}<input id="sMapProgress" placeholder="${tr('自動（In progress など）')}" value="${esc((s.statusMapping || {}).inProgress || '')}" /></label>
             <label class="field">${tr('<span>レビュー →</span>')}<input id="sMapReview" placeholder="${tr('自動（In review など）')}" value="${esc((s.statusMapping || {}).inReview || '')}" /></label>
@@ -4189,7 +4190,8 @@ function renderSettingsView() {
           </div>
           <small>${tr('列ごとに使う選択肢の名前を指定できます（カンマ区切りで候補を複数書けます。大文字小文字・絵文字・記号は無視して比べます）。空の列は名前から自動で探します。')}</small>
         </div>
-        <div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div></div></div>`,
+        <label class="check" id="sIssueCommentsRow"><input type="checkbox" id="sIssueComments" ${s.issueComments !== false ? 'checked' : ''} /> ${tr('タスクの開始・PR の作成・完了を Issue にコメントする')}</label>
+        <div id="sGithubPanel"><div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div></div></div>`,
     permission: `<label class="field">${tr('<span>権限モード</span>')}
         <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(tr(l))}</option>`).join('')}</select>
         <small>${tr('自動で許可されない操作は、カードに「承認待ち」として表示されます。')}</small></label>
@@ -4641,15 +4643,22 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
     () => {},
   );
   // 「Issue のステータスを自動で変える」にチェックがあるときだけ、項目名と選択肢の指定を出す
-  $('sIssueSync').onchange = () => ($('sStatusMap').hidden = !$('sIssueSync').checked);
   // GitHub Projects の欄は GitHub を選んだときだけ。同期できないサービスでは、同期の欄を出さない
   const drawIssueProvider = () => {
     const p = issueProviderInfo($('sIssueProvider').value);
-    $('sGithubIssue').hidden = p.id !== GITHUB_PROVIDER.id;
+    const isGithub = p.id === GITHUB_PROVIDER.id;
+    $('sGithubIssue').hidden = !isGithub;
+    $('sGithubPanel').hidden = !isGithub;
+    $('sStatusFieldRow').hidden = !isGithub;
     $('sIssueSyncRow').hidden = !p.canSync;
+    $('sStatusMap').hidden = !p.canSync || !$('sIssueSync').checked;
+    $('sTrackerSyncHelp').hidden = isGithub || !p.canSync || !p.statusHelp;
+    $('sTrackerSyncHelp').firstElementChild.textContent = p.statusHelp ? tr(p.statusHelp) : '';
+    $('sIssueCommentsRow').hidden = !p.canComment;
     $('sIssueSyncLabel').textContent = p.id === GITHUB_PROVIDER.id ? tr('Issue のステータスを自動で変える（GitHub Projects）') : tr('Issue のステータスを自動で変える');
   };
   $('sIssueProvider').onchange = drawIssueProvider;
+  $('sIssueSync').onchange = drawIssueProvider;
   drawIssueProvider();
   drawTrackers();
   refreshGh();
@@ -4710,6 +4719,7 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
         defaultSkill: defSkill || '',
         // 変えたときだけ送る（古い版のホストは知らない設定を受け取らないので、変えていなければエラーにしない）
         ...($('sIssueProvider').value !== (s.issueProvider || GITHUB_PROVIDER.id) ? { issueProvider: $('sIssueProvider').value } : {}),
+        ...($('sIssueComments').checked !== (s.issueComments !== false) ? { issueComments: $('sIssueComments').checked } : {}),
         issueStatusSync: $('sIssueSync').checked,
         suggestSkillsOnDone: $('sSuggestSkills').checked,
         deleteSessionsOnMerge: $('sDeleteSessions').checked,

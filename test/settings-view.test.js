@@ -42,7 +42,7 @@ test('節の分け方: 欄が決めた節にある', () => {
   const block = body.slice(body.indexOf('const sections = {'), body.indexOf('// 描き直しても'));
   const parts = block.split(/^ {4}(?=\w+: `)/m).slice(1);
   const of = (id) => parts.find((p) => p.includes(`id="${id}"`))?.split(':')[0];
-  const want = { sMax: 'general', updPanel: 'update', sBase: 'branch', sBranchRule: 'branch', sSetupScript: 'branch', sTeardownScript: 'branch', sRunScript: 'branch', sIssueSync: 'issue', ghPanel: 'issue', sMode: 'permission', sAllowed: 'permission', sSkill: 'task', sSubtaskMerge: 'task', sDefaultAgent: 'agents', sClaude: 'agents', sCustomList: 'custom', sRelayList: 'orchestration', sCompeteBox: 'orchestration' };
+  const want = { sMax: 'general', updPanel: 'update', sBase: 'branch', sBranchRule: 'branch', sSetupScript: 'branch', sTeardownScript: 'branch', sRunScript: 'branch', sIssueSync: 'issue', sIssueComments: 'issue', ghPanel: 'issue', sMode: 'permission', sAllowed: 'permission', sSkill: 'task', sSubtaskMerge: 'task', sDefaultAgent: 'agents', sClaude: 'agents', sCustomList: 'custom', sRelayList: 'orchestration', sCompeteBox: 'orchestration' };
   for (const [id, section] of Object.entries(want)) assert.strictEqual(of(id), section, id);
   assert.doesNotMatch(block, /class="s-section/, '節の見出しに置き換えた');
 });
