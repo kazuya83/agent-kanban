@@ -7,6 +7,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.Zoom = api;
 })(typeof self !== 'undefined' ? self : this, function () {
+  const tr = (typeof module === 'object' && module.exports ? require('./i18n.js') : I18n).tr;
   const MIN = 0.25;
   const MAX = 2.5;
   const STEP = 1.2; // ボタン1回で変わる割合
@@ -42,11 +43,11 @@
 
   // 操作ボタン。label: 倍率の欄に出す文字（省くと pct(z)）
   function toolbarHtml(z, label) {
-    return `<div class="zoom-bar" role="group" aria-label="拡大・縮小">
-      <button class="zoom-btn" type="button" data-zoom="out" title="縮小（⌘ / Ctrl ＋ スクロールでも変えられます）" ${clamp(z) <= MIN ? 'disabled' : ''}>－</button>
-      <button class="zoom-btn zoom-pct" type="button" data-zoom="reset" title="100% に戻す">${label || pct(z)}</button>
-      <button class="zoom-btn" type="button" data-zoom="in" title="拡大（⌘ / Ctrl ＋ スクロールでも変えられます）" ${clamp(z) >= MAX ? 'disabled' : ''}>＋</button>
-      <button class="zoom-btn" type="button" data-zoom="fit" title="全体が見える大きさにする">全体</button>
+    return `<div class="zoom-bar" role="group" aria-label="${tr('拡大・縮小')}">
+      <button class="zoom-btn" type="button" data-zoom="out" title="${tr('縮小（⌘ / Ctrl ＋ スクロールでも変えられます）')}" ${clamp(z) <= MIN ? 'disabled' : ''}>－</button>
+      <button class="zoom-btn zoom-pct" type="button" data-zoom="reset" title="${tr('100% に戻す')}">${label || pct(z)}</button>
+      <button class="zoom-btn" type="button" data-zoom="in" title="${tr('拡大（⌘ / Ctrl ＋ スクロールでも変えられます）')}" ${clamp(z) >= MAX ? 'disabled' : ''}>＋</button>
+      <button class="zoom-btn" type="button" data-zoom="fit" title="${tr('全体が見える大きさにする')}">${tr('全体')}</button>
     </div>`;
   }
 

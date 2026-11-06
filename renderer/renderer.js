@@ -3652,13 +3652,13 @@ const RC_ROLE_KEY = 'rcRole';
 
 function openRemoteSettings() {
   openModal(
-    `<h2>RC設定（遠隔操作）</h2>
-     <small class="muted s-note">作業する PC（ホスト。Mac でも Windows でも）のボードを、別の PC（クライアント）から操作できます。この PC の役割をホストかクライアントのどちらかに選んでください。ホストは 127.0.0.1 だけで待ち受けるので、SSH のポート転送を通してつなぎます（手順は README の「遠隔操作」）。</small>
-     <div class="remote-box" id="rcBox">遠隔の状態を読み込み中…</div>
-     <div class="modal-actions"><button class="btn primary" id="rcClose">閉じる</button></div>`,
+    `<h2>${tr('RC設定（遠隔操作）')}</h2>
+     <small class="muted s-note">${tr('作業する PC（ホスト。Mac でも Windows でも）のボードを、別の PC（クライアント）から操作できます。この PC の役割をホストかクライアントのどちらかに選んでください。ホストは 127.0.0.1 だけで待ち受けるので、SSH のポート転送を通してつなぎます（手順は README の「遠隔操作」）。')}</small>
+     <div class="remote-box" id="rcBox">${tr('遠隔の状態を読み込み中…')}</div>
+     <div class="modal-actions"><button class="btn primary" id="rcClose">${tr('閉じる')}</button></div>`,
     () => {
       // 操作側の SSH の鍵。作るのはこのアプリ、公開鍵をホストに登録するのはユーザー
-      const copyBtn = (id, label = 'コピー') => `<button class="btn small" type="button" data-copy="${id}">${label}</button>`;
+      const copyBtn = (id, label = tr('コピー')) => `<button class="btn small" type="button" data-copy="${id}">${label}</button>`;
       const drawKey = async (st) => {
         const kb = $('rKeyBox');
         if (!kb) return;
@@ -3672,39 +3672,39 @@ function openRemoteSettings() {
         }
         if (!$('rKeyBox')) return;
         if (!st.exists) {
-          kb.innerHTML = `<div><strong>① SSH の鍵を作る</strong></div>
-            <small class="muted">${esc(st.path)} にまだ鍵がありません。このアプリで ssh-keygen を動かして、パスフレーズなしの ed25519 の鍵を作ります（アプリからはパスフレーズを入力できないため）。</small>
-            <div class="row"><button class="btn small primary" type="button" id="rGenKey">鍵を作る</button></div>`;
+          kb.innerHTML = `<div>${tr('<strong>① SSH の鍵を作る</strong>')}</div>
+            <small class="muted">${tr('{v1} にまだ鍵がありません。このアプリで ssh-keygen を動かして、パスフレーズなしの ed25519 の鍵を作ります（アプリからはパスフレーズを入力できないため）。', { v1: (esc(st.path)) })}</small>
+            <div class="row"><button class="btn small primary" type="button" id="rGenKey">${tr('鍵を作る')}</button></div>`;
           $('rGenKey').onclick = async () => {
-            const r = await runBusy('SSH の鍵を作っています…', () => api.remoteGenKey({ keyPath: $('rSshKey').value, sshPath: $('rSshPath').value }));
+            const r = await runBusy(tr('SSH の鍵を作っています…'), () => api.remoteGenKey({ keyPath: $('rSshKey').value, sshPath: $('rSshPath').value }));
             if (!r) return;
             if ($('rSshKey')) $('rSshKey').value = r.path;
-            toast(r.created ? '鍵を作りました。公開鍵のファイルをホストに渡して登録してください' : 'すでにある鍵を使います', 'ok');
+            toast(r.created ? tr('鍵を作りました。公開鍵のファイルをホストに渡して登録してください') : tr('すでにある鍵を使います'), 'ok');
             drawKey(r);
           };
           return;
         }
         if (!st.publicKey) {
-          kb.innerHTML = `<div class="warn">鍵 ${esc(st.path)} はありますが、公開鍵（${esc(st.pubPath)}）が読めません。ターミナルで <code>ssh-keygen -y -f "${esc(st.path)}" &gt; "${esc(st.pubPath)}"</code> を実行して作り直してください。</div>`;
+          kb.innerHTML = `<div class="warn">${tr('鍵 {v1} はありますが、公開鍵（{v2}）が読めません。ターミナルで <code>ssh-keygen -y -f "{v3}" &gt; "{v4}"</code> を実行して作り直してください。', { v1: (esc(st.path)), v2: (esc(st.pubPath)), v3: (esc(st.path)), v4: (esc(st.pubPath)) })}</div>`;
           return;
         }
         const cmd = st.commands || {};
-        const user = $('rSshUser')?.value.trim() || '<ユーザー名>';
-        const host = $('rSshHost')?.value.trim() || '<ホストの IP>';
-        kb.innerHTML = `<div><strong>① SSH の鍵</strong>: ${esc(st.path)}（できています）</div>
-          <div class="remote-key-row"><div class="remote-ssh" id="rPubKey">${esc(st.publicKey)}</div>${copyBtn('rPubKey', '公開鍵をコピー')}</div>
-          <div><strong>② 公開鍵をホストに渡す</strong>（ここはご自身で行ってください）</div>
-          <small class="muted">公開鍵のファイル <b>${esc(st.pubPath)}</b> を、USB・共有フォルダ・メールなどでホストの PC の好きな場所に置き、ホストの Agent Kanban の「RC設定」→「操作側の公開鍵を登録する」で選んで登録します。秘密鍵（${esc(st.path)}）は渡さないでください。アプリを使わずに登録するなら、ホストの OS に合ったコマンドをホストで実行します:</small>
-          <div><small>ホストが Mac（ターミナルで）</small></div>
+        const user = $('rSshUser')?.value.trim() || tr('<ユーザー名>');
+        const host = $('rSshHost')?.value.trim() || tr('<ホストの IP>');
+        kb.innerHTML = `<div>${tr('<strong>① SSH の鍵</strong>: {v1}（できています）', { v1: (esc(st.path)) })}</div>
+          <div class="remote-key-row"><div class="remote-ssh" id="rPubKey">${esc(st.publicKey)}</div>${copyBtn('rPubKey', tr('公開鍵をコピー'))}</div>
+          <div>${tr('<strong>② 公開鍵をホストに渡す</strong>（ここはご自身で行ってください）')}</div>
+          <small class="muted">${tr('公開鍵のファイル <b>{v1}</b> を、USB・共有フォルダ・メールなどでホストの PC の好きな場所に置き、ホストの Agent Kanban の「RC設定」→「操作側の公開鍵を登録する」で選んで登録します。秘密鍵（{v2}）は渡さないでください。アプリを使わずに登録するなら、ホストの OS に合ったコマンドをホストで実行します:', { v1: (esc(st.pubPath)), v2: (esc(st.path)) })}</small>
+          <div><small>${tr('ホストが Mac（ターミナルで）')}</small></div>
           <div class="remote-key-row"><div class="remote-ssh" id="rCmdMac">${esc(cmd.mac || '')}</div>${copyBtn('rCmdMac')}</div>
-          <div><small>ホストが Windows で、ユーザーが管理者（ふつうの個人の PC。PowerShell を「管理者として実行」で）</small></div>
+          <div><small>${tr('ホストが Windows で、ユーザーが管理者（ふつうの個人の PC。PowerShell を「管理者として実行」で）')}</small></div>
           <div class="remote-key-row"><div class="remote-ssh" id="rCmdWinAdmin">${esc(cmd.winAdmin || '')}</div>${copyBtn('rCmdWinAdmin')}</div>
-          <div><small>ホストが Windows で、ユーザーが管理者ではない（PowerShell で）</small></div>
+          <div><small>${tr('ホストが Windows で、ユーザーが管理者ではない（PowerShell で）')}</small></div>
           <div class="remote-key-row"><div class="remote-ssh" id="rCmdWinUser">${esc(cmd.winUser || '')}</div>${copyBtn('rCmdWinUser')}</div>
-          <div><strong>③ パスワードなしで入れるか確かめる</strong>（この PC のターミナルで。初回は yes と答えます）</div>
+          <div>${tr('<strong>③ パスワードなしで入れるか確かめる</strong>（この PC のターミナルで。初回は yes と答えます）')}</div>
           <div class="remote-key-row"><div class="remote-ssh" id="rCmdCheck">${esc(`ssh -i "${st.path}" ${user}@${host} exit`)}</div>${copyBtn('rCmdCheck')}</div>`;
         kb.querySelectorAll('[data-copy]').forEach((b) => {
-          b.onclick = () => navigator.clipboard.writeText($(b.dataset.copy).textContent).then(() => toast('コピーしました', 'ok'), () => toast('コピーできませんでした'));
+          b.onclick = () => navigator.clipboard.writeText($(b.dataset.copy).textContent).then(() => toast(tr('コピーしました'), 'ok'), () => toast(tr('コピーできませんでした')));
         });
       };
       const drawRemote = async () => {
@@ -3740,123 +3740,121 @@ function openRemoteSettings() {
           }
         }
         const sshServerHowto = hi?.platform === 'win32'
-          ? '「設定 → システム → オプション機能」で「OpenSSH サーバー」を追加し、管理者の PowerShell で <code>Start-Service sshd; Set-Service sshd -StartupType Automatic</code> を実行してください'
+          ? tr('「設定 → システム → オプション機能」で「OpenSSH サーバー」を追加し、管理者の PowerShell で <code>Start-Service sshd; Set-Service sshd -StartupType Automatic</code> を実行してください')
           : hi?.platform === 'darwin'
-            ? '「システム設定 → 一般 → 共有 → リモートログイン」をオンにしてください'
-            : 'SSH サーバー（sshd）を起動してください';
+            ? tr('「システム設定 → 一般 → 共有 → リモートログイン」をオンにしてください')
+            : tr('SSH サーバー（sshd）を起動してください');
         const hostInfoBlock = hi
-          ? `<div class="remote-ssh">操作側の「SSH の接続先」: ${hi.tailscaleIps.length ? esc(hi.tailscaleIps.join(' / ')) : `${esc(hi.hostname)}（Tailscale の IP が見つかりません。Tailscale が接続中か確かめてください）`}
-    ユーザー名: ${esc(hi.user || '?')}
-    SSH サーバー（ポート ${esc(hi.sshPort)}）: ${hi.sshServer ? '動いています' : '動いていません'}</div>
-             ${hi.sshServer ? '' : `<div class="warn">このマシンの SSH サーバーが動いていないので、操作側からつなげません。${sshServerHowto}</div>`}
+          ? `<div class="remote-ssh">${tr('操作側の「SSH の接続先」: {v1}\n    ユーザー名: {v2}\n    SSH サーバー（ポート {v3}）: {v4}', { v1: (hi.tailscaleIps.length ? esc(hi.tailscaleIps.join(' / ')) : `${tr('{v1}（Tailscale の IP が見つかりません。Tailscale が接続中か確かめてください）', { v1: (esc(hi.hostname)) })}`), v2: (esc(hi.user || '?')), v3: (esc(hi.sshPort)), v4: (hi.sshServer ? tr('動いています') : tr('動いていません')) })}</div>
+             ${hi.sshServer ? '' : `<div class="warn">${tr('このマシンの SSH サーバーが動いていないので、操作側からつなげません。{v1}', { v1: (sshServerHowto) })}</div>`}
              <div class="remote-key" id="rHostKeyBox">
-               <div><strong>操作側の公開鍵を登録する</strong></div>
-               <small class="muted">操作側の RC設定で作った公開鍵（agent-kanban_ed25519.pub）を、USB・共有フォルダ・メールなどでこの PC の好きな場所に置き、ここで選んで「登録する」を押すと、SSH で入れるように設定します（${hi.platform === 'win32' ? '管理者のユーザーは C:\\ProgramData\\ssh\\administrators_authorized_keys、それ以外は ~/.ssh/authorized_keys' : '~/.ssh/authorized_keys'} に足します）。</small>
-               <div class="remote-key-row"><div class="remote-ssh" id="rHostPubPath">（まだ選んでいません）</div><button class="btn small" type="button" id="rPickPub">ファイルを選択…</button></div>
+               <div>${tr('<strong>操作側の公開鍵を登録する</strong>')}</div>
+               <small class="muted">${tr('操作側の RC設定で作った公開鍵（agent-kanban_ed25519.pub）を、USB・共有フォルダ・メールなどでこの PC の好きな場所に置き、ここで選んで「登録する」を押すと、SSH で入れるように設定します（{v1} に足します）。', { v1: (hi.platform === 'win32' ? tr('管理者のユーザーは C:\\ProgramData\\ssh\\administrators_authorized_keys、それ以外は ~/.ssh/authorized_keys') : '~/.ssh/authorized_keys') })}</small>
+               <div class="remote-key-row"><div class="remote-ssh" id="rHostPubPath">${tr('（まだ選んでいません）')}</div><button class="btn small" type="button" id="rPickPub">${tr('ファイルを選択…')}</button></div>
                <div id="rHostPubInfo"></div>
-               <div class="row"><button class="btn small primary" type="button" id="rInstallPub" disabled>登録する</button></div>
+               <div class="row"><button class="btn small primary" type="button" id="rInstallPub" disabled>${tr('登録する')}</button></div>
              </div>`
           : '';
         const port = rs.host.port || 17831;
         const ssh = `ssh -L ${port}:127.0.0.1:${port} <user>@<host>`;
         const hostBlock = rs.host.listening
-          ? `<div><strong>ホストとして待ち受け中</strong>（ポート ${esc(port)}・接続 ${rs.host.clients || 0}・ペア済み ${rs.host.pairedCount || 0}）</div>
-             <div>ペアリングコード: <span class="pair-code">${rs.host.pairCode ? esc(rs.host.pairCode) : '（期限切れ・再発行してください）'}</span></div>
+          ? `<div>${tr('<strong>ホストとして待ち受け中</strong>（ポート {v1}・接続 {v2}・ペア済み {v3}）', { v1: (esc(port)), v2: (rs.host.clients || 0), v3: (rs.host.pairedCount || 0) })}</div>
+             <div>${tr('ペアリングコード: <span class="pair-code">{v1}</span>', { v1: (rs.host.pairCode ? esc(rs.host.pairCode) : tr('（期限切れ・再発行してください）')) })}</div>
              <div class="row">
-               <button class="btn small" type="button" id="rRefreshPair">コードを再発行</button>
-               <button class="btn small" type="button" id="rClearPairs">ペアを破棄</button>
-               <button class="btn small danger" type="button" id="rStopHost">ホストを停止</button>
+               <button class="btn small" type="button" id="rRefreshPair">${tr('コードを再発行')}</button>
+               <button class="btn small" type="button" id="rClearPairs">${tr('ペアを破棄')}</button>
+               <button class="btn small danger" type="button" id="rStopHost">${tr('ホストを停止')}</button>
              </div>
-             <div><small class="muted">操作側の「クライアント」で「SSH 経由」を選び、下の接続先とユーザー名を入れて接続します。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>
+             <div><small class="muted">${tr('操作側の「クライアント」で「SSH 経由」を選び、下の接続先とユーザー名を入れて接続します。自分でトンネルを張るなら:')}</small><div class="remote-ssh">${esc(ssh)}</div></div>
              ${hostInfoBlock}`
-          : `<div><strong>ホスト（作業側）</strong></div>
-             <label class="field"><span>待ち受けポート</span><input id="rHostPort" type="number" min="1024" max="65535" value="${esc(port)}" /></label>
-             <button class="btn small primary" type="button" id="rStartHost">ホストを開始（ペアリングコードを出す）</button>
-             <div><small class="muted">開始後、操作側の「クライアント」で「SSH 経由」を選び、下の接続先とユーザー名・コードで接続します（このマシンの SSH サーバーをオンにしておいてください）。自分でトンネルを張るなら:</small><div class="remote-ssh">${esc(ssh)}</div></div>
+          : `<div>${tr('<strong>ホスト（作業側）</strong>')}</div>
+             <label class="field">${tr('<span>待ち受けポート</span>')}<input id="rHostPort" type="number" min="1024" max="65535" value="${esc(port)}" /></label>
+             <button class="btn small primary" type="button" id="rStartHost">${tr('ホストを開始（ペアリングコードを出す）')}</button>
+             <div><small class="muted">${tr('開始後、操作側の「クライアント」で「SSH 経由」を選び、下の接続先とユーザー名・コードで接続します（このマシンの SSH サーバーをオンにしておいてください）。自分でトンネルを張るなら:')}</small><div class="remote-ssh">${esc(ssh)}</div></div>
              ${hostInfoBlock}`;
         const c = rs.client;
         const viaSsh = c.mode !== 'direct';
-        const targetText = viaSsh ? `SSH 経由 ${esc(c.sshUser ? `${c.sshUser}@` : '')}${esc(c.sshHost)}（ホストのポート ${esc(c.port)}）` : `${esc(c.host)}:${esc(c.port)}`;
+        const targetText = viaSsh ? `${tr('SSH 経由 {v1}{v2}（ホストのポート {v3}）', { v1: (esc(c.sshUser ? `${c.sshUser}@` : '')), v2: (esc(c.sshHost)), v3: (esc(c.port)) })}` : `${esc(c.host)}:${esc(c.port)}`;
         const resumeBlock = c.reconnecting
-          ? `<div class="remote-key"><div><strong>前回の接続を再開しています…</strong>（${esc(c.reconnecting.attempt)}/${esc(c.reconnecting.max)} 回目） → ${targetText}</div>
-               ${c.reconnecting.lastError ? `<small class="muted">前回の失敗: ${esc(c.reconnecting.lastError)}</small>` : ''}
-               <div><button class="btn small" type="button" id="rCancelResume">再開をやめる</button></div></div>`
+          ? `<div class="remote-key"><div>${tr('<strong>前回の接続を再開しています…</strong>（{v1}/{v2} 回目） → {v3}', { v1: (esc(c.reconnecting.attempt)), v2: (esc(c.reconnecting.max)), v3: (targetText) })}</div>
+               ${c.reconnecting.lastError ? `<small class="muted">${tr('前回の失敗: {v1}', { v1: (esc(c.reconnecting.lastError)) })}</small>` : ''}
+               <div><button class="btn small" type="button" id="rCancelResume">${tr('再開をやめる')}</button></div></div>`
           : '';
         // これまでつないだ接続先のカード。押すと、その接続先と保存したトークンでつなぐ
         const history = c.history || [];
         const connTitle = (h) => (h.mode === 'direct' ? `${h.host}:${h.port}` : `${h.sshUser ? `${h.sshUser}@` : ''}${h.sshHost}`);
-        const connSub = (h) => (h.mode === 'direct' ? `直接・${h.host}:${h.port}` : `SSH 経由${h.sshPort && h.sshPort !== 22 ? `（ポート ${h.sshPort}）` : ''}・ホストのポート ${h.port}`);
+        const connSub = (h) => (h.mode === 'direct' ? `${tr('直接・{v1}:{v2}', { v1: (h.host), v2: (h.port) })}` : `${tr('SSH 経由{v1}・ホストのポート {v2}', { v1: (h.sshPort && h.sshPort !== 22 ? `${tr('（ポート {v1}）', { v1: (h.sshPort) })}` : ''), v2: (h.port) })}`);
         const historyBlock = history.length
-          ? `<div class="remote-key"><div><strong>これまでの接続</strong>（カードを押すと、保存したトークンでつなぎます）</div>
-               ${c.resumeError ? `<div class="warn">つながりませんでした: ${esc(c.resumeError)}</div>` : ''}
+          ? `<div class="remote-key"><div>${tr('<strong>これまでの接続</strong>（カードを押すと、保存したトークンでつなぎます）')}</div>
+               ${c.resumeError ? `<div class="warn">${tr('つながりませんでした: {v1}', { v1: (esc(c.resumeError)) })}</div>` : ''}
                <div class="rc-conn-list">${history
                  .map((h) => {
                    const last = h.id === c.currentId;
                    return `<div class="rc-conn-card${last ? ' last' : ''}${h.hasToken ? '' : ' no-token'}">
-                     <button class="rc-conn-main" type="button" data-conn="${esc(h.id)}" ${h.hasToken ? '' : 'disabled'} title="${h.hasToken ? 'この接続先につなぐ' : 'トークンがないので、6 桁のコードでペアリングし直してください'}">
-                       <span class="rc-conn-title">${h.hasToken ? '↻ ' : ''}${esc(connTitle(h))}${last ? '<span class="rc-conn-badge">前回</span>' : ''}</span>
+                     <button class="rc-conn-main" type="button" data-conn="${esc(h.id)}" ${h.hasToken ? '' : 'disabled'} title="${h.hasToken ? tr('この接続先につなぐ') : tr('トークンがないので、6 桁のコードでペアリングし直してください')}">
+                       <span class="rc-conn-title">${h.hasToken ? '↻ ' : ''}${esc(connTitle(h))}${last ? tr('<span class="rc-conn-badge">前回</span>') : ''}</span>
                        <span class="rc-conn-sub">${esc(connSub(h))}</span>
-                       <span class="rc-conn-sub">${h.hasToken ? (h.lastConnectedAt ? `最後の接続: ${esc(timeAgo(h.lastConnectedAt))}` : '以前の版で接続') : 'コードでのペアリングが必要'}</span>
+                       <span class="rc-conn-sub">${h.hasToken ? (h.lastConnectedAt ? `${tr('最後の接続: {v1}', { v1: (esc(timeAgo(h.lastConnectedAt))) })}` : tr('以前の版で接続')) : tr('コードでのペアリングが必要')}</span>
                      </button>
-                     <button class="rc-conn-forget" type="button" data-forget="${esc(h.id)}" title="この接続を一覧から消す（トークンも忘れます）">×</button>
+                     <button class="rc-conn-forget" type="button" data-forget="${esc(h.id)}" title="${tr('この接続を一覧から消す（トークンも忘れます）')}">×</button>
                    </div>`;
                  })
                  .join('')}</div>
-               <small class="muted">新しい接続先につなぐときや、接続先を直すときは、下の欄を入れて接続します。</small></div>`
+               <small class="muted">${tr('新しい接続先につなぐときや、接続先を直すときは、下の欄を入れて接続します。')}</small></div>`
           : '';
         const legacyResume = !c.reconnecting && c.canResume && !history.some((h) => h.id === c.currentId)
-            ? `<div class="remote-key"><div><strong>前回の接続</strong> → ${targetText}</div>
-                 ${c.resumeError ? `<div class="warn">つながりませんでした: ${esc(c.resumeError)}</div>` : ''}
-                 <div><button class="btn small primary" type="button" id="rResume">↻ 前回の接続を再開</button></div>
-                 <small class="muted">接続先を変えるときは、下の欄を直して「保存したトークンで接続」を押します。</small></div>`
+            ? `<div class="remote-key"><div>${tr('<strong>前回の接続</strong> → {v1}', { v1: (targetText) })}</div>
+                 ${c.resumeError ? `<div class="warn">${tr('つながりませんでした: {v1}', { v1: (esc(c.resumeError)) })}</div>` : ''}
+                 <div><button class="btn small primary" type="button" id="rResume">${tr('↻ 前回の接続を再開')}</button></div>
+                 <small class="muted">${tr('接続先を変えるときは、下の欄を直して「保存したトークンで接続」を押します。')}</small></div>`
             : '';
         const clientBlock = c.connected
-          ? `<div><strong>クライアントとして接続中</strong> → ${targetText}</div>
-             <small class="muted">アプリを終了しても、次に起動したときにこの接続を自動で再開します（回線が切れたときも、つなぎ直します）。「切断」を押すと、次からは自動で再開しません。</small>
-             <button class="btn small danger" type="button" id="rDisconnect">切断してローカルボードに戻る</button>`
-          : `<div><strong>クライアント（操作側）</strong></div>
+          ? `<div>${tr('<strong>クライアントとして接続中</strong> → {v1}', { v1: (targetText) })}</div>
+             <small class="muted">${tr('アプリを終了しても、次に起動したときにこの接続を自動で再開します（回線が切れたときも、つなぎ直します）。「切断」を押すと、次からは自動で再開しません。')}</small>
+             <button class="btn small danger" type="button" id="rDisconnect">${tr('切断してローカルボードに戻る')}</button>`
+          : `<div>${tr('<strong>クライアント（操作側）</strong>')}</div>
              ${resumeBlock}
              ${historyBlock}
              ${legacyResume}
-             <label class="field"><span>接続方法</span>
+             <label class="field">${tr('<span>接続方法</span>')}
                <select id="rClientMode">
-                 <option value="ssh" ${viaSsh ? 'selected' : ''}>SSH 経由（アプリがトンネルを張る・おすすめ）</option>
-                 <option value="direct" ${viaSsh ? '' : 'selected'}>直接（自分で張ったトンネルの 127.0.0.1 などへ）</option>
+                 <option value="ssh" ${viaSsh ? 'selected' : ''}>${tr('SSH 経由（アプリがトンネルを張る・おすすめ）')}</option>
+                 <option value="direct" ${viaSsh ? '' : 'selected'}>${tr('直接（自分で張ったトンネルの 127.0.0.1 などへ）')}</option>
                </select>
              </label>
              <div id="rSshFields" ${viaSsh ? '' : 'hidden'}>
                <div class="row">
-                 <label class="field"><span>SSH の接続先（Tailscale の IP・名前など）</span><input id="rSshHost" placeholder="100.x.x.x / マシン名" value="${esc(c.sshHost || '')}" /></label>
-                 <label class="field"><span>ユーザー名（ホストのログイン名）</span><input id="rSshUser" placeholder="kazuya" value="${esc(c.sshUser || '')}" /></label>
-                 <label class="field"><span>SSH ポート</span><input id="rSshPort" type="number" min="1" max="65535" value="${esc(c.sshPort || 22)}" /></label>
+                 <label class="field">${tr('<span>SSH の接続先（Tailscale の IP・名前など）</span>')}<input id="rSshHost" placeholder="${tr('100.x.x.x / マシン名')}" value="${esc(c.sshHost || '')}" /></label>
+                 <label class="field">${tr('<span>ユーザー名（ホストのログイン名）</span>')}<input id="rSshUser" placeholder="kazuya" value="${esc(c.sshUser || '')}" /></label>
+                 <label class="field">${tr('<span>SSH ポート</span>')}<input id="rSshPort" type="number" min="1" max="65535" value="${esc(c.sshPort || 22)}" /></label>
                </div>
                <div class="row">
-                 <label class="field"><span>鍵ファイル（空ならこのアプリで作る ~/.ssh/agent-kanban_ed25519）</span><input id="rSshKey" placeholder="~/.ssh/agent-kanban_ed25519" value="${esc(c.sshKey || '')}" /></label>
-                 <label class="field"><span>ssh コマンド</span><input id="rSshPath" value="${esc(c.sshPath || 'ssh')}" /></label>
+                 <label class="field">${tr('<span>鍵ファイル（空ならこのアプリで作る ~/.ssh/agent-kanban_ed25519）</span>')}<input id="rSshKey" placeholder="~/.ssh/agent-kanban_ed25519" value="${esc(c.sshKey || '')}" /></label>
+                 <label class="field">${tr('<span>ssh コマンド</span>')}<input id="rSshPath" value="${esc(c.sshPath || 'ssh')}" /></label>
                </div>
-               <small class="muted">SSH は鍵で入れる必要があります（パスワードは入力できません）。ホスト側で SSH サーバーをオンにしてください（Mac は「リモートログイン」、Windows は「OpenSSH サーバー」）。接続先とユーザー名は、ホストの Agent Kanban のこの画面に出ています。</small>
-               <div class="remote-key" id="rKeyBox">SSH の鍵を確かめています…</div>
+               <small class="muted">${tr('SSH は鍵で入れる必要があります（パスワードは入力できません）。ホスト側で SSH サーバーをオンにしてください（Mac は「リモートログイン」、Windows は「OpenSSH サーバー」）。接続先とユーザー名は、ホストの Agent Kanban のこの画面に出ています。')}</small>
+               <div class="remote-key" id="rKeyBox">${tr('SSH の鍵を確かめています…')}</div>
              </div>
              <div class="row">
-               <label class="field" id="rClientHostField" ${viaSsh ? 'hidden' : ''}><span>接続先ホスト</span><input id="rClientHost" value="${esc(c.host || '127.0.0.1')}" /></label>
-               <label class="field"><span>ホストの待ち受けポート</span><input id="rClientPort" type="number" min="1024" max="65535" value="${esc(c.port || 17831)}" /></label>
+               <label class="field" id="rClientHostField" ${viaSsh ? 'hidden' : ''}>${tr('<span>接続先ホスト</span>')}<input id="rClientHost" value="${esc(c.host || '127.0.0.1')}" /></label>
+               <label class="field">${tr('<span>ホストの待ち受けポート</span>')}<input id="rClientPort" type="number" min="1024" max="65535" value="${esc(c.port || 17831)}" /></label>
              </div>
-             <label class="field"><span>ペアリングコード（初回のみ。トークンがあれば空で再接続）</span><input id="rPairCode" placeholder="6桁" maxlength="8" /></label>
+             <label class="field">${tr('<span>ペアリングコード（初回のみ。トークンがあれば空で再接続）</span>')}<input id="rPairCode" placeholder="${tr('6桁')}" maxlength="8" /></label>
              <div class="row">
-               <button class="btn small primary" type="button" id="rConnect">${c.hasToken ? '保存したトークンで接続' : 'コードでペアリング'}</button>
-               ${c.hasToken ? '<button class="btn small" type="button" id="rForgetToken">トークンを忘れる</button>' : ''}
+               <button class="btn small primary" type="button" id="rConnect">${c.hasToken ? tr('保存したトークンで接続') : tr('コードでペアリング')}</button>
+               ${c.hasToken ? tr('<button class="btn small" type="button" id="rForgetToken">トークンを忘れる</button>') : ''}
              </div>
-             <small class="muted" id="rDirectHint" ${viaSsh ? 'hidden' : ''}>直接のときは、先に <code>${esc(ssh)}</code> を張り、接続先ホストは 127.0.0.1 のままにします（ホストは 127.0.0.1 でしか待ち受けないので、Tailscale の IP を直接入れてもつながりません）</small>`;
+             <small class="muted" id="rDirectHint" ${viaSsh ? 'hidden' : ''}>${tr('直接のときは、先に <code>{v1}</code> を張り、接続先ホストは 127.0.0.1 のままにします（ホストは 127.0.0.1 でしか待ち受けないので、Tailscale の IP を直接入れてもつながりません）', { v1: (esc(ssh)) })}</small>`;
         const roleTab = (r, label, lockedBy) =>
           `<button class="mtab${role === r ? ' active' : ''}" type="button" data-rc-role="${r}" ${lockedBy ? `disabled title="${esc(lockedBy)}"` : ''}>${label}</button>`;
         const roleTabs = `<div class="mtabs rc-role-tabs">
-            ${roleTab('host', 'ホスト（作業側）', clientActive ? 'クライアントとして接続中は選べません。先に切断してください' : '')}
-            ${roleTab('client', 'クライアント（操作側）', hostActive ? 'ホストとして待ち受け中は選べません。先にホストを停止してください' : '')}
+            ${roleTab('host', tr('ホスト（作業側）'), clientActive ? tr('クライアントとして接続中は選べません。先に切断してください') : '')}
+            ${roleTab('client', tr('クライアント（操作側）'), hostActive ? tr('ホストとして待ち受け中は選べません。先にホストを停止してください') : '')}
           </div>`;
         const lockNote = hostActive
-          ? '<small class="muted">ホストとして待ち受け中なので、クライアントには切り替えられません（ホストを停止すると選べます）。</small>'
+          ? tr('<small class="muted">ホストとして待ち受け中なので、クライアントには切り替えられません（ホストを停止すると選べます）。</small>')
           : clientActive
-            ? '<small class="muted">クライアントとして接続中なので、ホストには切り替えられません（切断すると選べます）。</small>'
+            ? tr('<small class="muted">クライアントとして接続中なので、ホストには切り替えられません（切断すると選べます）。</small>')
             : '';
         box.innerHTML = `${roleTabs}${lockNote}${role === 'host' ? hostBlock : clientBlock}`;
         box.querySelectorAll('[data-rc-role]').forEach((b) => {
@@ -3867,12 +3865,12 @@ function openRemoteSettings() {
           };
         });
         const busy = (label, fn) => runBusy(label, fn).then((ok) => { if (ok !== undefined) drawRemote(); });
-        if ($('rStartHost')) $('rStartHost').onclick = () => busy('ホストを開始しています…', () => api.remoteStartHost({ port: $('rHostPort').value }));
-        if ($('rStopHost')) $('rStopHost').onclick = () => busy('ホストを停止しています…', () => api.remoteStopHost());
-        if ($('rRefreshPair')) $('rRefreshPair').onclick = () => busy('コードを発行しています…', () => api.remoteRefreshPair());
+        if ($('rStartHost')) $('rStartHost').onclick = () => busy(tr('ホストを開始しています…'), () => api.remoteStartHost({ port: $('rHostPort').value }));
+        if ($('rStopHost')) $('rStopHost').onclick = () => busy(tr('ホストを停止しています…'), () => api.remoteStopHost());
+        if ($('rRefreshPair')) $('rRefreshPair').onclick = () => busy(tr('コードを発行しています…'), () => api.remoteRefreshPair());
         if ($('rClearPairs')) $('rClearPairs').onclick = () => {
-          if (!confirm('ペアリング済みのクライアントをすべて無効にしますか？')) return;
-          busy('ペアを破棄しています…', () => api.remoteClearPairs());
+          if (!confirm(tr('ペアリング済みのクライアントをすべて無効にしますか？'))) return;
+          busy(tr('ペアを破棄しています…'), () => api.remoteClearPairs());
         };
         if ($('rClientMode')) $('rClientMode').onchange = () => {
           const ssh = $('rClientMode').value === 'ssh';
@@ -3882,8 +3880,8 @@ function openRemoteSettings() {
         };
         if ($('rConnect')) $('rConnect').onclick = () => {
           const mode = $('rClientMode').value;
-          if (mode === 'ssh' && !$('rSshHost').value.trim()) return toast('SSH の接続先（Tailscale の IP か名前）を入れてください');
-          busy(mode === 'ssh' ? 'SSH トンネルを張って接続しています…' : '接続しています…', () =>
+          if (mode === 'ssh' && !$('rSshHost').value.trim()) return toast(tr('SSH の接続先（Tailscale の IP か名前）を入れてください'));
+          busy(mode === 'ssh' ? tr('SSH トンネルを張って接続しています…') : tr('接続しています…'), () =>
             api.remoteConnect({
               mode,
               host: $('rClientHost').value,
@@ -3900,42 +3898,42 @@ function openRemoteSettings() {
         // ホスト側: 受け取った公開鍵ファイルを選んで登録する
         let pickedPub = null;
         if ($('rPickPub')) $('rPickPub').onclick = async () => {
-          const r = await runBusy('公開鍵を読み込んでいます…', () => api.remotePickPubKey());
+          const r = await runBusy(tr('公開鍵を読み込んでいます…'), () => api.remotePickPubKey());
           if (!r) return;
           pickedPub = r;
           $('rHostPubPath').textContent = r.path;
-          $('rHostPubInfo').innerHTML = `<small class="muted">鍵: ${esc(r.type)}${r.comment ? `（${esc(r.comment)}）` : ''}</small>`;
+          $('rHostPubInfo').innerHTML = `<small class="muted">${tr('鍵: {v1}{v2}', { v1: (esc(r.type)), v2: (r.comment ? `（${esc(r.comment)}）` : '') })}</small>`;
           $('rInstallPub').disabled = false;
         };
         if ($('rInstallPub')) $('rInstallPub').onclick = async () => {
-          if (!pickedPub) return toast('公開鍵のファイルを選んでください');
-          const r = await runBusy('公開鍵を登録しています…', () => api.remoteInstallPubKey({ path: pickedPub.path }));
+          if (!pickedPub) return toast(tr('公開鍵のファイルを選んでください'));
+          const r = await runBusy(tr('公開鍵を登録しています…'), () => api.remoteInstallPubKey({ path: pickedPub.path }));
           if (!r) return;
-          $('rHostPubInfo').innerHTML = `<div class="ok-note">${r.added ? '登録しました' : 'この鍵はもう登録されています'}: ${esc(r.file)}<br />操作側で「SSH 経由」・接続先・ユーザー名（下の値）を入れて接続できます。</div>`;
-          toast(r.added ? '公開鍵を登録しました' : 'この鍵はもう登録されています', 'ok');
+          $('rHostPubInfo').innerHTML = `<div class="ok-note">${tr('{v1}: {v2}<br />操作側で「SSH 経由」・接続先・ユーザー名（下の値）を入れて接続できます。', { v1: (r.added ? tr('登録しました') : tr('この鍵はもう登録されています')), v2: (esc(r.file)) })}</div>`;
+          toast(r.added ? tr('公開鍵を登録しました') : tr('この鍵はもう登録されています'), 'ok');
         };
         if ($('rKeyBox')) {
           drawKey();
           // 鍵ファイルの欄を変えたら、その鍵を見直す
           $('rSshKey').onchange = () => drawKey();
         }
-        if ($('rResume')) $('rResume').onclick = () => busy(viaSsh ? 'SSH トンネルを張って、前回の接続を再開しています…' : '前回の接続を再開しています…', () => api.remoteResume());
+        if ($('rResume')) $('rResume').onclick = () => busy(viaSsh ? tr('SSH トンネルを張って、前回の接続を再開しています…') : tr('前回の接続を再開しています…'), () => api.remoteResume());
         box.querySelectorAll('[data-conn]').forEach((b) => {
           b.onclick = () => {
             const h = history.find((x) => x.id === b.dataset.conn);
-            busy(h?.mode === 'direct' ? `${connTitle(h)} につないでいます…` : `SSH トンネルを張って、${h ? connTitle(h) : ''} につないでいます…`, () => api.remoteResume({ id: b.dataset.conn }));
+            busy(h?.mode === 'direct' ? `${tr('{v1} につないでいます…', { v1: (connTitle(h)) })}` : `${tr('SSH トンネルを張って、{v1} につないでいます…', { v1: (h ? connTitle(h) : '') })}`, () => api.remoteResume({ id: b.dataset.conn }));
           };
         });
         box.querySelectorAll('[data-forget]').forEach((b) => {
           b.onclick = () => {
             const h = history.find((x) => x.id === b.dataset.forget);
-            if (!confirm(`「${h ? connTitle(h) : b.dataset.forget}」を、これまでの接続から消しますか？（保存したトークンも忘れます）`)) return;
-            busy('接続を消しています…', () => api.remoteForgetConnection({ id: b.dataset.forget }));
+            if (!confirm(`${tr('「{v1}」を、これまでの接続から消しますか？（保存したトークンも忘れます）', { v1: (h ? connTitle(h) : b.dataset.forget) })}`)) return;
+            busy(tr('接続を消しています…'), () => api.remoteForgetConnection({ id: b.dataset.forget }));
           };
         });
-        if ($('rCancelResume')) $('rCancelResume').onclick = () => busy('再開をやめています…', () => api.remoteCancelResume());
-        if ($('rDisconnect')) $('rDisconnect').onclick = () => busy('切断しています…', () => api.remoteDisconnect());
-        if ($('rForgetToken')) $('rForgetToken').onclick = () => busy('トークンを消しています…', () => api.remoteForgetToken());
+        if ($('rCancelResume')) $('rCancelResume').onclick = () => busy(tr('再開をやめています…'), () => api.remoteCancelResume());
+        if ($('rDisconnect')) $('rDisconnect').onclick = () => busy(tr('切断しています…'), () => api.remoteDisconnect());
+        if ($('rForgetToken')) $('rForgetToken').onclick = () => busy(tr('トークンを消しています…'), () => api.remoteForgetToken());
       };
       drawRemote();
       // 裏での再開が始まった・つながった・あきらめたときは、開いている RC設定も描き直す
@@ -3975,114 +3973,116 @@ function renderSettingsView() {
   const projectName = String(s.repoPath || '').split(/[\\/]/).filter(Boolean).pop() || '';
   // ブランチ一覧は git を何回も起動するので（Windows だと遅い）、待たずに画面を描いてから後で入れる
   const baseOptions = (info) =>
-    `<option value="">チェックアウト中のブランチ${info.current ? `（今は ${esc(info.current)}）` : ''}</option>` +
+    `<option value="">${tr('チェックアウト中のブランチ{v1}', { v1: (info.current ? `${tr('（今は {v1}）', { v1: (esc(info.current)) })}` : '') })}</option>` +
     [...new Set([...(s.baseBranch ? [s.baseBranch] : []), ...info.branches])]
       .map((b) => `<option ${b === s.baseBranch ? 'selected' : ''}>${esc(b)}</option>`)
       .join('');
   // 節の中身。並びと見出しは AppView.SETTINGS_NAV に合わせる
   const sections = {
-    general: `<small class="muted s-note">ここの項目は、どのプロジェクトでも同じです。</small>
-      <label class="field"><span>同時に動かす数</span><input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
-      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> タスクが完了したとき、前に完了したタスクと似た作業が続いていたら、スキルにしないか通知で聞く（右上のベル）</label>
-      <label class="check"><input type="checkbox" id="sDeleteSessions" ${s.deleteSessionsOnMerge !== false ? 'checked' : ''} /> マージして完了したら、そのタスクの作業に使った Claude Code の会話（セッション）を消す（引き継いだ元の会話は残します）</label>`,
+    general: `<small class="muted s-note">${tr('ここの項目は、どのプロジェクトでも同じです。')}</small>
+      <label class="field"><span>${tr('言語')}</span>
+        <select id="sLanguage">${I18n.LANGUAGES.map((l) => `<option value="${l.code}" ${l.code === I18n.getLanguage() ? 'selected' : ''}>${esc(l.label)}</option>`).join('')}</select>
+        <small>${tr('表示の言語です。選ぶとすぐに保存して、画面を読み直します。')}</small></label>
+      <label class="field">${tr('<span>同時に動かす数</span>')}<input id="sMax" type="number" min="1" max="10" value="${esc(s.maxParallel)}" /></label>
+      <label class="check"><input type="checkbox" id="sSuggestSkills" ${s.suggestSkillsOnDone !== false ? 'checked' : ''} /> ${tr('タスクが完了したとき、前に完了したタスクと似た作業が続いていたら、スキルにしないか通知で聞く（右上のベル）')}</label>
+      <label class="check"><input type="checkbox" id="sDeleteSessions" ${s.deleteSessionsOnMerge !== false ? 'checked' : ''} /> ${tr('マージして完了したら、そのタスクの作業に使った Claude Code の会話（セッション）を消す（引き継いだ元の会話は残します）')}</label>`,
     update: `<div id="updPanel" class="gh-panel upd-panel">${updatePanelHtml(state.update)}</div>`,
-    branch: `<small class="muted s-note">「このプロジェクト」の項目${projectName ? `（<code>${esc(projectName)}</code>）` : ''}は、プロジェクト（リポジトリ）ごとに覚えます。タブを切り替えると、そのプロジェクトの設定に変わります。初めて開いたプロジェクトは初期値から始まります。</small>
-      <label class="field"><span>ベースブランチ（worktree の作成元・マージ先）</span>
+    branch: `<small class="muted s-note">${tr('「このプロジェクト」の項目{v1}は、プロジェクト（リポジトリ）ごとに覚えます。タブを切り替えると、そのプロジェクトの設定に変わります。初めて開いたプロジェクトは初期値から始まります。', { v1: (projectName ? `（<code>${esc(projectName)}</code>）` : '') })}</small>
+      <label class="field">${tr('<span>ベースブランチ（worktree の作成元・マージ先）</span>')}
         <select id="sBase">${baseOptions({ branches: [], current: '' })}</select></label>
-      <label class="field"><span>レビュー後の取り込み方</span>
+      <label class="field">${tr('<span>レビュー後の取り込み方</span>')}
         <select id="sIntegration">
-          <option value="merge" ${s.integration !== 'pr' ? 'selected' : ''}>直接マージする（ローカルで git merge）</option>
-          <option value="pr" ${s.integration === 'pr' ? 'selected' : ''}>PR を作成する（origin に push して gh pr create）</option>
+          <option value="merge" ${s.integration !== 'pr' ? 'selected' : ''}>${tr('直接マージする（ローカルで git merge）')}</option>
+          <option value="pr" ${s.integration === 'pr' ? 'selected' : ''}>${tr('PR を作成する（origin に push して gh pr create）')}</option>
         </select>
-        <small>レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。</small></label>
-      <label class="field"><span>ブランチの命名規則（自然言語で書けます）</span>
-        <textarea id="sBranchRule" rows="2" placeholder="例: feature/<Issue番号>-<内容を表す短い英語> にする。Issue がないときは feature/<内容を表す短い英語>">${esc(s.branchNamingRule || '')}</textarea>
-        <small>書いておくと、タスクの開始時にそのタスクのエージェントがこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。</small></label>`,
+        <small>${tr('レビュー中のタスクに出るボタンが「マージ」か「PR を作成」に変わります。PR の作成には gh のインストールとログインが必要です。')}</small></label>
+      <label class="field">${tr('<span>ブランチの命名規則（自然言語で書けます）</span>')}
+        <textarea id="sBranchRule" rows="2" placeholder="${tr('例: feature/<Issue番号>-<内容を表す短い英語> にする。Issue がないときは feature/<内容を表す短い英語>')}">${esc(s.branchNamingRule || '')}</textarea>
+        <small>${tr('書いておくと、タスクの開始時にそのタスクのエージェントがこの規則に従ってブランチ名を考えます。空なら agent/issue-12-xxxx のような名前になります。決められなかったときも、この名前になります。')}</small></label>`,
     issue: `<div class="field">
-        <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> Issue のステータスを自動で変える（GitHub Projects）</label>
-        <small>Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。</small>
+        <label class="check"><input type="checkbox" id="sIssueSync" ${s.issueStatusSync !== false ? 'checked' : ''} /> ${tr('Issue のステータスを自動で変える（GitHub Projects）')}</label>
+        <small>${tr('Issue から作ったタスクが「実行中」になると In progress、「レビュー」になると In review、マージして「完了」になると Done に、Issue が入っている Project の Status を変えます。gh に project の権限が必要です。')}</small>
         <div class="status-map" id="sStatusMap" ${s.issueStatusSync !== false ? '' : 'hidden'}>
-          <label class="field"><span>変える項目（Project の単一選択フィールド名。空なら Status）</span><input id="sStatusField" placeholder="Status" value="${esc(s.statusFieldName || '')}" /></label>
+          <label class="field">${tr('<span>変える項目（Project の単一選択フィールド名。空なら Status）</span>')}<input id="sStatusField" placeholder="Status" value="${esc(s.statusFieldName || '')}" /></label>
           <div class="row">
-            <label class="field"><span>実行中 →</span><input id="sMapProgress" placeholder="自動（In progress など）" value="${esc((s.statusMapping || {}).inProgress || '')}" /></label>
-            <label class="field"><span>レビュー →</span><input id="sMapReview" placeholder="自動（In review など）" value="${esc((s.statusMapping || {}).inReview || '')}" /></label>
-            <label class="field"><span>完了 →</span><input id="sMapDone" placeholder="自動（Done など）" value="${esc((s.statusMapping || {}).done || '')}" /></label>
+            <label class="field">${tr('<span>実行中 →</span>')}<input id="sMapProgress" placeholder="${tr('自動（In progress など）')}" value="${esc((s.statusMapping || {}).inProgress || '')}" /></label>
+            <label class="field">${tr('<span>レビュー →</span>')}<input id="sMapReview" placeholder="${tr('自動（In review など）')}" value="${esc((s.statusMapping || {}).inReview || '')}" /></label>
+            <label class="field">${tr('<span>完了 →</span>')}<input id="sMapDone" placeholder="${tr('自動（Done など）')}" value="${esc((s.statusMapping || {}).done || '')}" /></label>
           </div>
-          <small>列ごとに使う選択肢の名前を指定できます（カンマ区切りで候補を複数書けます。大文字小文字・絵文字・記号は無視して比べます）。空の列は名前から自動で探します。</small>
+          <small>${tr('列ごとに使う選択肢の名前を指定できます（カンマ区切りで候補を複数書けます。大文字小文字・絵文字・記号は無視して比べます）。空の列は名前から自動で探します。')}</small>
         </div>
-        <div id="ghPanel" class="gh-panel">gh（GitHub CLI）を確認しています…</div></div>`,
-    permission: `<label class="field"><span>権限モード</span>
+        <div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div></div>`,
+    permission: `<label class="field">${tr('<span>権限モード</span>')}
         <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
-        <small>自動で許可されない操作は、カードに「承認待ち」として表示されます。</small></label>
-      <label class="field"><span>Claude Code に最初から許可しておくツール（カンマか改行で区切る）</span>
-        <textarea id="sAllowed" rows="2" placeholder="例: Bash(npm test:*), Bash(git status), WebSearch">${esc(s.allowedTools)}</textarea></label>`,
-    task: `<div class="field"><span>新しいタスクで最初から選んでおくスキル</span><div id="sSkill" class="skill-slot"></div>
-        <small>「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。</small></div>
-      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> 新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める</label>
-      <small class="muted s-note">仕様を詰めるときに、分けたほうがよい大きなタスクなら、エージェントがサブタスクに分けることを提案します（「サブタスクでやる」と答えたら分けます）。開始前のタスクには、進捗タブから手動でサブタスクを足せます（足したあとは「サブタスク」タブで見られます）。</small>
-      <label class="field"><span>サブタスクが終わったら（既定。タスクごとに開始前に変えられます）</span><select id="sSubtaskMerge"><option value="auto"${s.subtaskMerge !== 'review' ? ' selected' : ''}>自動で親のブランチにマージする</option><option value="review"${s.subtaskMerge === 'review' ? ' selected' : ''}>確かめてからマージする</option></select></label>`,
-    agents: `<small class="muted s-note">ここの項目は、どのプロジェクトでも同じです（「このプロジェクトの設定」と書いた項目だけは、プロジェクトごとに覚えます）。</small>
-      <small class="muted s-note">チェックを付けたエージェントだけ、コマンドとモデルを設定でき、タスク・会話・Pipeline・競争で選べます（1つ以上）。</small>
+        <small>${tr('自動で許可されない操作は、カードに「承認待ち」として表示されます。')}</small></label>
+      <label class="field">${tr('<span>Claude Code に最初から許可しておくツール（カンマか改行で区切る）</span>')}
+        <textarea id="sAllowed" rows="2" placeholder="${tr('例: Bash(npm test:*), Bash(git status), WebSearch')}">${esc(s.allowedTools)}</textarea></label>`,
+    task: `<div class="field">${tr('<span>新しいタスクで最初から選んでおくスキル</span>')}<div id="sSkill" class="skill-slot"></div>
+        <small>${tr('「＋ 新しいタスク」（自然言語・Issue のどちらでも）を開いたときに、このスキルが選ばれた状態になります（その場で外したり変えたりできます）。')}</small></div>
+      <label class="check"><input type="checkbox" id="sSpecCheck" ${s.specCheck !== false ? 'checked' : ''} /> ${tr('新しいタスクの内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める')}</label>
+      <small class="muted s-note">${tr('仕様を詰めるときに、分けたほうがよい大きなタスクなら、エージェントがサブタスクに分けることを提案します（「サブタスクでやる」と答えたら分けます）。開始前のタスクには、進捗タブから手動でサブタスクを足せます（足したあとは「サブタスク」タブで見られます）。')}</small>
+      <label class="field">${tr('<span>サブタスクが終わったら（既定。タスクごとに開始前に変えられます）</span>')}<select id="sSubtaskMerge"><option value="auto"${s.subtaskMerge !== 'review' ? ' selected' : ''}>${tr('自動で親のブランチにマージする')}</option><option value="review"${s.subtaskMerge === 'review' ? ' selected' : ''}>${tr('確かめてからマージする')}</option></select></label>`,
+    agents: `<small class="muted s-note">${tr('ここの項目は、どのプロジェクトでも同じです（「このプロジェクトの設定」と書いた項目だけは、プロジェクトごとに覚えます）。')}</small>
+      <small class="muted s-note">${tr('チェックを付けたエージェントだけ、コマンドとモデルを設定でき、タスク・会話・Pipeline・競争で選べます（1つ以上）。')}</small>
       ${agentConfigHtml('claude', s, `
         <div class="row">
-          <label class="field"><span>claude コマンドのパス</span><input id="sClaude" value="${esc(s.claudePath || 'claude')}" /></label>
-          <label class="field"><span>モデル（空なら既定）</span><input id="sModel" placeholder="例: sonnet / opus" value="${esc(s.model || '')}" /></label>
+          <label class="field">${tr('<span>claude コマンドのパス</span>')}<input id="sClaude" value="${esc(s.claudePath || 'claude')}" /></label>
+          <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sModel" placeholder="${tr('例: sonnet / opus')}" value="${esc(s.model || '')}" /></label>
         </div>`)}
       ${agentConfigHtml('codex', s, `
         <div class="row">
-          <label class="field"><span>codex コマンドのパス</span><input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
-          <label class="field"><span>モデル（空なら既定）</span><input id="sCodexModel" placeholder="例: gpt-5-codex" value="${esc(s.codexModel || '')}" /></label>
+          <label class="field">${tr('<span>codex コマンドのパス</span>')}<input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
+          <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sCodexModel" placeholder="${tr('例: gpt-5-codex')}" value="${esc(s.codexModel || '')}" /></label>
         </div>`)}
       ${agentConfigHtml('gemini', s, `
         <div class="row">
-          <label class="field"><span>gemini コマンドのパス</span><input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
-          <label class="field"><span>モデル（空なら既定）</span><input id="sGeminiModel" placeholder="例: gemini-2.5-pro" value="${esc(s.geminiModel || '')}" /></label>
+          <label class="field">${tr('<span>gemini コマンドのパス</span>')}<input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
+          <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sGeminiModel" placeholder="${tr('例: gemini-2.5-pro')}" value="${esc(s.geminiModel || '')}" /></label>
         </div>`)}
       ${agentConfigHtml('cursor', s, `
         <div class="row">
-          <label class="field"><span>cursor-agent コマンドのパス</span><input id="sCursor" value="${esc(s.cursorPath || 'cursor-agent')}" /></label>
-          <label class="field"><span>モデル（空なら既定）</span><input id="sCursorModel" placeholder="例: gpt-5 / sonnet-4.5" value="${esc(s.cursorModel || '')}" /></label>
+          <label class="field">${tr('<span>cursor-agent コマンドのパス</span>')}<input id="sCursor" value="${esc(s.cursorPath || 'cursor-agent')}" /></label>
+          <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sCursorModel" placeholder="${tr('例: gpt-5 / sonnet-4.5')}" value="${esc(s.cursorModel || '')}" /></label>
         </div>`)}
-      <small class="muted s-note">Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。</small>
-      <label class="field"><span>新しいタスク・会話で最初から選んでおくエージェント</span>
+      <small class="muted s-note">${tr('Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。')}</small>
+      <label class="field">${tr('<span>新しいタスク・会話で最初から選んでおくエージェント</span>')}
         <select id="sDefaultAgent"></select>
-        <small>オーケストレーションで Pipeline・競争を選んでいれば、タスクを作るときの「エージェント」の欄では、そちらを最初から選んでおきます（使えない状態のときや会話では、このエージェント）。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。</small></label>`,
-    custom: `<small class="muted s-note">カスタムエージェントは、このプロジェクトの設定です。</small>
+        <small>${tr('オーケストレーションで Pipeline・競争を選んでいれば、タスクを作るときの「エージェント」の欄では、そちらを最初から選んでおきます（使えない状態のときや会話では、このエージェント）。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。')}</small></label>`,
+    custom: `<small class="muted s-note">${tr('カスタムエージェントは、このプロジェクトの設定です。')}</small>
          <div class="field">
         <div id="sCustomList" class="ca-list"></div>
         <div id="sCustomForm" class="ca-form" hidden></div>
-        <div><button class="btn small" id="sCustomAdd" type="button">＋ カスタムエージェントを追加</button></div>
-        <small>元にするエージェント（CLI）とモデルに、プロフィール（名前・アイコンと色・説明・振る舞いの指示）を持たせます。タスク・会話を作るときの「エージェント」の欄、Pipelineの工程、競争で選べます。振る舞いの指示は、最初の指示の前に付けて渡します。</small></div>`,
-    orchestration: `<div class="field"><span>使うオーケストレーション（Pipelineと競争は、どちらか1つだけ使えます。使わないこともできます）</span>
+        <div><button class="btn small" id="sCustomAdd" type="button">${tr('＋ カスタムエージェントを追加')}</button></div>
+        <small>${tr('元にするエージェント（CLI）とモデルに、プロフィール（名前・アイコンと色・説明・振る舞いの指示）を持たせます。タスク・会話を作るときの「エージェント」の欄、Pipelineの工程、競争で選べます。振る舞いの指示は、最初の指示の前に付けて渡します。')}</small></div>`,
+    orchestration: `<div class="field">${tr('<span>使うオーケストレーション（Pipelineと競争は、どちらか1つだけ使えます。使わないこともできます）</span>')}
         <div class="check-row">
           <label class="check"><input type="radio" name="sOrch" value="relay" ${orchestrationOf(s) === 'relay' ? 'checked' : ''} /> ${icon('pipeline')}Pipeline</label>
-          <label class="check"><input type="radio" name="sOrch" value="compete" ${orchestrationOf(s) === 'compete' ? 'checked' : ''} /> ${icon('flag')}競争</label>
-          <label class="check"><input type="radio" name="sOrch" value="none" ${orchestrationOf(s) === 'none' ? 'checked' : ''} /> なし</label>
+          <label class="check"><input type="radio" name="sOrch" value="compete" ${orchestrationOf(s) === 'compete' ? 'checked' : ''} /> ${tr('{v1}競争', { v1: (icon('flag')) })}</label>
+          <label class="check"><input type="radio" name="sOrch" value="none" ${orchestrationOf(s) === 'none' ? 'checked' : ''} /> ${tr('なし')}</label>
         </div>
-        <small>選んだ方だけ、タスクを作るときに「エージェント」の欄で選べます。「なし」なら、いつも1つのエージェントで動かします（Pipeline・競争の設定は消えずに残ります）。</small></div>
-      <div class="field" id="sRelayField"><span>${icon('pipeline')}Pipeline（このプロジェクトの設定。いくつでも作れます）</span>
+        <small>${tr('選んだ方だけ、タスクを作るときに「エージェント」の欄で選べます。「なし」なら、いつも1つのエージェントで動かします（Pipeline・競争の設定は消えずに残ります）。')}</small></div>
+      <div class="field" id="sRelayField">${tr('<span>{v1}Pipeline（このプロジェクトの設定。いくつでも作れます）</span>', { v1: (icon('pipeline')) })}
         <div id="sRelayList" class="pl-list"></div>
         <div id="sRelayExport" class="ca-form" hidden></div>
         <div class="pl-tools">
-          <button class="btn small" id="sRelayAdd" type="button">＋ Pipelineを追加</button>
-          <button class="btn small" id="sRelayImport" type="button">インポート（.json / .zip）</button>
-          <button class="btn small" id="sRelayBundle" type="button">まとめてエクスポート（zip）</button>
+          <button class="btn small" id="sRelayAdd" type="button">${tr('＋ Pipelineを追加')}</button>
+          <button class="btn small" id="sRelayImport" type="button">${tr('インポート（.json / .zip）')}</button>
+          <button class="btn small" id="sRelayBundle" type="button">${tr('まとめてエクスポート（zip）')}</button>
         </div>
-        <small>工程（エージェントと担当の説明）を線でつなぎ、分岐（if）・ループ・並列を組めます。工程が終わるたびに変更をコミットし、最後の報告と一緒に次の工程へ渡します。タスクを作るときに、どの Pipeline で動かすかを選べます（「既定」のものを最初から選んでおきます）。<br />
-        「エクスポート」は Pipeline 1つを .json に、「まとめてエクスポート」は選んだ Pipeline とカスタムエージェントを zip にします。インポートは .json か zip を選びます（同じ中身のカスタムエージェントがあればそれを使い、なければ足します）。Pipeline の一覧の変更は、すぐに保存します。</small></div>
-      <div class="field" id="sCompeteField"><span>${icon('flag')}競争させるエージェント（2つ以上）</span>
+        <small>${tr('工程（エージェントと担当の説明）を線でつなぎ、分岐（if）・ループ・並列を組めます。工程が終わるたびに変更をコミットし、最後の報告と一緒に次の工程へ渡します。タスクを作るときに、どの Pipeline で動かすかを選べます（「既定」のものを最初から選んでおきます）。<br />\n        「エクスポート」は Pipeline 1つを .json に、「まとめてエクスポート」は選んだ Pipeline とカスタムエージェントを zip にします。インポートは .json か zip を選びます（同じ中身のカスタムエージェントがあればそれを使い、なければ足します）。Pipeline の一覧の変更は、すぐに保存します。')}</small></div>
+      <div class="field" id="sCompeteField">${tr('<span>{v1}競争させるエージェント（2つ以上）</span>', { v1: (icon('flag')) })}
         <div class="check-row" id="sCompeteBox"></div>
-        <small>使うエージェントにチェックを付けたものと、このプロジェクトのカスタムエージェントから選べます（カスタムエージェントの選択は、プロジェクトごとに覚えます）。</small></div>`,
+        <small>${tr('使うエージェントにチェックを付けたものと、このプロジェクトのカスタムエージェントから選べます（カスタムエージェントの選択は、プロジェクトごとに覚えます）。')}</small></div>`,
   };
   // 描き直しても（元に戻す・タブの切り替え）、見ていた節から動かさない
   const scrollTop = $('settingsMain')?.scrollTop || 0;
   const sectionsHtml = AppView.SETTINGS_NAV.flatMap((g) => g.items)
     .map(({ id, label }) => `<section id="settings-${id}" class="settings-section" data-section="${id}"><h2 class="settings-title">${esc(label)}</h2>${sections[id]}</section>`)
     .join('');
-  $('settingsView').innerHTML = `<nav id="settingsNav" class="settings-nav" aria-label="設定の項目">${AppView.settingsNavHtml(icon)}</nav>
+  $('settingsView').innerHTML = `<nav id="settingsNav" class="settings-nav" aria-label="${tr('設定の項目')}">${AppView.settingsNavHtml(icon)}</nav>
     <div id="settingsMain" class="settings-main">
       <div class="settings-content">${sectionsHtml}</div>
-      <div class="settings-actions"><button class="btn ghost" id="sCancel">元に戻す</button><button class="btn primary" id="sOk">保存</button></div>
+      <div class="settings-actions"><button class="btn ghost" id="sCancel">${tr('元に戻す')}</button><button class="btn primary" id="sOk">${tr('保存')}</button></div>
     </div>`;
   settingsViewKey = viewKey;
   // ダイアログの操作を待つ間に、画面を離れたりプロジェクトが変わったりしたら、この描画の値では保存も描き直しもしない
@@ -4128,20 +4128,20 @@ function renderSettingsView() {
           .map(
             (ca, i) => `<div class="ca-item" style="--pc:${esc(ca.color || '#6366f1')}">
               ${personaIcon(ca, ca.agent)}
-              <div class="ca-main"><b>${esc(ca.name)}</b> <span class="muted small">${agentIcon(ca.agent)}${esc(agentLabel(ca.agent))}${ca.model ? ` / ${esc(ca.model)}` : ''}${using().includes(ca.agent) ? '' : '（使わない設定）'}</span>
+              <div class="ca-main"><b>${esc(ca.name)}</b> <span class="muted small">${agentIcon(ca.agent)}${esc(agentLabel(ca.agent))}${ca.model ? ` / ${esc(ca.model)}` : ''}${using().includes(ca.agent) ? '' : tr('（使わない設定）')}</span>
                 ${ca.description ? `<div class="small">${esc(ca.description)}</div>` : ''}
                 ${ca.instruction ? `<div class="muted small rs-inst">${esc(ca.instruction)}</div>` : ''}</div>
-              <div class="ca-acts"><button class="btn small" type="button" data-ca-edit="${i}">編集</button><button class="btn small danger" type="button" data-ca-del="${i}">削除</button></div>
+              <div class="ca-acts"><button class="btn small" type="button" data-ca-edit="${i}">${tr('編集')}</button><button class="btn small danger" type="button" data-ca-del="${i}">${tr('削除')}</button></div>
             </div>`,
           )
           .join('')
-      : '<div class="muted small">まだありません</div>';
+      : tr('<div class="muted small">まだありません</div>');
     $('sCustomList').querySelectorAll('[data-ca-edit]').forEach((b) => (b.onclick = () => openCustomForm(Number(b.dataset.caEdit))));
     $('sCustomList').querySelectorAll('[data-ca-del]').forEach((b) => {
       b.onclick = () => {
         const ca = cas[Number(b.dataset.caDel)];
         const used = flows.some((p) => PipelinePack.usedCustomIds(p.flow).includes(ca.id));
-        if (!confirm(`カスタムエージェント「${ca.name}」を削除しますか？${used ? '\nPipelineの工程で使っています。削除すると、その工程を選び直すまでPipelineを始められません。' : ''}\n（作ってあるタスクは、そのまま動きます）`)) return;
+        if (!confirm(`${tr('カスタムエージェント「{v1}」を削除しますか？{v2}\n（作ってあるタスクは、そのまま動きます）', { v1: (ca.name), v2: (used ? tr('\nPipelineの工程で使っています。削除すると、その工程を選び直すまでPipelineを始められません。') : '') })}`)) return;
         cas.splice(Number(b.dataset.caDel), 1);
         competeCustomSel.delete(ca.id);
         $('sCustomForm').hidden = true;
@@ -4160,20 +4160,20 @@ function renderSettingsView() {
     const cur = index === null ? { id: '', name: '', icon: '', color: '#6366f1', description: '', instruction: '', agent: using()[0] || 'claude', model: '' } : cas[index];
     const box = $('sCustomForm');
     box.hidden = false;
-    box.innerHTML = `<h4>${index === null ? 'カスタムエージェントを追加' : `「${esc(cur.name)}」を編集`}</h4>
+    box.innerHTML = `<h4>${index === null ? tr('カスタムエージェントを追加') : `${tr('「{v1}」を編集', { v1: (esc(cur.name)) })}`}</h4>
       <div class="row ca-row3">
-        <label class="field"><span>名前</span><input id="caName" maxlength="30" placeholder="例: 慎重なレビュアー" value="${esc(cur.name)}" /></label>
-        <label class="field"><span>アイコン（絵文字）</span><input id="caIcon" maxlength="8" placeholder="絵文字か1文字" value="${esc(cur.icon || '')}" /></label>
-        <label class="field"><span>色</span><input id="caColor" type="color" value="${esc(cur.color || '#6366f1')}" /></label>
+        <label class="field">${tr('<span>名前</span>')}<input id="caName" maxlength="30" placeholder="${tr('例: 慎重なレビュアー')}" value="${esc(cur.name)}" /></label>
+        <label class="field">${tr('<span>アイコン（絵文字）</span>')}<input id="caIcon" maxlength="8" placeholder="${tr('絵文字か1文字')}" value="${esc(cur.icon || '')}" /></label>
+        <label class="field">${tr('<span>色</span>')}<input id="caColor" type="color" value="${esc(cur.color || '#6366f1')}" /></label>
       </div>
-      <label class="field"><span>説明（役割の一言）</span><input id="caDesc" maxlength="200" placeholder="例: セキュリティとテストの抜けを重点的に見る" value="${esc(cur.description || '')}" /></label>
+      <label class="field">${tr('<span>説明（役割の一言）</span>')}<input id="caDesc" maxlength="200" placeholder="${tr('例: セキュリティとテストの抜けを重点的に見る')}" value="${esc(cur.description || '')}" /></label>
       <div class="row">
-        <label class="field"><span>元にするエージェント</span><select id="caAgent">${AGENTS.map(([a, l]) => `<option value="${a}" ${a === cur.agent ? 'selected' : ''}>${esc(l)}${using().includes(a) ? '' : '（使わない設定）'}</option>`).join('')}</select></label>
-        <label class="field"><span>モデル（空なら設定の既定）</span><input id="caModel" list="caModelList" autocomplete="off" spellcheck="false" value="${esc(cur.model || '')}" /><datalist id="caModelList"></datalist></label>
+        <label class="field">${tr('<span>元にするエージェント</span>')}<select id="caAgent">${AGENTS.map(([a, l]) => `<option value="${a}" ${a === cur.agent ? 'selected' : ''}>${esc(l)}${using().includes(a) ? '' : tr('（使わない設定）')}</option>`).join('')}</select></label>
+        <label class="field">${tr('<span>モデル（空なら設定の既定）</span>')}<input id="caModel" list="caModelList" autocomplete="off" spellcheck="false" value="${esc(cur.model || '')}" /><datalist id="caModelList"></datalist></label>
       </div>
-      <label class="field"><span>振る舞いの指示（性格・やり方。最初の指示の前に付けます）</span><textarea id="caInst" rows="5" maxlength="4000" placeholder="例: 変更は小さく保ち、直す前に必ず理由を説明してください。テストが通るまで完了にしないでください。">${esc(cur.instruction || '')}</textarea></label>
+      <label class="field">${tr('<span>振る舞いの指示（性格・やり方。最初の指示の前に付けます）</span>')}<textarea id="caInst" rows="5" maxlength="4000" placeholder="${tr('例: 変更は小さく保ち、直す前に必ず理由を説明してください。テストが通るまで完了にしないでください。')}">${esc(cur.instruction || '')}</textarea></label>
       <div class="ca-preview" id="caPreview"></div>
-      <div class="modal-actions"><button class="btn ghost small" id="caCancel" type="button">やめる</button><button class="btn primary small" id="caOk" type="button">${index === null ? '追加' : '決定'}</button></div>`;
+      <div class="modal-actions"><button class="btn ghost small" id="caCancel" type="button">${tr('やめる')}</button><button class="btn primary small" id="caOk" type="button">${index === null ? tr('追加') : tr('決定')}</button></div>`;
     const read = () => ({
       id: cur.id || newCaId(),
       name: $('caName').value.trim(),
@@ -4187,8 +4187,8 @@ function renderSettingsView() {
     const preview = () => {
       const v = read();
       $('caModelList').innerHTML = (MODEL_SUGGEST[v.agent] || []).map((m) => `<option value="${esc(m)}"></option>`).join('');
-      $('caModel').placeholder = settingsModel(v.agent) ? `例: ${settingsModel(v.agent)}（設定の既定）` : `例: ${(MODEL_SUGGEST[v.agent] || [])[0] || ''}`;
-      $('caPreview').innerHTML = `<span class="orch-chip agent persona" style="--pc:${esc(v.color)}">${personaIcon(v, v.agent)}${esc(whoLabel(v.agent, { ...v, name: v.name || '（名前）' }))}</span>`;
+      $('caModel').placeholder = settingsModel(v.agent) ? `${tr('例: {v1}（設定の既定）', { v1: (settingsModel(v.agent)) })}` : `${tr('例: {v1}', { v1: ((MODEL_SUGGEST[v.agent] || [])[0] || '') })}`;
+      $('caPreview').innerHTML = `<span class="orch-chip agent persona" style="--pc:${esc(v.color)}">${personaIcon(v, v.agent)}${esc(whoLabel(v.agent, { ...v, name: v.name || tr('（名前）') }))}</span>`;
     };
     box.querySelectorAll('input, select, textarea').forEach((el) => (el.oninput = el.onchange = preview));
     preview();
@@ -4196,9 +4196,9 @@ function renderSettingsView() {
     $('caCancel').onclick = () => (box.hidden = true);
     $('caOk').onclick = () => {
       const v = read();
-      if (!v.name) return toast('名前を入れてください');
-      if (v.model && !/^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$/.test(v.model)) return toast(`モデル名に使えない文字が入っています: ${v.model}`);
-      if (cas.some((x, i) => i !== index && x.name === v.name)) return toast(`「${v.name}」という名前のカスタムエージェントはもうあります`);
+      if (!v.name) return toast(tr('名前を入れてください'));
+      if (v.model && !/^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$/.test(v.model)) return toast(`${tr('モデル名に使えない文字が入っています: {v1}', { v1: (v.model) })}`);
+      if (cas.some((x, i) => i !== index && x.name === v.name)) return toast(`${tr('「{v1}」という名前のカスタムエージェントはもうあります', { v1: (v.name) })}`);
       if (index === null) cas.push(v);
       else cas[index] = v;
       box.hidden = true;
@@ -4210,10 +4210,10 @@ function renderSettingsView() {
   const saveFlows = async (msg, extra = {}) => {
     // フローチャートの編集中にプロジェクトが変わったら（遠隔操作の切断など）、前のプロジェクトの一覧を保存しない
     if (isStale()) {
-      toast('プロジェクトが変わったので保存しませんでした');
+      toast(tr('プロジェクトが変わったので保存しませんでした'));
       return false;
     }
-    const r = await runBusy(msg, () => api.updateSettings({ relayFlows: flows, relayFlowId: flowDefId, customAgents: cas, ...extra }), '保存しました');
+    const r = await runBusy(msg, () => api.updateSettings({ relayFlows: flows, relayFlowId: flowDefId, customAgents: cas, ...extra }), tr('保存しました'));
     if (!r) return false;
     Object.assign(state.board.settings, r);
     flows = JSON.parse(JSON.stringify(r.relayFlows || flows));
@@ -4227,8 +4227,8 @@ function renderSettingsView() {
       const box = $('sRelayExport');
       box.hidden = false;
       box.innerHTML = `<h4>${esc(title)}</h4>
-        <label class="field"><span>名前（${PipelinePack.PIPELINE_NAME_MAX}文字まで）</span><input id="plName" maxlength="${PipelinePack.PIPELINE_NAME_MAX}" value="${esc(initial)}" /></label>
-        <div class="modal-actions"><button class="btn ghost small" id="plCancel" type="button">やめる</button><button class="btn primary small" id="plOk" type="button">${esc(okLabel)}</button></div>`;
+        <label class="field">${tr('<span>名前（{v1}文字まで）</span>', { v1: (PipelinePack.PIPELINE_NAME_MAX) })}<input id="plName" maxlength="${PipelinePack.PIPELINE_NAME_MAX}" value="${esc(initial)}" /></label>
+        <div class="modal-actions"><button class="btn ghost small" id="plCancel" type="button">${tr('やめる')}</button><button class="btn primary small" id="plOk" type="button">${esc(okLabel)}</button></div>`;
       const done = (v) => {
         box.hidden = true;
         resolve(v);
@@ -4241,7 +4241,7 @@ function renderSettingsView() {
       $('plCancel').onclick = () => done(null);
       $('plOk').onclick = () => {
         const v = $('plName').value.trim();
-        if (!v) return toast('名前を入れてください');
+        if (!v) return toast(tr('名前を入れてください'));
         done(v);
       };
     });
@@ -4266,7 +4266,7 @@ function renderSettingsView() {
         const id = flows[i].id;
         const prev = flows[i].flow;
         flows[i].flow = flow;
-        if (!(await saveFlows('フローチャートを保存しています…'))) {
+        if (!(await saveFlows(tr('フローチャートを保存しています…')))) {
           const j = flows.findIndex((p) => p.id === id);
           if (j >= 0) flows[j].flow = prev;
           return false;
@@ -4280,7 +4280,7 @@ function renderSettingsView() {
     const data = PipelinePack.toBase64(new TextEncoder().encode(PipelinePack.exportPipelineJson(p)));
     const used = PipelinePack.usedCustomIds(p.flow).filter((id) => cas.some((x) => x.id === id));
     const r = await run(() => api.saveFile({ name: `${PipelinePack.safeFileName(p.name)}.pipeline`, data, ext: 'json' }));
-    if (r) toast(`エクスポートしました${used.length ? '（カスタムエージェントの工程があります。ほかのプロジェクトで使うときは「まとめてエクスポート」で一緒に書き出してください）' : ''}`, 'ok');
+    if (r) toast(`${tr('エクスポートしました{v1}', { v1: (used.length ? tr('（カスタムエージェントの工程があります。ほかのプロジェクトで使うときは「まとめてエクスポート」で一緒に書き出してください）') : '') })}`, 'ok');
   };
   // まとめてエクスポート: 書き出す Pipeline とカスタムエージェントを選んで zip にする
   const openBundle = (preset) => {
@@ -4291,11 +4291,11 @@ function renderSettingsView() {
     box.hidden = false;
     const draw = () => {
       const used = usedBy();
-      box.innerHTML = `<h4>まとめてエクスポート（zip）</h4>
+      box.innerHTML = `<h4>${tr('まとめてエクスポート（zip）')}</h4>
         <div class="field"><span>Pipeline</span><div class="check-row">${flows.map((p) => `<label class="check"><input type="checkbox" class="bxP" value="${esc(p.id)}" ${selP.has(p.id) ? 'checked' : ''} /> ${esc(p.name)}</label>`).join('')}</div></div>
-        <div class="field"><span>カスタムエージェント</span><div class="check-row">${cas.length ? cas.map((ca) => `<label class="check"><input type="checkbox" class="bxC" value="${esc(ca.id)}" ${selC.has(ca.id) ? 'checked' : ''} /> ${personaIcon(ca, ca.agent)}${esc(ca.name)}${used.has(ca.id) ? ' <span class="muted small">（工程で使用）</span>' : ''}</label>`).join('') : '<span class="muted small">まだありません</span>'}</div>
-        ${[...used].some((id) => cas.some((x) => x.id === id) && !selC.has(id)) ? `<small class="relay-sum-err">${icon('alert')}工程で使っているカスタムエージェントを外すと、取り込んだ先でその工程のエージェントを選び直すことになります</small>` : ''}</div>
-        <div class="modal-actions"><button class="btn ghost small" id="bxCancel" type="button">やめる</button><button class="btn primary small" id="bxOk" type="button">zip でエクスポート</button></div>`;
+        <div class="field">${tr('<span>カスタムエージェント</span>')}<div class="check-row">${cas.length ? cas.map((ca) => `<label class="check"><input type="checkbox" class="bxC" value="${esc(ca.id)}" ${selC.has(ca.id) ? 'checked' : ''} /> ${personaIcon(ca, ca.agent)}${esc(ca.name)}${used.has(ca.id) ? tr(' <span class="muted small">（工程で使用）</span>') : ''}</label>`).join('') : tr('<span class="muted small">まだありません</span>')}</div>
+        ${[...used].some((id) => cas.some((x) => x.id === id) && !selC.has(id)) ? `<small class="relay-sum-err">${tr('{v1}工程で使っているカスタムエージェントを外すと、取り込んだ先でその工程のエージェントを選び直すことになります', { v1: (icon('alert')) })}</small>` : ''}</div>
+        <div class="modal-actions"><button class="btn ghost small" id="bxCancel" type="button">${tr('やめる')}</button><button class="btn primary small" id="bxOk" type="button">${tr('zip でエクスポート')}</button></div>`;
       box.querySelectorAll('.bxP').forEach((cb) => (cb.onchange = () => {
         if (cb.checked) {
           selP.add(cb.value);
@@ -4309,13 +4309,13 @@ function renderSettingsView() {
       $('bxOk').onclick = async () => {
         const ps = flows.filter((p) => selP.has(p.id));
         const cs = cas.filter((ca) => selC.has(ca.id));
-        if (!ps.length && !cs.length) return toast('エクスポートするものを選んでください');
+        if (!ps.length && !cs.length) return toast(tr('エクスポートするものを選んでください'));
         const data = PipelinePack.toBase64(PipelinePack.exportBundleZip({ pipelines: ps, customAgents: cs }));
         const name = ps.length === 1 ? PipelinePack.safeFileName(ps[0].name) : 'pipelines';
         const r = await run(() => api.saveFile({ name, data, ext: 'zip' }));
         if (r) {
           box.hidden = true;
-          toast(`Pipeline ${ps.length} 個・カスタムエージェント ${cs.length} 個をエクスポートしました`, 'ok');
+          toast(`${tr('Pipeline {v1} 個・カスタムエージェント {v2} 個をエクスポートしました', { v1: (ps.length), v2: (cs.length) })}`, 'ok');
         }
       };
     };
@@ -4337,18 +4337,20 @@ function renderSettingsView() {
     } catch (e) {
       return toast(e.message || String(e));
     }
-    const lines = [`「${f.name}」から取り込みます。`];
+    const lines = [`${tr('「{v1}」から取り込みます。', { v1: (f.name) })}`];
     if (m.addedPipelines.length) lines.push(`Pipeline: ${m.addedPipelines.join('、')}`);
-    if (m.addedAgents.length) lines.push(`カスタムエージェント（追加）: ${m.addedAgents.join('、')}`);
-    if (m.reusedAgents.length) lines.push(`カスタムエージェント（同じものがあるので、それを使う）: ${m.reusedAgents.join('、')}`);
-    if (m.missing.length) lines.push(`\nカスタムエージェントが見つからない工程があります（取り込んだあと、フローチャートで選び直してください）: ${m.missing.join('、')}`);
-    if (parsed.skipped.length) lines.push(`\n読めなかったファイル: ${parsed.skipped.join('、')}`);
-    if (!m.addedPipelines.length && !m.addedAgents.length) return toast(`取り込むものはありません（同じカスタムエージェントがもうあります）`);
+    if (m.addedAgents.length) lines.push(`${tr('カスタムエージェント（追加）: {v1}', { v1: (m.addedAgents.join(tr('、'))) })}`);
+    if (m.reusedAgents.length) lines.push(`${tr('カスタムエージェント（同じものがあるので、それを使う）: {v1}', { v1: (m.reusedAgents.join(tr('、'))) })}`);
+    if (m.missing.length) lines.push(`
+${tr('カスタムエージェントが見つからない工程があります（取り込んだあと、フローチャートで選び直してください）: {v1}', { v1: (m.missing.join(tr('、'))) })}`);
+    if (parsed.skipped.length) lines.push(`
+${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'))) })}`);
+    if (!m.addedPipelines.length && !m.addedAgents.length) return toast(`${tr('取り込むものはありません（同じカスタムエージェントがもうあります）')}`);
     if (!confirm(lines.join('\n'))) return;
     const before = { flows, cas };
     flows = m.relayFlows;
     cas = m.customAgents;
-    if (!(await saveFlows('取り込んでいます…'))) {
+    if (!(await saveFlows(tr('取り込んでいます…')))) {
       flows = before.flows;
       cas = before.cas;
     }
@@ -4360,15 +4362,15 @@ function renderSettingsView() {
     $('sRelayList').innerHTML = flows
       .map(
         (p, i) => `<div class="pl-item ${p.id === flowDefId ? 'is-default' : ''}">
-          <div class="pl-head"><b>${icon('pipeline')}${esc(p.name)}</b>${p.id === flowDefId ? ' <span class="pl-badge">既定</span>' : ''}
+          <div class="pl-head"><b>${icon('pipeline')}${esc(p.name)}</b>${p.id === flowDefId ? tr(' <span class="pl-badge">既定</span>') : ''}
             <div class="pl-acts">
-              <button class="btn small" type="button" data-pl-edit="${i}">フローチャートを編集</button>
-              <button class="btn small ghost" type="button" data-pl-rename="${i}">名前</button>
-              <button class="btn small ghost" type="button" data-pl-copy="${i}">複製</button>
-              ${p.id === flowDefId ? '' : `<button class="btn small ghost" type="button" data-pl-def="${i}">既定にする</button>`}
-              <button class="btn small ghost" type="button" data-pl-export="${i}">エクスポート</button>
-              <button class="btn small ghost" type="button" data-pl-bundle="${i}" title="この Pipeline と、工程で使うカスタムエージェントを zip にします">zip</button>
-              ${flows.length > 1 ? `<button class="btn small danger" type="button" data-pl-del="${i}">削除</button>` : ''}
+              <button class="btn small" type="button" data-pl-edit="${i}">${tr('フローチャートを編集')}</button>
+              <button class="btn small ghost" type="button" data-pl-rename="${i}">${tr('名前')}</button>
+              <button class="btn small ghost" type="button" data-pl-copy="${i}">${tr('複製')}</button>
+              ${p.id === flowDefId ? '' : `<button class="btn small ghost" type="button" data-pl-def="${i}">${tr('既定にする')}</button>`}
+              <button class="btn small ghost" type="button" data-pl-export="${i}">${tr('エクスポート')}</button>
+              <button class="btn small ghost" type="button" data-pl-bundle="${i}" title="${tr('この Pipeline と、工程で使うカスタムエージェントを zip にします')}">zip</button>
+              ${flows.length > 1 ? `<button class="btn small danger" type="button" data-pl-del="${i}">${tr('削除')}</button>` : ''}
             </div></div>
           <div class="relay-summary">${relayFlowSummaryHtml(p.flow, using(), cas)}</div>
         </div>`,
@@ -4379,44 +4381,44 @@ function renderSettingsView() {
     on('pl-export', (i) => exportOne(flows[i]));
     on('pl-bundle', (i) => openBundle(flows[i].id));
     on('pl-rename', async (i) => {
-      const v = await askName(`「${flows[i].name}」の名前を変える`, flows[i].name, '決定');
+      const v = await askName(`${tr('「{v1}」の名前を変える', { v1: (flows[i].name) })}`, flows[i].name, tr('決定'));
       if (v == null) return;
       const name = [...v].slice(0, PipelinePack.PIPELINE_NAME_MAX).join('').trim();
-      if (flows.some((p, j) => j !== i && p.name === name)) return toast(`「${name}」という名前の Pipeline はもうあります`);
+      if (flows.some((p, j) => j !== i && p.name === name)) return toast(`${tr('「{v1}」という名前の Pipeline はもうあります', { v1: (name) })}`);
       const prev = flows[i].name;
       flows[i].name = name;
-      if (!(await saveFlows('名前を変えています…'))) flows[i].name = prev;
+      if (!(await saveFlows(tr('名前を変えています…')))) flows[i].name = prev;
       drawRelay();
     });
     on('pl-copy', async (i) => {
-      flows.push({ id: newFlowId(), name: newFlowName(`${flows[i].name} のコピー`), flow: JSON.parse(JSON.stringify(flows[i].flow)) });
-      if (!(await saveFlows('複製しています…'))) flows.pop();
+      flows.push({ id: newFlowId(), name: newFlowName(`${tr('{v1} のコピー', { v1: (flows[i].name) })}`), flow: JSON.parse(JSON.stringify(flows[i].flow)) });
+      if (!(await saveFlows(tr('複製しています…')))) flows.pop();
       drawRelay();
     });
     on('pl-def', async (i) => {
       const prev = flowDefId;
       flowDefId = flows[i].id;
-      if (!(await saveFlows('既定の Pipeline を変えています…'))) flowDefId = prev;
+      if (!(await saveFlows(tr('既定の Pipeline を変えています…')))) flowDefId = prev;
       drawRelay();
     });
     on('pl-del', async (i) => {
       const p = flows[i];
-      if (!confirm(`Pipeline「${p.name}」を削除しますか？\n（作ってあるタスクは、そのまま動きます）`)) return;
+      if (!confirm(`${tr('Pipeline「{v1}」を削除しますか？\n（作ってあるタスクは、そのまま動きます）', { v1: (p.name) })}`)) return;
       const before = { flows: [...flows], flowDefId };
       flows.splice(i, 1);
       if (flowDefId === p.id) flowDefId = flows[0].id;
-      if (!(await saveFlows('削除しています…'))) ({ flows, flowDefId } = before);
+      if (!(await saveFlows(tr('削除しています…')))) ({ flows, flowDefId } = before);
       drawRelay();
     });
   };
   $('sRelayAdd').onclick = async () => {
-    const v = await askName('Pipelineを追加', newFlowName('Pipeline'), '追加してフローチャートを編集');
+    const v = await askName(tr('Pipelineを追加'), newFlowName('Pipeline'), tr('追加してフローチャートを編集'));
     if (v == null) return;
     const name = [...v].slice(0, PipelinePack.PIPELINE_NAME_MAX).join('').trim();
-    if (flows.some((p) => p.name === name)) return toast(`「${name}」という名前の Pipeline はもうあります`);
+    if (flows.some((p) => p.name === name)) return toast(`${tr('「{v1}」という名前の Pipeline はもうあります', { v1: (name) })}`);
     // 新しい Pipeline は「実装 → レビュー」から始める（既定の Pipeline の形をまねず、初めの形にする）
     flows.push({ id: newFlowId(), name, flow: null });
-    if (!(await saveFlows('Pipeline を追加しています…'))) flows.pop();
+    if (!(await saveFlows(tr('Pipeline を追加しています…')))) flows.pop();
     drawRelay();
     const i = flows.findIndex((p) => p.name === name);
     if (i >= 0) editFlow(i);
@@ -4461,20 +4463,33 @@ function renderSettingsView() {
   $('sIssueSync').onchange = () => ($('sStatusMap').hidden = !$('sIssueSync').checked);
   refreshGh();
   bindUpdatePanel();
+  // 言語は保存ボタンを待たず、選んだら手元の設定へ書いて画面を読み直す
+  if ($('sLanguage')) $('sLanguage').onchange = async () => {
+    const code = $('sLanguage').value;
+    if (!I18n.isLanguage(code) || code === I18n.getLanguage()) return;
+    try {
+      await api.setLanguage(code);
+    } catch (err) {
+      $('sLanguage').value = I18n.getLanguage();
+      toast(err.message || String(err));
+      return;
+    }
+    location.reload();
+  };
   $('sCancel').onclick = () => {
     renderSettingsView();
-    toast('保存済みの値に戻しました', 'ok');
+    toast(tr('保存済みの値に戻しました'), 'ok');
   };
   $('sOk').onclick = async () => {
     const on = using();
-    if (!on.length) return toast('使うエージェントを1つ以上選んでください');
-    if (!$('sCustomForm').hidden && !confirm('カスタムエージェントの編集を決定していません。編集中の内容を捨てて保存しますか？')) return;
-    const steps = flows.flatMap((p) => FlowModel.orderSteps(p.flow || { nodes: [], edges: [] }).map((st) => ({ ...st, label: flows.length > 1 ? `${p.name}: ${st.label || '（名前なし）'}` : st.label })));
+    if (!on.length) return toast(tr('使うエージェントを1つ以上選んでください'));
+    if (!$('sCustomForm').hidden && !confirm(tr('カスタムエージェントの編集を決定していません。編集中の内容を捨てて保存しますか？'))) return;
+    const steps = flows.flatMap((p) => FlowModel.orderSteps(p.flow || { nodes: [], edges: [] }).map((st) => ({ ...st, label: flows.length > 1 ? `${p.name}: ${st.label || tr('（名前なし）')}` : st.label })));
     const lostStep = steps.find((st) => stepWho(st, cas).missing);
-    if (lostStep && orch() === 'relay' && !confirm(`Pipelineの工程「${lostStep.label || '（名前なし）'}」のカスタムエージェントがありません。このままだとPipelineを始められません。保存しますか？`)) return;
+    if (lostStep && orch() === 'relay' && !confirm(`${tr('Pipelineの工程「{v1}」のカスタムエージェントがありません。このままだとPipelineを始められません。保存しますか？', { v1: (lostStep.label || tr('（名前なし）')) })}`)) return;
     const offStep = steps.find((st) => !on.includes(stepWho(st, cas).agent));
-    if (offStep && orch() === 'relay' && !confirm(`Pipelineの工程「${offStep.label || '（名前なし）'}」の ${agentLabel(stepWho(offStep, cas).agent)} は使わない設定です。このままだとPipelineを始められません。保存しますか？`)) return;
-    const r = await runBusy('設定を保存しています…', () =>
+    if (offStep && orch() === 'relay' && !confirm(`${tr('Pipelineの工程「{v1}」の {v2} は使わない設定です。このままだとPipelineを始められません。保存しますか？', { v1: (offStep.label || tr('（名前なし）')), v2: (agentLabel(stepWho(offStep, cas).agent)) })}`)) return;
+    const r = await runBusy(tr('設定を保存しています…'), () =>
       api.updateSettings({
         baseBranch: $('sBase').value,
         integration: $('sIntegration').value,
@@ -4512,7 +4527,7 @@ function renderSettingsView() {
       // 画面に残るので、保存した値（サーバー側で整えた値も含む）で描き直す。ボードの更新を待たずに反映する
       Object.assign(state.board.settings, r);
       renderSettingsView();
-      toast('保存しました', 'ok');
+      toast(tr('保存しました'), 'ok');
       checkEnv();
     }
   };
@@ -4861,35 +4876,35 @@ function renderGh(st) {
   const log = ghState.lines.length ? `<pre class="gh-log">${esc(ghState.lines.slice(-8).join('\n'))}</pre>` : '';
   if (ghState.busy && ghState.code) {
     el.className = 'gh-panel gh-warn';
-    el.innerHTML = `<b>ブラウザで GitHub にログインしてください</b>
-      <p>開いたページに、次のコードを入力します。</p>
-      <div class="gh-code"><code>${esc(ghState.code.code)}</code><button class="btn small" id="ghCopy">コピー</button><button class="btn small ghost" id="ghOpen">ページを開く</button></div>
-      <p class="muted small">ログインが終わると、自動でこの画面に戻ります。</p>${log}
-      <button class="btn small ghost" id="ghCancel">やめる</button>`;
-    part('ghCopy').onclick = () => navigator.clipboard.writeText(ghState.code.code).then(() => toast('コピーしました', 'ok'));
+    el.innerHTML = `${tr('<b>ブラウザで GitHub にログインしてください</b>')}
+      <p>${tr('開いたページに、次のコードを入力します。')}</p>
+      <div class="gh-code"><code>${esc(ghState.code.code)}</code><button class="btn small" id="ghCopy">${tr('コピー')}</button><button class="btn small ghost" id="ghOpen">${tr('ページを開く')}</button></div>
+      <p class="muted small">${tr('ログインが終わると、自動でこの画面に戻ります。')}</p>${log}
+      <button class="btn small ghost" id="ghCancel">${tr('やめる')}</button>`;
+    part('ghCopy').onclick = () => navigator.clipboard.writeText(ghState.code.code).then(() => toast(tr('コピーしました'), 'ok'));
     part('ghOpen').onclick = () => run(() => api.openExternal(ghState.code.url));
     part('ghCancel').onclick = () => api.ghCancel();
     return;
   }
   if (ghState.busy) {
     el.className = 'gh-panel';
-    el.innerHTML = `<b>処理しています…</b>${log}`;
+    el.innerHTML = `${tr('<b>処理しています…</b>{v1}', { v1: (log) })}`;
     return;
   }
   if (!st) {
     el.className = 'gh-panel';
-    el.textContent = 'gh の状態を確認できませんでした';
+    el.textContent = tr('gh の状態を確認できませんでした');
     return;
   }
   if (!st.installed) {
     el.className = 'gh-panel gh-warn';
-    el.innerHTML = `<b>gh（GitHub CLI）が入っていません</b>
-      <p>Issue を読み込むのに使います（private リポジトリの Issue も読めるようになります）。</p>
+    el.innerHTML = `${tr('<b>gh（GitHub CLI）が入っていません</b>')}
+      <p>${tr('Issue を読み込むのに使います（private リポジトリの Issue も読めるようになります）。')}</p>
       ${st.installer
-        ? `<button class="btn primary small" id="ghInstall">gh をインストールする</button> <span class="muted small">${esc(st.installer)} で <code>${esc(st.installLabel)}</code> を実行します</span>`
-        : `<button class="btn primary small" id="ghDownload">ダウンロードページを開く</button> <span class="muted small">インストールしたら「もう一度確認」を押してください</span>`}
-      <div><button class="btn small ghost" id="ghRecheck">もう一度確認</button></div>${log}
-      <p class="muted small">public リポジトリなら、gh がなくても読み込めます。</p>`;
+        ? `<button class="btn primary small" id="ghInstall">${tr('gh をインストールする')}</button> ${tr('<span class="muted small">{v1} で <code>{v2}</code> を実行します</span>', { v1: (esc(st.installer)), v2: (esc(st.installLabel)) })}`
+        : `<button class="btn primary small" id="ghDownload">${tr('ダウンロードページを開く')}</button> ${tr('<span class="muted small">インストールしたら「もう一度確認」を押してください</span>')}`}
+      <div><button class="btn small ghost" id="ghRecheck">${tr('もう一度確認')}</button></div>${log}
+      <p class="muted small">${tr('public リポジトリなら、gh がなくても読み込めます。')}</p>`;
     if (part('ghInstall')) part('ghInstall').onclick = () => ghAction('install');
     if (part('ghDownload')) part('ghDownload').onclick = () => run(() => api.openExternal(st.downloadUrl));
     part('ghRecheck').onclick = refreshGh;
@@ -4897,25 +4912,25 @@ function renderGh(st) {
   }
   if (!st.loggedIn) {
     el.className = 'gh-panel gh-warn';
-    el.innerHTML = `<b>gh は入っていますが、GitHub にログインしていません</b>
-      <p><button class="btn primary small" id="ghLogin">GitHub にログイン</button> <span class="muted small">ブラウザが開くので、表示されたコードを入力します</span></p>
-      <div><button class="btn small ghost" id="ghRecheck">もう一度確認</button></div>${log}`;
+    el.innerHTML = `${tr('<b>gh は入っていますが、GitHub にログインしていません</b>')}
+      <p><button class="btn primary small" id="ghLogin">${tr('GitHub にログイン')}</button> ${tr('<span class="muted small">ブラウザが開くので、表示されたコードを入力します</span>')}</p>
+      <div><button class="btn small ghost" id="ghRecheck">${tr('もう一度確認')}</button></div>${log}`;
     part('ghLogin').onclick = () => ghAction('login');
     part('ghRecheck').onclick = refreshGh;
     return;
   }
   if (st.hasProjectScope === false && state.board.settings.issueStatusSync !== false) {
     el.className = 'gh-panel gh-warn';
-    el.innerHTML = `<span>${icon('check')}gh で GitHub にログインしています${st.user ? `（<b>${esc(st.user)}</b>）` : ''}</span>
-      <p>Issue のステータス（GitHub Projects の In progress / In review / Done）を自動で変えるには、project の権限が必要です。</p>
-      <p><button class="btn primary small" id="ghScope">Projects の権限を追加</button> <span class="muted small">ブラウザが開くので、表示されたコードを入力します</span></p>
-      <div><button class="btn small ghost" id="ghRecheck">もう一度確認</button></div>${log}`;
+    el.innerHTML = `${tr('<span>{v1}gh で GitHub にログインしています{v2}</span>', { v1: (icon('check')), v2: (st.user ? `（<b>${esc(st.user)}</b>）` : '') })}
+      <p>${tr('Issue のステータス（GitHub Projects の In progress / In review / Done）を自動で変えるには、project の権限が必要です。')}</p>
+      <p><button class="btn primary small" id="ghScope">${tr('Projects の権限を追加')}</button> ${tr('<span class="muted small">ブラウザが開くので、表示されたコードを入力します</span>')}</p>
+      <div><button class="btn small ghost" id="ghRecheck">${tr('もう一度確認')}</button></div>${log}`;
     part('ghScope').onclick = () => ghAction('scope');
     part('ghRecheck').onclick = refreshGh;
     return;
   }
   el.className = 'gh-panel ok';
-  el.innerHTML = `<span>${icon('check')}gh で GitHub にログインしています${st.user ? `（<b>${esc(st.user)}</b>）` : ''}</span>`;
+  el.innerHTML = `${tr('<span>{v1}gh で GitHub にログインしています{v2}</span>', { v1: (icon('check')), v2: (st.user ? `（<b>${esc(st.user)}</b>）` : '') })}`;
 }
 
 async function ghAction(kind) {
@@ -4927,10 +4942,10 @@ async function ghAction(kind) {
     const st = await (kind === 'install' ? api.ghInstall() : kind === 'scope' ? api.ghAddProjectScope() : api.ghLogin());
     ghState.busy = false;
     ghState.code = null;
-    toast(kind === 'install' ? 'gh をインストールしました' : kind === 'scope' ? 'project の権限を追加しました' : 'GitHub にログインしました', 'ok');
+    toast(kind === 'install' ? tr('gh をインストールしました') : kind === 'scope' ? tr('project の権限を追加しました') : tr('GitHub にログインしました'), 'ok');
     renderGh(st);
     // インストールが終わったら、続けてログインも案内する
-    if (kind === 'install' && st && st.installed && !st.loggedIn) toast('続けて「GitHub にログイン」を押してください', 'ok');
+    if (kind === 'install' && st && st.installed && !st.loggedIn) toast(tr('続けて「GitHub にログイン」を押してください'), 'ok');
   } catch (err) {
     ghState.busy = false;
     ghState.code = null;
@@ -5151,11 +5166,18 @@ async function checkEnv() {
   const on = enabledAgents();
   const has = (a) => (env.agents ? !!env.agents[a] : a === 'claude' ? !!env.claude : true);
   if (env.wsl) {
-    if (!env.git) msgs.push(`${env.wsl}（WSL）の中に git が見つかりません。${env.wsl} のターミナルで sudo apt install git を実行してください。`);
-    for (const a of on) if (!has(a)) msgs.push(`${env.wsl}（WSL）の中に ${a} が見つかりません。${env.wsl} のターミナルで ${agentLabel(a)} をインストールしてログインしてください（このリポジトリのタスクは ${env.wsl} の中で動きます）。`);
+    if (!env.git) msgs.push(tr('{v1}（WSL）の中に git が見つかりません。{v1} のターミナルで sudo apt install git を実行してください。', { v1: env.wsl }));
+    for (const a of on) if (!has(a)) msgs.push(tr('{v1}（WSL）の中に {v2} が見つかりません。{v1} のターミナルで {v3} をインストールしてログインしてください（このリポジトリのタスクは {v1} の中で動きます）。', { v1: env.wsl, v2: a, v3: agentLabel(a) }));
   } else {
-    if (!env.git) msgs.push(`git が見つかりません。${env.platform === 'win32' ? 'Git for Windows（https://git-scm.com/）' : env.platform === 'darwin' ? 'ターミナルで xcode-select --install を実行するか Homebrew で git' : 'git'} をインストールしてから、アプリを再起動してください。`);
-    for (const a of on) if (!has(a)) msgs.push(`${a} コマンドが見つかりません。${agentLabel(a)} をインストールしてログインするか、「設定」で ${a} のフルパスを指定してください（ターミナルで which ${a}、Windows なら where ${a} で調べられます）。使わないなら、「設定」の「使うエージェント」でチェックを外してください。`);
+    if (!env.git) {
+      const gitMsg = env.platform === 'win32'
+        ? tr('git が見つかりません。Git for Windows（https://git-scm.com/）をインストールしてから、アプリを再起動してください。')
+        : env.platform === 'darwin'
+          ? tr('git が見つかりません。ターミナルで xcode-select --install を実行するか Homebrew で git をインストールしてから、アプリを再起動してください。')
+          : tr('git が見つかりません。git をインストールしてから、アプリを再起動してください。');
+      msgs.push(gitMsg);
+    }
+    for (const a of on) if (!has(a)) msgs.push(tr('{v1} コマンドが見つかりません。{v2} をインストールしてログインするか、「設定」で {v1} のフルパスを指定してください（ターミナルで which {v1}、Windows なら where {v1} で調べられます）。使わないなら、「設定」の「使うエージェント」でチェックを外してください。', { v1: a, v2: agentLabel(a) }));
   }
   const el = $('envBanner');
   el.innerHTML = msgs.map((m) => `<div>${icon('alert')}${esc(m)}</div>`).join('');
@@ -5165,27 +5187,27 @@ async function checkEnv() {
 // ---- アプリの更新 ----
 // 設定の「アプリの更新」の中身（状態は main の update:status / update:changed）
 function updatePanelHtml(u) {
-  if (!u) return '<p class="muted">新しい版を確かめています…</p>';
-  const cur = `今の版: <b>v${esc(u.currentVersion)}</b>`;
+  if (!u) return tr('<p class="muted">新しい版を確かめています…</p>');
+  const cur = `${tr('今の版: <b>v{v1}</b>', { v1: (esc(u.currentVersion)) })}`;
   if (!u.supported) return `<p>${cur}</p><p class="muted">${esc(u.reason)}</p>`;
-  const checked = u.checkedAt ? `（${esc(new Date(u.checkedAt).toLocaleString())} に確かめました）` : '';
+  const checked = u.checkedAt ? `${tr('（{v1} に確かめました）', { v1: (esc(new Date(u.checkedAt).toLocaleString(I18n.locale()))) })}` : '';
   let msg;
   let actions = '';
-  if (u.quitting || u.state === 'installing') msg = `<p>v${esc(u.latestVersion)} に更新しています。アプリを終了して入れ替え、起動し直します…</p>`;
-  else if (u.state === 'checking') msg = '<p class="muted">新しい版を確かめています…</p>';
+  if (u.quitting || u.state === 'installing') msg = `<p>${tr('v{v1} に更新しています。アプリを終了して入れ替え、起動し直します…', { v1: (esc(u.latestVersion)) })}</p>`;
+  else if (u.state === 'checking') msg = tr('<p class="muted">新しい版を確かめています…</p>');
   else if (u.state === 'available') {
-    msg = `<p><b>新しい版 v${esc(u.latestVersion)} があります。</b> <a href="#" id="updNotes">変更点を見る</a></p>`;
-    actions = `<button class="btn primary small" id="updInstall" type="button">新しいバージョンに更新</button>`;
-  } else if (u.state === 'preparing') msg = `<p>新しい版 v${esc(u.latestVersion)} を準備中です（この OS 向けのファイルがまだそろっていません）。しばらくしてからもう一度確かめてください。</p>`;
-  else if (u.state === 'latest') msg = `<p class="muted">最新の版です${checked}</p>`;
+    msg = `<p>${tr('<b>新しい版 v{v1} があります。</b> <a href="#" id="updNotes">変更点を見る</a>', { v1: (esc(u.latestVersion)) })}</p>`;
+    actions = `<button class="btn primary small" id="updInstall" type="button">${tr('新しいバージョンに更新')}</button>`;
+  } else if (u.state === 'preparing') msg = `<p>${tr('新しい版 v{v1} を準備中です（この OS 向けのファイルがまだそろっていません）。しばらくしてからもう一度確かめてください。', { v1: (esc(u.latestVersion)) })}</p>`;
+  else if (u.state === 'latest') msg = `<p class="muted">${tr('最新の版です{v1}', { v1: (checked) })}</p>`;
   else if (u.state === 'error') msg = `<p class="upd-warn">${esc(u.error)}</p>`;
   else msg = '';
   const busy = u.quitting || u.state === 'installing' || u.state === 'checking';
-  if (state.updateFailedLog) msg += '<p class="upd-warn">前回の更新はできませんでした。<a href="#" id="updLog">更新の記録を開く</a></p>';
+  if (state.updateFailedLog) msg += tr('<p class="upd-warn">前回の更新はできませんでした。<a href="#" id="updLog">更新の記録を開く</a></p>');
   return `<p>${cur}</p>${msg}
-    <div class="upd-actions">${actions}<button class="btn small" id="updCheck" type="button" ${busy ? 'disabled' : ''}>新しい版を確かめる</button></div>
-    <label class="check"><input type="checkbox" id="updAuto" ${u.autoUpdate ? 'checked' : ''} /> 新しい版が出たら自動で更新する</label>
-    <small>アプリは起動したときと6時間ごとに新しい版を確かめます。自動で更新するときは、実行中・待機中のタスクがなくなるのを待ってから、アプリを終了して入れ替え、起動し直します。更新すると、手で入れたときと同じ場所（${u.platform === 'win32' ? '%LOCALAPPDATA%\\Programs\\Agent Kanban' : '/Applications または ~/.local/bin'}）に入ります。</small>`;
+    <div class="upd-actions">${actions}<button class="btn small" id="updCheck" type="button" ${busy ? 'disabled' : ''}>${tr('新しい版を確かめる')}</button></div>
+    <label class="check"><input type="checkbox" id="updAuto" ${u.autoUpdate ? 'checked' : ''} /> ${tr('新しい版が出たら自動で更新する')}</label>
+    <small>${tr('アプリは起動したときと6時間ごとに新しい版を確かめます。自動で更新するときは、実行中・待機中のタスクがなくなるのを待ってから、アプリを終了して入れ替え、起動し直します。更新すると、手で入れたときと同じ場所（{v1}）に入ります。', { v1: (u.platform === 'win32' ? '%LOCALAPPDATA%\\Programs\\Agent Kanban' : tr('/Applications または ~/.local/bin')) })}</small>`;
 }
 
 function bindUpdatePanel() {
@@ -5194,7 +5216,7 @@ function bindUpdatePanel() {
   el.innerHTML = updatePanelHtml(state.update);
   const u = state.update;
   if ($('updCheck')) $('updCheck').onclick = () => run(async () => setUpdate(await api.checkUpdate()));
-  if ($('updAuto')) $('updAuto').onchange = () => run(async () => setUpdate(await api.setAutoUpdate($('updAuto').checked)), $('updAuto').checked ? '新しい版が出たら自動で更新します' : '自動で更新しないようにしました');
+  if ($('updAuto')) $('updAuto').onchange = () => run(async () => setUpdate(await api.setAutoUpdate($('updAuto').checked)), $('updAuto').checked ? tr('新しい版が出たら自動で更新します') : tr('自動で更新しないようにしました'));
   if ($('updNotes')) $('updNotes').onclick = (e) => {
     e.preventDefault();
     run(() => api.openExternal(u.releaseUrl));
@@ -5210,8 +5232,10 @@ async function installUpdate() {
   const u = await run(() => api.updateStatus());
   if (!u) return;
   const { running = 0, queued = 0 } = u.active || {};
-  const tasks = running || queued ? `\n\n${[running && `実行中 ${running} 件`, queued && `待機中 ${queued} 件`].filter(Boolean).join('・')}のタスクは中断します（それまでの変更はタスクのブランチにコミットし、起動し直したあとに「再開」で続けられます）。` : '';
-  if (!confirm(`v${u.latestVersion} に更新します。アプリを終了して新しい版に入れ替え、起動し直します（1分ほどかかります）。${tasks}\n\n更新しますか？`)) return;
+  const tasks = running || queued ? `
+
+${tr('{v1}のタスクは中断します（それまでの変更はタスクのブランチにコミットし、起動し直したあとに「再開」で続けられます）。', { v1: ([running && `${tr('実行中 {v1} 件', { v1: (running) })}`, queued && `${tr('待機中 {v1} 件', { v1: (queued) })}`].filter(Boolean).join(tr('・'))) })}` : '';
+  if (!confirm(`${tr('v{v1} に更新します。アプリを終了して新しい版に入れ替え、起動し直します（1分ほどかかります）。{v2}\n\n更新しますか？', { v1: (u.latestVersion), v2: (tasks) })}`)) return;
   const r = await run(() => api.installUpdate());
   if (r) setUpdate(r);
 }
@@ -5225,17 +5249,18 @@ function setUpdate(u) {
   if (badge) {
     const on = u.supported && (u.state === 'available' || u.state === 'installing' || u.quitting);
     badge.classList.toggle('hidden', !on);
-    badge.textContent = u.state === 'installing' || u.quitting ? '更新しています…' : `v${u.latestVersion} に更新できます`;
+    badge.textContent = u.state === 'installing' || u.quitting ? tr('更新しています…') : `${tr('v{v1} に更新できます', { v1: (u.latestVersion) })}`;
   }
 }
 
+I18n.localizeDom(document);
 api.updateStatus().then((u) => {
   setUpdate(u);
   // 前の起動で更新したときの結果を一度だけ知らせる
   const r = u.lastResult;
   if (!r) return;
-  if (r.ok) toast(`v${r.to} に更新しました`, 'ok');
-  else toast(`v${r.to} に更新できませんでした（v${u.currentVersion} のままです）。詳しくは設定の「アプリの更新」から記録を開いて確かめてください`);
+  if (r.ok) toast(`${tr('v{v1} に更新しました', { v1: (r.to) })}`, 'ok');
+  else toast(`${tr('v{v1} に更新できませんでした（v{v2} のままです）。詳しくは設定の「アプリの更新」から記録を開いて確かめてください', { v1: (r.to), v2: (u.currentVersion) })}`);
   api.dismissUpdateResult().catch(() => {});
   if (!r.ok) state.updateFailedLog = true;
 }, () => {});
@@ -5245,7 +5270,7 @@ $('updateBadge')?.addEventListener('click', () => openSettings('update'));
 // 左上に、いま動いているアプリのバージョンを出す
 api.appInfo().then(
   (i) => {
-    $('appVersion').textContent = `v${i.version}${i.packaged ? '' : '（開発版）'}`;
+    $('appVersion').textContent = `v${i.version}${i.packaged ? '' : tr('（開発版）')}`;
     $('appVersion').title = `Agent Kanban v${i.version}`;
   },
   () => {},
