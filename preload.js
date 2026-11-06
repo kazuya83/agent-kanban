@@ -7,6 +7,9 @@ async function call(channel, arg) {
   return r.data;
 }
 
+// スケジュールの操作は (id, 内容) でも { id, ...内容 } でも受け付け、ハンドラには { id, ...内容 } で渡す
+const scheduleArg = (a, b) => (a && typeof a === 'object' ? a : { ...(b || {}), id: a });
+
 contextBridge.exposeInMainWorld('api', {
   getBoard: () => call('board:get'),
   appInfo: () => call('app:info'),
@@ -72,6 +75,11 @@ contextBridge.exposeInMainWorld('api', {
   readNotifications: (ids) => call('notifications:read', { ids }),
   clearNotifications: (ids) => call('notifications:clear', { ids }),
   actNotification: (id) => call('notifications:act', { id }),
+  createSchedule: (p) => call('schedules:create', p),
+  updateSchedule: (a, b) => call('schedules:update', scheduleArg(a, b)),
+  deleteSchedule: (id) => call('schedules:delete', { id }),
+  // start が true で「今すぐ実行」、false で「タスクだけ作成」。作ったカードの ID を返す
+  runSchedule: (a, b) => call('schedules:run', scheduleArg(a, b)),
   btw: (id, text) => call('card:btw', { id, text }),
   setSession: (id, session) => call('card:setSession', { id, session }),
   listSessions: () => call('sessions:list'),

@@ -51,7 +51,7 @@ test('renderer.js の agentIcon() は登録済みのエージェント ID', () =
 
 test('画面に出す文字に絵文字が残っていない', () => {
   // src/agent.js・main.js の文言（通知のボタン・会話のタイトル・カードの最後のメッセージ・ダイアログなど）も画面に出る
-  for (const f of ['renderer/index.html', 'renderer/renderer.js', 'src/agent.js', 'main.js']) {
+  for (const f of ['renderer/index.html', 'renderer/renderer.js', 'renderer/scheduler-view.js', 'src/agent.js', 'main.js']) {
     const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
     src.split('\n').forEach((line, i) => assert.doesNotMatch(line, EMOJI, `${f}:${i + 1}: ${line.trim().slice(0, 80)}`));
   }
@@ -60,13 +60,17 @@ test('画面に出す文字に絵文字が残っていない', () => {
 test('index.html の data-icon は icons.js にある名前', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
   for (const [, name] of html.matchAll(/data-icon="([^"]+)"/g)) assert.ok(ICON_NAMES.includes(name), name);
-  for (const [, name] of fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf8').matchAll(/icon\('([^']+)'\)/g)) assert.ok(ICON_NAMES.includes(name), name);
+  for (const f of ['renderer.js', 'scheduler-view.js']) {
+    for (const [, name] of fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8').matchAll(/icon\('([^']+)'\)/g)) assert.ok(ICON_NAMES.includes(name), `${f}: ${name}`);
+  }
 });
 
-test('renderer.js で icon() を同じ名前の変数で隠していない', () => {
+test('画面のスクリプトで icon() を同じ名前の変数で隠していない', () => {
   // const [icon, label] = ... のように隠すと、その中の icon('clock') が TypeError になり、
   // 詳細（Pipelineの工程など）が何も表示されなくなる
-  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf8');
   const decl = /\b(?:const|let|var)\s+(?:icon\b|[[{][^=;]*?\bicon\b[^=;]*?[\]}]\s*=)|function\s*\w*\s*\([^)]*\bicon\b[^)]*\)|\(([^()]*\b)?icon\b[^()]*\)\s*=>|\bicon\s*=>/;
-  src.split('\n').forEach((line, i) => assert.doesNotMatch(line, decl, `renderer.js:${i + 1}: ${line.trim().slice(0, 80)}`));
+  for (const f of ['renderer.js', 'scheduler-view.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8');
+    src.split('\n').forEach((line, i) => assert.doesNotMatch(line, decl, `${f}:${i + 1}: ${line.trim().slice(0, 80)}`));
+  }
 });

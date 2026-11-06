@@ -89,6 +89,19 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
   -webkit-app-region: drag;
 }
 .topbar button, .topbar .pill { -webkit-app-region: no-drag; }
+/* ハンバーガーメニュー（カンバン管理 / タスクスケジューラの切り替え） */
+.nav-wrap { position: relative; -webkit-app-region: no-drag; }
+.nav-btn { font-size: 15px; padding: 4px 8px; }
+.nav-btn .ic { margin-right: 0; }
+.nav-menu {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 60; min-width: 200px; padding: 6px;
+  display: flex; flex-direction: column; gap: 2px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.nav-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; text-align: left; white-space: nowrap; }
+.nav-item .ic { width: 16px; height: 16px; margin: 0; }
+.nav-item:hover { background: var(--panel-2); }
+.nav-item.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-weight: 600; }
 /* 幅が足りなくても折り返さずに1行に収める（小さい要素から先に縮めたり隠したりする） */
 .topbar > * { flex: none; }
 .topbar > .spacer { flex: 1 1 0; min-width: 0; }
@@ -192,6 +205,8 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 /* レイアウト */
 .layout { flex: 1; display: flex; min-height: 0; }
 .board { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 12px; padding: 14px; overflow: auto; min-width: 0; }
+.scheduler-view { flex: 1; min-width: 0; padding: 14px; overflow: auto; }
+.scheduler-view > .empty-state { margin: 64px auto 0; }
 .column { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; min-height: 0; }
 .column.drop { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
 .column > header { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; padding: 10px 12px; font-weight: 600; border-bottom: 1px solid var(--line); }
@@ -719,6 +734,7 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .orch-chip.agent { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
 .orch-chip.relay { background: color-mix(in srgb, var(--run) 16%, transparent); color: var(--run); }
 .orch-chip.compete { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.orch-chip.schedule { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .relay-bar { display: flex; gap: 3px; margin: 2px 0 4px; }
 .rb-seg { flex: 1; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--muted) 25%, transparent); }
 /* 工程の状態の色（バーとワークフローで共通） */

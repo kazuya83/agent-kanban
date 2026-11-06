@@ -5,9 +5,17 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:" />
     <title>Agent Kanban</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="scheduler.css" />
   </head>
   <body>
     <header class="topbar">
+      <div class="nav-wrap">
+        <button id="navBtn" class="btn ghost nav-btn" type="button" title="画面を切り替えます" aria-label="メニュー" aria-expanded="false" aria-controls="navMenu"><span data-icon="menu"></span></button>
+        <nav id="navMenu" class="nav-menu hidden" aria-label="画面の切り替え">
+          <button class="nav-item" type="button" data-view="kanban"><span data-icon="logo"></span>カンバン管理</button>
+          <button class="nav-item" type="button" data-view="scheduler"><span data-icon="calendar"></span>タスクスケジューラ</button>
+        </nav>
+      </div>
       <div class="brand"><span class="logo" data-icon="logo"></span><span class="brand-text"><span class="brand-name">Agent Kanban</span><span id="appVersion" class="brand-ver"></span><button id="updateBadge" class="update-badge hidden" type="button" title="設定の「アプリの更新」を開きます"></button></span></div>
       <div id="repoTabs" class="repo-tabs" role="tablist" aria-label="開いているリポジトリ"></div>
       <div class="spacer"></div>
@@ -27,6 +35,7 @@
     <div id="interruptBanner" class="int-banner hidden"></div>
     <div class="layout">
       <main id="board" class="board"></main>
+      <main id="schedulerView" class="scheduler-view hidden"></main>
       <div id="detailBackdrop" class="d-backdrop hidden"></div>
       <aside id="detail" class="detail hidden">
         <div id="detailResizer" class="d-resizer" title="ドラッグで幅を変えられます（ダブルクリックで元の幅に戻します）"></div>
@@ -64,10 +73,13 @@
     <script src="markdown.js"></script>
     <script src="chat-log.js"></script>
     <script src="zoom.js"></script>
+    <script src="app-view.js"></script>
+    <script src="schedule-model.js"></script>
     <script src="flow-model.js"></script>
     <script src="pipeline-pack.js"></script>
     <script src="flow-editor.js"></script>
     <script src="flow-view.js"></script>
     <script src="renderer.js"></script>
+    <script src="scheduler-view.js"></script>
   </body>
 </html>

@@ -895,7 +895,7 @@ class AgentManager extends EventEmitter {
   /**
    * 通知を足す。右上の通知一覧に出し、'notification' イベントでデスクトップ通知にも使う
    * @param {object} c カード
-   * @param {string} kind permission / question / awaiting / review / failed / done / skill
+   * @param {string} kind permission / question / awaiting / review / failed / done / skill / schedule
    */
   notify(c, kind, title, body, extra) {
     const n = {
@@ -999,8 +999,13 @@ class AgentManager extends EventEmitter {
    * @returns {object[]} 作ったカード
    */
   // readOnly: ソースを変更しないタスク（worktree を作らずリポジトリのフォルダで動かし、ファイルを書き換えるツールは止める）
-  createTask({ title, prompt, issue, session, skill, agent, model, fromChat, attachments: files, readOnly }) {
+  // repoPath: カードを作るリポジトリ（省くと今開いているリポジトリ）。Pipeline・カスタムエージェント・プロジェクトごとの設定は、そのリポジトリのものを使う
+  // skipSpecCheck: 仕様の確認をしない（誰も見ていないスケジュール実行で、確認のまま止まらないように）
+  // scheduleId / scheduleTitle: このタスクを作ったスケジュール
+  createTask({ title, prompt, issue, session, skill, agent, model, fromChat, attachments: files, readOnly, repoPath, skipSpecCheck, scheduleId, scheduleTitle }) {
     const s = this.store.settings;
+    const repo = this.targetRepo(repoPath);
+    const extra = { repoPath: repo, skipSpecCheck, scheduleId, scheduleTitle };
     // 添付は先に確かめておく（カードごとに保存する）
     const parsed = attachments.parseAttachments(files);
     let mode = agent || providers.defaultAgentOf(s);
@@ -1011,7 +1016,7 @@ class AgentManager extends EventEmitter {
       mode = 'relay';
     }
     // カスタムエージェント: その CLI・モデル・プロフィールで動かす
-    const custom = providers.isCustomRef(mode) ? this.customAgent(mode) : null;
+    const custom = providers.isCustomRef(mode) ? this.customAgent(mode, repo) : null;
     if (custom) mode = custom.agent;
     // Pipeline・競争は工程・カードごとにエージェントが違うので、モデルは工程・設定のものを使う
     const m = mode === 'relay' || mode === 'compete' ? '' : custom ? custom.model : cleanModel(model);
@@ -1025,65 +1030,75 @@ class AgentManager extends EventEmitter {
       throw new Error(`${name(mode)}は使わない設定になっています（${why}）。「設定」の「オーケストレーション」で${name(mode)}を選んでください`);
     }
     if (readOnly && mode === 'compete') throw new Error('ソースを変更しないタスクでは、競争は使えません。ほかのエージェントを選んでください');
-    if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from, parsed });
+    if (mode === 'compete') return this.createCompetition({ title, prompt, issue, session, skill, fromChat: from, parsed, ...extra });
     if (mode === 'relay') {
       // Pipelineのフローチャートは、プロジェクトごとの設定（複数あれば、選んだもの。選んでいなければ既定の Pipeline）
-      const pipe = pipelineOf(this.store.repoSettings(s.repoPath), pipelineId);
+      const pipe = pipelineOf(this.store.repoSettings(repo), pipelineId);
       if (!pipe) throw new Error('選んだ Pipeline が見つかりません（消されたかもしれません）。選び直してください');
       const flow = cleanRelayFlow(pipe.flow);
       const errs = FlowModel.validateFlow(flow);
       if (errs.length) throw new Error(`Pipeline「${pipe.name}」のフローチャートを直してください（設定の「フローチャートを編集」）: ${errs[0]}`);
-      const steps = relayStepsOf(flow, this.customAgents());
+      const steps = relayStepsOf(flow, this.customAgents(repo));
       const lost = steps.find((st) => st.missing);
       if (lost) throw new Error(`Pipelineの工程「${lost.label}」のカスタムエージェントが見つかりません（消されたかもしれません）。「設定」のフローチャートで、工程のエージェントを選び直してください`);
       const off = steps.find((st) => !providers.isEnabled(s, st.agent));
       if (off) throw new Error(`Pipelineの工程「${off.label}」の ${whoLabel(off.agent, off.persona)} は使わない設定になっています。「設定」で工程のエージェントを変えるか、使うエージェントにチェックを付けてください`);
-      if (isNoGitRepo(s, s.repoPath) && flow.nodes.some((n) => n.type === 'parallel')) throw new Error('git で管理していないフォルダでは、並列のあるPipelineは使えません（枝ごとに別の作業場所を作れないため）。フローチャートから並列を外してください');
+      if (isNoGitRepo(s, repo) && flow.nodes.some((n) => n.type === 'parallel')) throw new Error('git で管理していないフォルダでは、並列のあるPipelineは使えません（枝ごとに別の作業場所を作れないため）。フローチャートから並列を外してください');
       if (readOnly && flow.nodes.some((n) => n.type === 'parallel')) throw new Error('ソースを変更しないタスクでは、並列のあるPipelineは使えません。フローチャートから並列を外すか、ほかのエージェントを選んでください');
       const first = FlowModel.route(flow, FlowModel.startNode(flow).id, {});
       const index = relayStepIndex({ relay: { steps } }, first.node.id);
       const st = steps[index];
-      const c = this.createCard({ title, prompt, issue, session, skill, agent: st.agent, relay: { flow, steps, index, history: [], counts: {}, pipeline: { id: pipe.id, name: pipe.name } }, fromChat: from, parsed, readOnly });
+      const c = this.createCard({ title, prompt, issue, session, skill, agent: st.agent, relay: { flow, steps, index, history: [], counts: {}, pipeline: { id: pipe.id, name: pipe.name } }, fromChat: from, parsed, readOnly, ...extra });
       if (st.model) c.model = st.model;
       if (st.persona) c.persona = st.persona;
       return [c];
     }
-    return [this.createCard({ title, prompt, issue, session, skill, agent: mode, model: m, persona: providers.personaOf(custom), fromChat: from, parsed, readOnly })];
+    return [this.createCard({ title, prompt, issue, session, skill, agent: mode, model: m, persona: providers.personaOf(custom), fromChat: from, parsed, readOnly, ...extra })];
   }
 
   // 競争: 同じタスクを、設定のエージェントそれぞれのカードにする（使わない設定のエージェントは外す）
-  createCompetition({ title, prompt, issue, session, skill, fromChat, parsed }) {
+  createCompetition({ title, prompt, issue, session, skill, fromChat, parsed, repoPath, skipSpecCheck, scheduleId, scheduleTitle }) {
     const s = this.store.settings;
-    if (isNoGitRepo(s, s.repoPath)) throw new Error('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください');
-    const list = this.competeEntries();
+    const repo = this.targetRepo(repoPath);
+    if (isNoGitRepo(s, repo)) throw new Error('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください');
+    const list = this.competeEntries(repo);
     if (list.length < 2) throw new Error('競争させるエージェントを、設定で2つ以上選んでください（使うエージェントにチェックを付けたものと、カスタムエージェントから選べます）');
     const group = crypto.randomBytes(4).toString('hex');
     const base = (title && title.trim()) || truncate(String(prompt || '').trim().split('\n')[0], 40);
     return list.map((x, index) =>
-      this.createCard({ title: `${base} [${whoShort(x.agent, x.persona)}]`, prompt, issue, session, skill, agent: x.agent, model: x.model, persona: x.persona, compete: { group, index, total: list.length, title: base }, fromChat, parsed }),
+      this.createCard({ title: `${base} [${whoShort(x.agent, x.persona)}]`, prompt, issue, session, skill, agent: x.agent, model: x.model, persona: x.persona, compete: { group, index, total: list.length, title: base }, fromChat, parsed, repoPath: repo, skipSpecCheck, scheduleId, scheduleTitle: scheduleTitle || base }),
     );
   }
 
   // 競争させる顔ぶれ: 設定のふつうのエージェント（使う設定のもの）と、このプロジェクトのカスタムエージェント（元の CLI が使う設定のもの）
-  competeEntries() {
+  competeEntries(repoPath) {
     const s = this.store.settings;
     const plain = providers.cleanCompeteAgents(s.competeAgents).filter((a) => providers.isEnabled(s, a)).map((a) => ({ agent: a, model: '', persona: null }));
-    const cas = this.customAgents();
-    const custom = (Array.isArray(s.competeCustomAgents) ? s.competeCustomAgents : [])
+    const cas = this.customAgents(repoPath);
+    const custom = this.store.repoSettings(repoPath).competeCustomAgents
       .map((id) => providers.findCustomAgent(cas, id))
       .filter((ca) => ca && providers.isEnabled(s, ca.agent))
       .map((ca) => ({ agent: ca.agent, model: ca.model, persona: providers.personaOf(ca) }));
     return [...plain, ...custom];
   }
 
-  // 今のプロジェクトのカスタムエージェント
-  customAgents() {
-    return providers.cleanCustomAgents(this.store.repoSettings(this.store.settings.repoPath).customAgents);
+  // カードを作るリポジトリ。指定がなければ今開いているリポジトリ
+  // （指定されたフォルダがなければエラー。設定が初期値に戻って、見当違いの動きをしないように）
+  targetRepo(repoPath) {
+    const dir = String(repoPath || '').trim();
+    if (!dir) return this.store.settings.repoPath;
+    if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`リポジトリのフォルダが見つかりません: ${dir}`);
+    return dir;
+  }
+
+  // プロジェクトのカスタムエージェント（省くと今のプロジェクト）
+  customAgents(repoPath = this.store.settings.repoPath) {
+    return providers.cleanCustomAgents(this.store.repoSettings(repoPath).customAgents);
   }
 
   // 「custom:<ID>」のカスタムエージェント（なければ・元の CLI が使わない設定ならエラー）
-  customAgent(ref) {
-    const ca = providers.findCustomAgent(this.customAgents(), ref);
+  customAgent(ref, repoPath) {
+    const ca = providers.findCustomAgent(this.customAgents(repoPath), ref);
     if (!ca) throw new Error('カスタムエージェントが見つかりません（消されたかもしれません）。選び直してください');
     if (!providers.isEnabled(this.store.settings, ca.agent)) throw new Error(`カスタムエージェント「${ca.name}」の ${agentLabel(ca.agent)} は使わない設定になっています。「設定」の「使うエージェント」でチェックを付けてください`);
     return ca;
@@ -1102,12 +1117,13 @@ class AgentManager extends EventEmitter {
     return a && providers.isEnabled(s, a) ? a : providers.defaultAgentOf(s);
   }
 
-  createCard({ title, prompt, issue, session, skill, agent, model, persona, relay, compete, fromChat, parsed, readOnly }) {
+  createCard({ title, prompt, issue, session, skill, agent, model, persona, relay, compete, fromChat, parsed, readOnly, repoPath, skipSpecCheck, scheduleId, scheduleTitle }) {
     const s = this.store.settings;
-    if (!s.repoPath) throw new Error('先にリポジトリを選んでください');
+    const repo = this.targetRepo(repoPath);
+    if (!repo) throw new Error('先にリポジトリを選んでください');
     if (!prompt || !prompt.trim()) throw new Error('指示を入力してください');
     if (agent) this.assertEnabled(agent);
-    const noGit = isNoGitRepo(s, s.repoPath);
+    const noGit = isNoGitRepo(s, repo);
     if (readOnly && compete) throw new Error('ソースを変更しないタスクでは、競争は使えません。ほかのエージェントを選んでください');
     if (noGit && compete) throw new Error('git で管理していないフォルダでは、競争は使えません（候補ごとに別の作業場所を作れないため）。ほかのエージェントを選んでください');
     const card = {
@@ -1115,12 +1131,16 @@ class AgentManager extends EventEmitter {
       title: (title && title.trim()) || truncate(prompt.trim().split('\n')[0], 40),
       prompt: prompt.trim(),
       status: 'todo',
-      repoPath: s.repoPath,
+      repoPath: repo,
       createdAt: Date.now(),
       permissions: [],
       alwaysAllow: [],
       logs: [],
     };
+    if (scheduleId) {
+      card.scheduleId = scheduleId;
+      card.scheduleTitle = String(scheduleTitle || '').trim() || card.title;
+    }
     if (noGit) card.noGit = true;
     // ソースを変更しないタスク: git なしのフォルダと同じく、worktree・ブランチ・コミット・マージを使わず、
     // リポジトリのフォルダでそのまま動かす。終わったら確かめて「完了にする」で完了にする
@@ -1148,7 +1168,7 @@ class AgentManager extends EventEmitter {
     if (session && session.id && card.agent === 'claude') this.applySession(card, session);
     card.skill = cleanSkill(skill);
     // 内容が詰まっていなければ、開発を始める前にエージェントと対話して仕様を詰める
-    if (s.specCheck !== false) card.specState = 'checking';
+    if (!skipSpecCheck && this.store.repoSettings(repo).specCheck !== false) card.specState = 'checking';
     this.saveCardAttachments(card, parsed);
     this.store.cards.push(card);
     this.changed(card);
