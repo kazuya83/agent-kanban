@@ -440,7 +440,7 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .dv-fileblock.collapsed .dv-fhead .dv-caret { transform: rotate(-90deg); }
 .dv-fpath { font-family: var(--mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dv-fnums { flex-shrink: 0; font-size: 11.5px; }
-.dv-fbody { overflow-x: auto; }
+.dv-fbody { overflow-x: auto; container-type: inline-size; } /* コメントの欄は、横に長い行があっても見えている幅に収める */
 .dv-note { padding: 14px; color: var(--muted); font-size: 12px; display: flex; gap: 10px; align-items: center; }
 .dv-tbl { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; }
 .dv-tbl td { padding: 0 8px; vertical-align: top; }
@@ -455,6 +455,22 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .dv-del .sg { color: var(--err); }
 .dv-hunk td { background: color-mix(in srgb, var(--run) 10%, transparent); color: var(--muted); padding-top: 3px; padding-bottom: 3px; }
 .dv-meta td { color: var(--muted); font-style: italic; }
+/* 行コメント: 行にマウスを重ねると + が出る */
+.dv-tbl td.ln { position: relative; }
+.dv-cadd { position: absolute; left: 2px; top: 0; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 4px; background: var(--accent); color: #fff; font: inherit; line-height: 16px; cursor: pointer; opacity: 0; }
+.dv-tbl tr:hover .dv-cadd, .dv-cadd:focus-visible { opacity: 1; }
+.dv-crow td { padding: 6px 8px; background: var(--panel-2); font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', sans-serif; white-space: normal; }
+.dv-cbox { position: sticky; left: 8px; width: min(560px, calc(100cqw - 16px)); box-sizing: border-box; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.dv-cbox + .dv-cbox { margin-top: 6px; }
+.dv-ctext { white-space: pre-wrap; word-break: break-word; }
+.dv-cform textarea { display: block; width: 100%; box-sizing: border-box; resize: vertical; }
+.dv-cacts { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+.dv-cbar { padding: 6px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0; font-size: 12px; }
+.dv-cbar-row { display: flex; gap: 8px; align-items: center; }
+.dv-corphans { margin-top: 6px; display: grid; gap: 4px; }
+.dv-corphan { display: flex; gap: 8px; align-items: center; }
+.dv-corphan code { flex-shrink: 0; }
+.dv-corphan span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 上下・左右の切り替え */
 .dv-mode { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .dv-mode .btn { border: 0; border-radius: 0; }
@@ -619,6 +635,9 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 
 /* コンフリクト */
 .b-conflict { background: color-mix(in srgb, var(--err) 22%, transparent); color: var(--err); font-weight: 600; }
+.b-ci-ok { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); font-weight: 600; }
+.b-ci-wait { background: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--muted); font-weight: 600; }
+.ci-failed { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
 .card.conflicting { border-left-color: var(--err); border-color: color-mix(in srgb, var(--err) 55%, transparent); }
 .cf-box { margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--err) 50%, transparent); background: color-mix(in srgb, var(--err) 7%, var(--panel)); }
 .cf-box.ok { border-color: color-mix(in srgb, var(--ok) 50%, transparent); background: color-mix(in srgb, var(--ok) 7%, var(--panel)); }

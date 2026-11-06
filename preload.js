@@ -102,6 +102,7 @@ contextBridge.exposeInMainWorld('api', {
   abortConflict: (id) => call('conflict:abort', id),
   dismissConflict: (id) => call('conflict:dismiss', id),
   reopenPrConflict: (id) => call('conflict:fromPr', id),
+  fixCi: (id) => call('ci:fix', id),
   answerPermission: (id, reqId, decision, message) => call('card:permission', { id, reqId, decision, message }),
   answerQuestion: (id, reqId, answers) => call('card:answer', { id, reqId, answers }),
   open: (id) => call('card:open', id),
