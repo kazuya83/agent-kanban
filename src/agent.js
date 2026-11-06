@@ -512,6 +512,29 @@ function relayTargetText(c, edge) {
   return `${FlowModel.TYPE_LABEL[n.type]}「${FlowModel.labelOf(n)}」へ進みます`;
 }
 
+// ログに出す行き先。エージェントへの指示（relayJudgeNote）は relayTargetText の日本語のまま
+function relayTargetLog(c, edge) {
+  const flow = c.relay.flow;
+  const n = edge && FlowModel.nodeOf(flow, edge.to);
+  if (!n || n.type === 'end') return tr('Pipelineを終えてレビューに回します');
+  if (n.type === 'step') {
+    const j = relayStepIndex(c, n.id);
+    const back = FlowModel.backEdges(flow).has(edge.id);
+    const st = c.relay.steps[j] || n;
+    const who = whoLabel(st.agent, st.persona);
+    return back
+      ? tr('工程{n}「{label}」（{who}）に戻ってやり直します', { n: j + 1, label: n.label, who })
+      : tr('工程{n}「{label}」（{who}）へ進みます', { n: j + 1, label: n.label, who });
+  }
+  if (n.type === 'parallel') {
+    const names = Subtasks.joinQuoted(FlowModel.outEdges(flow, n.id).map((e) => (FlowModel.nodeOf(flow, e.to) || {}).label || ''));
+    return tr('並列「{label}」で {names} を同時に進めます', { label: n.label, names });
+  }
+  if (n.type === 'join') return tr('合流「{label}」で、ほかの枝が終わるのを待ちます', { label: n.label });
+  const typeKey = FlowModel.TYPE_LABEL[n.type];
+  return tr('{type}「{label}」へ進みます', { type: typeKey ? tr(typeKey) : n.type, label: FlowModel.shownLabel(n) });
+}
+
 // すぐあとが分岐の工程に付ける、判定の値の書き方の説明
 function relayJudgeNote(c, i) {
   const st = c.relay.steps[i];
@@ -811,7 +834,7 @@ class AgentManager extends EventEmitter {
     for (const [id, child] of this.procs) {
       const c = this.store.card(id);
       if (c) this.log(c, 'system',tr('アプリを終了するため中断しました。次に起動したときに「再開」できます'));
-      this.denyAllPending(id, 'アプリを終了します');
+      this.denyAllPending(id, tr('アプリを終了します'));
       killTree(child);
     }
     const done = Promise.all(runs.map((r) => r.done));
@@ -1241,7 +1264,7 @@ class AgentManager extends EventEmitter {
     const plan = relayPlan(c);
     r.lastResult = plan.result;
     if (plan.judge) {
-      const where = plan.branch ? ` → ${relayTargetText(c, plan.branch.edge)}` : '';
+      const where = plan.branch ? ` → ${relayTargetLog(c, plan.branch.edge)}` : '';
       if (plan.missing) this.log(c, 'system',tr('Pipeline: 工程「{label}」の返事に判定の値（[[RESULT:値]]）がなかったので、分岐「{label2}」の「どれにも合わないとき」の線へ進みます{where}', { label: st.label, label2: plan.judge.node.label, where }));
       else this.log(c, 'system', plan.branch && plan.branch.edge.value && FlowModel.normValue(plan.branch.edge.value) === plan.result ? tr('Pipeline: 工程「{label}」の判定は「{result}」でした{where}', { label: st.label, result: plan.result, where }) : plan.branch ? tr('Pipeline: 工程「{label}」の判定は「{result}」でした（どの期待値にも合わないので「どれにも合わないとき」の線へ）{where}', { label: st.label, result: plan.result, where }) : tr('Pipeline: 工程「{label}」の判定は「{result}」でした', { label: st.label, result: plan.result }));
     }
@@ -1321,7 +1344,7 @@ class AgentManager extends EventEmitter {
     const kids = info.branches.map((b, k) => this.createBranchCard(c, node, info.join, k, relayStepIndex(c, b.edge.to)));
     r.waiting.children = kids.map((k) => k.id);
     const join = FlowModel.nodeOf(r.flow, info.join);
-    this.log(c, 'system', tr('Pipeline: 並列「{label}」で、{n} 本の枝（{names}）を別々の worktree で同時に動かします。すべての枝が終わったら、合流「{join}」でこのブランチにマージします', { label: node.label, n: kids.length, names: kids.map((k) => `「${k.relay.branchOf.label}」`).join('・'), join: FlowModel.labelOf(join) }));
+    this.log(c, 'system', tr('Pipeline: 並列「{label}」で、{n} 本の枝（{names}）を別々の worktree で同時に動かします。すべての枝が終わったら、合流「{join}」でこのブランチにマージします', { label: node.label, n: kids.length, names: Subtasks.joinQuoted(kids.map((k) => k.relay.branchOf.label)), join: FlowModel.labelOf(join) }));
     this.changed(c);
     for (const k of kids) {
       this.log(k, 'system',tr('Pipeline: 「{title}」の並列「{label}」の枝 {v} です。ブランチ {branch} から分けた worktree で動かします', { title: c.title, label: node.label, v: k.relay.branchOf.index + 1, branch: c.branch }));
@@ -1530,7 +1553,7 @@ class AgentManager extends EventEmitter {
       if (createIssues) {
         for (const x of list) {
           if (x.issue) continue;
-          const made = await this.createSubIssue(c.repoPath, c.issue.number, { title: x.title, body: `${x.prompt}\n\n---\nAgent Kanban のサブタスクとして作成しました（親: #${c.issue.number}）。` });
+          const made = await this.createSubIssue(c.repoPath, c.issue.number, { title: x.title, body: `${x.prompt}\n\n---\n${tr('Agent Kanban のサブタスクとして作成しました（親: #{number}）。', { number: c.issue.number })}` });
           x.issue = { number: made.number, title: made.title, url: made.url };
           // 途中で失敗しても、作ったサブIssue は覚えておく（もう一度押したときに二重に作らない）
           c.subtaskProposal.items = list;
@@ -1558,7 +1581,7 @@ class AgentManager extends EventEmitter {
     const c = this.must(id);
     if (!c.subtaskProposal) throw new Error(tr('サブタスクの提案はありません'));
     c.subtaskProposal = null;
-    this.send(id, 'サブタスクに分けずに、このタスクのまま開発を進めてください（もうサブタスクの提案はしないでください）。');
+    this.send(id, tr('サブタスクに分けずに、このタスクのまま開発を進めてください（もうサブタスクの提案はしないでください）。'));
   }
 
   // サブタスクを親のブランチに取り込める状態か（manual: ユーザーが確かめて取り込むときは、失敗で終わったものも取り込める）
@@ -2359,7 +2382,7 @@ class AgentManager extends EventEmitter {
     const child = this.procs.get(id);
     if (!child) throw new Error(tr('実行中ではありません'));
     c.stopRequested = true;
-    this.denyAllPending(id, '停止されました');
+    this.denyAllPending(id, tr('停止されました'));
     killTree(child);
   }
 
@@ -2709,7 +2732,7 @@ class AgentManager extends EventEmitter {
       this.runs.delete(c.id);
       // 受け取られないまま終わった btw は「届かなかった」にする（終了後の追加指示待ち follow は残す）
       for (const m of c.btw || []) if (m.state === 'sent') m.state = 'lost';
-      this.denyAllPending(c.id, 'エージェントが終了しました');
+      this.denyAllPending(c.id, tr('エージェントが終了しました'));
       if (!this.store.card(c.id)) return; // 破棄された
       if (afterDone) return this.finishAfterDone(c, code, spawnError, run, cmd);
       // 状態を「レビュー」にする前に、作業内容をブランチにコミットしておく
@@ -3160,7 +3183,7 @@ class AgentManager extends EventEmitter {
 
   requestPermission({ cardId, toolName, input, toolUseId }, signal) {
     const c = this.store.card(cardId);
-    if (!c) return Promise.resolve({ behavior: 'deny', message: 'タスクが見つかりません' });
+    if (!c) return Promise.resolve({ behavior: 'deny', message: tr('タスクが見つかりません') });
     input = input && typeof input === 'object' ? input : {};
     if (toolName === 'AskUserQuestion') return this.askQuestion(c, input, toolUseId, signal);
     if ((c.alwaysAllow || []).includes(toolName)) {
@@ -3178,7 +3201,7 @@ class AgentManager extends EventEmitter {
       this.emit('permission', c, req);
       this.notify(c, 'permission', tr('承認待ち: {title}', { title: c.title }), `${toolName}  ${req.summary}`);
       signal?.addEventListener('abort', () => {
-        if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: '中断されました' }, null);
+        if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: tr('中断されました') }, null);
       });
     });
   }
@@ -3205,7 +3228,7 @@ class AgentManager extends EventEmitter {
       this.emit('question', c, questions);
       this.notify(c, 'question', tr('質問: {title}', { title: c.title }), questions.map((q) => q.question).join(' / '));
       signal?.addEventListener('abort', () => {
-        if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: '中断されました' }, null);
+        if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: tr('中断されました') }, null);
       });
     });
   }
@@ -3219,7 +3242,7 @@ class AgentManager extends EventEmitter {
     const p = this.pending.get(reqId);
     if (!p || p.cardId !== cardId || p.kind !== 'question') throw new Error(tr('この質問はもう終わっています'));
     if (!answers) {
-      this.settle(reqId, { behavior: 'deny', message: 'ユーザーは質問に答えずに、そのまま進めるよう求めています。妥当だと思う方法で続けてください。' }, tr('答えずに続ける'));
+      this.settle(reqId, { behavior: 'deny', message: tr('ユーザーは質問に答えずに、そのまま進めるよう求めています。妥当だと思う方法で続けてください。') }, tr('答えずに続ける'));
       return;
     }
     const clean = {};
@@ -3419,7 +3442,7 @@ class AgentManager extends EventEmitter {
     const subIssues = c.subtasks ? c.subtasks.items.filter((x) => x.issue && x.state === 'merged').map((x) => `Closes #${x.issue.number}`) : [];
     if (subIssues.length) lines.push(...subIssues, '');
     if (c.lastMessage) lines.push(c.lastMessage, '');
-    lines.push('---', 'Agent Kanban のタスクから作成しました。');
+    lines.push('---', tr('Agent Kanban のタスクから作成しました。'));
     return { title, body: lines.join('\n') };
   }
 
@@ -3883,7 +3906,7 @@ class AgentManager extends EventEmitter {
     const subParent = this.subtaskParentOf(c);
     const child = this.procs.get(id);
     this.store.removeCard(id);
-    this.denyAllPending(id, '破棄されました');
+    this.denyAllPending(id, tr('破棄されました'));
     if (child) {
       killTree(child);
       await new Promise((r) => (child.exitCode !== null ? r() : child.once('close', r)));

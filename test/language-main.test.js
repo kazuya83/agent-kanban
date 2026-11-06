@@ -9,7 +9,8 @@ const I18n = require('../renderer/i18n');
 const { tr } = I18n;
 const { Store, languageForBoardFile, assertLanguage, defaultRepoSettings } = require('../src/store');
 const { isLocalChannel, isProxyChannel, stripLocalSettings, redactForRemote, restoreLocalLanguage, RemoteHost, RemoteClient } = require('../src/remote');
-const { parseMarkdownQuestions, isOtherOption, withReplyLanguage, isQuitInterrupt, buildBranchNamePrompt, AgentManager } = require('../src/agent');
+const { parseMarkdownQuestions, isOtherOption, withReplyLanguage, isQuitInterrupt, buildBranchNamePrompt, buildRelayStepPrompt, relayStepsOf, AgentManager } = require('../src/agent');
+const FlowModel = require('../renderer/flow-model');
 const providers = require('../src/providers');
 const git = require('../src/git');
 const { Updater, installCommand } = require('../src/updater');
@@ -380,6 +381,7 @@ test('英語にすると、残っていたエラーと通知が日本語のま�
     ['手元のリポジトリは作りましたが、{message}', { message: 'gh' }],
     ['新しい版を確かめられませんでした: {message}', { message: 'offline' }],
     ['マージ', null],
+    ['文中の操作名（マージ）', null],
     ['ペアリングコードが違うか、期限切れです。ホスト側で新しいコードを出してください', null],
     ['トークンが無効です。もう一度ペアリングしてください', null],
     ['先にペアリングまたは認証してください', null],
@@ -395,6 +397,23 @@ test('英語にすると、残っていたエラーと通知が日本語のま�
     ['エラー: 更新できませんでした', null],
     ['ユーザーが拒否しました', null],
     ['Agent Kanban に接続できなかったため拒否しました: {message}', { message: 'ECONNREFUSED' }],
+    ['Pipelineを終えてレビューに回します', null],
+    ['工程{n}「{label}」（{who}）へ進みます', { n: 2, label: 'Next', who: 'Codex CLI' }],
+    ['工程{n}「{label}」（{who}）に戻ってやり直します', { n: 1, label: 'Check', who: 'Claude Code' }],
+    ['並列「{label}」で {names} を同時に進めます', { label: 'P', names: 'A' }],
+    ['合流「{label}」で、ほかの枝が終わるのを待ちます', { label: 'J' }],
+    ['{type}「{label}」へ進みます', { type: 'Branch', label: 'Judge' }],
+    ['サブタスクに分けずに、このタスクのまま開発を進めてください（もうサブタスクの提案はしないでください）。', null],
+    ['アプリを終了します', null],
+    ['停止されました', null],
+    ['エージェントが終了しました', null],
+    ['中断されました', null],
+    ['ユーザーは質問に答えずに、そのまま進めるよう求めています。妥当だと思う方法で続けてください。', null],
+    ['破棄されました', null],
+    ['Agent Kanban のタスクから作成しました。', null],
+    ['Agent Kanban のサブタスクとして作成しました（親: #{number}）。', { number: 9 }],
+    ['「{name}」', { name: 'Survey' }],
+    ['・', null],
   ];
   try {
     for (const code of ['en', 'es', 'fr', 'zh']) {
@@ -666,6 +685,135 @@ test('英語にすると、ログ・Issue のエラー・工程名と更新ロ�
   } finally {
     process.env.PATH = oldPath;
     global.fetch = oldFetch;
+    I18n.setLanguage(prev);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function relayCard(steps, result) {
+  const flow = FlowModel.flowFromSteps(steps);
+  return {
+    id: 'relay-lang',
+    title: 'Relay',
+    status: 'review',
+    logs: [],
+    prompt: 'do the task',
+    branch: 'task',
+    baseBranch: 'main',
+    lastText: `ok\n[[RESULT:${result}]]`,
+    relay: { flow, steps: relayStepsOf(flow), index: 0, counts: {}, history: [] },
+  };
+}
+
+test('英語にすると、判定ログ・分けずに進める・拒否理由・順番の区切りと SSH の余白が日本語のままにならない', async () => {
+  const prev = I18n.getLanguage();
+  const dir = tmpDir();
+  const store = new Store(path.join(dir, 'board.json'));
+  const agents = new AgentManager(store, { mcpScript: path.join(__dirname, '..', 'src', 'permission-mcp.js'), mcpDir: path.join(dir, 'mcp'), nodeBin: process.execPath });
+  try {
+    I18n.setLanguage('en');
+    const endCard = relayCard([{ agent: 'claude', label: 'Check', instruction: 'check', onPass: 'end', onFail: 0 }], 'pass');
+    agents.relayNextStep(endCard);
+    const endLog = endCard.logs.at(-1).text;
+    assert.match(endLog, /judged "pass"/);
+    assert.match(endLog, /finish the Pipeline and send it to review/);
+    assert.doesNotMatch(endLog, /Pipelineを終えてレビューに回します|へ進みます/);
+    const prompt = buildRelayStepPrompt(endCard, 0);
+    assert.match(prompt, /Pipelineを終えてレビューに回します/, 'エージェントへの判定の指示は日本語のまま');
+
+    const nextCard = relayCard([
+      { agent: 'claude', label: 'Check', instruction: 'check', onPass: 1, onFail: 0 },
+      { agent: 'codex', label: 'Next', instruction: 'next' },
+    ], 'pass');
+    agents.relayNextStep(nextCard);
+    const nextLog = nextCard.logs.at(-1).text;
+    assert.match(nextLog, /continue to step 2 "Next" \(Codex CLI\)/);
+    assert.doesNotMatch(nextLog, /へ進みます|工程2|に戻ってやり直します/);
+
+    const plain = { id: 'nosplit', title: 'No split', status: 'review', logs: [], repoPath: dir, subtaskProposal: { items: [{ key: 'a', title: 'A', prompt: 'p' }] } };
+    store.cards.push(plain);
+    agents.enqueue = () => {};
+    agents.declineSubtasks(plain.id);
+    const user = plain.logs.find((l) => l.kind === 'user');
+    assert.match(user.text, /without splitting it into subtasks/);
+    assert.doesNotMatch(user.text, /サブタスクに分けずに/);
+
+    const qcard = { id: 'qskip', title: 'Q', status: 'running', logs: [], questions: [] };
+    store.cards.push(qcard);
+    const skipped = agents.requestPermission({
+      cardId: 'qskip',
+      toolName: 'AskUserQuestion',
+      input: { questions: [{ question: 'Continue?', header: 'Go', options: [{ label: 'Yes', description: 'y' }] }] },
+    });
+    agents.answerQuestion('qskip', qcard.questions[0].id, null);
+    const skipMsg = (await skipped).message;
+    assert.match(skipMsg, /without answering the question/);
+    assert.doesNotMatch(skipMsg, /ユーザーは質問に答えずに/);
+
+    const stopCard = { id: 'stop', title: 'Stop', status: 'running', logs: [], permissions: [] };
+    store.cards.push(stopCard);
+    const stopped = agents.requestPermission({ cardId: 'stop', toolName: 'Bash', input: { command: 'ls' } });
+    agents.procs.set('stop', { exitCode: 0, kill() {} });
+    agents.stop('stop');
+    assert.strictEqual((await stopped).message, 'It was stopped');
+    assert.doesNotMatch((await stopped).message, /停止されました/);
+
+    const ascii = [
+      { key: 'a', title: 'Survey', after: [] },
+      { key: 'b', title: 'Build', after: [] },
+      { key: 'c', title: 'Check', after: ['a', 'b'] },
+    ];
+    const order = describeOrder(ascii);
+    assert.strictEqual(order, 'Parallel: “Survey”, “Build” / "Check" after “Survey”, “Build”');
+    assert.doesNotMatch(order, /[「」・]/);
+
+    for (const [lang, next] of [['en', 'The app cannot'], ['es', 'La aplicación'], ['fr', "L'application"]]) {
+      I18n.setLanguage(lang);
+      const msg = explainSshError('Permission denied (publickey)', { host: 'h.example', user: 'me', sshPort: 22 });
+      const i = msg.indexOf(next);
+      assert.ok(i > 1, `${lang} ${msg}`);
+      assert.strictEqual(msg[i - 1], ' ', `${lang} has no space before ${next}`);
+    }
+    I18n.setLanguage('en');
+    const withKey = explainSshError('Permission denied', { host: 'h.example', user: 'me', sshPort: 22, identityFile: '/tmp/id_ed25519' });
+    assert.match(withKey, /password\. The app cannot/);
+
+    const pr = agents.prDefaults({ title: 'T', lastMessage: 'did it' });
+    assert.match(pr.body, /Created from an Agent Kanban task\./);
+    assert.doesNotMatch(pr.body, /Agent Kanban のタスクから作成しました/);
+    let subBody = '';
+    agents.createSubIssue = async (_repo, parent, issue) => {
+      subBody = issue.body;
+      assert.strictEqual(parent, 9);
+      return { number: 11, title: issue.title, url: 'https://example/11' };
+    };
+    agents.advanceSubtasks = async () => {};
+    const sub = {
+      id: 'subissue',
+      title: 'Parent',
+      status: 'review',
+      logs: [],
+      worktreePath: dir,
+      repoPath: dir,
+      branch: 'task',
+      issue: { number: 9, title: 'Parent', url: 'u' },
+      subtaskProposal: { items: [{ key: 'a', title: 'Child', prompt: 'do child' }] },
+    };
+    store.cards.push(sub);
+    await agents.acceptSubtasks(sub.id, { createIssues: true });
+    assert.match(subBody, /Created as an Agent Kanban subtask \(parent: #9\)/);
+    assert.doesNotMatch(subBody, /サブタスクとして作成しました/);
+
+    I18n.setLanguage('ja');
+    const jaEnd = relayCard([{ agent: 'claude', label: '確認', instruction: 'check', onPass: 'end', onFail: 0 }], 'pass');
+    agents.relayNextStep(jaEnd);
+    assert.match(jaEnd.logs.at(-1).text, /→ Pipelineを終えてレビューに回します/);
+    assert.strictEqual(describeOrder([
+      { key: 'a', title: '調査', after: [] },
+      { key: 'b', title: '実装', after: [] },
+      { key: 'c', title: '確認', after: ['a'] },
+    ]), '並列: 「調査」・「実装」 / 「確認」は 「調査」 のあと');
+  } finally {
     I18n.setLanguage(prev);
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -2,7 +2,13 @@
 const { execFile } = require('child_process');
 const fs = require('fs');
 const wsl = require('./wsl');
-const { tr } = require('../renderer/i18n');
+const I18n = require('../renderer/i18n');
+const { tr } = I18n;
+
+// 画面のボタン「マージ」とは別の文。ボタンは Merge、ここは文の中に入れる操作名
+function mergeOperationName() {
+  return I18n.getLanguage() === 'ja' ? 'マージ' : tr('文中の操作名（マージ）');
+}
 
 function git(cwd, args, { allowExitCodes = [], network = false, timeout } = {}) {
   return new Promise((resolve, reject) => {
@@ -222,7 +228,7 @@ async function operationInProgress(dir) {
   const checks = [
     ['rebase-merge', 'rebase'],
     ['rebase-apply', 'rebase'],
-    ['MERGE_HEAD', tr('マージ')],
+    ['MERGE_HEAD', mergeOperationName()],
     ['CHERRY_PICK_HEAD', 'cherry-pick'],
     ['REVERT_HEAD', 'revert'],
     ['BISECT_LOG', 'bisect'],

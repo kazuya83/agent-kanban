@@ -288,6 +288,8 @@ test('作成: 入力した内容で登録する', async () => {
   el('schedPrompt').value = ' 集計して ';
   el('schedKind').value = 'weekly';
   el('schedTime').value = '08:30';
+  // 初期値は今日の曜日にチェックが入る。入力した曜日だけを見る
+  for (let i = 0; i < 7; i++) el(`schedWd${i}`).checked = false;
   el('schedWd1').checked = true;
   el('schedWd5').checked = true;
   await el('schedOk').onclick();
