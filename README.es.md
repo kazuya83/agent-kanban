@@ -2,7 +2,7 @@
 
 # Agent Kanban
 
-Aplicación de escritorio (Electron, Mac / Windows / Linux) que ejecuta en paralelo las CLI de agentes de programación con IA (Claude Code / Codex CLI / Gemini CLI / Cursor CLI), cada tarea en su propio git worktree, y las gestiona en un tablero kanban. **No solo mueve tareas dentro de un repositorio: también puede mover a la vez tareas de varios repositorios.**
+Aplicación de escritorio (Electron, Mac / Windows / Linux) que ejecuta en paralelo las CLI de agentes de programación con IA (Claude Code / Codex CLI / Gemini CLI / Cursor CLI), cada tarea en su propio git worktree, y las gestiona en un tablero kanban. **No solo ejecuta tareas dentro de un repositorio: también puede ejecutar a la vez tareas de varios repositorios.**
 
 ![Tablero: columnas Por hacer, En ejecución, Revisión y Hecho. Las tarjetas en ejecución muestran pregunta, espera de aprobación y en curso](docs/board.png)
 
@@ -10,7 +10,7 @@ Aplicación de escritorio (Electron, Mac / Windows / Linux) que ejecuta en paral
 
 - **1 tarea = 1 worktree = 1 rama.** Crea un worktree en `<repo>.worktrees/<id>`, junto al repositorio, y trabaja en una rama `agent/<resumen>-<id>`. Las tareas no chocan entre sí ni con el árbol de trabajo que tienes abierto
 - **El agente es la CLI, arrancada tal cual.** Claude Code se ejecuta con `claude -p --input-format stream-json --output-format stream-json`, y su salida se muestra en la tarjeta como registro. El inicio de sesión, el modelo, `CLAUDE.md` y las skills son los mismos que usas en la terminal
-- **La aprobación pasa por `--permission-prompt-tool` de Claude Code.** Solo las acciones que el modo de permisos o `--allowedTools` no autoriza solo aparecen en la tarjeta como espera de aprobación
+- **La aprobación pasa por `--permission-prompt-tool` de Claude Code.** Solo las acciones que el modo de permisos o `--allowedTools` no autoriza automáticamente aparecen en la tarjeta como espera de aprobación
 - **Al terminar, incorporas el trabajo con un merge (`--no-ff`) o creando un PR (`gh`).** Puedes elegir la rama de destino y, después del merge, hacer push a origin
 - El estado del tablero se guarda en `board.json`, en la carpeta userData de Electron. No hay un servidor externo
 
@@ -120,7 +120,7 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.
 irm https://raw.githubusercontent.com/kazuya83/agent-kanban/main/install.ps1 | iex
 ```
 
-Los mismos comandos actualizan a la última versión. También se puede actualizar desde la aplicación: «Ajustes» → «Actualización de la aplicación» → «Actualizar a la nueva versión». Si marcas «Actualizar solo cuando salga una versión nueva», se sustituye y se vuelve a abrir cuando no hay ninguna tarea en marcha. Para fijar una versión, desinstalar, instalar desde un archivo y el aviso del primer arranque, consulta [docs/install.md](docs/install.md) (Japanese).
+Los mismos comandos actualizan a la última versión. También se puede actualizar desde la aplicación: «Ajustes» → «Actualización de la aplicación» → «Actualizar a la nueva versión». Si marcas «Actualizar automáticamente cuando salga una versión nueva», se sustituye y se vuelve a abrir cuando no hay ninguna tarea en marcha. Para fijar una versión, desinstalar, instalar desde un archivo y el aviso del primer arranque, consulta [docs/install.md](docs/install.md) (Japanese).
 
 ## Uso
 

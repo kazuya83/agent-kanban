@@ -39,6 +39,75 @@ function hasJapanese(s) {
   return /[\u3040-\u30ff\u3400-\u9fff]/.test(String(s || ''));
 }
 
+// 冒頭の太字と、承認の行。本文の別の場所に同じ単語があっても、ここだけを見る。コードブロックは捨てる
+function claimTexts(md) {
+  const body = stripFences(md);
+  const bold = (body.match(/\*\*([^*]+)\*\*/) || [])[1] || '';
+  const approval = body.split('\n').find((line) => line.includes('--permission-prompt-tool')) || '';
+  return { bold, approval, body };
+}
+
+function isMeaningSpec(spec) {
+  if (!spec) return false;
+  return [spec.intro, spec.introBad, spec.approval, spec.approvalBad, spec.update, spec.updateBad].every((r) => r && typeof r.test === 'function');
+}
+
+// 3つの事実が欠けている名前。ok に合わない、または bad（取り違え）に合う
+function meaningProblems(md, spec) {
+  if (!isMeaningSpec(spec)) return ['intro', 'approval', 'update'];
+  const { bold, approval, body } = claimTexts(md);
+  const problems = [];
+  const miss = (text, ok, bad) => !ok.test(text) || bad.test(text);
+  if (miss(bold, spec.intro, spec.introBad)) problems.push('intro');
+  if (miss(approval, spec.approval, spec.approvalBad)) problems.push('approval');
+  if (miss(body, spec.update, spec.updateBad)) problems.push('update');
+  return problems;
+}
+
+// 日本語の「動かせます」はタスクを実行する意味。移す・自動では許可しない・新しい版のときだけ、は取り違え
+const MEANING = {
+  'README.md': {
+    intro: /run tasks from more than one repository/,
+    introBad: /\bmove tasks\b/,
+    approval: /does not auto-allow show up on the card/,
+    approvalBad: /does not auto-allow only show/,
+    update: /Update automatically when a new version is out/,
+    updateBad: /Update only when a new version is out/,
+  },
+  'README.ja.md': {
+    intro: /複数のリポジトリのタスクも同時に動かせます/,
+    introBad: /複数のリポジトリのタスクも同時に移せます/,
+    approval: /自動で許可されない操作だけが、カードに「承認待ち」として出ます/,
+    approvalBad: /自動で許可されない操作だけが、カードに出ません/,
+    update: /新しい版が出たら自動で更新する/,
+    updateBad: /新しい版のときだけ更新する/,
+  },
+  'README.es.md': {
+    intro: /ejecut(?:a|ar)\b[\s\S]*varios repositorios/,
+    introBad: /\b(?:mueve|mover|mueven)\b/,
+    approval: /no autoriza automáticamente aparecen en la tarjeta/,
+    approvalBad: /no autoriza solo/,
+    update: /Actualizar automáticamente cuando salga una versión nueva/,
+    updateBad: /Actualizar solo cuando salga una versión nueva/,
+  },
+  'README.fr.md': {
+    intro: /faire avancer en même temps des tâches de plusieurs dépôts/,
+    introBad: /déplacer|déplace/,
+    approval: /n'autorise pas tout seul apparaissent sur la carte/,
+    approvalBad: /n'autorise pas seul apparaissent/,
+    update: /Mettre à jour automatiquement quand une nouvelle version sort/,
+    updateBad: /Mettre à jour seulement quand une nouvelle version/,
+  },
+  'README.zh-CN.md': {
+    intro: /多个仓库的任务也可以同时进行/,
+    introBad: /多个仓库的任务也可以同时移动/,
+    approval: /不会自动允许的操作，才会在卡片上显示为等待批准/,
+    approvalBad: /不会自动允许的操作不会显示/,
+    update: /有新版本时自动更新/,
+    updateBad: /只在有新版本时更新/,
+  },
+};
+
 // 見出しの段とリンク先が同じなら true。空や、コードブロックにしか見出しがないものは false
 function sameShape(a, b) {
   const ha = headingLevels(a);
@@ -143,6 +212,70 @@ test('日本語の文字判定は空と ASCII を外し、かなと漢字を拾�
   assert.equal(hasJapanese('Error: 失敗'), true);
 });
 
+test('事実の抜き出しは最初の太字と承認の行だけで、コードブロックは捨てる', () => {
+  const md = ['```', '**hidden**', '--permission-prompt-tool hidden', '```', '', '**visible**', 'line --permission-prompt-tool yes'].join('\n');
+  const found = claimTexts(md);
+  assert.equal(found.bold, 'visible');
+  assert.equal(found.approval, 'line --permission-prompt-tool yes');
+  assert.equal(found.body.includes('hidden'), false);
+  assert.deepEqual(claimTexts(''), { bold: '', approval: '', body: '' });
+  assert.deepEqual(claimTexts('no bold\n'), { bold: '', approval: '', body: 'no bold\n' });
+  assert.deepEqual(claimTexts(null), { bold: '', approval: '', body: '' });
+  assert.deepEqual(claimTexts(undefined), { bold: '', approval: '', body: '' });
+  assert.equal(claimTexts('**unclosed').bold, '');
+});
+
+const esIntroOk = 'No solo ejecuta tareas dentro de un repositorio: también puede ejecutar a la vez tareas de varios repositorios.';
+const esIntroBad = 'No solo mueve tareas dentro de un repositorio: también puede mover a la vez tareas de varios repositorios.';
+const esApprovalOk = 'Solo las acciones que el modo de permisos o `--allowedTools` no autoriza automáticamente aparecen en la tarjeta como espera de aprobación';
+const esApprovalBad = 'Solo las acciones que el modo de permisos o `--allowedTools` no autoriza solo aparecen en la tarjeta como espera de aprobación';
+const esUpdateOk = 'Actualizar automáticamente cuando salga una versión nueva';
+const esUpdateBad = 'Actualizar solo cuando salga una versión nueva';
+
+function esClaim(intro, approval, update) {
+  return [
+    '# Título',
+    '',
+    `Aplicación. **${intro}**`,
+    '',
+    `- **La aprobación pasa por \`--permission-prompt-tool\` de Claude Code.** ${approval}`,
+    '',
+    `Si marcas «${update}», se sustituye.`,
+  ].join('\n');
+}
+
+test('スペイン語の3つの事実は、実行・自動では許可しない・自動更新だけを通し、取り違えは落とす', () => {
+  const es = MEANING['README.es.md'];
+  const good = esClaim(esIntroOk, esApprovalOk, esUpdateOk);
+  assert.deepEqual(meaningProblems(good, es), []);
+  assert.deepEqual(meaningProblems(esClaim(esIntroBad, esApprovalOk, esUpdateOk), es), ['intro']);
+  assert.deepEqual(meaningProblems(esClaim(esIntroOk, esApprovalBad, esUpdateOk), es), ['approval']);
+  assert.deepEqual(meaningProblems(esClaim(esIntroOk, esApprovalOk, esUpdateBad), es), ['update']);
+  assert.deepEqual(meaningProblems(esClaim(esIntroBad, esApprovalBad, esUpdateBad), es), ['intro', 'approval', 'update']);
+  // 実行と移動が混ざる、副詞の位置がずれる、承認の文がつながらない
+  const mixed = 'No solo ejecuta tareas dentro de un repositorio: también puede mover a la vez tareas de varios repositorios.';
+  assert.deepEqual(meaningProblems(esClaim(mixed, esApprovalOk, esUpdateOk), es), ['intro']);
+  assert.deepEqual(meaningProblems(esClaim('puede ejecutar una tarea', esApprovalOk, esUpdateOk), es), ['intro']);
+  assert.deepEqual(meaningProblems(esClaim(esIntroOk, 'no autoriza automáticamente', esUpdateOk), es), ['approval']);
+  assert.deepEqual(meaningProblems(esClaim(esIntroOk, `${esApprovalOk} no autoriza solo`, esUpdateOk), es), ['approval']);
+  assert.deepEqual(meaningProblems(esClaim(esIntroOk, esApprovalOk, 'Actualizar automáticamente solo cuando salga una versión nueva'), es), ['update']);
+  assert.deepEqual(meaningProblems(`${good}\n${esUpdateBad}`, es), ['update']);
+  // 太字と承認の行以外、またはコードブロックの中だけでは事実にならない
+  assert.deepEqual(meaningProblems(`${good}\nPuedes mover el archivo.\nEsta nota no autoriza solo el ejemplo.`, es), []);
+  assert.deepEqual(meaningProblems(['```', good, '```'].join('\n'), es), ['intro', 'approval', 'update']);
+  const noFlag = ['# Título', '', `**${esIntroOk}**`, '', esApprovalOk, '', esUpdateOk].join('\n');
+  assert.deepEqual(meaningProblems(noFlag, es), ['approval']);
+  for (const md of ['', '   ', null, undefined]) {
+    assert.deepEqual(meaningProblems(md, es), ['intro', 'approval', 'update']);
+  }
+  assert.deepEqual(meaningProblems(good, null), ['intro', 'approval', 'update']);
+  assert.deepEqual(meaningProblems(good, {}), ['intro', 'approval', 'update']);
+  assert.deepEqual(meaningProblems(good, { intro: /ejecuta/ }), ['intro', 'approval', 'update']);
+  assert.equal(isMeaningSpec(es), true);
+  assert.equal(isMeaningSpec(null), false);
+  assert.equal(isMeaningSpec({ intro: /a/, introBad: /b/ }), false);
+});
+
 test('更新スクリプトは終了コードを見て、表示文は見ない', () => {
   for (const platform of ['darwin', 'linux', 'win32']) {
     const env = platform === 'linux' ? { APPIMAGE: '/a.AppImage' } : {};
@@ -167,6 +300,15 @@ test('5つの README は見出しとリンク先が一致し、言語リンク�
     assert.equal(sameShape(texts[0], texts[i]), true, README_FILES[i]);
   }
   assert.deepEqual(headingLevels(texts[0]), [1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2]);
+});
+
+test('冒頭の太字・承認・自動更新は、5言語で同じ事実を言う', () => {
+  for (const file of README_FILES) {
+    assert.deepEqual(meaningProblems(read(file), MEANING[file]), [], file);
+  }
+  assert.equal(MEANING['README.es.md'].introBad.test('puede mover a la vez tareas'), true);
+  assert.equal(MEANING['README.md'].intro.test('run tasks from more than one repository'), true);
+  assert.deepEqual(meaningProblems(read('README.md'), undefined), ['intro', 'approval', 'update']);
 });
 
 test('英語・西・仏の README は本文が翻訳され、docs には (Japanese) が付く', () => {
