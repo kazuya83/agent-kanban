@@ -957,44 +957,52 @@ class AgentManager extends EventEmitter {
     });
   }
 
-  // カードの状態を見て、まだ書いていない出来事を返す（書く文つき）
+  // カードの状態を見て、まだ書いていない出来事を返す（書く文つき）。
+  // 開始と完了は、競争なら同じ Issue の候補全体で1回だけ
   issueCommentEvents(c) {
-    const seen = c.issueComments || {};
+    const seen = c.issueCommented || {};
+    const peers = this.competitors(c.id);
+    const sent = (event) => peers.some((x) => x.issueCommented && x.issueCommented[event]);
     const out = [];
-    if (c.status === 'running' && !seen.started) out.push({ event: 'started', value: true, body: c.branch ? tr('Worktree Kanban でタスクを開始しました（ブランチ: {branch}）', { branch: c.branch }) : tr('Worktree Kanban でタスクを開始しました') });
+    if (c.status === 'running' && !sent('started')) out.push({ event: 'started', value: true, body: c.branch ? tr('Worktree Kanban でタスクを開始しました（ブランチ: {branch}）', { branch: c.branch }) : tr('Worktree Kanban でタスクを開始しました') });
     if (c.prUrl && seen.pr !== c.prUrl) out.push({ event: 'pr', value: c.prUrl, body: tr('PR を作成しました: {url}', { url: c.prUrl }) });
-    if (this.issueStatusKey(c) === 'done' && !seen.done) out.push({ event: 'done', value: true, body: tr('Worktree Kanban のタスクが完了しました') });
+    if (this.issueStatusKey(c) === 'done' && !sent('done')) out.push({ event: 'done', value: true, body: tr('Worktree Kanban のタスクが完了しました') });
     return out;
   }
 
   // タスクの開始・PR の作成・完了を Issue にコメントで書き戻す（commentEvents を持つサービスだけ）。
   // 切っているあいだの出来事も「書いた」ことにする（あとで入れたときに、古い出来事をまとめて書かない）
   queueIssueComments(c) {
-    if (!c.issue) return;
+    if (!c.issue || c.afterDone || !this.store.card(c.id)) return;
     const provider = this.issueProvider(c);
     if (!provider || !provider.commentEvents || typeof provider.addComment !== 'function') return;
     const events = this.issueCommentEvents(c);
     if (!events.length) return;
-    c.issueComments = c.issueComments || {};
+    c.issueCommented = c.issueCommented || {};
     const enabled = this.store.repoSettings(c.repoPath).issueComments !== false;
     for (const { event, value, body } of events) {
-      c.issueComments[event] = value;
+      c.issueCommented[event] = value;
       if (enabled) this.queueIssueWork(c, () => this.runIssueComment(c, body));
     }
     this.store.save(); // 再起動で同じコメントを二重に書かない
   }
 
+  // コメントに失敗してもタスクは止めない。理由はカードのログに出す
   async runIssueComment(c, body) {
     if (!this.store.card(c.id)) return; // 破棄された
+    const key = IssueRef.keyOf(c.issue);
+    let kind = 'system';
+    let text = tr('{key} にコメントしました: {body}', { key, body });
     try {
       await this.addIssueComment(c, body);
     } catch (err) {
-      if (!this.store.card(c.id)) return;
-      const provider = this.issueProvider(c);
-      this.log(c, 'error', tr('{label} にコメントを書けませんでした: {message}', { label: provider ? provider.label : IssueRef.providerOf(c.issue), message: err.message }));
-      this.store.save();
-      this.emit('changed', c.id);
+      kind = 'error';
+      text = tr('{key} にコメントできませんでした: {message}', { key, message: err.message });
     }
+    if (!this.store.card(c.id)) return;
+    this.log(c, kind, text);
+    this.store.save();
+    this.emit('changed', c.id);
   }
 
   async runIssueSync(c, key) {

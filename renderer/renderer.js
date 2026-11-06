@@ -4188,7 +4188,8 @@ function renderSettingsView() {
             <label class="field">${tr('<span>レビュー →</span>')}<input id="sMapReview" placeholder="${tr('自動（In review など）')}" value="${esc((s.statusMapping || {}).inReview || '')}" /></label>
             <label class="field">${tr('<span>完了 →</span>')}<input id="sMapDone" placeholder="${tr('自動（Done など）')}" value="${esc((s.statusMapping || {}).done || '')}" /></label>
           </div>
-          <small>${tr('列ごとに使う選択肢の名前を指定できます（カンマ区切りで候補を複数書けます。大文字小文字・絵文字・記号は無視して比べます）。空の列は名前から自動で探します。')}</small>
+          <small id="sStatusMapGithub">${tr('列ごとに使う選択肢の名前を指定できます（カンマ区切りで候補を複数書けます。大文字小文字・絵文字・記号は無視して比べます）。空の列は名前から自動で探します。')}</small>
+          <small id="sStatusMapNames" hidden></small>
         </div>
         <label class="check" id="sIssueCommentsRow"><input type="checkbox" id="sIssueComments" ${s.issueComments !== false ? 'checked' : ''} /> ${tr('タスクの開始・PR の作成・完了を Issue にコメントする')}</label>
         <div id="sGithubPanel"><div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div></div></div>`,
@@ -4644,6 +4645,7 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
   );
   // 「Issue のステータスを自動で変える」にチェックがあるときだけ、項目名と選択肢の指定を出す
   // GitHub Projects の欄は GitHub を選んだときだけ。同期できないサービスでは、同期の欄を出さない
+  // 名前の指定の欄は、GitHub と、名前の指定を使うサービス（mapsStatusNames）で出す
   const drawIssueProvider = () => {
     const p = issueProviderInfo($('sIssueProvider').value);
     const isGithub = p.id === GITHUB_PROVIDER.id;
@@ -4651,7 +4653,10 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
     $('sGithubPanel').hidden = !isGithub;
     $('sStatusFieldRow').hidden = !isGithub;
     $('sIssueSyncRow').hidden = !p.canSync;
-    $('sStatusMap').hidden = !p.canSync || !$('sIssueSync').checked;
+    $('sStatusMapGithub').hidden = !isGithub;
+    $('sStatusMapNames').hidden = isGithub || !p.statusMapHelp;
+    $('sStatusMapNames').textContent = p.statusMapHelp ? tr(p.statusMapHelp) : '';
+    $('sStatusMap').hidden = !p.canSync || !$('sIssueSync').checked || !(isGithub || p.canMapStatus);
     $('sTrackerSyncHelp').hidden = isGithub || !p.canSync || !p.statusHelp;
     $('sTrackerSyncHelp').firstElementChild.textContent = p.statusHelp ? tr(p.statusHelp) : '';
     $('sIssueCommentsRow').hidden = !p.canComment;

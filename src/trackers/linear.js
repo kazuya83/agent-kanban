@@ -147,6 +147,7 @@ module.exports = {
   refPlaceholder: '例: ENG-123 または https://linear.app/acme/issue/ENG-123',
   statusHelp: 'Issue から作ったタスクが「実行中」になると started、「レビュー」になると In Review などの started、マージして「完了」になると completed の型の状態に、Issue を変えます。',
   commentEvents: true,
+  mapsStatusNames: true,
   configFields: [
     { name: 'apiKey', type: 'secret', label: 'API キー', placeholder: 'lin_api_…', required: true, help: 'Linear の Settings の Security & access にある Personal API keys で作れます。Issue の読み書きとコメントの権限が必要です。' },
   ],

@@ -351,7 +351,7 @@ test('コメントの失敗はカードのログに出し、API キーは出さ�
   agents.changed(c);
   await agents.flushIssueSync();
   const msg = c.logs.filter((l) => l.kind === 'error' || l.type === 'error').map((l) => l.text).join('\n');
-  assert.match(msg, /Linear にコメントを書けませんでした/);
+  assert.match(msg, /ENG-1 にコメントできませんでした/);
   assert.ok(!JSON.stringify(c.logs).includes(KEY));
 });
 
@@ -373,7 +373,7 @@ test('GitHub のカードにはコメントを書かない', async () => {
   agents.changed(c);
   await agents.flushIssueSync();
   assert.strictEqual(called, 0);
-  assert.strictEqual(c.issueComments, undefined);
+  assert.strictEqual(c.issueCommented, undefined);
 });
 
 // ---------- 訳 ----------

@@ -504,6 +504,7 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .field[hidden] { display: none; }
 .field > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .field small, .field-note { color: var(--muted); display: block; margin-top: 4px; }
+.field small[hidden] { display: none; }
 .field-note { margin: -4px 0 10px; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 /* 横並びの項目は、項目名が折り返して行数が違っても入力欄の下端をそろえる */
