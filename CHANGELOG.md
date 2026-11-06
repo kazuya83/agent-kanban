@@ -8,10 +8,66 @@ Each release that changes the app raises the last number of the version. There i
 
 ### Added
 
+- A guide for moving from Conductor, with the steps to export Conductor Cloud data first (English and Japanese).
+
+## 0.1.96
+
+### Changed
+
+- Clicking outside the detail panel, on its left, closes it.
+
+## 0.1.95
+
+### Added
+
 - Integrations with GitLab, Linear, and Jira, including self-hosted GitLab and Jira Data Center: create tasks from Issue numbers or URLs, link Issues in PRs and MRs, sync status with the card, write comments back, and handle sub-issues.
 - GitLab merge requests: create them, check conflicts and pipeline results, and detect merges.
 - Slack integration: notifications for completions, failures, and items waiting for you, and starting tasks from Slack for allowed users only. Nobody can start a task by default.
 - An "Integrations" section in Settings. Tokens are encrypted with a key from the OS secure storage.
+
+## 0.1.94
+
+### Added
+
+- Antigravity CLI as an agent.
+
+## 0.1.93
+
+### Added
+
+- Checkpoints: restore a task to the point before a Pipeline step or an agent run. Files, Pipeline progress, and the conversation go back together.
+
+## 0.1.92
+
+### Added
+
+- Watch Issues on a schedule and create a card for each new Issue.
+- More feature GIFs on the website.
+
+### Changed
+
+- The README and website now lead with chaining agents into flowcharts.
+- Improved the detail panel layout.
+
+## 0.1.91
+
+### Added
+
+- A guide for moving from Vibe Kanban (English and Japanese).
+- "Agents to use" in Settings: pick the agents you use, so the app no longer assumes Claude Code.
+
+## 0.1.90
+
+### Added
+
+- Ports per task: each worktree gets 10 ports, so parallel development servers do not collide.
+- `CHANGELOG.md`, `CONTRIBUTING.md`, and `SECURITY.md`.
+
+## 0.1.89
+
+### Added
+
+- English versions of the documents in `docs/`.
 
 ## 0.1.88
 

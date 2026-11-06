@@ -273,6 +273,7 @@ irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 
 | [インストール](docs/install.ja.md) | インストール・アップデート・アンインストール、Windows で WSL のリポジトリを使う |
 | [開発者向け](docs/development.ja.md) | ソースから動かす・ビルド・リリース・アプリのしくみ・テスト |
 | [Vibe Kanban から移る方法](https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.ja.html) | Vibe Kanban に起きたこと・引き継げるもの・移行の手順 |
+| [Conductor から移る方法](https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.ja.html) | Conductor に起きていること・Cloud のデータの書き出し・引き継げるもの・移行の手順 |
 
 ## ライセンス
 

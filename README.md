@@ -282,6 +282,7 @@ The same commands update to the latest version. You can also update from the app
 | [Install](docs/install.md) | Install, update, uninstall, and using a WSL repository on Windows |
 | [For developers](docs/development.md) | Run from source, build, release, how the app is built, and tests |
 | [Migrate from Vibe Kanban](https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.html) | What changed at Vibe Kanban, what carries over, and the migration steps |
+| [Migrate from Conductor](https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.html) | What is changing at Conductor, how to export Cloud data, what carries over, and the migration steps |
 
 ## License
 

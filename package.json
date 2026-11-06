@@ -1,7 +1,7 @@
 {
   "name": "worktree-kanban",
   "version": "0.1.8",
-  "description": "Kanban desktop app that runs AI coding agents (Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI) in parallel, one git worktree per task. Mac and Windows can each remotely operate the other",
+  "description": "Kanban desktop app for Mac, Windows, and Linux that runs AI coding agents (Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI) in parallel, one git worktree per task. Chain them into flowchart Pipelines, restore an earlier checkpoint, and remotely operate Mac and Windows from each other",
   "main": "main.js",
   "license": "FSL-1.1-ALv2",
   "author": "kazuya83",

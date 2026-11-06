@@ -282,6 +282,7 @@ Los mismos comandos actualizan a la última versión. También se puede actualiz
 | [Instalación](docs/install.md) (English) | Instalación, actualización, desinstalación y uso de un repositorio de WSL en Windows |
 | [Para desarrolladores](docs/development.md) (English) | Ejecutar desde el código, compilar, publicar, cómo está hecha la aplicación y las pruebas |
 | [Migrar desde Vibe Kanban](https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.html) (English) | Qué cambió en Vibe Kanban, qué se conserva y los pasos para migrar |
+| [Migrar desde Conductor](https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.html) (English) | Qué cambia en Conductor, cómo exportar los datos de Cloud, qué se conserva y los pasos para migrar |
 
 ## Licencia
 
