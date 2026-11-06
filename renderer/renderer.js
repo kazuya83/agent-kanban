@@ -4173,6 +4173,7 @@ async function openSettings() {
           customAgents: cas,
           modelSuggest: MODEL_SUGGEST,
           defaultAgent: $('sDefaultAgent').value || 'claude',
+          generate: (request, flow, agent) => api.generateFlow({ request, flow, agent, enabled: using(), customAgents: cas }),
           onSave: async (flow) => {
             // 工程で選んだカスタムエージェントも一緒に保存する（この画面で追加したばかりのものを使えるように）
             const id = flows[i].id;

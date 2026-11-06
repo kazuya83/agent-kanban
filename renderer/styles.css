@@ -868,6 +868,11 @@ body.resizing-row { cursor: row-resize; user-select: none; }
 .fe-head h2 { margin: 0; }
 .fe-tools { display: flex; gap: 6px; flex-wrap: wrap; }
 .fe-help { margin: 6px 0 8px; }
+.fe-ai { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
+.fe-ai textarea { flex: 1; min-width: 0; resize: vertical; }
+.fe-ai-acts { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.fe-ai-msg { margin: -2px 0 8px; color: var(--muted); }
+.fe-ai-msg.err { color: var(--warn); white-space: pre-wrap; max-height: 80px; overflow-y: auto; }
 .fe-main { flex: 1; min-height: 0; display: flex; gap: 10px; }
 .fe-canvas-wrap { flex: 1; min-width: 0; position: relative; display: flex; }
 .fe-canvas { flex: 1; min-width: 0; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background-color: var(--bg); background-image: radial-gradient(color-mix(in srgb, var(--muted) 28%, transparent) 1px, transparent 1px); background-size: 16px 16px; }

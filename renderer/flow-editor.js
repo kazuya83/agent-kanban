@@ -10,6 +10,7 @@
   let lastZoom = 1;
   const W = { start: 120, step: 200, if: 170, parallel: 160, join: 160, end: 120 };
   const H = { start: 40, step: 64, if: 56, parallel: 48, join: 48, end: 40 };
+  const AI_REQUEST_MAX = 2000;
   const ADD = [
     ['step', '工程', '1つのエージェントが作業する工程'],
     ['if', '分岐（if）', '直前の工程のエージェントが書いた判定の値で、行き先を分けます'],
@@ -42,8 +43,9 @@
   }
 
   /**
-   * @param {{ flow: object, agents: [string, string][], enabled: string[], customAgents?: object[], modelSuggest?: Record<string, string[]>, defaultAgent: string, onSave: (flow: object) => Promise<boolean>|boolean }} opts
+   * @param {{ flow: object, agents: [string, string][], enabled: string[], customAgents?: object[], modelSuggest?: Record<string, string[]>, defaultAgent: string, generate?: (request: string, flow: object, agent: string) => Promise<object>, onSave: (flow: object) => Promise<boolean>|boolean }} opts
    *   agents: [[id, 表示名]]（すべてのエージェント）、enabled: 使うエージェント、customAgents: カスタムエージェント（{ id, name, icon, agent, model }）
+   *   generate: 文章の指示からフローを作る（返ったフローは画面に反映するだけで、保存はしない）
    */
   function open(opts) {
     const host = document.getElementById('flowModal');
@@ -53,7 +55,10 @@
     if (!flow.nodes.some((n) => n.type === 'start')) flow.nodes.unshift({ id: 'start', type: 'start', x: 60, y: 30 });
     let sel = null; // { kind: 'node'|'edge', id }
     let dirty = false;
+    let closed = false;
     const agentName = (a) => (opts.agents.find((x) => x[0] === a) || [a, a])[1];
+    // 新しい工程と、文章からフローを作るときに使うエージェント
+    const baseAgent = opts.enabled.includes(opts.defaultAgent) ? opts.defaultAgent : opts.enabled[0] || 'claude';
     const customs = Array.isArray(opts.customAgents) ? opts.customAgents : [];
     const customOf = (id) => customs.find((x) => x.id === id) || null;
     // 工程を動かすエージェント（カスタムエージェントなら、その元の CLI）
@@ -74,6 +79,13 @@
         <div class="fe-tools">${ADD.map(([t, l, tip]) => `<button class="btn small fe-add" data-type="${t}" type="button" title="${esc(tip)}">＋ ${esc(l)}</button>`).join('')}</div>
       </div>
       <p class="muted small fe-help">ノードはドラッグで動かせます。何もないところをドラッグすると、スクロールできます。右上のボタンか、⌘（Ctrl）を押しながらのスクロール・ピンチで拡大・縮小できます。ノードの下の丸（出口）から別のノードへドラッグすると、線をつなげます。前のノードへ戻る線を引くとループになり、戻る上限を決められます。ノードや線を選んで Delete キーで消せます。</p>
+      ${opts.generate
+        ? `<div class="fe-ai">
+        <textarea id="feAiText" rows="2" maxlength="${AI_REQUEST_MAX}" placeholder="作りたいフローや直したいところを文章で書けます（${esc(agentName(baseAgent))} が組み立てます）。例: Codex で実装して Claude でレビューし、直すところがあれば実装に戻す（3回まで）"></textarea>
+        <div class="fe-ai-acts"><button class="btn small primary" id="feAiRun" type="button" title="⌘（Ctrl）＋Enter でも送れます">AIで反映</button><button class="btn small ghost" id="feAiUndo" type="button" hidden>元に戻す</button></div>
+      </div>
+      <div class="fe-ai-msg small" id="feAiMsg" hidden></div>`
+        : ''}
       <div class="fe-main">
         <div class="fe-canvas-wrap"><div class="fe-canvas" id="feCanvas"><div class="fe-sizer" id="feSizer"><div class="fe-inner" id="feInner"><svg class="fe-svg" id="feSvg"></svg></div></div></div><div class="zoom-host" id="feZoom"></div></div>
         <div class="fe-side" id="feSide"></div>
@@ -136,7 +148,7 @@
         // 上（前）のノードへ戻る線は、右に回り込む
         const off = Math.max(aw, bw) / 2 + 60;
         d = `M${sx},${sy} C${sx + off},${sy + 90} ${tx + off},${ty - 90} ${tx},${ty}`;
-        mx = Math.max(sx, tx) + off * 0.75;
+        mx = Math.max(sx, tx) + off;
         my = (sy + ty) / 2;
       }
       return { d, mx, my };
@@ -389,7 +401,7 @@
         // 今見えているところの左上あたりに置く（重ならないよう少しずらす）
         const k = flow.nodes.length % 6;
         const n = { id: uid(type === 'step' ? 's' : type.slice(0, 2), used), type, x: canvas.scrollLeft + 40 + k * 24, y: canvas.scrollTop + 40 + k * 24 };
-        if (type === 'step') Object.assign(n, { agent: opts.enabled.includes(opts.defaultAgent) ? opts.defaultAgent : opts.enabled[0] || 'claude', label: '', instruction: '' });
+        if (type === 'step') Object.assign(n, { agent: baseAgent, label: '', instruction: '' });
         if (type === 'if') Object.assign(n, { label: '分岐', question: '' });
         if (type === 'parallel') n.label = '並列';
         if (type === 'join') n.label = '合流';
@@ -398,6 +410,65 @@
         select({ kind: 'node', id: n.id });
       };
     });
+
+    // ---------- 文章で作る・直す ----------
+    // 返ったフローは画面に反映するだけ（「保存」を押すまで設定は変えない）。反映の直前の形には「元に戻す」で戻せる
+    if (opts.generate) {
+      const aiText = box.querySelector('#feAiText');
+      const aiRun = box.querySelector('#feAiRun');
+      const aiUndo = box.querySelector('#feAiUndo');
+      const aiMsg = box.querySelector('#feAiMsg');
+      const say = (text, kind) => {
+        aiMsg.hidden = !text;
+        aiMsg.textContent = text || '';
+        aiMsg.classList.toggle('err', kind === 'err');
+      };
+      const setFlow = (next) => {
+        flow.nodes = next.nodes;
+        flow.edges = next.edges;
+        sel = null;
+        draw();
+        fitZoom();
+      };
+      let before = null;
+      const runAi = async () => {
+        const request = aiText.value.trim();
+        if (aiRun.disabled) return;
+        if (!request) return say('作りたいフローや直したいところを書いてください', 'err');
+        aiRun.disabled = true;
+        aiUndo.hidden = true;
+        say(`${agentName(baseAgent)} がフローを組み立てています…`);
+        try {
+          const next = await opts.generate(request, FM.cleanFlow(flow) || flow, baseAgent);
+          if (closed) return;
+          before = JSON.parse(JSON.stringify({ nodes: flow.nodes, edges: flow.edges, dirty }));
+          touch();
+          setFlow(next);
+          aiText.value = '';
+          aiUndo.hidden = false;
+          say('反映しました。中身を確かめて「保存」を押してください（まだ保存していません）');
+        } catch (err) {
+          if (!closed) say((err && err.message) || String(err), 'err');
+        } finally {
+          aiRun.disabled = false;
+        }
+      };
+      aiRun.onclick = runAi;
+      aiText.onkeydown = (ev) => {
+        if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && !ev.isComposing) {
+          ev.preventDefault();
+          runAi();
+        }
+      };
+      aiUndo.onclick = () => {
+        if (!before) return;
+        dirty = before.dirty;
+        setFlow(before);
+        before = null;
+        aiUndo.hidden = true;
+        say('');
+      };
+    }
 
     // ---------- ドラッグ（ノードを動かす・線をつなぐ・スクロールする） ----------
     let drag = null;
@@ -536,6 +607,7 @@
     };
     document.addEventListener('keydown', onKey, true);
     function close() {
+      closed = true;
       host.classList.add('hidden');
       box.innerHTML = '';
       window.removeEventListener('mousemove', onMove);

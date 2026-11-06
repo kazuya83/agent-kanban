@@ -77,7 +77,7 @@
     if (dy > 24) return { d: `M${sx},${sy} C${sx},${sy + dy / 2} ${tx},${ty - dy / 2} ${tx},${ty}`, mx: (sx + tx) / 2, my: (sy + ty) / 2 };
     // 上（前）のノードへ戻る線は、右に回り込む
     const off = Math.max(aw, bw) / 2 + 60;
-    return { d: `M${sx},${sy} C${sx + off},${sy + 90} ${tx + off},${ty - 90} ${tx},${ty}`, mx: Math.max(sx, tx) + off * 0.75, my: (sy + ty) / 2 };
+    return { d: `M${sx},${sy} C${sx + off},${sy + 90} ${tx + off},${ty - 90} ${tx},${ty}`, mx: Math.max(sx, tx) + off, my: (sy + ty) / 2 };
   }
 
   /**

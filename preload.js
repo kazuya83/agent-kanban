@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   createRepo: (p) => call('repo:create', p),
   repoInfo: () => call('repo:info'),
   updateSettings: (patch) => call('settings:update', patch),
+  // 文章の指示から Pipeline のフローチャートを作る・直す: { request, flow, agent, enabled, customAgents } → フロー（保存はしない）
+  generateFlow: (p) => call('flow:generate', p),
   // Pipeline のエクスポート・インポート: { name, data(base64), ext: 'json' | 'zip' } を保存する / ファイルを選んで { name, data(base64) } を返す
   saveFile: (p) => call('file:save', p),
   openFile: () => call('file:open'),

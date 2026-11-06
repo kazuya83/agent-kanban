@@ -907,6 +907,13 @@ app.whenReady().then(async () => {
     notifyBoard();
     return store.settings;
   });
+  // 文章の指示から Pipeline のフローチャートを作る・直す（保存はしない。編集画面で確かめてから保存してもらう）
+  handle('flow:generate', ({ request, flow, agent, enabled, customAgents } = {}) => {
+    const use = providers.isAgent(agent) ? agent : 'claude';
+    const cwd = store.settings.repoPath || require('os').homedir();
+    const ask = (prompt) => agents.askOnce(use, cwd, prompt, undefined, 300000);
+    return require('./src/flow-ai').generateFlow(ask, { request, flow, defaultAgent: use, enabled: providers.cleanEnabledAgents(enabled), customAgents: providers.cleanCustomAgents(customAgents) });
+  });
   // Pipeline・カスタムエージェントのエクスポート・インポート（このマシンのファイル。遠隔操作中も、操作している側のマシンに保存する・から読む）
   // 中身（JSON・zip）を作る・読むのは画面（renderer/pipeline-pack.js）。ここはファイルを選んで書く・読むだけ
   const PACK_EXTS = ['json', 'zip'];
