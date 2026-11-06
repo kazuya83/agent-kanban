@@ -273,6 +273,166 @@ test('言語が英語でもプロンプト用の種別名は日本語のまま�
   });
 });
 
+test('言語が英語でも、保存する既定の名前は日本語のまま', () => {
+  const raw = {
+    nodes: [
+      { id: 'start', type: 'start', x: 0, y: 0 },
+      { id: 's1', type: 'step', x: 0, y: 80, agent: 'claude', label: '  ' },
+      { id: 's2', type: 'step', x: 0, y: 160, agent: 'codex', label: '実装' },
+      { id: 'br', type: 'if', x: 0, y: 240, label: '' },
+      { id: 'par', type: 'parallel', x: 0, y: 320, label: '   ' },
+      { id: 'join', type: 'join', x: 0, y: 400 },
+      { id: 'end', type: 'end', x: 0, y: 480 },
+    ],
+    edges: [],
+  };
+  for (const lang of ['en', 'es', 'fr', 'zh', 'ja']) {
+    withLanguage(lang, () => {
+      const flow = FlowModel.cleanFlow(raw);
+      const label = (id) => flow.nodes.find((n) => n.id === id).label;
+      assert.strictEqual(label('s1'), '工程1', lang);
+      assert.strictEqual(label('s2'), '実装', lang);
+      assert.strictEqual(label('br'), '分岐', lang);
+      assert.strictEqual(label('par'), '並列', lang);
+      assert.strictEqual(label('join'), '合流', lang);
+      assert.strictEqual(FlowModel.labelOf(flow.nodes.find((n) => n.id === 'br')), '分岐', lang);
+      assert.strictEqual(FlowModel.labelOf(flow.nodes.find((n) => n.id === 's1')), '工程1', lang);
+      const translated = I18n.tr('工程{n}', { n: 1 });
+      if (translated !== '工程1') assert.notStrictEqual(label('s1'), translated, lang);
+    });
+  }
+  withLanguage('en', () => {
+    const long = FlowModel.cleanFlow({ nodes: [{ id: 's', type: 'step', label: 'あ'.repeat(40) }], edges: [] });
+    assert.strictEqual(long.nodes.find((n) => n.type === 'step').label, 'あ'.repeat(30));
+    const kept = FlowModel.cleanFlow({ nodes: [{ id: 's', type: 'step', label: '0' }, { id: 'b', type: 'if', label: 'Branch' }], edges: [] });
+    assert.strictEqual(kept.nodes.find((n) => n.id === 's').label, '0');
+    assert.strictEqual(kept.nodes.find((n) => n.id === 'b').label, 'Branch');
+    assert.strictEqual(FlowModel.cleanFlow(null), null);
+    assert.strictEqual(FlowModel.cleanFlow({}), null);
+    assert.strictEqual(FlowModel.cleanFlow({ nodes: 'x' }), null);
+
+    const made = FlowModel.flowFromSteps([{ agent: 'claude', instruction: '', onPass: 'end', onFail: 'end' }]);
+    const step = made.nodes.find((n) => n.type === 'step');
+    const branch = made.nodes.find((n) => n.type === 'if');
+    assert.strictEqual(step.label, '工程1');
+    assert.strictEqual(branch.label, '工程1の判定');
+    assert.strictEqual(branch.question, '作業の結果を判定してください');
+    assert.strictEqual(FlowModel.labelOf(branch), '工程1の判定');
+    assert.strictEqual(FlowModel.labelOf(step), '工程1');
+    const pass = made.edges.find((e) => e.value === 'pass');
+    const fail = made.edges.find((e) => e.value === 'fail');
+    assert.strictEqual(pass.when, '問題がない（合格）');
+    assert.strictEqual(fail.when, '直す必要がある（差し戻し）');
+    assert.ok(pass.else);
+    assert.notStrictEqual(branch.label, 'Judgment of Step 1');
+
+    const named = FlowModel.flowFromSteps([{ agent: 'codex', label: '実装', onPass: 1 }]);
+    assert.strictEqual(named.nodes.find((n) => n.type === 'step').label, '実装');
+    assert.strictEqual(named.nodes.find((n) => n.type === 'if').label, '実装の判定');
+    assert.strictEqual(named.nodes.find((n) => n.type === 'if').question, '作業の結果を判定してください');
+    const plain = FlowModel.flowFromSteps([{ agent: 'claude', label: '書く' }]);
+    assert.strictEqual(plain.nodes.find((n) => n.type === 'if'), undefined);
+    const none = FlowModel.flowFromSteps(null);
+    assert.ok(none.nodes.some((n) => n.type === 'start'));
+    assert.strictEqual(none.nodes.find((n) => n.type === 'if'), undefined);
+    assert.strictEqual(none.nodes.find((n) => n.type === 'step'), undefined);
+
+    assert.strictEqual(FlowModel.displayText('工程2', 'step'), 'Step 2');
+    assert.strictEqual(FlowModel.displayText('工程1の判定', 'if'), 'Judgment of Step 1');
+    assert.strictEqual(FlowModel.displayText('実装の判定', 'if'), 'Judgment of 実装');
+    assert.strictEqual(FlowModel.displayText('分岐', 'if'), 'Branch');
+    assert.strictEqual(FlowModel.displayText('分岐', 'step'), '分岐');
+    assert.strictEqual(FlowModel.displayText('レビュー', 'if'), 'レビュー');
+    assert.strictEqual(FlowModel.displayText('', 'step'), '');
+    assert.strictEqual(FlowModel.displayText('の判定', 'if'), 'の判定');
+    assert.strictEqual(FlowModel.displayText(null), '');
+    assert.strictEqual(FlowModel.shownLabel({ type: 'parallel', label: '並列' }), 'Parallel');
+    assert.strictEqual(FlowModel.shownLabel({ type: 'join' }), 'Join');
+    assert.strictEqual(FlowModel.shownLabel(null), '');
+    assert.strictEqual(FlowModel.labelOf({ type: 'if' }), '分岐');
+    assert.strictEqual(FlowModel.isDefaultLabel({ type: 'step', label: '工程1' }), true);
+    assert.strictEqual(FlowModel.isDefaultLabel({ type: 'if', label: '工程1の判定' }), true);
+    assert.strictEqual(FlowModel.isDefaultLabel({ type: 'if', label: '分岐' }), true);
+    assert.strictEqual(FlowModel.isDefaultLabel({ type: 'parallel', label: '' }), true);
+    assert.strictEqual(FlowModel.isDefaultLabel({ type: 'step', label: '実装' }), false);
+    assert.strictEqual(FlowModel.isDefaultLabel({ type: 'if', label: 'Branch' }), false);
+    assert.strictEqual(FlowModel.isDefaultLabel(null), false);
+    assert.strictEqual(FlowModel.isDefaultLabel({ label: '分岐' }), false);
+
+    const svg = FlowView.html(made, new Map());
+    assert.match(svg, /Step 1/);
+    assert.match(svg, /Judgment of Step 1/);
+    assert.doesNotMatch(svg, /工程1/);
+    const node = { type: 'if', label: '分岐' };
+    assert.strictEqual(FlowModel.shownLabel(node), 'Branch');
+    assert.strictEqual(node.label, '分岐');
+  });
+  withLanguage('ja', () => {
+    const made = FlowModel.flowFromSteps([{ agent: 'claude', onPass: 'end' }]);
+    assert.strictEqual(made.nodes.find((n) => n.type === 'if').label, '工程1の判定');
+    assert.strictEqual(FlowModel.displayText('工程1', 'step'), '工程1');
+    assert.strictEqual(FlowModel.displayText('工程1の判定'), '工程1の判定');
+    assert.strictEqual(FlowModel.shownLabel({ type: 'if', label: '分岐' }), '分岐');
+  });
+  withLanguage('es', () => {
+    assert.strictEqual(FlowModel.displayText('工程3', 'step'), 'Paso 3');
+    assert.strictEqual(FlowModel.cleanFlow({ nodes: [{ id: 'b', type: 'if', label: '' }] }).nodes.find((n) => n.type === 'if').label, '分岐');
+  });
+  withLanguage('fr', () => {
+    const made = FlowModel.flowFromSteps([{ agent: 'claude', onFail: 'end' }]);
+    assert.strictEqual(made.nodes.find((n) => n.type === 'if').question, '作業の結果を判定してください');
+    assert.strictEqual(made.edges.find((e) => e.value === 'pass').when, '問題がない（合格）');
+    assert.strictEqual(FlowModel.displayText('工程1の判定'), 'Jugement de Étape 1');
+  });
+  withLanguage('zh', () => {
+    assert.strictEqual(FlowModel.displayText('工程4'), '步骤4');
+    assert.notStrictEqual(FlowModel.displayText('工程4'), '工程4');
+  });
+
+  const editor = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'flow-editor.js'), 'utf8');
+  const add = editor.match(/const type = b\.dataset\.type;[\s\S]*?select\(\{ kind: 'node', id: n\.id \}\);/);
+  assert.ok(add, 'ノードを足す処理がある');
+  assert.doesNotMatch(add[0], /tr\(/);
+  assert.match(add[0], /label: '分岐'/);
+  assert.match(add[0], /n\.label = '並列'/);
+  assert.match(add[0], /n\.label = '合流'/);
+  assert.match(editor, /FM\.isDefaultLabel\(n\) \? ''/);
+  assert.match(editor, /value="\$\{esc\(labelValue\(n\)\)\}"/);
+  assert.doesNotMatch(editor, /id="feLabel"[^>]*value="\$\{esc\(n\.label/);
+  withLanguage('en', () => {
+    assert.notStrictEqual(I18n.tr('分岐'), '分岐');
+    assert.notStrictEqual(I18n.tr('並列'), '並列');
+    assert.notStrictEqual(I18n.tr('合流'), '合流');
+  });
+
+  const renderer = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf8');
+  const tgt = renderer.match(/const tgt = \(e\) => \{([\s\S]*?)\n    \};/);
+  assert.ok(tgt, '行き先の関数がある');
+  assert.match(tgt[1], /tr\('終了'\)/);
+  assert.match(tgt[1], /tr\('工程\{n\}へ'/);
+  assert.match(tgt[1], /tr\('工程\{n\}に戻る'/);
+  assert.match(tgt[1], /tr\('\{type\}「\{label\}」へ'/);
+  assert.doesNotMatch(tgt[1], /`工程/);
+  assert.doesNotMatch(tgt[1], /」へ`/);
+  const dest = {
+    en: ['End', 'to step 2', 'back to step 1', 'to Branch “Review”'],
+    es: ['Fin', 'al paso 2', 'volver al paso 1', 'a Bifurcación «Review»'],
+    fr: ['Fin', 'vers l’étape 2', 'retour à l’étape 1', 'vers Branchement « Review »'],
+    zh: ['结束', '前往步骤2', '返回步骤1', '前往分支“Review”'],
+    ja: ['終了', '工程2へ', '工程1に戻る', '分岐「Review」へ'],
+  };
+  for (const lang of ['ja', ...LANGS]) {
+    withLanguage(lang, () => {
+      assert.strictEqual(I18n.tr('終了'), dest[lang][0], lang);
+      assert.strictEqual(I18n.tr('工程{n}へ', { n: 2 }), dest[lang][1], lang);
+      assert.strictEqual(I18n.tr('工程{n}に戻る', { n: 1 }), dest[lang][2], lang);
+      assert.strictEqual(I18n.tr('{type}「{label}」へ', { type: I18n.tr('分岐'), label: 'Review' }), dest[lang][3], lang);
+      assert.strictEqual(I18n.tr('工程{n}へ', { n: 0 }), dest[lang][1].replace('2', '0').replace('2', '0'), lang);
+      assert.strictEqual(I18n.tr('工程{n}へ', {}), dest[lang][1].includes('{n}') ? dest[lang][1] : dest[lang][1].replace('2', '{n}'), lang);
+    });
+  }
+});
+
 test('fmtTime と同じ日付表示は I18n.locale() を渡す', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf8');
   const m = src.match(/function fmtTime\(ms\) \{([\s\S]*?)\n\}/);

@@ -99,11 +99,31 @@
       return agentName(n.agent) + (n.model ? ` / ${n.model}` : '') + (opts.enabled.includes(n.agent) ? '' : tr('（使わない設定）'));
     };
     const typeLabel = (type) => tr(FM.TYPE_LABEL[type] || type || '');
-    // 種別名そのもの（開始・終了・名前を付けていない並列など）は画面の言語にする。付けた名前はそのまま
-    const showName = (n) => {
-      if (!n) return '';
-      const raw = FM.labelOf(n);
-      return raw && raw === FM.TYPE_LABEL[n.type] ? typeLabel(n.type) : raw;
+    // 種別名・「工程N」・「〜の判定」は画面の言語にする。付けた名前はそのまま。保存値は日本語のまま
+    const showName = (n) => (n ? FM.shownLabel(n) : '');
+    const labelValue = (n) => (FM.isDefaultLabel(n) ? '' : String(n.label == null ? '' : n.label));
+    const stepNumber = (n) => {
+      const m = /^工程(\d+)$/.exec(String(n.label || '').trim());
+      if (m) return m[1];
+      let c = 0;
+      for (const x of flow.nodes) {
+        if (x.type !== 'step') continue;
+        c += 1;
+        if (x.id === n.id) return c;
+      }
+      return c + 1;
+    };
+    // 既定の名前は value に入れない（訳した文を入れると、そのまま保存される）。placeholder に訳を出す
+    const labelPlaceholder = (n) => {
+      const raw = String(n.label || '').trim();
+      const ca = n.type === 'step' && n.custom ? customOf(n.custom) : null;
+      if (ca && !raw) return ca.name;
+      if (n.type === 'step' && (!raw || /^工程\d+$/.test(raw))) return tr('工程{n}', { n: stepNumber(n) });
+      if (!raw || raw === FM.TYPE_LABEL[n.type]) return tr(FM.TYPE_LABEL[n.type] || '');
+      if (/^.+の判定$/.test(raw)) return FM.displayText(raw);
+      if (n.type === 'step') return tr('例: 実装');
+      if (n.type === 'if') return tr('例: レビューの結果');
+      return '';
     };
 
     box.innerHTML = `
@@ -149,7 +169,8 @@
       let sub = '';
       if (n.type === 'step') {
         const i = steps.findIndex((x) => x.id === n.id);
-        title = tr('{n}. {label}', { n: i + 1, label: n.label || tr('（名前なし）') });
+        const raw = String(n.label || '').trim();
+        title = tr('{n}. {label}', { n: i + 1, label: raw ? FM.displayText(raw, 'step') : tr('（名前なし）') });
         sub = stepName(n);
       } else if (n.type === 'if') sub = n.question ? n.question : tr('判定の値で分ける');
       else if (n.type === 'parallel') sub = tr('同時に動かす');
@@ -305,12 +326,12 @@
             ${n.custom
               ? `<small class="muted fe-ca-note">${ca ? tr('カスタムエージェント「{name}」のモデル（{model}）とプロフィールで動かします。{desc}', { name: esc(ca.name), model: esc(ca.model || tr('設定の既定')), desc: ca.description ? esc(ca.description) : '' }) : tr('このカスタムエージェントは見つかりません。選び直してください。')}</small>`
               : `<label class="field"><span>${tr('モデル（空なら設定の既定）')}</span><input id="feModel" list="feModelList" autocomplete="off" spellcheck="false" maxlength="100" placeholder="${esc(tr('例: {model}', { model: ((opts.modelSuggest || {})[n.agent] || [])[0] || '' }))}" value="${esc(n.model || '')}" /><datalist id="feModelList">${sugg}</datalist></label>`}
-            <label class="field"><span>${tr('工程の名前')}</span><input id="feLabel" maxlength="30" placeholder="${ca ? esc(ca.name) : esc(tr('例: 実装'))}" value="${esc(n.label || '')}" /></label>
+            <label class="field"><span>${tr('工程の名前')}</span><input id="feLabel" maxlength="30" placeholder="${esc(labelPlaceholder(n))}" value="${esc(labelValue(n))}" /></label>
             <label class="field"><span>${tr('担当の説明')}</span><textarea id="feInst" rows="6" placeholder="${esc(tr('例: 前の工程の変更をレビューして直す'))}">${esc(n.instruction || '')}</textarea></label>`;
           const j = FM.judgeOf(flow, n.id);
-          if (j) body += `<small class="muted">${tr('この工程のあとは分岐「{label}」です。エージェントに、返事の最後へ判定の値（{values}）を書いてもらいます。', { label: esc(j.node.label || ''), values: j.options.map((o) => `<code>${esc(o.value)}</code>`).join(' / ') || tr('まだありません') })}</small>`;
+          if (j) body += `<small class="muted">${tr('この工程のあとは分岐「{label}」です。エージェントに、返事の最後へ判定の値（{values}）を書いてもらいます。', { label: esc(FM.shownLabel(j.node)), values: j.options.map((o) => `<code>${esc(o.value)}</code>`).join(' / ') || tr('まだありません') })}</small>`;
         } else if (n.type === 'if') {
-          body = `<label class="field"><span>${tr('分岐の名前')}</span><input id="feLabel" maxlength="30" placeholder="${esc(tr('例: レビューの結果'))}" value="${esc(n.label || '')}" /></label>
+          body = `<label class="field"><span>${tr('分岐の名前')}</span><input id="feLabel" maxlength="30" placeholder="${esc(labelPlaceholder(n))}" value="${esc(labelValue(n))}" /></label>
             <label class="field"><span>${tr('判定すること（エージェントに伝えます）')}</span><textarea id="feQuestion" rows="3" placeholder="${esc(tr('例: テストがすべて通り、直すところがないか'))}">${esc(n.question || '')}</textarea></label>
             <small class="muted">${tr('行き先ごとに線を引き、線を選んで「期待値」と「条件の説明」を決めます。どの期待値にも合わないときの行き先は、線の「どれにも合わないとき」で決めます（なければ止まって知らせます）。')}</small>`;
           const outs = FM.outEdges(flow, n.id);
@@ -320,7 +341,7 @@
               .join('')}</div>`;
           }
         } else if (n.type === 'parallel' || n.type === 'join') {
-          body = `<label class="field"><span>${tr('名前')}</span><input id="feLabel" maxlength="30" value="${esc(n.label || '')}" /></label>
+          body = `<label class="field"><span>${tr('名前')}</span><input id="feLabel" maxlength="30" placeholder="${esc(labelPlaceholder(n))}" value="${esc(labelValue(n))}" /></label>
             <small class="muted">${n.type === 'parallel' ? tr('線を2本以上出し、それぞれ工程につなぎます。枝の最後は同じ合流につないでください。枝ごとに別の worktree（このタスクのブランチから分けたもの）で同時に動かします。') : tr('並列の枝の最後をここにつなぎます。すべての枝が終わったら、枝の変更を順にマージして先へ進みます。コンフリクトしたら止めて知らせます。')}</small>`;
         } else if (n.type === 'start') body = `<small class="muted">${tr('Pipelineはここから始まります。線を1本、最初の工程へつないでください。')}</small>`;
         else body = `<small class="muted">${tr('ここに来たら Pipeline を終えて、レビュー列に入れて知らせます。')}</small>`;
@@ -436,9 +457,10 @@
         const k = flow.nodes.length % 6;
         const n = { id: uid(type === 'step' ? 's' : type.slice(0, 2), used), type, x: canvas.scrollLeft + 40 + k * 24, y: canvas.scrollTop + 40 + k * 24 };
         if (type === 'step') Object.assign(n, { agent: baseAgent, label: '', instruction: '' });
-        if (type === 'if') Object.assign(n, { label: tr('分岐'), question: '' });
-        if (type === 'parallel') n.label = tr('並列');
-        if (type === 'join') n.label = tr('合流');
+        // 既定の名前は日本語。訳した文を label に入れると、その文が保存される
+        if (type === 'if') Object.assign(n, { label: '分岐', question: '' });
+        if (type === 'parallel') n.label = '並列';
+        if (type === 'join') n.label = '合流';
         flow.nodes.push(n);
         touch();
         select({ kind: 'node', id: n.id });
@@ -662,9 +684,9 @@
       if (errs.length) return;
       // 使えない文字のモデル名は cleanFlow が落とすので、落ちたものがあれば知らせる
       const typed = flow.nodes.find((n) => n.type === 'step' && n.model && !clean.nodes.some((x) => x.id === n.id && x.model === n.model));
-      if (typed) return alert(tr('工程「{label}」のモデル名に使えない文字が入っています: {model}', { label: typed.label || '', model: typed.model }));
+      if (typed) return alert(tr('工程「{label}」のモデル名に使えない文字が入っています: {model}', { label: FM.displayText(typed.label || '', 'step'), model: typed.model }));
       const off = clean.nodes.find((n) => n.type === 'step' && stepOff(n));
-      if (off && !confirm(tr('工程「{label}」の {who} は使えません（{why}）。このままだとPipelineを始められません。保存しますか？', { label: off.label, who: stepName(off), why: off.custom && !customOf(off.custom) ? tr('カスタムエージェントが見つかりません') : tr('使わない設定です') }))) return;
+      if (off && !confirm(tr('工程「{label}」の {who} は使えません（{why}）。このままだとPipelineを始められません。保存しますか？', { label: FM.displayText(off.label, 'step'), who: stepName(off), why: off.custom && !customOf(off.custom) ? tr('カスタムエージェントが見つかりません') : tr('使わない設定です') }))) return;
       const ok = await opts.onSave(clean);
       if (ok !== false) close();
     };

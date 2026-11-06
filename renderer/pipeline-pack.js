@@ -13,6 +13,7 @@
   else root.PipelinePack = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   const i18n = typeof module === 'object' && module.exports ? require('./i18n.js') : typeof I18n !== 'undefined' ? I18n : null;
+  const flowModel = typeof module === 'object' && module.exports ? require('./flow-model') : typeof globalThis !== 'undefined' ? globalThis.FlowModel : null;
   function tr(key, vars) {
     if (i18n) return i18n.tr(key, vars);
     return vars ? String(key).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : key;
@@ -339,7 +340,7 @@
       for (const n of flow.nodes || []) {
         if (!n || n.type !== 'step' || !n.custom) continue;
         if (idMap.has(n.custom)) n.custom = idMap.get(n.custom);
-        if (!cas.some((x) => x.id === n.custom)) res.missing.push(tr('{pipeline}「{step}」', { pipeline: p.name, step: n.label || tr('工程') }));
+        if (!cas.some((x) => x.id === n.custom)) res.missing.push(tr('{pipeline}「{step}」', { pipeline: p.name, step: n.label && flowModel ? flowModel.displayText(n.label, 'step') : n.label || tr('工程') }));
       }
       const id = randomId('p', flowIds);
       const name = uniqueName(p.name, flowNames, PIPELINE_NAME_MAX);

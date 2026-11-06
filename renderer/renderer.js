@@ -479,7 +479,7 @@ function orchChipsHtml(c) {
     chips.push(`<span class="orch-chip relay" title="Pipeline: 並列の枝が、それぞれ別の worktree で動いています。すべて終わったら合流でマージします">${icon('pipeline')}並列「${esc((n && n.label) || '')}」の枝 ${c.relay.waiting.children.length} 本を待機中</span>`);
   } else if (c.relay) {
     const b = c.relay.branchOf;
-    chips.push(`<span class="orch-chip relay" title="${b ? 'Pipelineの並列の枝: 合流で元のタスクにマージします' : 'Pipeline: フローチャートの工程ごとに、エージェントが作業を引き継ぎます'}">${icon('pipeline')}${b ? `枝${b.index + 1} · ` : ''}${c.relay.index + 1}/${c.relay.steps.length} ${esc(c.relay.steps[c.relay.index].label)} · ${personaIcon(c.persona, agentOf(c))} ${esc(whoShort(agentOf(c), c.persona))}</span>`);
+    chips.push(`<span class="orch-chip relay" title="${b ? 'Pipelineの並列の枝: 合流で元のタスクにマージします' : 'Pipeline: フローチャートの工程ごとに、エージェントが作業を引き継ぎます'}">${icon('pipeline')}${b ? `枝${b.index + 1} · ` : ''}${c.relay.index + 1}/${c.relay.steps.length} ${esc(FlowModel.displayText(c.relay.steps[c.relay.index].label, 'step'))} · ${personaIcon(c.persona, agentOf(c))} ${esc(whoShort(agentOf(c), c.persona))}</span>`);
   }
   else if (c.persona) chips.push(`<span class="orch-chip agent persona" style="--pc:${esc(c.persona.color || '#6366f1')}" title="${esc(c.persona.description || 'カスタムエージェント')}">${personaIcon(c.persona, agentOf(c))}${esc(whoLabel(agentOf(c), c.persona))}</span>`);
   else chips.push(`<span class="orch-chip agent">${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</span>`);
@@ -1049,7 +1049,7 @@ function hhmm(t) {
 // ボードのカード: 工程の数だけ区切った進み具合のバー
 function relayBarHtml(c) {
   const r = c.relay;
-  const segs = r.steps.map((st, i) => `<span class="rb-seg rs-${relayStepState(c, i)}" title="${i + 1}. ${esc(st.label)}（${esc(whoShort(st.agent, st.persona))}）: ${RELAY_STATE[relayStepState(c, i)][1]}"></span>`);
+  const segs = r.steps.map((st, i) => `<span class="rb-seg rs-${relayStepState(c, i)}" title="${i + 1}. ${esc(FlowModel.displayText(st.label, 'step'))}（${esc(whoShort(st.agent, st.persona))}）: ${RELAY_STATE[relayStepState(c, i)][1]}"></span>`);
   return `<div class="relay-bar">${segs.join('')}</div>`;
 }
 
@@ -1083,14 +1083,17 @@ function relayFlowHtml(c) {
     const judge = FlowModel.judgeOf(r.flow, st.id);
     const back = FlowModel.backEdges(r.flow);
     const tgt = (e) => {
-      const n = FlowModel.nodeOf(r.flow, e.to);
-      if (!n || n.type === 'end') return '終了';
-      if (n.type === 'step') return `工程${r.steps.findIndex((x) => x.id === n.id) + 1}${back.has(e.id) ? 'に戻る' : 'へ'}`;
-      return `${tr(FlowModel.TYPE_LABEL[n.type] || n.type)}「${FlowModel.labelOf(n)}」へ`;
+      const node = FlowModel.nodeOf(r.flow, e.to);
+      if (!node || node.type === 'end') return tr('終了');
+      if (node.type === 'step') {
+        const num = r.steps.findIndex((x) => x.id === node.id) + 1;
+        return back.has(e.id) ? tr('工程{n}に戻る', { n: num }) : tr('工程{n}へ', { n: num });
+      }
+      return tr('{type}「{label}」へ', { type: tr(FlowModel.TYPE_LABEL[node.type] || node.type), label: FlowModel.shownLabel(node) });
     };
     const result = (i === r.index && r.lastResult) || (prev && prev.result);
     const judgeHtml = judge
-      ? `<div class="rf-info">分岐「${esc(judge.node.label)}」: ${FlowModel.outEdges(r.flow, judge.node.id)
+      ? `<div class="rf-info">${esc(tr('分岐「{label}」', { label: FlowModel.shownLabel(judge.node) }))}: ${FlowModel.outEdges(r.flow, judge.node.id)
           .map((e) => `${esc(e.value || 'それ以外')}${e.value && e.else ? '（それ以外も）' : ''} → ${esc(tgt(e))}${back.has(e.id) && (r.counts || {})[e.id] ? `（戻った回数 ${r.counts[e.id]}/${e.maxLoops || 3}）` : ''}`)
           .join(' ・ ')}${result ? ` <span class="rf-verdict v-${result === 'fail' ? 'fail' : result === 'pass' ? 'pass' : 'other'}">${esc(result === 'fail' ? '差し戻し' : result === 'pass' ? '合格' : result)}</span>` : ''}</div>`
       : '';
@@ -1101,7 +1104,7 @@ function relayFlowHtml(c) {
     return `<li class="rf-node rs-${stt} ${i === r.index && !r.waiting ? 'cur' : ''}">
       <span class="rf-dot">${mark}</span>
       <div class="rf-body">
-        <div class="rf-head"><b>${i + 1}. ${esc(st.label)}</b>${h && h.branch ? ` <span class="rf-branch">並列の枝</span>` : ''} <span class="rf-agent">${personaIcon(st.persona, st.agent)}${esc(whoLabel(st.agent, st.persona))}${st.model ? ` / ${esc(st.model)}` : ''}</span> <span class="rf-state">${label}</span></div>
+        <div class="rf-head"><b>${i + 1}. ${esc(FlowModel.displayText(st.label, 'step'))}</b>${h && h.branch ? ` <span class="rf-branch">並列の枝</span>` : ''} <span class="rf-agent">${personaIcon(st.persona, st.agent)}${esc(whoLabel(st.agent, st.persona))}${st.model ? ` / ${esc(st.model)}` : ''}</span> <span class="rf-state">${label}</span></div>
         ${info.length ? `<div class="rf-info">${info.join(' ・ ')}</div>` : ''}
         ${judgeHtml}
         ${st.instruction ? `<div class="rf-inst" title="${esc(st.instruction)}">${esc(st.instruction)}</div>` : ''}
@@ -1550,7 +1553,7 @@ function relayChartHtml(c) {
       const i = idx.get(n.id);
       const st = i == null ? null : r.steps[i];
       if (!st) return {};
-      return { title: `${i + 1}. ${st.label}`, sub: whoShort(st.agent, st.persona), tip: whoLabel(st.agent, st.persona) + (st.model ? ` / ${st.model}` : '') };
+      return { title: `${i + 1}. ${FlowModel.displayText(st.label, 'step')}`, sub: whoShort(st.agent, st.persona), tip: whoLabel(st.agent, st.persona) + (st.model ? ` / ${st.model}` : '') };
     },
   });
   if (!svg) return '';
@@ -2942,7 +2945,7 @@ function pipelineShortName(p) {
 }
 function relayFlowLabel(info) {
   const extra = [info.ifs && tr('分岐{n}', { n: info.ifs }), info.pars && tr('並列{n}', { n: info.pars }), info.loops && tr('ループ{n}', { n: info.loops })].filter(Boolean).join(tr('・'));
-  return (info.steps.map((x) => `${x.label}(${whoShort(stepWho(x).agent, stepWho(x).persona)})`).join(' → ') || tr('未設定')) + (extra ? tr('（{extra}）', { extra }) : '');
+  return (info.steps.map((x) => `${FlowModel.displayText(x.label, 'step')}(${whoShort(stepWho(x).agent, stepWho(x).persona)})`).join(' → ') || tr('未設定')) + (extra ? tr('（{extra}）', { extra }) : '');
 }
 // 設定: Pipelineのフローの要約
 function relayFlowSummaryHtml(flow, enabled, cas = customAgents()) {
@@ -2951,7 +2954,7 @@ function relayFlowSummaryHtml(flow, enabled, cas = customAgents()) {
     .map((x, i) => {
       const w = stepWho(x, cas);
       const model = w.model || x.model;
-      return `<li><span class="relay-no">${i + 1}</span> ${personaIcon(w.persona, w.agent)}<b>${esc(x.label)}</b> <span class="muted">${esc(whoLabel(w.agent, w.persona))}${model ? ` / ${esc(model)}` : ''}${w.missing ? tr('（カスタムエージェントが見つかりません）') : enabled.includes(w.agent) ? '' : tr('（使わない設定）')}</span>${x.instruction ? `<div class="muted small rs-inst">${esc(x.instruction)}</div>` : ''}</li>`;
+      return `<li><span class="relay-no">${i + 1}</span> ${personaIcon(w.persona, w.agent)}<b>${esc(FlowModel.displayText(x.label, 'step'))}</b> <span class="muted">${esc(whoLabel(w.agent, w.persona))}${model ? ` / ${esc(model)}` : ''}${w.missing ? tr('（カスタムエージェントが見つかりません）') : enabled.includes(w.agent) ? '' : tr('（使わない設定）')}</span>${x.instruction ? `<div class="muted small rs-inst">${esc(x.instruction)}</div>` : ''}</li>`;
     })
     .join('');
   const extra = [info.ifs && tr('分岐（if） {n}', { n: info.ifs }), info.pars && tr('並列 {n}', { n: info.pars }), info.loops && tr('ループ {n}', { n: info.loops })].filter(Boolean).join(tr(' ・ '));

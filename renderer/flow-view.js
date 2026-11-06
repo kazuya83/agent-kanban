@@ -134,8 +134,7 @@
         const info = n.type === 'step' && o.stepInfo ? o.stepInfo(n) || {} : {};
         const kindJa = FM ? FM.TYPE_LABEL[n.type] : '';
         const kind = kindJa ? tr(kindJa) : n.type;
-        let title = info.title || (FM ? FM.labelOf(n) : n.label || n.type);
-        if (!info.title && kindJa && title === kindJa) title = kind;
+        const title = info.title || (FM && FM.shownLabel ? FM.shownLabel(n) : n.label || n.type);
         const round = n.type === 'start' || n.type === 'end' ? h / 2 : n.type === 'if' ? 14 : 8;
         const cur = o.current && o.current === n.id;
         const mark = marks[s] || '';

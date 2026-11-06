@@ -498,6 +498,24 @@ api.add({
     "fr": "Étape {n}",
     "zh": "步骤{n}"
   },
+  "工程{n}へ": {
+    "en": "to step {n}",
+    "es": "al paso {n}",
+    "fr": "vers l’étape {n}",
+    "zh": "前往步骤{n}"
+  },
+  "工程{n}に戻る": {
+    "en": "back to step {n}",
+    "es": "volver al paso {n}",
+    "fr": "retour à l’étape {n}",
+    "zh": "返回步骤{n}"
+  },
+  "分岐「{label}」": {
+    "en": "Branch “{label}”",
+    "es": "Bifurcación «{label}»",
+    "fr": "Branchement « {label} »",
+    "zh": "分支“{label}”"
+  },
   "並列「{label}」": {
     "en": "Parallel “{label}”",
     "es": "Paralelo «{label}»",
@@ -569,6 +587,12 @@ api.add({
     "es": "{type} «{label}»",
     "fr": "{type} « {label} »",
     "zh": "{type}“{label}”"
+  },
+  "{type}「{label}」へ": {
+    "en": "to {type} “{label}”",
+    "es": "a {type} «{label}»",
+    "fr": "vers {type} « {label} »",
+    "zh": "前往{type}“{label}”"
   },
   "開始からは、線を1本だけ出してください": {
     "en": "Draw exactly one line from the start",

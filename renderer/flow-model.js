@@ -102,7 +102,8 @@
       if (x.type === 'step') {
         steps++;
         node.agent = isAgent(x.agent) ? x.agent : 'claude';
-        node.label = trunc(String(x.label || '').trim(), 30) || tr('工程{n}', { n: steps });
+        // 既定の名前は日本語のまま保存する。画面に出すときだけ displayText で訳す
+        node.label = trunc(String(x.label || '').trim(), 30) || `工程${steps}`;
         node.instruction = trunc(String(x.instruction || '').trim(), 4000);
         // モデル（空なら設定のエージェントごとの既定）。カスタムエージェントを選んだ工程は、そのエージェント・モデル・プロフィールで動かす
         const model = String(x.model || '').trim();
@@ -110,7 +111,7 @@
         const custom = cleanId(String(x.custom || '').replace(/^custom:/, ''));
         if (custom) node.custom = custom;
       } else if (x.type === 'if') {
-        node.label = trunc(String(x.label || '').trim(), 30) || tr('分岐');
+        node.label = trunc(String(x.label || '').trim(), 30) || '分岐';
         node.question = trunc(String(x.question || '').trim(), 1000);
       } else if (x.type === 'parallel' || x.type === 'join') {
         node.label = trunc(String(x.label || '').trim(), 30) || TYPE_LABEL[x.type];
@@ -230,7 +231,7 @@
   function parallelInfo(flow, pid) {
     const errors = [];
     const p = nodeOf(flow, pid);
-    const name = tr('並列「{label}」', { label: (p && p.label) || '' });
+    const name = tr('並列「{label}」', { label: p && String(p.label || '').trim() ? displayText(p.label, p.type) : '' });
     const branches = [];
     let join = null;
     for (const e of outEdges(flow, pid)) {
@@ -270,7 +271,7 @@
     for (const b of branches) {
       for (const id of b.nodes) {
         for (const e of inEdges(flow, id)) {
-          if (e.from !== pid && !b.nodes.has(e.from)) errors.push(tr('{name}の枝の外から、枝の中の「{label}」へ線が入っています', { name, label: labelOf(nodeOf(flow, id)) }));
+          if (e.from !== pid && !b.nodes.has(e.from)) errors.push(tr('{name}の枝の外から、枝の中の「{label}」へ線が入っています', { name, label: shownLabel(nodeOf(flow, id)) }));
         }
       }
     }
@@ -281,6 +282,31 @@
     if (!n) return '';
     if (n.type === 'start' || n.type === 'end') return TYPE_LABEL[n.type];
     return n.label || TYPE_LABEL[n.type];
+  }
+
+  // 保存されている名前を、画面に出すときだけ訳す。labelOf の戻り値は変えない
+  function displayText(raw, type) {
+    const s = String(raw == null ? '' : raw).trim();
+    if (type && Object.hasOwn(TYPE_LABEL, type) && s === TYPE_LABEL[type]) return tr(s);
+    const step = /^工程(\d+)$/.exec(s);
+    if (step) return tr('工程{n}', { n: step[1] });
+    const judge = /^(.*)の判定$/.exec(s);
+    if (judge && judge[1]) return tr('{name}の判定', { name: displayText(judge[1]) });
+    return s;
+  }
+  function shownLabel(n) {
+    if (!n) return '';
+    return displayText(labelOf(n), n.type);
+  }
+  // 名前欄に訳を入れると、その文が保存される。既定のままなら欄は空にする
+  function isDefaultLabel(n) {
+    if (!n || !n.type) return false;
+    const raw = String(n.label || '').trim();
+    if (!raw) return true;
+    if (Object.hasOwn(TYPE_LABEL, n.type) && raw === TYPE_LABEL[n.type]) return true;
+    if (/^工程\d+$/.test(raw)) return true;
+    if (/^.+の判定$/.test(raw)) return true;
+    return false;
   }
 
   /**
@@ -295,12 +321,7 @@
     if (!s) return [tr('開始のノードがありません')];
     const steps = flow.nodes.filter((n) => n.type === 'step');
     if (!steps.length) errors.push(tr('工程のノードが1つもありません'));
-    const name = (n) => {
-      const type = typeName(n.type);
-      const label = labelOf(n);
-      // 種別名そのもの（開始・終了など）は画面の言語にする。labelOf の戻り値は日本語のまま
-      return tr('{type}「{label}」', { type, label: label === TYPE_LABEL[n.type] ? type : label });
-    };
+    const name = (n) => tr('{type}「{label}」', { type: typeName(n.type), label: shownLabel(n) });
     for (const n of flow.nodes) {
       const outs = outEdges(flow, n.id);
       const ins = inEdges(flow, n.id);
@@ -337,10 +358,10 @@
       const info = parallelInfo(flow, p.id);
       errors.push(...info.errors);
       if (!info.join) continue;
-      if (owned.has(info.join)) errors.push(tr('合流「{label}」に、2つの並列がつながっています', { label: labelOf(nodeOf(flow, info.join)) }));
+      if (owned.has(info.join)) errors.push(tr('合流「{label}」に、2つの並列がつながっています', { label: shownLabel(nodeOf(flow, info.join)) }));
       owned.set(info.join, p.id);
       const inside = new Set(info.branches.flatMap((b) => [...b.nodes]));
-      for (const e of inEdges(flow, info.join)) if (!inside.has(e.from)) errors.push(tr('合流「{label}」には、並列「{parallel}」の枝だけをつないでください', { label: labelOf(nodeOf(flow, info.join)), parallel: labelOf(p) }));
+      for (const e of inEdges(flow, info.join)) if (!inside.has(e.from)) errors.push(tr('合流「{label}」には、並列「{parallel}」の枝だけをつないでください', { label: shownLabel(nodeOf(flow, info.join)), parallel: shownLabel(p) }));
     }
     for (const j of flow.nodes.filter((n) => n.type === 'join')) if (!owned.has(j.id) && inEdges(flow, j.id).length) errors.push(tr('{name}が、どの並列の枝ともつながっていません', { name: name(j) }));
     return [...new Set(errors)];
@@ -480,11 +501,12 @@
     const sid = (i) => `s${i + 1}`;
     const judges = (st) => st.onPass !== undefined || st.onFail !== undefined;
     list.forEach((st, i) => {
-      nodes.push({ id: sid(i), type: 'step', x: X, y, agent: st.agent || 'claude', label: st.label || tr('工程{n}', { n: i + 1 }), instruction: st.instruction || '' });
+      // 既定の工程名と分岐名は日本語のまま保存する。question と when はエージェントへ渡す判定の指示なので訳さない
+      const stepLabel = String(st.label || '').trim() || `工程${i + 1}`;
+      nodes.push({ id: sid(i), type: 'step', x: X, y, agent: st.agent || 'claude', label: stepLabel, instruction: st.instruction || '' });
       y += 110;
       if (judges(st)) {
-        // question と when はエージェントへ渡す判定の指示なので訳さない
-        nodes.push({ id: `if${i + 1}`, type: 'if', x: X + 30, y, label: tr('{name}の判定', { name: st.label || tr('工程{n}', { n: i + 1 }) }), question: '作業の結果を判定してください' });
+        nodes.push({ id: `if${i + 1}`, type: 'if', x: X + 30, y, label: `${stepLabel}の判定`, question: '作業の結果を判定してください' });
         y += 110;
       }
     });
@@ -525,6 +547,9 @@
     inEdges,
     startNode,
     labelOf,
+    displayText,
+    shownLabel,
+    isDefaultLabel,
     normValue,
     resultValue,
     route,
