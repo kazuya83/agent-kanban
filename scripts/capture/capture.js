@@ -22,6 +22,7 @@ const only = opt('only');
 const noGif = args.includes('--no-gif');
 const onlyGif = args.includes('--gif-only');
 const feats = opt('feature');
+const demoOnly = args.includes('--demo');
 
 // preload.js にあるチャンネルをすべて差し替える（エージェントや外部サービスを動かさないため）
 function channels() {
@@ -163,7 +164,7 @@ async function main() {
     console.log(`== ${lang}`);
     const { ctx, dir } = await launch(lang);
     try {
-      if (!onlyGif && !feats) {
+      if (!onlyGif && !feats && !demoOnly) {
         const scenes = scenesFor(ctx);
         for (const [name, run] of Object.entries(scenes)) {
           if (only && !only.includes(name)) continue;
@@ -175,8 +176,11 @@ async function main() {
           console.log(`  ${name}`);
         }
       }
-      if (!noGif && !only && !feats) await demo(ctx, path.join(out, 'demo.gif'));
-      if (!noGif && !only) {
+      if (!noGif && !only && !feats) {
+        await ctx.reset();
+        await demo(ctx, path.join(out, 'demo.gif'));
+      }
+      if (!noGif && !only && !demoOnly) {
         const list = gifFeatures(ctx);
         await ctx.page.setViewportSize(FEATURE_SIZE);
         for (const [name, run] of Object.entries(list)) {
