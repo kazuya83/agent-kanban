@@ -97,7 +97,10 @@
         i++;
         while (i < lines.length && !(lines[i].trim().startsWith(mark[0].repeat(mark.length)) && !lines[i].trim().replace(/[`~]/g, ''))) body.push(lines[i++]);
         i++; // 閉じの ``` を飛ばす（無ければ最後まで）
-        out.push(`<pre class="md-code"${lang ? ` data-lang="${esc(lang)}"` : ''}><code>${esc(body.join('\n'))}</code></pre>`);
+        // コピーボタンは pre の外に置く（pre は横にスクロールするので、中に置くと一緒に流れてしまう）
+        out.push(
+          `<div class="md-code-wrap"><button class="md-copy" type="button" title="このコードをコピー">コピー</button><pre class="md-code"${lang ? ` data-lang="${esc(lang)}"` : ''}><code>${esc(body.join('\n'))}</code></pre></div>`,
+        );
         continue;
       }
       if ((m = line.match(RE.heading))) {

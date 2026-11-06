@@ -18,6 +18,13 @@ test('コードブロックの中は装飾せず、そのまま出す', () => {
   assert.match(html, /<p>後ろの文<\/p>/);
 });
 
+test('コードブロックには、スクロールする pre の外にコピーボタンが付く', () => {
+  const html = render('```\necho <a>\n```');
+  assert.match(html, /^<div class="md-code-wrap"><button class="md-copy" type="button"[^>]*>コピー<\/button><pre class="md-code"><code>echo &lt;a&gt;<\/code><\/pre><\/div>$/);
+  // 行の中の `code` には付けない
+  assert.ok(!/md-copy/.test(render('`npm test` を動かす')));
+});
+
 test('表を table にする', () => {
   const html = render('| ファイル | 内容 |\n|---|:-:|\n| a.js | 追加 |');
   assert.match(html, /<th>ファイル<\/th>/);

@@ -5004,6 +5004,24 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   run(() => api.openExternal(a.dataset.url));
 });
+// コードブロックの右上の「コピー」。ログは後から足されて増えるので、document でまとめて受ける
+document.addEventListener('click', (e) => {
+  const b = e.target.closest?.('.md-copy');
+  if (!b) return;
+  const code = b.parentElement.querySelector('pre.md-code code');
+  navigator.clipboard.writeText(code ? code.textContent : '').then(
+    () => {
+      b.textContent = 'コピーしました';
+      b.classList.add('copied');
+      clearTimeout(b._copiedTimer);
+      b._copiedTimer = setTimeout(() => {
+        b.textContent = 'コピー';
+        b.classList.remove('copied');
+      }, 1500);
+    },
+    () => toast('コピーできませんでした'),
+  );
+});
 
 api.onLog(({ id, entry }) => {
   if (!state.logs.has(id)) return;
