@@ -691,6 +691,8 @@ function renderBoard() {
   const { settings, cards } = state.board;
   renderInterruptBanner();
   renderRemoteInfo();
+  // Claude Code を使わない設定なら、Claude Code の会話の一覧は出さない
+  $('sessionsBtn').classList.toggle('hidden', !enabledAgents(settings).includes('claude'));
   // 会話は同時実行数に数えない
   const running = cards.filter((c) => c.status === 'running' && !isChat(c)).length;
   renderNotifications();
@@ -3185,9 +3187,9 @@ function firstAgentOf(v) {
   const s = state.board.settings;
   if (isRelayRef(v)) {
     const first = relayFlowInfo((pipelineOfRef(v, s) || {}).flow).first;
-    return first ? stepWho(first).agent : 'claude';
+    return first ? stepWho(first).agent : '';
   }
-  if (v === 'compete') return (s.competeAgents || []).includes('claude') ? 'claude' : '';
+  if (v === 'compete') return (s.competeAgents || []).includes('claude') && enabledAgents(s).includes('claude') ? 'claude' : '';
   if (isCustomRef(v)) return (findCustomAgent(v) || {}).agent || '';
   return v;
 }
@@ -4250,6 +4252,8 @@ function renderSettingsView() {
   const drawAgents = () => {
     const on = using();
     const list = on.length ? on : ['claude'];
+    // Claude Code だけの設定は、使うときだけ出す
+    for (const id of ['sAllowed', 'sDeleteSessions']) $(id)?.closest('label')?.classList.toggle('hidden', !on.includes('claude'));
     // 最初から選んでおくエージェント
     const dsel = $('sDefaultAgent');
     const cur = dsel.value || defaultAgent(s);
@@ -4411,7 +4415,7 @@ function renderSettingsView() {
       enabled: using(),
       customAgents: cas,
       modelSuggest: MODEL_SUGGEST,
-      defaultAgent: $('sDefaultAgent').value || 'claude',
+      defaultAgent: $('sDefaultAgent').value || using()[0],
       generate: (request, flow, agent) => api.generateFlow({ request, flow, agent, enabled: using(), customAgents: cas }),
       onSave: async (flow) => {
         // 工程で選んだカスタムエージェントも一緒に保存する（この画面で追加したばかりのものを使えるように）

@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const { LATE_MS, MAX_RUNS, cleanRule, cleanSchedule, nextRun, scheduleError } = require('../renderer/schedule-model');
 const { tr } = require('../renderer/i18n');
+const providers = require('./providers');
 
 const TICK_MS = 30 * 1000;
 // 登録・編集で変えられる項目（履歴や次回の日時は、ここからは変えられない）
@@ -165,14 +166,16 @@ class Scheduler extends EventEmitter {
       this.record(s, { at, status: 'failed', message: error });
       return { cards: [], error };
     }
+    // 登録したあとで使わない設定にしたエージェントなら、今使えるエージェント（最初から選んでおくもの）で動かす
+    const agentOff = providers.isAgent(s.agent) && !providers.isEnabled(this.store.settings, s.agent);
     let cards;
     try {
       cards = this.agents.createTask({
         title: s.title,
         prompt: s.prompt,
         skill: s.skill,
-        agent: s.agent,
-        model: s.model,
+        agent: agentOff ? undefined : s.agent,
+        model: agentOff ? undefined : s.model,
         readOnly: s.readOnly,
         repoPath: s.repoPath,
         skipSpecCheck: true,

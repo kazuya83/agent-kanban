@@ -471,6 +471,8 @@ app.whenReady().then(async () => {
   // Store のコンストラクタでは setLanguage しない。新規の既定フローを選んだ言語で作るため、先に決める
   I18n.setLanguage(languageForBoardFile(boardFile));
   store = new Store(boardFile);
+  // 初めて起動したときは、インストールされているエージェントを使う設定にする
+  store.adoptAgents(providers.AGENT_IDS.filter((a) => resolveCommand(providers.agentCommand(store.settings, a))));
   agents = new AgentManager(store, {
     // パッケージ後は asar の外に出した MCP スクリプトを使う
     mcpScript: path.join(__dirname, 'src', 'permission-mcp.js').replace('app.asar', 'app.asar.unpacked'),
@@ -911,7 +913,10 @@ app.whenReady().then(async () => {
       if (b) git.assertSafeRef(b, tr('ベースブランチ名'));
       patch = { ...patch, baseBranch: b };
     }
-    if (patch && 'enabledAgents' in patch) patch = { ...patch, enabledAgents: providers.cleanEnabledAgents(patch.enabledAgents) };
+    if (patch && 'enabledAgents' in patch) {
+      patch = { ...patch, enabledAgents: providers.cleanEnabledAgents(patch.enabledAgents) };
+      delete store.settings.agentsUnset; // ユーザーが決めたので、起動したときに選び直さない
+    }
     if (patch && 'defaultAgent' in patch && !providers.isAgent(patch.defaultAgent)) patch = { ...patch, defaultAgent: 'claude' };
     for (const k of ['codexPath', 'codexModel', 'geminiPath', 'geminiModel', 'cursorPath', 'cursorModel']) if (patch && k in patch) patch = { ...patch, [k]: String(patch[k] || '').trim() };
     if (patch && 'relaySteps' in patch) patch = { ...patch, relaySteps: providers.cleanRelaySteps(patch.relaySteps) };
@@ -942,7 +947,7 @@ app.whenReady().then(async () => {
   });
   // 文章の指示から Pipeline のフローチャートを作る・直す（保存はしない。編集画面で確かめてから保存してもらう）
   handle('flow:generate', ({ request, flow, agent, enabled, customAgents } = {}) => {
-    const use = providers.isAgent(agent) ? agent : 'claude';
+    const use = providers.isAgent(agent) ? agent : providers.defaultAgentOf(store.settings);
     const cwd = store.settings.repoPath || require('os').homedir();
     const ask = (prompt) => agents.askOnce(use, cwd, prompt, undefined, 300000);
     return require('./src/flow-ai').generateFlow(ask, { request, flow, defaultAgent: use, enabled: providers.cleanEnabledAgents(enabled), customAgents: providers.cleanCustomAgents(customAgents) });

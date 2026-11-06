@@ -9,8 +9,8 @@ const { tr } = I18n;
 
 // Pipelineのフローチャート（プロジェクトごと）の初期値: 前と同じ「実装 → レビュー」
 // 呼んだときの言語で作る。言語を変えると画面を読み直すので、新しいリポジトリは選んだ言語になる
-function defaultRelayFlow() {
-  return FlowModel.flowFromSteps(defaultRelaySteps());
+function defaultRelayFlow(enabled) {
+  return FlowModel.flowFromSteps(defaultRelaySteps(enabled));
 }
 const DEFAULT_RELAY_FLOW = defaultRelayFlow();
 function cloneFlow(f) {
@@ -321,6 +321,12 @@ function defaultRepoSettings() {
   return out;
 }
 
+// 保存してある、そのリポジトリの設定。初めて開くリポジトリは初期値にし、Pipeline は今使えるエージェントで組む
+function savedRepoSettings(settings, dir) {
+  const saved = (settings.repoSettings || {})[dir];
+  return pickRepoSettings(saved || { relayFlow: defaultRelayFlow(settings.enabledAgents) });
+}
+
 // 設定から、プロジェクトごとの項目だけを取り出す（足りない項目は初期値）
 function pickRepoSettings(src) {
   const out = defaultRepoSettings();
@@ -358,7 +364,7 @@ function repoSettingsOf(settings, dir) {
   const d = String(dir || '').trim();
   if (!settings) return defaultRepoSettings();
   if (!d || d === settings.repoPath) return pickRepoSettings(settings);
-  return pickRepoSettings((settings.repoSettings || {})[d]);
+  return savedRepoSettings(settings, d);
 }
 
 function hasRepoSettings(settings, dir) {
@@ -381,7 +387,7 @@ function stashRepoSettings(settings) {
 function switchRepoSettings(settings, dir) {
   stashRepoSettings(settings);
   const d = String(dir || '').trim();
-  const next = d ? pickRepoSettings(settings.repoSettings[d]) : defaultRepoSettings();
+  const next = d ? savedRepoSettings(settings, d) : defaultRepoSettings();
   settings.repoPath = d;
   Object.assign(settings, next);
   if (d) settings.repoSettings[d] = pickRepoSettings(next);
@@ -392,7 +398,7 @@ function setRepoSettings(settings, dir, patch) {
   const d = String(dir || '').trim();
   if (!settings || !d || !patch) return;
   const map = settings.repoSettings && typeof settings.repoSettings === 'object' && !Array.isArray(settings.repoSettings) ? { ...settings.repoSettings } : {};
-  const cur = pickRepoSettings(d === settings.repoPath ? settings : map[d]);
+  const cur = d === settings.repoPath ? pickRepoSettings(settings) : savedRepoSettings({ ...settings, repoSettings: map }, d);
   const relay = relayPatchOf(cur, patch);
   if (relay) patch = { ...patch, ...relay };
   const keys = Object.keys(patch).filter((k) => REPO_SETTING_KEYS.includes(k));
@@ -477,7 +483,7 @@ class Store {
     this.file = file;
     // 言語は main.js が setLanguage したあとに new Store する。ここでは setLanguage しない
     // 読めないときの初期 language は、その時点の表示言語（欠けたファイルは en、壊れたファイルは ja）
-    this.data = { settings: { ...DEFAULT_SETTINGS, language: I18n.getLanguage(), relaySteps: defaultRelaySteps(), relayFlow: cloneFlow(defaultRelayFlow()) }, cards: [], removedCost: {}, costLog: [], weeklyResetAt: 0, notifications: [], schedules: [] };
+    this.data = { settings: { ...DEFAULT_SETTINGS, language: I18n.getLanguage(), relaySteps: defaultRelaySteps(), relayFlow: cloneFlow(defaultRelayFlow()), agentsUnset: true }, cards: [], removedCost: {}, costLog: [], weeklyResetAt: 0, notifications: [], schedules: [] };
     this.timer = null;
     this.load();
   }
@@ -511,6 +517,25 @@ class Store {
     const tmp = `${this.file}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(this.data));
     fs.renameSync(tmp, this.file);
+  }
+
+  /**
+   * 使うエージェントをまだ決めていない（初めて起動した）ときに、インストールされているエージェントを使う設定にする。
+   * 見つからなければ何も変えず、次に起動したときにまた探す。ユーザーが設定を保存したあとは変えない
+   * @param {string[]} found 見つかったエージェント
+   * @returns {boolean} 変えたか
+   */
+  adoptAgents(found) {
+    const s = this.data.settings;
+    const list = (found || []).filter(isAgent);
+    if (!s.agentsUnset || !list.length) return false;
+    delete s.agentsUnset;
+    s.enabledAgents = cleanEnabledAgents(list);
+    s.defaultAgent = s.enabledAgents[0];
+    s.competeAgents = [...s.enabledAgents];
+    if (!s.repoPath) Object.assign(s, cleanRelayFlows([], '', defaultRelayFlow(s.enabledAgents)));
+    this.save();
+    return true;
   }
 
   get settings() {

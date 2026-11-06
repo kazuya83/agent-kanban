@@ -7,7 +7,8 @@
 #   scripts/after-merge-build.sh --status             → 今どこまで進んだかと、これまでの結果を出す
 #
 # 1. 今の main から一時的な worktree（ブランチ build-apps/<sha>）を作る
-# 2. そこで claude -p "/build-apps review" を動かす（テスト・3つの OS のビルド。落ちたら install.sh / install.ps1 などを直す）
+# 2. そこでエージェントに /build-apps review を頼む（テスト・3つの OS のビルド。落ちたら install.sh / install.ps1 などを直す）
+#    エージェントは claude → codex → gemini → cursor-agent の順に、見つかったものを使う
 # 3. 直したところがあればコミットし、scripts/build-all.sh をもう一度動かして確かめる。なければ dist/ のファイルがそろっているかを確かめる
 # 4. 通って、直したところがあれば、main にマージして origin に push する
 # 5. ビルドしたコミットが origin/main に入っていて、scripts/next-version.js が「出す」と決めたら、
@@ -17,7 +18,7 @@
 # 進み具合: 段階ごとに macOS の通知を出し、.git/build-apps/status（今の段階）と
 #           .git/build-apps/history.log（1 回の実行を 1 行）に書く。細かいログは .git/build-apps/logs/
 #
-# 環境変数: AFTER_MERGE_CLAUDE（claude の場所）, AFTER_MERGE_GH（gh の場所）, AFTER_MERGE_BUILD_ALL（確かめに使うビルドのコマンド）,
+# 環境変数: AFTER_MERGE_AGENT（使うエージェント: claude / codex / gemini / cursor）, AFTER_MERGE_CLAUDE（claude の場所）, AFTER_MERGE_GH（gh の場所）, AFTER_MERGE_BUILD_ALL（確かめに使うビルドのコマンド）,
 #           AFTER_MERGE_NO_PUSH=1（push しない）, AFTER_MERGE_NO_RELEASE=1（Release を出さない）,
 #           AFTER_MERGE_NO_NOTIFY=1（通知を出さない）
 set -uo pipefail
@@ -249,6 +250,49 @@ release_built() {
   return 0
 }
 
+# ---- 使うエージェント ----
+agent=""
+agent_bin=""
+# エージェントの名前からコマンドを決める
+agent_command() {
+  case "$1" in
+    claude) echo "$claude_bin" ;;
+    codex | gemini) echo "$1" ;;
+    cursor | cursor-agent) echo cursor-agent ;;
+    *) return 1 ;;
+  esac
+}
+# AFTER_MERGE_AGENT があればそれを、なければ見つかったものを使う
+pick_agent() {
+  local a c
+  for a in ${AFTER_MERGE_AGENT:-claude codex gemini cursor}; do
+    c="$(agent_command "$a")" || continue
+    if command -v "$c" >/dev/null 2>&1; then
+      agent="$a"
+      agent_bin="$c"
+      return 0
+    fi
+  done
+  return 1
+}
+# スキルを頼む1行目（Claude Code はスラッシュコマンド、ほかは SKILL.md の場所を伝える）
+skill_line() {
+  if [ "$agent" = claude ]; then
+    echo "/build-apps review"
+  else
+    echo ".claude/skills/build-apps/SKILL.md の手順に従って、review を行ってください"
+  fi
+}
+# 誰も見ていないところで最後まで動かす。一時的な worktree の中で、ビルドのためにコマンドとネットワークを使えるようにする
+run_agent() {
+  case "$agent" in
+    claude) "$agent_bin" -p "$1" --permission-mode acceptEdits --allowedTools "Bash Read Edit Write Glob Grep" ;;
+    codex) "$agent_bin" exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox "$1" ;;
+    gemini) "$agent_bin" -p "$1" --skip-trust --approval-mode yolo ;;
+    *) "$agent_bin" -p --trust --force "$1" ;;
+  esac
+}
+
 run_once() {
   local sha short branch wt version target changed=0
   sha="$("${G[@]}" rev-parse main)" || return 1
@@ -270,16 +314,15 @@ run_once() {
   mkdir -p "$(dirname "$wt")"
   "${G[@]}" worktree add -B "$branch" "$wt" "$sha" >>"$log" 2>&1 || { fail "worktree を作れませんでした"; return 1; }
 
-  command -v "$claude_bin" >/dev/null 2>&1 || { fail "claude が見つかりません（AFTER_MERGE_CLAUDE で場所を指定できます）"; return 1; }
-  say "claude -p /build-apps review"
+  pick_agent || { fail "エージェントが見つかりません（claude / codex / gemini / cursor-agent のどれかを入れるか、AFTER_MERGE_AGENT・AFTER_MERGE_CLAUDE で指定してください）"; return 1; }
+  say "$agent で /build-apps review"
   (
-    cd "$wt" && "$claude_bin" -p "/build-apps review
+    cd "$wt" && run_agent "$(skill_line)
 
 これは main にマージしたあとの自動の実行です。ユーザーには質問できないので、最後まで自分で進めてください。
 - scripts/build-all.sh が通るまで、落ちたところ（install.sh / install.ps1 など）を直してください
 - コミット・マージ・push・リリースはしないでください（このあとスクリプトが行います）
-- 直しきれないときは、直さずにそのまま終えて、理由を書いてください" \
-      --permission-mode acceptEdits --allowedTools "Bash Read Edit Write Glob Grep"
+- 直しきれないときは、直さずにそのまま終えて、理由を書いてください"
   ) </dev/null >>"$log" 2>&1 || { fail "/build-apps が失敗しました（worktree: ${wt}）"; return 1; }
 
   cd "$wt" || return 1

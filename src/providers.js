@@ -383,12 +383,19 @@ function createParser(a, opts = {}) {
 
 // ---------- オーケストレーション ----------
 
+// Pipeline の初期値の「実装」「レビュー」を動かすエージェント。
+// 今使えるエージェントの中から選ぶ（Codex と Claude Code なら Codex → Claude Code。1つだけなら両方その1つ）
+function relayStepAgents(enabled) {
+  const on = Array.isArray(enabled) && enabled.length ? enabled : ['codex', 'claude'];
+  return [on.find((a) => a !== 'claude') || on[0], on.includes('claude') ? 'claude' : on[on.length - 1]];
+}
 // Pipeline（順番に引き継ぐ）の工程の初期値。呼んだときの言語で作る（新規インストールと、新しいリポジトリ）
-function defaultRelaySteps() {
+function defaultRelaySteps(enabled) {
+  const [impl, review] = relayStepAgents(enabled);
   return [
-    { agent: 'codex', label: tr('実装'), instruction: tr('タスクの指示に沿って実装してください。必要ならテストも追加・実行してください。') },
+    { agent: impl, label: tr('実装'), instruction: tr('タスクの指示に沿って実装してください。必要ならテストも追加・実行してください。') },
     {
-      agent: 'claude',
+      agent: review,
       label: tr('レビュー'),
       instruction: tr('前の工程の変更をレビューしてください（git log / git diff でベースブランチからの変更を確かめられます）。バグ・抜け・テスト不足があれば直し、最後に何を確かめて何を直したかを短く報告してください。'),
     },

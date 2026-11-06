@@ -79,7 +79,7 @@ git config core.hooksPath .githooks
 ```
 
 - `.githooks/post-merge` runs `scripts/after-merge-build.sh` in the background. The merge itself finishes right away
-- It creates a temporary worktree (branch `build-apps/<sha>`) from the merged main and runs the tests and the three OS builds with `claude -p "/build-apps review"`. If something fails, Claude fixes install.sh / install.ps1 and the like
+- It creates a temporary worktree (branch `build-apps/<sha>`) from the merged main and asks an agent to run `/build-apps review` (the tests and the three OS builds). If something fails, the agent fixes install.sh / install.ps1 and the like. It uses the first of `claude`, `codex`, `gemini`, `cursor-agent` that it finds (set `AFTER_MERGE_AGENT` to choose; agents other than Claude Code run without permission prompts)
 - The built files are copied to `dist/` in the folder where main is checked out
 - If anything was fixed, it commits and builds again to confirm. If that passes, it merges into main and pushes to `origin/main`. If nothing was fixed, it neither merges nor pushes
 - **When the build passes, it publishes a GitHub Release right away.** It uses the built files as they are and does not build again. The version number and whether to release are decided by `scripts/next-version.js`, the same as `scripts/release-local.sh` (changes to only the README, docs, or tests are not released)
