@@ -1,4 +1,4 @@
-/* global api, icon, agentIcon, NOTIF_ICON */
+/* global api, icon, agentIcon, NOTIF_ICON, AppView */
 const COLUMNS = [
   { key: 'todo', label: 'Todo', statuses: ['todo'], hint: 'ここから「実行中」へドラッグしても開始できます。レビューと完了のあいだも、ドラッグで動かせます' },
   { key: 'running', label: '実行中', statuses: ['queued', 'running'] },
@@ -102,7 +102,7 @@ function pipelineOfRef(v, s = state.board.settings || {}) {
   return isRelayRef(v) ? pipelines(s).find((p) => p.id === v.slice(RELAY_PREFIX.length)) || null : null;
 }
 
-const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'chat', logs: new Map(), headSig: '', relayOpen: new Set(), chartZoom: null };
+const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'chat', logs: new Map(), headSig: '', relayOpen: new Set(), chartZoom: null, view: AppView.loadView(localStorage) };
 const $ = (id) => document.getElementById(id);
 // index.html の data-icon="名前" の場所に、モノクロの SVG アイコンを入れる（icons.js）
 for (const el of document.querySelectorAll('[data-icon]')) el.outerHTML = icon(el.dataset.icon, el.className);
@@ -483,6 +483,7 @@ function orchChipsHtml(c) {
   }
   else if (c.persona) chips.push(`<span class="orch-chip agent persona" style="--pc:${esc(c.persona.color || '#6366f1')}" title="${esc(c.persona.description || 'カスタムエージェント')}">${personaIcon(c.persona, agentOf(c))}${esc(whoLabel(agentOf(c), c.persona))}</span>`);
   else chips.push(`<span class="orch-chip agent">${agentIcon(agentOf(c))}${esc(agentLabel(agentOf(c)))}</span>`);
+  if (c.scheduleId) chips.push(`<span class="orch-chip schedule" title="スケジュール「${esc(c.scheduleTitle || '')}」から作られたタスクです">${icon('calendar')}${esc(c.scheduleTitle || 'スケジュール')}</span>`);
   if (c.compete) {
     const n = competitors(c).length;
     chips.push(c.compete.adopted ? `<span class="orch-chip compete">${icon('flag')}採用した案</span>` : `<span class="orch-chip compete" title="同じタスクを複数のエージェントで解いています">${icon('flag')}競争 ${n}案</span>`);
@@ -648,6 +649,43 @@ function renderRemoteInfo() {
   el.onclick = () => openRemoteSettings();
 }
 
+// 表示する画面（カンバン管理 / タスクスケジューラ）を DOM に反映する
+function applyView() {
+  const scheduler = state.view === 'scheduler';
+  $('board').classList.toggle('hidden', scheduler);
+  $('schedulerView').classList.toggle('hidden', !scheduler);
+  document.querySelectorAll('#navMenu [data-view]').forEach((b) => {
+    const on = b.dataset.view === state.view;
+    b.classList.toggle('active', on);
+    if (on) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
+}
+
+function setView(view) {
+  const next = AppView.normalizeView(view);
+  if (next === state.view) return;
+  state.view = next;
+  AppView.saveView(localStorage, next);
+  applyView();
+  // タスク詳細はカンバンの横に開くものなので、スケジューラ画面では閉じる
+  if (next === 'scheduler' && state.selected) closeDetail();
+  else renderBoard();
+}
+
+// スケジューラ画面を描く。scheduler-view.js が読み込めていなくても、ほかの画面は止めない
+function renderSchedulerView() {
+  if (typeof window.SchedulerView?.render === 'function') window.SchedulerView.render();
+  else $('schedulerView').innerHTML = '<div class="empty-state"><h2>タスクスケジューラを読み込めませんでした</h2><p>アプリを開き直しても直らないときは、最新の版に更新してください。</p></div>';
+}
+
+// タスクの内容をコピーして、スケジュールの登録画面を開く
+function openScheduleEditor(c) {
+  if (typeof window.SchedulerView?.openEditor !== 'function') return toast('タスクスケジューラを読み込めませんでした');
+  setView('scheduler');
+  window.SchedulerView.openEditor({ fromCard: c });
+}
+
 function renderBoard() {
   const { settings, cards } = state.board;
   renderInterruptBanner();
@@ -657,6 +695,7 @@ function renderBoard() {
   renderNotifications();
   renderChatBtn();
   $('runInfo').textContent = `実行中 ${running}/${settings.maxParallel || 1}`;
+  if (state.view === 'scheduler') return renderSchedulerView();
 
   if (!settings.repoPath) {
     $('board').innerHTML = viewingHost()
@@ -897,6 +936,7 @@ async function selectNew(id) {
 }
 
 async function select(id, { subFrom = null } = {}) {
+  setView('kanban'); // 通知や履歴からスケジューラ画面で開いても、カードが見えるようにする
   state.selected = id;
   state.headSig = '';
   // サブタスクを親の「サブタスク」タブから開いたときは、閉じると親に戻る
@@ -1784,6 +1824,7 @@ function renderDetailHead() {
     // 完了したタスクは開き直さない。修正は別のタスクにする（このタスクのやりとりを引き継ぐ）
     s === 'done' && `<button class="btn" data-act="fixTask" title="このタスクのやりとり（完了後の会話も含む）を引き継いで、修正のための新しいタスクを作ります">${icon('wrench')}修正タスクを作る</button>`,
     (c.worktreePath || isNoGit(c)) && `<button class="btn ghost" data-act="open">フォルダを開く</button>`,
+    AppView.canSchedule(c) && `<button class="btn ghost" data-act="schedule" title="このタスクの内容をコピーして、スケジュールに登録します（添付ファイルはコピーしません）">${icon('calendar')}スケジュール登録</button>`,
     // 完了したタスク（完了後の会話の途中も含む）は削除できない
     s !== 'done' && !c.afterDone && `<button class="btn danger" data-act="discard">破棄</button>`,
   ].filter(Boolean);
@@ -1983,6 +2024,7 @@ async function detailAction(e) {
     if (id) selectNew(id);
     return;
   }
+  if (act === 'schedule') return openScheduleEditor(c);
   if (act === 'discard' && isChat(c)) {
     if (confirm(`会話「${c.title}」をボードから削除しますか？\n${agentOf(c) === 'claude' ? '（Claude Code の会話の記録は残るので、あとで「既存の会話」から引き継げます）' : ''}`)) {
       await runBusy('削除しています…', () => api.discard(c.id), '削除しました');
@@ -5270,6 +5312,13 @@ api.appInfo().then(
   ro.observe(panel);
   ro.observe(title);
 })();
+
+AppView.bindNavMenu({ button: $('navBtn'), menu: $('navMenu'), doc: document, onSelect: setView });
+applyView();
+// scheduler-view.js は renderer.js のあとに読むので、最初の描画に間に合わなかったときは読み終わってから描き直す
+document.addEventListener('DOMContentLoaded', () => {
+  if (state.view === 'scheduler') renderSchedulerView();
+});
 
 (async () => {
   state.board = await api.getBoard();
