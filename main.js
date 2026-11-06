@@ -96,7 +96,7 @@ function createWindow() {
       sandbox: true,
     },
   });
-  // アプリの画面以外へは移動させない。新しいウインドウも開かせない（リンクは open:external で許可した URL だけを外部ブラウザで開く）
+  // アプリの画面以外へは移動させない。新しいウインドウも開かせない（リンクは open:external で http(s) の URL だけをデフォルトブラウザで開く）
   const appUrl = require('url').pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).href;
   win.webContents.on('will-navigate', (e, url) => {
     if (url !== appUrl) e.preventDefault();
@@ -966,8 +966,9 @@ app.whenReady().then(async () => {
     return { slug, gh: !!resolveCommand('gh') };
   });
   handle('open:external', async (url) => {
-    if (!/^https:\/\/([a-z0-9-]+\.)?github\.com\//.test(String(url))) throw new Error('開けない URL です');
-    await shell.openExternal(url);
+    const target = require('./src/external-url').externalUrl(url);
+    if (!target) throw new Error('開けない URL です');
+    await shell.openExternal(target);
   });
   // gh（GitHub CLI）: 状態の確認・インストール・ログイン
   const gh = require('./src/gh');
