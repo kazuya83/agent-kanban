@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// テスト用の偽 Codex CLI / 偽 Gemini CLI / 偽 Cursor CLI（1つ目の引数 codex / gemini / cursor で切り替える）。
+// テスト用の偽 Codex CLI / 偽 Antigravity CLI / 偽 Gemini CLI / 偽 Cursor CLI（1つ目の引数 codex / antigravity / gemini / cursor で切り替える）。
 // 本物と同じく、指示を stdin から（Cursor は最後の引数から）読み、cwd にファイルを書いて、JSONL のイベントを出す。
 // 受け取った引数は FAKE_ARGS_LOG があればそこに1行ずつ追記する
 const fs = require('fs');
@@ -70,6 +70,30 @@ process.stdin.on('end', async () => {
     else if (judging && prompt.includes('[judge]')) verdict = prompt.split('\n')[0].includes('回目') ? '\n[[RESULT:pass]]' : '\n直してください\n[[RESULT:fail]]';
     out({ type: 'item.completed', item: { id: 'item_2', type: 'agent_message', text: ask ? 'どちらにしますか？' : `codex done: ${prompt.split('\n')[0]}${verdict}` } });
     out({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } });
+    process.exit(0);
+  }
+  if (kind === 'antigravity') {
+    // 本物の agy 1.5 の出力と同じ形（--output-format stream-json）。種類は event に入っている
+    const sid = opt('--conversation') || `agy-conv-${process.pid}`;
+    const step = (o) => out({ event: 'step_update', step_update: { conversation_id: sid, ...o } });
+    out({ event: 'init', conversation_id: sid, init: { cwd: process.cwd(), tools: ['run_command'], permission_mode: args.includes('--dangerously-skip-permissions') ? 'always-proceed' : 'request-review', ...(opt('--model') ? { model: opt('--model') } : {}) } });
+    step({ step_index: 0, state: 'DONE', step_type: 'user_input' });
+    step({ step_index: 1, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'ファイルを' });
+    step({ step_index: 1, state: 'DONE', step_type: 'agent_response', text_delta: '作ります\n' });
+    step({ step_index: 2, state: 'ACTIVE', step_type: 'tool', tool_name: 'write_file', tool_info: { name: 'write_file', parameters: { Path: file } } });
+    if (opt('--mode') === 'plan' || (opt('--mode') !== 'accept-edits' && !args.includes('--dangerously-skip-permissions'))) {
+      // 許可されていないと、確認を出せないのでその場で拒否される
+      step({ step_index: 2, state: 'ERROR', step_type: 'tool', tool_name: 'write_file', tool_info: { name: 'write_file', parameters: { Path: file }, error: { type: 'TOOL_ERROR', message: 'permission check failed' } } });
+    } else {
+      fs.writeFileSync(file, `${prompt}\n`);
+      step({ step_index: 2, state: 'DONE', step_type: 'tool', tool_name: 'write_file', tool_info: { name: 'write_file', parameters: { Path: file } } });
+    }
+    if (fail) {
+      out({ event: 'result', result: { conversation_id: sid, status: 'ERROR', response: '', error: 'agy boom', num_turns: 1, finished_reason: 'error' } });
+      process.exit(3);
+    }
+    step({ step_index: 3, state: 'DONE', step_type: 'agent_response', text_delta: `antigravity done: ${prompt.split('\n')[0]}\n` });
+    out({ event: 'result', result: { conversation_id: sid, status: 'SUCCESS', response: 'done', num_turns: 1 } });
     process.exit(0);
   }
   if (kind === 'gemini') {

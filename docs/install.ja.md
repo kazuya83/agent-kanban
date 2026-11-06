@@ -86,7 +86,9 @@ $env:WORKTREE_KANBAN_UNINSTALL = "1"; irm https://raw.githubusercontent.com/kazu
 > - **Mac**: 「開発元を検証できません」と出たら、アプリを右クリックして「開く」を選びます。それでも開けないときは、ターミナルで `xattr -cr "/Applications/Worktree Kanban.app"` を実行してください
 > - **Windows**: 「Windows によって PC が保護されました」と出たら、「詳細情報」→「実行」を押します
 
-アプリとは別に、**git** と、使うエージェントの CLI（**Claude Code / Codex CLI / Gemini CLI / Cursor CLI** のどれか。ログイン済み）が必要です。アプリは、ターミナルの PATH にある `claude` / `codex` / `gemini` / `cursor-agent` を自動で探します。見つからないときは、画面の上に案内が出ます（メニューの設定の「使うエージェント」でフルパスを指定することもできます）。
+アプリとは別に、**git** と、使うエージェントの CLI（**Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI** のどれか。ログイン済み）が必要です。アプリは、ターミナルの PATH にある `claude` / `codex` / `agy` / `gemini` / `cursor-agent` を自動で探します。見つからないときは、画面の上に案内が出ます（メニューの設定の「使うエージェント」でフルパスを指定することもできます）。
+
+Antigravity CLI は `curl -fsSL https://antigravity.google/cli/install.sh | bash` で入れて、一度 `agy` を起動してログインしておきます。Gemini CLI は、個人のアカウントでは使えなくなりました（[詳しくは](agents.ja.md)）。
 
 ## Windows で WSL（Ubuntu など）のリポジトリを使う
 

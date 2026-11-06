@@ -12,7 +12,7 @@ Mac と Windows を相互に遠隔操作できます。
 [![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
-[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
+[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Antigravity%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
 
 [English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
@@ -25,7 +25,7 @@ Mac と Windows を相互に遠隔操作できます。
 
 </div>
 
-AI コーディングエージェントの CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を、タスクごとに別々の git worktree で並列に動かし、カンバンボードで管理するデスクトップアプリです（Electron、Mac / Windows / Linux）。**1 つのリポジトリの中だけでなく、複数のリポジトリのタスクも同時に動かせます**。
+AI コーディングエージェントの CLI（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI）を、タスクごとに別々の git worktree で並列に動かし、カンバンボードで管理するデスクトップアプリです（Electron、Mac / Windows / Linux）。**1 つのリポジトリの中だけでなく、複数のリポジトリのタスクも同時に動かせます**。
 
 ![ボード: Todo・実行中・レビュー・完了の列。実行中のカードには、質問・承認待ち・作業中の状態が出ている](docs/images/ja/board.png)
 
@@ -34,7 +34,7 @@ AI コーディングエージェントの CLI（Claude Code / Codex CLI / Gemin
 - **Mac と Windows を相互に遠隔操作** — エージェントを動かす PC のボードを、別の PC からそのまま操作できます。承認、質問への回答、追加の指示、マージもできます。
 - **1 タスクに 1 つの worktree** — タスクごとに別々の git worktree とブランチで動くので、タスク同士や手元の作業ツリーとぶつかりません。
 - **複数のリポジトリを同時に** — 最大 3 つのリポジトリをタブで開けます。タブを切り替えても、ほかのタスクは止まりません。
-- **いつもの CLI をそのまま** — Claude Code、Codex CLI、Gemini CLI、Cursor CLI を、今のログインや設定のまま使えます。
+- **いつもの CLI をそのまま** — Claude Code、Codex CLI、Antigravity CLI、Gemini CLI、Cursor CLI を、今のログインや設定のまま使えます。
 - **最後は人が決める** — マージや PR の前に差分を確かめられます。Claude Code なら、操作の承認もカードで行えます。
 - **手元で完結** — ボードの状態はこの PC に保存します。外部のサーバーは使いません。
 
@@ -58,7 +58,7 @@ flowchart LR
 - **終わったら、マージ（`--no-ff`）か PR の作成（`gh`）で取り込みます**。マージ先のブランチは選べ、マージしたあとに origin へ push することもできます
 - ボードの状態は Electron の userData フォルダの `board.json` に保存します。外部のサーバーは使いません
 
-Codex / Gemini / Cursor では、CLI の制約から、カードでの承認・選択肢の質問・btw・金額の表示が使えません（詳しくは [docs/agents.ja.md](docs/agents.ja.md)）。
+Codex / Antigravity / Gemini / Cursor では、CLI の制約から、カードでの承認・選択肢の質問・btw・金額の表示が使えません（詳しくは [docs/agents.ja.md](docs/agents.ja.md)）。
 
 ## 主な機能
 
@@ -211,7 +211,7 @@ Claude Code が `AskUserQuestion` で質問すると、カードが「質問」�
 ## 必要なもの
 
 - git
-- 使うエージェントの CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI のどれか）。ログインを済ませておきます
+- 使うエージェントの CLI（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI のどれか）。ログインを済ませておきます
 - GitHub の Issue・PR の機能を使うときは `gh`（アプリから入れることもできます）
 
 ## インストール
@@ -242,7 +242,7 @@ irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 
 | ドキュメント | 内容 |
 | --- | --- |
 | [画面と使い方](docs/usage.ja.md) | 承認・質問・仕様の確認・タスクスケジューラ・スキル・会話・btw・マージ / PR・Issue のステータス・通知・コンフリクトなど、機能ごとの使い方 |
-| [エージェントとオーケストレーション](docs/agents.ja.md) | Claude Code / Codex / Gemini / Cursor の違い、Pipeline・競争 |
+| [エージェントとオーケストレーション](docs/agents.ja.md) | Claude Code / Codex / Antigravity / Gemini / Cursor の違い、Pipeline・競争 |
 | [設定](docs/settings.ja.md) | トップバーのメニューから開く設定の画面と項目 |
 | [遠隔操作](docs/remote.ja.md) | 別の PC から SSH トンネルでボードを操作する手順と、つながらないときの直し方 |
 | [インストール](docs/install.ja.md) | インストール・アップデート・アンインストール、Windows で WSL のリポジトリを使う |

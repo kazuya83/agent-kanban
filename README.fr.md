@@ -12,7 +12,7 @@ Mac et Windows peuvent se contrôler mutuellement à distance.
 [![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
-[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
+[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Antigravity%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
 
 [English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
@@ -25,7 +25,7 @@ Mac et Windows peuvent se contrôler mutuellement à distance.
 
 </div>
 
-Application de bureau (Electron, Mac / Windows / Linux) qui lance en parallèle les CLI d'agents de code IA (Claude Code / Codex CLI / Gemini CLI / Cursor CLI), chaque tâche dans son propre git worktree, et les suit sur un tableau kanban. **Elle ne se limite pas à un seul dépôt : elle peut aussi faire avancer en même temps des tâches de plusieurs dépôts.**
+Application de bureau (Electron, Mac / Windows / Linux) qui lance en parallèle les CLI d'agents de code IA (Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI), chaque tâche dans son propre git worktree, et les suit sur un tableau kanban. **Elle ne se limite pas à un seul dépôt : elle peut aussi faire avancer en même temps des tâches de plusieurs dépôts.**
 
 ![Tableau : colonnes À faire, En cours, Revue et Terminé. Les cartes en cours affichent une question, une attente d'approbation ou un travail en cours](docs/images/fr/board.png)
 
@@ -34,7 +34,7 @@ Application de bureau (Electron, Mac / Windows / Linux) qui lance en parallèle 
 - **Contrôle à distance Mac ⇄ Windows** — faites tourner les agents sur un PC et pilotez le même tableau depuis l'autre : approuvez, répondez aux questions, envoyez des instructions et fusionnez.
 - **Une tâche, un worktree** — chaque tâche a son propre worktree git et sa branche : elles n'entrent en conflit ni entre elles ni avec votre arbre de travail.
 - **Plusieurs dépôts à la fois** — ouvrez jusqu'à 3 dépôts en onglets ; changer d'onglet n'arrête rien.
-- **Les CLI que vous utilisez déjà** — Claude Code, Codex CLI, Gemini CLI et Cursor CLI, avec votre connexion et vos réglages actuels.
+- **Les CLI que vous utilisez déjà** — Claude Code, Codex CLI, Antigravity CLI, Gemini CLI et Cursor CLI, avec votre connexion et vos réglages actuels.
 - **Vous gardez la main** — vérifiez le diff avant de fusionner ou d'ouvrir une PR. Avec Claude Code, vous approuvez aussi les actions sur la carte.
 - **Tout en local** — l'état du tableau reste sur votre machine. Il n'y a pas de serveur externe.
 
@@ -58,7 +58,7 @@ flowchart LR
 - **Une fois terminé, vous intégrez le travail par un merge (`--no-ff`) ou en ouvrant un PR (`gh`).** Vous choisissez la branche cible, et vous pouvez pousser vers origin après le merge
 - L'état du tableau est enregistré dans `board.json`, dans le dossier userData d'Electron. Il n'y a pas de serveur externe
 
-Avec Codex / Gemini / Cursor, à cause des limites de la CLI, l'approbation sur la carte, les questions à choix, btw et l'affichage du coût ne sont pas disponibles (détails dans [docs/agents.md](docs/agents.md) (English)).
+Avec Codex / Antigravity / Gemini / Cursor, à cause des limites de la CLI, l'approbation sur la carte, les questions à choix, btw et l'affichage du coût ne sont pas disponibles (détails dans [docs/agents.md](docs/agents.md) (English)).
 
 ## Fonctions principales
 
@@ -221,7 +221,7 @@ Depuis le menu de la barre du haut, passez au « Planificateur de tâches » pou
 ## Prérequis
 
 - git
-- La CLI de l'agent que vous utilisez (l'un de Claude Code / Codex CLI / Gemini CLI / Cursor CLI), déjà connectée
+- La CLI de l'agent que vous utilisez (l'un de Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI), déjà connectée
 - `gh`, si vous utilisez les Issues et les PR GitHub (vous pouvez aussi l'installer depuis l'application)
 
 ## Installation
@@ -252,7 +252,7 @@ Les mêmes commandes mettent à jour vers la dernière version. Vous pouvez auss
 | Document | Contenu |
 | --- | --- |
 | [Écran et utilisation](docs/usage.md) (English) | Utilisation de chaque fonction : approbation, questions, vérification de la spécification, planificateur de tâches, skills, conversation, btw, merge / PR, état des Issues, notifications, conflits, et le reste |
-| [Agents et orchestration](docs/agents.md) (English) | Différences entre Claude Code / Codex / Gemini / Cursor, Pipeline et compétition |
+| [Agents et orchestration](docs/agents.md) (English) | Différences entre Claude Code / Codex / Antigravity / Gemini / Cursor, Pipeline et compétition |
 | [Réglages](docs/settings.md) (English) | L'écran des réglages ouvert depuis le menu de la barre du haut, et ses rubriques |
 | [Contrôle à distance](docs/remote.md) (English) | Comment piloter le tableau depuis un autre PC par un tunnel SSH, et comment réparer une connexion qui échoue |
 | [Installation](docs/install.md) (English) | Installation, mise à jour, désinstallation, et utilisation d'un dépôt WSL sous Windows |

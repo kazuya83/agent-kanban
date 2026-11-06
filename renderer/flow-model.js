@@ -34,7 +34,7 @@
     return type || '';
   }
   const NODE_TYPES = ['start', 'step', 'if', 'parallel', 'join', 'end'];
-  const AGENT_IDS = ['claude', 'codex', 'gemini', 'cursor'];
+  const AGENT_IDS = ['claude', 'codex', 'antigravity', 'gemini', 'cursor'];
   const MAX_NODES = 40;
   const MAX_STEPS = 16;
   const MAX_EDGES = 80;

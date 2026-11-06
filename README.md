@@ -12,7 +12,7 @@ Mac and Windows can each remotely operate the other.
 [![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
-[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
+[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Antigravity%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
 
 [English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
@@ -25,7 +25,7 @@ Mac and Windows can each remotely operate the other.
 
 </div>
 
-A desktop app (Electron, Mac / Windows / Linux) that runs AI coding-agent CLIs (Claude Code / Codex CLI / Gemini CLI / Cursor CLI) in parallel, each task in its own git worktree, and manages them on a kanban board. **It can run tasks from more than one repository at the same time, not only tasks inside a single repository.**
+A desktop app (Electron, Mac / Windows / Linux) that runs AI coding-agent CLIs (Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI) in parallel, each task in its own git worktree, and manages them on a kanban board. **It can run tasks from more than one repository at the same time, not only tasks inside a single repository.**
 
 ![Board: Todo, Running, Review, and Done columns. Cards in Running show question, waiting-for-approval, and working states](docs/images/en/board.png)
 
@@ -34,7 +34,7 @@ A desktop app (Electron, Mac / Windows / Linux) that runs AI coding-agent CLIs (
 - **Mac ⇄ Windows remote control** — run agents on one PC and operate the same board from the other: approve, answer questions, send instructions, and merge.
 - **One task, one worktree** — each task gets its own git worktree and branch, so tasks never collide with each other or with your working tree.
 - **Several repositories at once** — keep up to 3 repositories open as tabs; switching tabs does not stop anything.
-- **The CLIs you already use** — Claude Code, Codex CLI, Gemini CLI, and Cursor CLI, with the sign-in and settings you have today.
+- **The CLIs you already use** — Claude Code, Codex CLI, Antigravity CLI, Gemini CLI, and Cursor CLI, with the sign-in and settings you have today.
 - **You stay in charge** — check the diff before you merge or open a PR. With Claude Code, you also approve actions on the card.
 - **Local by design** — board state stays on your machine. There is no external server.
 
@@ -58,7 +58,7 @@ flowchart LR
 - **When it finishes, you bring the work in by merging (`--no-ff`) or opening a PR (`gh`).** You can choose the target branch, and you can push to origin after the merge
 - Board state is stored in `board.json` in Electron's userData folder. There is no external server
 
-On Codex / Gemini / Cursor, in-card approval, multiple-choice questions, btw, and cost display are unavailable because of CLI limits (see [docs/agents.md](docs/agents.md)).
+On Codex / Antigravity / Gemini / Cursor, in-card approval, multiple-choice questions, btw, and cost display are unavailable because of CLI limits (see [docs/agents.md](docs/agents.md)).
 
 ## Features
 
@@ -221,7 +221,7 @@ From the menu in the top bar, switch to "Task scheduler" to manage schedules tha
 ## Requirements
 
 - git
-- The CLI of the agent you use (one of Claude Code / Codex CLI / Gemini CLI / Cursor CLI), already signed in
+- The CLI of the agent you use (one of Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI), already signed in
 - `gh`, if you use GitHub Issues and PRs (you can also install it from the app)
 
 ## Install
@@ -252,7 +252,7 @@ The same commands update to the latest version. You can also update from the app
 | Document | Contents |
 | --- | --- |
 | [Screen and usage](docs/usage.md) | How to use each feature: approval, questions, spec check, task scheduler, skills, chat, btw, merge / PR, Issue status, notifications, conflicts, and more |
-| [Agents and orchestration](docs/agents.md) | Differences between Claude Code / Codex / Gemini / Cursor, Pipeline and competition |
+| [Agents and orchestration](docs/agents.md) | Differences between Claude Code / Codex / Antigravity / Gemini / Cursor, Pipeline and competition |
 | [Settings](docs/settings.md) | The settings screen opened from the top-bar menu, and its items |
 | [Remote control](docs/remote.md) | How to operate the board from another PC over an SSH tunnel, and how to fix a connection that fails |
 | [Install](docs/install.md) | Install, update, uninstall, and using a WSL repository on Windows |

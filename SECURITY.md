@@ -27,7 +27,7 @@ In scope, for example:
 
 Out of scope:
 
-- Vulnerabilities in the agent CLIs themselves (Claude Code, Codex CLI, Gemini CLI, Cursor CLI), `git`, `gh`, or `ssh`. Please report those to their own projects.
+- Vulnerabilities in the agent CLIs themselves (Claude Code, Codex CLI, Antigravity CLI, Gemini CLI, Cursor CLI), `git`, `gh`, or `ssh`. Please report those to their own projects.
 - Actions an agent takes after you approved them, or that your permission mode or `--allowedTools` allows automatically
 - Issues that need an attacker who already controls your user account on the machine
 - The warning the OS shows on first launch. The builds are not signed with a developer certificate.

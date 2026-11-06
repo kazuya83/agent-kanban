@@ -8,7 +8,7 @@
 #
 # 1. 今の main から一時的な worktree（ブランチ build-apps/<sha>）を作る
 # 2. そこでエージェントに /build-apps review を頼む（テスト・3つの OS のビルド。落ちたら install.sh / install.ps1 などを直す）
-#    エージェントは claude → codex → gemini → cursor-agent の順に、見つかったものを使う
+#    エージェントは claude → codex → agy → gemini → cursor-agent の順に、見つかったものを使う
 # 3. 直したところがあればコミットし、scripts/build-all.sh をもう一度動かして確かめる。なければ dist/ のファイルがそろっているかを確かめる
 # 4. 通って、直したところがあれば、main にマージして origin に push する
 # 5. ビルドしたコミットが origin/main に入っていて、scripts/next-version.js が「出す」と決めたら、
@@ -18,7 +18,7 @@
 # 進み具合: 段階ごとに macOS の通知を出し、.git/build-apps/status（今の段階）と
 #           .git/build-apps/history.log（1 回の実行を 1 行）に書く。細かいログは .git/build-apps/logs/
 #
-# 環境変数: AFTER_MERGE_AGENT（使うエージェント: claude / codex / gemini / cursor）, AFTER_MERGE_CLAUDE（claude の場所）, AFTER_MERGE_GH（gh の場所）, AFTER_MERGE_BUILD_ALL（確かめに使うビルドのコマンド）,
+# 環境変数: AFTER_MERGE_AGENT（使うエージェント: claude / codex / antigravity / gemini / cursor）, AFTER_MERGE_CLAUDE（claude の場所）, AFTER_MERGE_GH（gh の場所）, AFTER_MERGE_BUILD_ALL（確かめに使うビルドのコマンド）,
 #           AFTER_MERGE_NO_PUSH=1（push しない）, AFTER_MERGE_NO_RELEASE=1（Release を出さない）,
 #           AFTER_MERGE_NO_NOTIFY=1（通知を出さない）
 set -uo pipefail
@@ -258,6 +258,7 @@ agent_command() {
   case "$1" in
     claude) echo "$claude_bin" ;;
     codex | gemini) echo "$1" ;;
+    antigravity | agy) echo agy ;;
     cursor | cursor-agent) echo cursor-agent ;;
     *) return 1 ;;
   esac
@@ -265,7 +266,7 @@ agent_command() {
 # AFTER_MERGE_AGENT があればそれを、なければ見つかったものを使う
 pick_agent() {
   local a c
-  for a in ${AFTER_MERGE_AGENT:-claude codex gemini cursor}; do
+  for a in ${AFTER_MERGE_AGENT:-claude codex antigravity gemini cursor}; do
     c="$(agent_command "$a")" || continue
     if command -v "$c" >/dev/null 2>&1; then
       agent="$a"
@@ -288,6 +289,7 @@ run_agent() {
   case "$agent" in
     claude) "$agent_bin" -p "$1" --permission-mode acceptEdits --allowedTools "Bash Read Edit Write Glob Grep" ;;
     codex) "$agent_bin" exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox "$1" ;;
+    antigravity | agy) "$agent_bin" -p "$1" --dangerously-skip-permissions ;;
     gemini) "$agent_bin" -p "$1" --skip-trust --approval-mode yolo ;;
     *) "$agent_bin" -p --trust --force "$1" ;;
   esac
@@ -314,7 +316,7 @@ run_once() {
   mkdir -p "$(dirname "$wt")"
   "${G[@]}" worktree add -B "$branch" "$wt" "$sha" >>"$log" 2>&1 || { fail "worktree を作れませんでした"; return 1; }
 
-  pick_agent || { fail "エージェントが見つかりません（claude / codex / gemini / cursor-agent のどれかを入れるか、AFTER_MERGE_AGENT・AFTER_MERGE_CLAUDE で指定してください）"; return 1; }
+  pick_agent || { fail "エージェントが見つかりません（claude / codex / agy / gemini / cursor-agent のどれかを入れるか、AFTER_MERGE_AGENT・AFTER_MERGE_CLAUDE で指定してください）"; return 1; }
   say "$agent で /build-apps review"
   (
     cd "$wt" && run_agent "$(skill_line)

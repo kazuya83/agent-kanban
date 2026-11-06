@@ -2,11 +2,11 @@
 
 # エージェントとオーケストレーション（🤖 / 🔁 / 🏁）
 
-タスクを作るときの「エージェント」で、**Claude Code / Codex CLI / Gemini CLI / Cursor CLI** のどれで動かすかを選べます（メニューの設定の「使うエージェント」でチェックを付けたものだけが出ます）。さらに、複数のエージェントを組み合わせる **オーケストレーション** も選べます。
+タスクを作るときの「エージェント」で、**Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI** のどれで動かすかを選べます（メニューの設定の「使うエージェント」でチェックを付けたものだけが出ます）。さらに、複数のエージェントを組み合わせる **オーケストレーション** も選べます。
 
 | 選び方 | 動き方 |
 | --- | --- |
-| Claude Code / Codex CLI / Gemini CLI / Cursor CLI | そのエージェントで1枚のカードとして動きます（worktree・コミット・マージ・PR はこれまでと同じ） |
+| Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI | そのエージェントで1枚のカードとして動きます（worktree・コミット・マージ・PR はこれまでと同じ） |
 | 🔁 Pipeline | 設定の **フローチャート** に沿って、工程ごとにエージェントが作業を引き継ぎます（例: Codex で実装 → Claude でレビュー → 差し戻しなら実装へ戻る）。工程は同じ worktree で動き（並列の枝だけは別の worktree）、工程が終わるたびに変更をコミットし、最後の報告を次の工程に渡します。途中の工程が失敗・質問で止まったら、そこで止まります（追加指示で直すと、続きの工程へ進みます）。すべての工程が終わるとレビュー列に入ります。進み具合は、カードのバーと、詳細のワークフロー（工程ごとの状態・エージェント・かかった時間・金額・次へ渡した報告）で確かめられます |
 | 🏁 競争 | 同じタスクを、設定のエージェントそれぞれのカード（別々の worktree・ブランチ）で **並列に** 解きます。全員が終わると通知が届きます。詳細の「進捗」タブの「🏁 競争」の欄で候補を見比べ、「🤔 ○○ に比べてもらう」で比較の会話を始めたり（最初から選んでおくエージェントに頼みます）、「🏁 この案を採用」でほかの候補を破棄したりできます。採用した案は、いつもどおりマージ・PR の作成で取り込みます |
 
@@ -25,11 +25,14 @@
 - **Pipelineと競争は排他** です。メニューの設定の「オーケストレーション」の「使うオーケストレーション」でどちらか1つ、または「なし」を選びます（初期値はPipeline）。選んだ方だけ、その設定欄が出て、タスクを作るときに選べます。「なし」にすると、タスクを作るときの「エージェント」の欄には1つのエージェントだけが出ます。選んでいない方の設定は消えずに残るので、切り替えればまた使えます
 - ブランチの命名・コンフリクトの解消・仕様の確認・会話・スキルの提案も、どのエージェントでも動きます（ブランチ名とコンフリクトの解消は、そのタスクのエージェントが行います）
 - Issue から作るときも、同じようにエージェント・Pipeline・競争を選べます（競争なら、1つの Issue につきエージェントの数だけカードができます）
-- Codex は `codex exec --json`、Gemini は `gemini --output-format stream-json`、Cursor は `cursor-agent -p --output-format stream-json`（指示は最後の引数で渡します）で動かし、追加指示は同じ会話の続き（Codex は `codex exec resume`、Gemini・Cursor は `--resume`）から動きます
-- Codex / Gemini / Cursor は、CLI の作りの都合で、カードでの承認・選択肢の質問・btw（実行中のメッセージ）・既存の会話（ターミナルの会話）の引き継ぎ・使った金額の表示には対応していません。権限モードに合わせて CLI 側で許可します
-  - 計画だけ → Codex は読み取りのみの sandbox・Gemini は `plan`・Cursor は `--mode plan`
-  - すべて自動で許可 → Codex は `--dangerously-bypass-approvals-and-sandbox`・Gemini は `yolo`・Cursor は `--force --approve-mcps`
-  - それ以外 → Codex は worktree の中だけ書ける sandbox（`workspace-write`）・Gemini はファイル編集だけ自動で許可（`auto_edit`）・Cursor は `--force`（Cursor はヘッドレスだと `--force` がないとファイルを書けないため。コマンドも許可されるので、止めたいものは Cursor の `cli-config.json` の deny に書きます）
+- Codex は `codex exec --json`、Antigravity は `agy --output-format stream-json`、Gemini は `gemini --output-format stream-json`、Cursor は `cursor-agent -p --output-format stream-json`（指示は最後の引数で渡します）で動かし、追加指示は同じ会話の続き（Codex は `codex exec resume`、Antigravity は `--conversation`、Gemini・Cursor は `--resume`）から動きます
+- Codex / Antigravity / Gemini / Cursor は、CLI の作りの都合で、カードでの承認・選択肢の質問・btw（実行中のメッセージ）・既存の会話（ターミナルの会話）の引き継ぎ・使った金額の表示には対応していません。権限モードに合わせて CLI 側で許可します
+  - 計画だけ → Codex は読み取りのみの sandbox・Antigravity は `--mode plan`・Gemini は `plan`・Cursor は `--mode plan`
+  - すべて自動で許可 → Codex は `--dangerously-bypass-approvals-and-sandbox`・Antigravity は `--dangerously-skip-permissions`・Gemini は `yolo`・Cursor は `--force --approve-mcps`
+  - それ以外 → Codex は worktree の中だけ書ける sandbox（`workspace-write`）・Antigravity は worktree の中のファイル編集だけ自動で許可（`--mode accept-edits`）・Gemini はファイル編集だけ自動で許可（`auto_edit`）・Cursor は `--force`（Cursor はヘッドレスだと `--force` がないとファイルを書けないため。コマンドも許可されるので、止めたいものは Cursor の `cli-config.json` の deny に書きます）
+- Antigravity は、許可されていないコマンドをその場で拒否します（ヘッドレスでは確認を出せないため）。テストなどのコマンドを動かしたいときは、`~/.gemini/antigravity-cli/settings.json` の `permissions.allow` に `"command(npm test)"` のように書くか、「すべて自動で許可」を選びます
+- Antigravity は、最初に一度ターミナルで `agy` を起動してログインしておきます。ログインしていないと、カードに認証のエラーが出ます
+- Gemini CLI は、2026年6月18日で Google AI Pro / Ultra と無料の個人アカウントでは使えなくなりました（[Google の案内](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)）。有料の API キーや Gemini Code Assist の Standard / Enterprise なら引き続き使えます。個人のアカウントでは Antigravity CLI を選んでください
 - スキルを選ぶと、Claude Code には `/スキル名` で、ほかのエージェントには SKILL.md の場所を伝えて手順に従ってもらいます
 
 ---

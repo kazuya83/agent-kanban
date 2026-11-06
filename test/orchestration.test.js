@@ -39,10 +39,11 @@ function setup() {
     repoPath: repo,
     claudePath: bin('claude', FAKE_CLAUDE),
     codexPath: bin('codex', FAKE_CLI, 'codex'),
+    antigravityPath: bin('agy', FAKE_CLI, 'antigravity'),
     geminiPath: bin('gemini', FAKE_CLI, 'gemini'),
     cursorPath: bin('cursor-agent', FAKE_CLI, 'cursor'),
     maxParallel: 3,
-    enabledAgents: ['claude', 'codex', 'gemini', 'cursor'],
+    enabledAgents: ['claude', 'codex', 'antigravity', 'gemini', 'cursor'],
     specCheck: false, // ここでは指示をそのまま渡したときの流れを確かめる（仕様の確認は agent.test.js で確かめる）
   });
   const agents = new AgentManager(store, { mcpScript: path.join(__dirname, '..', 'src', 'permission-mcp.js'), mcpDir: path.join(tmp, 'data', 'mcp'), nodeBin: process.execPath });
@@ -69,6 +70,32 @@ function waitFor(pred, ms = 10000) {
   });
 }
 
+test('providers: Antigravity の出力をアクションに直す', () => {
+  const p = providers.createParser('antigravity', { summarize: (x) => JSON.stringify(x) });
+  const up = (o) => p.onEvent({ event: 'step_update', step_update: { conversation_id: 'c1', ...o } });
+  assert.deepStrictEqual(p.onEvent({ event: 'init', conversation_id: 'c1', init: { model: 'm1' } }), [{ type: 'session', id: 'c1', model: 'm1' }]);
+  assert.deepStrictEqual(up({ step_index: 0, state: 'DONE', step_type: 'user_input' }), []);
+  // 発言は、少しずつ届いたものをツールの呼び出しか終わりでまとめる（DONE にも続きが入っている）
+  assert.deepStrictEqual(up({ step_index: 1, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'ファイルを' }), []);
+  assert.deepStrictEqual(up({ step_index: 1, state: 'DONE', step_type: 'agent_response', text_delta: '読みます' }), []);
+  // ツールは ACTIVE で1回だけ出し、DONE で結果を出す
+  const cmd = { name: 'run_command', parameters: { CommandLine: 'npm test' } };
+  assert.deepStrictEqual(up({ step_index: 2, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: cmd }), [{ type: 'text', text: 'ファイルを読みます' }, { type: 'tool', name: 'Bash', summary: 'npm test' }]);
+  assert.deepStrictEqual(up({ step_index: 2, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: cmd }), []);
+  assert.deepStrictEqual(up({ step_index: 2, state: 'DONE', step_type: 'tool', tool_name: 'run_command', tool_info: { ...cmd, output: 'ok!\r\n' } }), [{ type: 'tool_result', text: 'ok!\r\n', error: false }]);
+  // 権限がなく拒否されたツールはエラーになる。DONE から始まるツールも取りこぼさない
+  const denied = up({ step_index: 3, state: 'ERROR', step_type: 'tool', tool_name: 'write_file', tool_info: { name: 'write_file', parameters: { Path: '/w.txt' }, error: { type: 'TOOL_ERROR', message: 'permission check failed' } } });
+  assert.deepStrictEqual(denied, [{ type: 'tool', name: 'Write', summary: '/w.txt' }, { type: 'tool_result', text: 'permission check failed', error: true }]);
+  assert.deepStrictEqual(up({ step_index: 4, state: 'DONE', step_type: 'tool', tool_name: 'mcp_x', tool_info: { parameters: { a: 1 } } }), [{ type: 'tool', name: 'mcp_x', summary: '{"a":1}' }, { type: 'tool_result', text: 'ok', error: false }]);
+  up({ step_index: 5, state: 'DONE', step_type: 'agent_response', text_delta: '完了' });
+  assert.deepStrictEqual(p.onEvent({ event: 'result', result: { status: 'SUCCESS', response: '完了' } }), [{ type: 'text', text: '完了' }, { type: 'result' }]);
+  // ログインしていないときの実際の形（init は来ない）
+  assert.deepStrictEqual(p.onEvent({ event: 'result', result: { conversation_id: '', status: 'ERROR', error: 'authentication failed or timed out', finished_reason: 'error' } }), [{ type: 'result', error: 'authentication failed or timed out' }]);
+  assert.deepStrictEqual(p.onEvent({ event: 'result', result: { status: 'CANCELED' } }), [{ type: 'result', error: 'エラー（CANCELED）' }]);
+  // 種類が type のイベントは読まない
+  assert.deepStrictEqual(p.onEvent({ type: 'init' }), []);
+});
+
 test('providers: 引数（権限モード・モデル・続き）', () => {
   assert.deepStrictEqual(providers.buildArgs('codex', { mode: 'acceptEdits' }), ['exec', '--json', '--skip-git-repo-check', '-c', 'sandbox_mode=workspace-write', '-']);
   assert.deepStrictEqual(providers.buildArgs('codex', { mode: 'plan', model: 'o3', sessionId: 'abc' }), ['exec', 'resume', '--json', '--skip-git-repo-check', '-c', 'sandbox_mode=read-only', '-m', 'o3', 'abc', '-']);
@@ -76,6 +103,12 @@ test('providers: 引数（権限モード・モデル・続き）', () => {
   assert.deepStrictEqual(providers.buildArgs('gemini', { mode: 'acceptEdits', sessionId: 's1' }), ['--output-format', 'stream-json', '--skip-trust', '--approval-mode', 'auto_edit', '--resume', 's1']);
   assert.strictEqual(providers.geminiApproval('bypassPermissions'), 'yolo');
   assert.strictEqual(providers.geminiApproval('plan'), 'plan');
+  // Antigravity の引数は本物の agy 1.5 で確かめたもの。指示は stdin で渡す
+  assert.deepStrictEqual(providers.buildArgs('antigravity', { mode: 'acceptEdits' }), ['--output-format', 'stream-json', '--mode', 'accept-edits']);
+  assert.deepStrictEqual(providers.buildArgs('antigravity', { mode: 'plan', model: 'gemini-3.8-flash-high', sessionId: 'c1', includeDirs: ['/a', '/b'] }), ['--output-format', 'stream-json', '--mode', 'plan', '--model', 'gemini-3.8-flash-high', '--conversation', 'c1', '--add-dir', '/a', '--add-dir', '/b']);
+  assert.deepStrictEqual(providers.antigravityPolicy('bypassPermissions'), ['--dangerously-skip-permissions']);
+  assert.deepStrictEqual(providers.antigravityPolicy('default'), []);
+  assert.strictEqual(providers.promptViaArg('antigravity'), false);
   // Cursor は指示を最後の引数で渡す（「-」で始まる指示はオプションに見えないよう空白を付ける）
   assert.deepStrictEqual(providers.buildArgs('cursor', { mode: 'acceptEdits', prompt: 'やって' }), ['-p', '--output-format', 'stream-json', '--trust', '--force', 'やって']);
   assert.deepStrictEqual(providers.buildArgs('cursor', { mode: 'plan', model: 'gpt-5', sessionId: 'c1', prompt: '-x' }), ['-p', '--output-format', 'stream-json', '--trust', '--mode', 'plan', '--model', 'gpt-5', '--resume', 'c1', ' -x']);
@@ -103,6 +136,36 @@ test('providers: Gemini の少しずつ届く発言はまとめ、Codex のイ�
   assert.deepStrictEqual(r.map((x) => x.type), ['tool', 'tool_result']);
   assert.strictEqual(r[1].error, true);
   assert.deepStrictEqual(cp.onEvent({ type: 'turn.failed', error: { message: 'bad' } }), [{ type: 'result', error: 'bad' }]);
+});
+
+test('Antigravity のタスク: 指示を stdin で渡して worktree で動き、追加指示は --conversation で続ける', async () => {
+  const { agents, calls } = setup();
+  const [c] = agents.createTask({ title: 'ag', prompt: 'アンチグラビティで作って', agent: 'antigravity' });
+  assert.strictEqual(c.agent, 'antigravity');
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  assert.match(c.sessionId, /^agy-conv-/);
+  assert.strictEqual(c.sessions[0].agent, 'antigravity');
+  assert.match(c.lastText, /antigravity done/);
+  assert.ok(c.logs.some((l) => l.kind === 'text' && l.agent === 'antigravity' && l.text.trim() === 'ファイルを作ります'));
+  assert.ok(c.logs.some((l) => l.kind === 'tool' && /^Write/.test(l.text)));
+  assert.match(await agents.diff(c.id), /アンチグラビティで作って/);
+  const first = calls().filter((x) => x.kind === 'antigravity')[0].args;
+  assert.deepStrictEqual(first.slice(0, 4), ['--output-format', 'stream-json', '--mode', 'accept-edits']);
+  assert.ok(!first.includes('アンチグラビティで作って'), '指示は引数に入れない');
+  const sid = c.sessionId;
+  agents.send(c.id, 'もう1つ');
+  await waitFor(() => c.status === 'review' && calls().filter((x) => x.kind === 'antigravity').length === 2);
+  const second = calls().filter((x) => x.kind === 'antigravity')[1].args;
+  assert.strictEqual(second[second.indexOf('--conversation') + 1], sid);
+});
+
+test('Antigravity のタスク: 失敗はエラー列に', async () => {
+  const { agents } = setup();
+  const [c] = agents.createTask({ title: 'ag', prompt: '[fail] アンチグラビティ', agent: 'antigravity' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'failed');
+  assert.strictEqual(c.error, 'agy boom');
 });
 
 test('providers: Cursor のイベントを共通の形に直す', () => {

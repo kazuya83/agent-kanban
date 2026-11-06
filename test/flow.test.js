@@ -186,10 +186,11 @@ function setup() {
     repoPath: repo,
     claudePath: bin('claude', FAKE_CLAUDE),
     codexPath: bin('codex', FAKE_CLI, 'codex'),
+    antigravityPath: bin('agy', FAKE_CLI, 'antigravity'),
     geminiPath: bin('gemini', FAKE_CLI, 'gemini'),
     cursorPath: bin('cursor-agent', FAKE_CLI, 'cursor'),
     maxParallel: 4,
-    enabledAgents: ['claude', 'codex', 'gemini', 'cursor'],
+    enabledAgents: ['claude', 'codex', 'antigravity', 'gemini', 'cursor'],
     specCheck: false,
   });
   const agents = new AgentManager(store, { mcpScript: path.join(__dirname, '..', 'src', 'permission-mcp.js'), mcpDir: path.join(tmp, 'data', 'mcp'), nodeBin: process.execPath });

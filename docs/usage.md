@@ -27,7 +27,7 @@ You can also create tasks that end without changing source code, such as only wr
 
 - Under "New task", check "**Do not change source (lookup or generating SQL only)**". The card shows "No source changes"
 - No worktree or branch is created; the task runs in the repository folder as it is (it can read the code to look things up)
-- The agent is told not to change source and to write what it produces in a code block in its reply. Claude Code runs with its file-editing tools (Edit, Write, and so on) blocked, and commands are confirmed on the card every time regardless of the permission mode in Settings (with "Plan only", that mode applies). Codex / Gemini / Cursor run in a read-only plan mode
+- The agent is told not to change source and to write what it produces in a code block in its reply. Claude Code runs with its file-editing tools (Edit, Write, and so on) blocked, and commands are confirmed on the card every time regardless of the permission mode in Settings (with "Plan only", that mode applies). Codex / Antigravity / Gemini / Cursor run in a read-only plan mode
 - The SQL or other output appears in the reply on the "Chat" tab. Once you have checked it, press "Mark done" (the same as tasks in a folder not managed by git). Diff, merge, and PR do not appear
 - Competition and Pipelines with parallel paths cannot be used. The task cannot be split into subtasks either
 
@@ -168,7 +168,7 @@ The input boxes for "New task" and "Conversation" (both when starting and for la
 - Attached files are listed below the box (remove them with ×). Up to 10 files, 20 MB in total
 - Attachments are saved in an app folder outside the working folder (worktree or repository). The saved location is added at the end of the instruction, so any agent can read them from there
   - Claude Code receives images (PNG / JPEG / GIF / WebP, up to 3.5 MB) directly attached to the message
-  - Codex / Gemini / Cursor, and files other than images, are read from the saved location
+  - Codex / Antigravity / Gemini / Cursor, and files other than images, are read from the saved location
 - Files attached from a remote control client are sent to the host and saved there
 - The names of attached images and files appear in the log under your instruction. For a task that has not started, they also appear in the editor on the "Progress" tab. Discarding a task also deletes its attachments
 
@@ -186,7 +186,7 @@ The agent's replies and your instructions in the log are rendered as Markdown (h
 - No worktree or branch is created; it runs in the repository folder as it is. It does not commit, merge, or create PRs
 - Because it works on your local working files, file changes and commands are confirmed on the card every time (when the permission mode in Settings is "Plan only" or "Allow everything automatically", that mode applies)
 - It does not count toward the concurrency limit, so you get a reply right away even when tasks are backed up
-- When you want work done, press "📝 Make a task" to create a task that runs in a worktree as a continuation of the conversation (the conversation itself stays). Between Claude Code agents the conversation itself carries over. In other cases (a Codex / Gemini / Cursor conversation, or a task on a different agent), the exchange is passed along with the first instruction
+- When you want work done, press "📝 Make a task" to create a task that runs in a worktree as a continuation of the conversation (the conversation itself stays). Between Claude Code agents the conversation itself carries over. In other cases (a Codex / Antigravity / Gemini / Cursor conversation, or a task on a different agent), the exchange is passed along with the first instruction
 
 ## Switch conversations (sessions)
 Under "Conversation" in the detail panel, choose which conversation the next run uses. If a task continued from an existing conversation, it shows where it came from.
@@ -195,7 +195,7 @@ Under "Conversation" in the detail panel, choose which conversation the next run
 The "Progress" tab in the detail panel shows how far a task has come.
 
 - State, start time and elapsed time, agent, and cost
-- TODOs written by the agent (TodoWrite on Claude Code, TODO lists on Codex, Gemini, and Cursor), grouped into done, in progress, and upcoming, with a bar showing the share done. A Pipeline shows the current step's TODOs, and shows each branch's TODOs while waiting for parallel branches
+- TODOs written by the agent (TodoWrite on Claude Code, TODO lists on Codex, Gemini, and Cursor; Antigravity does not report TODOs, so the list stays empty), grouped into done, in progress, and upcoming, with a bar showing the share done. A Pipeline shows the current step's TODOs, and shows each branch's TODOs while waiting for parallel branches
 - For a Pipeline, the flowchart from Settings is drawn as is, with steps colored as finished (green), running (blue), stopped (orange), and upcoming. Lines already passed are green, and the line toward the current step animates in blue. Zoom the flowchart with the buttons at the top right, or with ⌘ (Ctrl) + scroll or a pinch ("Fit" fits it to the frame's width). Below it are each step's time, cost, judgment, and the report passed to the next step
 - Recent work (tool calls and replies), newest first. See "Log" for details
 - For a task that has not started, you can edit the title and first instruction here (after it starts, the instruction can be seen at the top of "Chat")
@@ -246,7 +246,7 @@ When a task enters "Done", if there are **tasks with similar work** among earlie
 
 ## What you can do
 
-- **A card starts working as soon as you create it**: a branch `agent/<name>-<id>` and a worktree (`<repository>.worktrees/<id>`) are created automatically, and the agent's CLI (`claude -p` / `codex exec` / `gemini` / `cursor-agent -p`) starts inside it
+- **A card starts working as soon as you create it**: a branch `agent/<name>-<id>` and a worktree (`<repository>.worktrees/<id>`) are created automatically, and the agent's CLI (`claude -p` / `codex exec` / `agy` / `gemini` / `cursor-agent -p`) starts inside it
   - If you write a rule in plain language under "Branch naming rule" in Settings, such as "use `feature/<Issue number>-<short English description>`", the task's agent comes up with the branch name following that rule when the task starts (if the name already exists, `-2` or the like is added; if it cannot decide, the usual name is used)
 - **Choose a model per task or conversation**: in the "Model" field of the screens that start "+ New task" (including from an Issue) and "💬 Conversation", choose the model for just that task or conversation (for example `opus` / `sonnet` / `haiku` on Claude Code). The field suggests models often used with the chosen agent. If empty, the default model for that agent in Settings is used. Pipeline and competition run several agents, so they use the models in Settings. The model in use can be seen on the "Info" tab in the detail panel
 - **Create tasks from GitHub Issues**: choose the "Create from a GitHub Issue" tab under "+ New task" and just enter a number. The agent's instruction is built from the Issue's title, body, labels, and comments. Enter several, like `12, 15, 18`, and each Issue becomes one card, running in parallel

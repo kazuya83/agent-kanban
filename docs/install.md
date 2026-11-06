@@ -86,7 +86,9 @@ Download the file for your OS from [Releases](https://github.com/kazuya83/worktr
 > - **Mac**: if it says the developer cannot be verified, right-click the app and choose "Open". If it still does not open, run `xattr -cr "/Applications/Worktree Kanban.app"` in a terminal
 > - **Windows**: if you see "Windows protected your PC", press "More info" → "Run anyway"
 
-Besides the app, you need **git** and the CLI of the agent you use (one of **Claude Code / Codex CLI / Gemini CLI / Cursor CLI**, signed in). The app automatically looks for `claude` / `codex` / `gemini` / `cursor-agent` on your terminal's PATH. If one is not found, a notice appears at the top of the screen (you can also set the full path under "Agents to use" in Settings).
+Besides the app, you need **git** and the CLI of the agent you use (one of **Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI**, signed in). The app automatically looks for `claude` / `codex` / `agy` / `gemini` / `cursor-agent` on your terminal's PATH. If one is not found, a notice appears at the top of the screen (you can also set the full path under "Agents to use" in Settings).
+
+Install Antigravity CLI with `curl -fsSL https://antigravity.google/cli/install.sh | bash`, then start `agy` once and sign in. Gemini CLI no longer works on personal accounts ([details](agents.md)).
 
 ## Use WSL (Ubuntu and others) repositories on Windows
 

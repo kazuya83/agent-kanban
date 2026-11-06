@@ -34,10 +34,11 @@ function setup() {
     repoPath: repo,
     claudePath: bin('claude', FAKE_CLAUDE),
     codexPath: bin('codex', FAKE_CLI, 'codex'),
+    antigravityPath: bin('agy', FAKE_CLI, 'antigravity'),
     geminiPath: bin('gemini', FAKE_CLI, 'gemini'),
     cursorPath: bin('cursor-agent', FAKE_CLI, 'cursor'),
     maxParallel: 3,
-    enabledAgents: ['claude', 'codex', 'gemini', 'cursor'],
+    enabledAgents: ['claude', 'codex', 'antigravity', 'gemini', 'cursor'],
     specCheck: false,
     customAgents: providers.cleanCustomAgents([
       { id: 'rev', name: '慎重なレビュアー', icon: 'R', color: '#ff0000', description: 'テストの抜けを見る', instruction: '必ず理由を書くこと', agent: 'codex', model: 'gpt-5-codex' },

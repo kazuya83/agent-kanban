@@ -16,7 +16,7 @@ For a large change, open a Discussion or an Issue first so we can agree on the d
 
 ## Set up
 
-You need Node.js 22 or later (24 recommended), git, and at least one agent CLI you have signed in to (Claude Code, Codex CLI, Gemini CLI, or Cursor CLI).
+You need Node.js 22 or later (24 recommended), git, and at least one agent CLI you have signed in to (Claude Code, Codex CLI, Antigravity CLI, Gemini CLI, or Cursor CLI).
 
 ```bash
 npm install
