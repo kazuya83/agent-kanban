@@ -64,7 +64,7 @@ GitLab・Linear・Jira・Slack の接続先とトークンを入れます。ど�
 
 | 項目 | 説明 |
 | --- | --- |
-| 権限モード | `acceptEdits`（ファイル編集は自動、コマンドは承認）がおすすめ。`default` にすると、すべての操作をカードで承認します |
+| 権限モード | `acceptEdits`（ファイル編集は自動、コマンドは承認）がおすすめ。`default` にすると、すべての操作をカードで承認します。`bypassPermissions`（すべて自動で許可）を選んでも、Issue から作ったタスクと Slack から頼んだタスク（そのサブタスクも）は `acceptEdits` で動きます。Issue の本文や Slack のメッセージは外の人が書けるので、そこから承認なしでコマンドが動かないようにするためです |
 | Claude Code に最初から許可しておくツール | `--allowedTools` に渡します。例: `Bash(npm test:*), WebSearch` |
 
 ## タスクの既定

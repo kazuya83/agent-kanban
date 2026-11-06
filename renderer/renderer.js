@@ -4375,7 +4375,7 @@ function renderSettingsView() {
         <div id="sGithubPanel"><div id="ghPanel" class="gh-panel">${tr('gh（GitHub CLI）を確認しています…')}</div></div></div>`,
     permission: `<label class="field">${tr('<span>権限モード</span>')}
         <select id="sMode">${PERMISSION_MODES.map(([v, l]) => `<option value="${v}" ${v === s.permissionMode ? 'selected' : ''}>${esc(tr(l))}</option>`).join('')}</select>
-        <small>${tr('自動で許可されない操作は、カードに「承認待ち」として表示されます。')}</small></label>
+        <small>${tr('自動で許可されない操作は、カードに「承認待ち」として表示されます。')} ${tr('「すべて自動で許可する」を選んでも、Issue から作ったタスクと Slack から頼んだタスク（そのサブタスクも）は、ファイル編集は自動・コマンドは承認で動かします。外の人が書いた指示から、承認なしでコマンドが動くのを防ぐためです。')}</small></label>
       <label class="field">${tr('<span>Claude Code に最初から許可しておくツール（カンマか改行で区切る）</span>')}
         <textarea id="sAllowed" rows="2" placeholder="${tr('例: Bash(npm test:*), Bash(git status), WebSearch')}">${esc(s.allowedTools)}</textarea></label>`,
     task: `<div class="field">${tr('<span>新しいタスクで最初から選んでおくスキル</span>')}<div id="sSkill" class="skill-slot"></div>

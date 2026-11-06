@@ -947,6 +947,12 @@
     "fr": "Planifier seulement (ne pas modifier les fichiers)",
     "zh": "只制定计划（不修改文件）"
   },
+  "「すべて自動で許可する」を選んでも、Issue から作ったタスクと Slack から頼んだタスク（そのサブタスクも）は、ファイル編集は自動・コマンドは承認で動かします。外の人が書いた指示から、承認なしでコマンドが動くのを防ぐためです。": {
+    "en": "Even with “Allow everything automatically”, tasks created from Issues and tasks requested from Slack (and their subtasks) run with file edits automatic and commands needing approval. This keeps instructions written by outsiders from running commands without approval.",
+    "es": "Aunque elija «Permitir todo automáticamente», las tareas creadas desde Issues y las pedidas desde Slack (y sus subtareas) se ejecutan con ediciones automáticas y comandos con aprobación. Así, instrucciones escritas por personas externas no ejecutan comandos sin aprobación.",
+    "fr": "Même avec « Tout autoriser automatiquement », les tâches créées depuis des Issues et celles demandées depuis Slack (et leurs sous-tâches) s’exécutent avec les modifications automatiques et les commandes soumises à approbation. Cela empêche des instructions écrites par des personnes extérieures d’exécuter des commandes sans approbation.",
+    "zh": "即使选择「全部自动允许」，从 Issue 创建的任务和从 Slack 发起的任务（及其子任务）也会以文件编辑自动允许、命令需要批准的方式运行。这是为了防止外部人员写的指示在未经批准的情况下执行命令。"
+  },
   "すべて自動で許可する（注意）": {
     "en": "Allow everything automatically (caution)",
     "es": "Permitir todo automáticamente (precaución)",

@@ -2929,6 +2929,30 @@ class AgentManager extends EventEmitter {
     return mode === 'plan' || mode === 'bypassPermissions' ? mode : 'default';
   }
 
+  // 外から来た文章を指示に含むタスクか。Issue から作ったタスク（手で作ったものも、監視で自動に作ったものも）は
+  // Issue の本文・コメントが、Slack から頼んだタスクは Slack のメッセージが、そのまま指示になる。
+  // サブタスク・リレーの枝は親の指示から作るので、親が外から来ていれば同じ扱い
+  externalOrigin(c, depth = 0) {
+    if (!c || depth > 20) return false;
+    if (c.issue || c.slack) return true;
+    const parentId = (c.subtaskOf && c.subtaskOf.parent) || (c.relay && c.relay.branchOf && c.relay.branchOf.parent);
+    return parentId ? this.externalOrigin(this.store.card(parentId), depth + 1) : false;
+  }
+
+  // ふつうのタスクの権限モード。外から来た指示のタスクは、プロジェクトの設定が「すべて自動で許可」でも使わない。
+  // public リポジトリの Issue は誰でも書けるので、悪意のある Issue からコマンドが承認なしで動くのを防ぐ。
+  // ファイル編集は worktree の中だけなので自動にし（acceptEdits）、コマンドはカードで確かめる
+  taskPermissionMode(c, mode) {
+    if (mode === 'bypassPermissions' && this.externalOrigin(c)) {
+      if (!c.externalModeNoted) {
+        c.externalModeNoted = true;
+        this.log(c, 'system', tr('外から来た指示（Issue・Slack）のタスクなので、「すべて自動で許可」にはせず、ファイル編集は自動・コマンドは承認（acceptEdits）で動かします'));
+      }
+      return 'acceptEdits';
+    }
+    return mode;
+  }
+
   // ソースを変更しないタスクの権限モード。リポジトリのフォルダ（手元の作業中のファイル）で動くので、
   // Claude Code はファイルを書き換えるツールを止めたうえで、コマンドは毎回カードで確かめる（「計画だけ」ならそれに従う）。
   // Codex / Antigravity / Gemini / Cursor はツールを個別に止められないので、読み取りだけの「計画」モードで動かす
@@ -3110,7 +3134,7 @@ class AgentManager extends EventEmitter {
     const rs = this.store.repoSettings(c.repoPath); // 権限モード・許可しておくツールは、そのタスクのプロジェクトの設定
     const agent = agentOf(c);
     const label = agentLabel(agent);
-    const mode = afterDone ? 'plan' : chat ? this.chatPermissionMode(rs.permissionMode) : c.readOnly ? this.readOnlyPermissionMode(agentOf(c), rs.permissionMode) : rs.permissionMode;
+    const mode = afterDone ? 'plan' : chat ? this.chatPermissionMode(rs.permissionMode) : c.readOnly ? this.readOnlyPermissionMode(agentOf(c), rs.permissionMode) : this.taskPermissionMode(c, rs.permissionMode);
     const prompt = c.pendingPrompt || '';
     // 言語の指示はエージェントにだけ渡し、ログ（lastPromptSent）には残さない
     const spoken = withReplyLanguage(prompt);
