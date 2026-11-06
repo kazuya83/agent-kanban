@@ -3667,14 +3667,16 @@ class AgentManager extends EventEmitter {
     }
     return new Promise((resolve) => {
       const id = crypto.randomBytes(6).toString('hex');
-      const req = { id, toolName, toolUseId, summary: summarizeInput(input), detail: truncate(JSON.stringify(input, null, 2), 4000), at: Date.now() };
+      const detail = JSON.stringify(input, null, 2);
+      // detailCut: 入力の全文を detail に載せきれなかった（Slack からは許可させない）
+      const req = { id, toolName, toolUseId, summary: summarizeInput(input), detail: truncate(detail, 4000), detailCut: detail.length > 4000, at: Date.now() };
       this.pending.set(id, { cardId, toolName, input, resolve });
       c.permissions = c.permissions || [];
       c.permissions.push(req);
       this.log(c, 'permission',tr('承認待ち: {toolName}  {summary}', { toolName, summary: req.summary }));
       this.changed(c);
       this.emit('permission', c, req);
-      this.notify(c, 'permission', tr('承認待ち: {title}', { title: c.title }), `${toolName}  ${req.summary}`);
+      this.notify(c, 'permission', tr('承認待ち: {title}', { title: c.title }), `${toolName}  ${req.summary}`, { reqId: id });
       signal?.addEventListener('abort', () => {
         if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: tr('中断されました') }, null);
       });
@@ -3701,7 +3703,7 @@ class AgentManager extends EventEmitter {
       this.log(c, 'question',tr('質問: {v}', { v: questions.map((q) => q.question).join(' / ') }));
       this.changed(c);
       this.emit('question', c, questions);
-      this.notify(c, 'question', tr('質問: {title}', { title: c.title }), questions.map((q) => q.question).join(' / '));
+      this.notify(c, 'question', tr('質問: {title}', { title: c.title }), questions.map((q) => q.question).join(' / '), { reqId: id });
       signal?.addEventListener('abort', () => {
         if (this.pending.has(id)) this.settle(id, { behavior: 'deny', message: tr('中断されました') }, null);
       });
@@ -3760,6 +3762,7 @@ class AgentManager extends EventEmitter {
       if (label) this.log(c, p.kind === 'question' ? 'question' : 'permission', p.kind === 'question' ? label : `${label}: ${p.toolName}`);
       this.changed(c);
     }
+    this.emit('settled', reqId, label);
     p.resolve(result);
   }
 

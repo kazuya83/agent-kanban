@@ -24,6 +24,7 @@ In scope, for example:
 - The local approval server, and ways to bypass approval on a card
 - Token storage, and ways to read a saved integration token
 - Starting a task from Slack without being on the allow list
+- Approving or answering from Slack without being on the allow list
 - Command, argument, or path injection through branch names, Issue text, repository content, or other outside input
 - `install.sh`, `install.ps1`, and the in-app updater
 
@@ -49,12 +50,13 @@ Out of scope:
 - API calls use https. An `http://` address for GitLab or Jira needs an explicit opt-in, and the token then travels unencrypted.
 - Redirects are not followed, and changing a service's URL deletes tokens you did not enter again, so a saved token is not sent to a different address.
 
-## Starting tasks from Slack
+## Starting tasks and approving from Slack
 
-Starting a task means an agent runs code on your machine, so access is opt-in:
+Starting a task or allowing a tool means an agent runs code on your machine, so access is opt-in:
 
-- Only the Slack user IDs you list can start a task. The list is empty by default, so nobody can.
+- Only the Slack user IDs you list can start a task, approve, or answer. The list is empty by default, so nobody can. It is checked again when a form is submitted.
 - Tasks start only from channels you map to a project.
 - Only the text of the message that mentions the bot becomes instructions. The rest of the thread is not read. Allowed users' text still reaches the agent as instructions, so list only people you would let run code on this machine.
 - Receiving uses Slack's Socket Mode. The app connects out to Slack and opens no port.
-- The project's permission settings apply as usual. Approvals are given in the app, not in Slack.
+- The project's permission settings apply as usual. Slack offers Allow only when the full tool input can be shown; otherwise it offers only Deny. "Always allow" is available only in the app.
+- Permission notifications include up to 4,000 characters of tool input, so everyone in the channel can read it. Post them to a channel limited to people who may see it.

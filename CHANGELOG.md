@@ -23,6 +23,7 @@ Each release that changes the app raises the last number of the version. There i
 - Integrations with GitLab, Linear, and Jira, including self-hosted GitLab and Jira Data Center: create tasks from Issue numbers or URLs, link Issues in PRs and MRs, sync status with the card, write comments back, and handle sub-issues.
 - GitLab merge requests: create them, check conflicts and pipeline results, and detect merges.
 - Slack integration: notifications for completions, failures, and items waiting for you, and starting tasks from Slack for allowed users only. Nobody can start a task by default.
+- Approving and answering from Slack: buttons on notifications for permission checks, agent questions, spec checks, and replies, limited to allowed users. Slack offers Allow only when the full tool input can be shown. Needs "Interactivity & Shortcuts" turned on in the Slack app.
 - An "Integrations" section in Settings. Tokens are encrypted with a key from the OS secure storage.
 
 ## 0.1.94
