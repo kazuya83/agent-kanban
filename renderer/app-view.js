@@ -1,25 +1,29 @@
-// 画面（カンバン管理 / タスクスケジューラ）の切り替えと、ハンバーガーメニューの開け閉め
+// 画面（カンバン管理 / タスクスケジューラ / 設定）の切り替えと、ハンバーガーメニューの開け閉め、設定画面の左の一覧
 // レンダラ（<script> で読み込む）とテスト（require）の両方から使う。
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AppView = api;
 })(typeof self !== 'undefined' ? self : this, function () {
-  const VIEWS = ['kanban', 'scheduler'];
+  const VIEWS = ['kanban', 'scheduler', 'settings'];
   const DEFAULT_VIEW = 'kanban';
   const VIEW_KEY = 'agent-kanban.view';
+  // 設定画面は起動時に復元しない（次の起動は、その前のカンバンかスケジューラに戻る）
+  const NOT_RESTORED_VIEW = 'settings';
 
   const normalizeView = (v) => (VIEWS.includes(v) ? v : DEFAULT_VIEW);
 
   // 選んだ画面を覚えておく。保存先が使えなくても画面は動かす（次の起動で既定の画面に戻るだけ）
   function loadView(storage) {
     try {
-      return normalizeView(storage.getItem(VIEW_KEY));
+      const view = normalizeView(storage.getItem(VIEW_KEY));
+      return view === NOT_RESTORED_VIEW ? DEFAULT_VIEW : view;
     } catch {
       return DEFAULT_VIEW;
     }
   }
   function saveView(storage, view) {
+    if (view === NOT_RESTORED_VIEW) return;
     try {
       storage.setItem(VIEW_KEY, normalizeView(view));
     } catch {
@@ -64,5 +68,85 @@
     return { isOpen, setOpen };
   }
 
-  return { VIEWS, DEFAULT_VIEW, VIEW_KEY, normalizeView, loadView, saveView, canSchedule, bindNavMenu };
+  // 設定画面の左の一覧。id は節の要素 settings-<id> と対応する
+  const SETTINGS_NAV = [
+    {
+      heading: null,
+      items: [
+        { id: 'general', label: '全般', icon: 'settings' },
+        { id: 'update', label: 'アプリの更新', icon: 'download' },
+      ],
+    },
+    {
+      heading: 'このプロジェクト',
+      items: [
+        { id: 'branch', label: 'ブランチと取り込み', icon: 'branch' },
+        { id: 'issue', label: 'Issue 連携', icon: 'zap' },
+        { id: 'permission', label: '権限', icon: 'lock' },
+        { id: 'task', label: 'タスクの既定', icon: 'note' },
+      ],
+    },
+    {
+      heading: 'エージェント',
+      items: [
+        { id: 'agents', label: '使うエージェント', icon: 'bot' },
+        { id: 'custom', label: 'カスタムエージェント', icon: 'wrench' },
+        { id: 'orchestration', label: 'オーケストレーション', icon: 'pipeline' },
+      ],
+    },
+  ];
+  // 節の先頭がスクロール位置のこの距離まで近づいたら、その節を現在地にする
+  const SECTION_TOP_MARGIN = 24;
+
+  function settingsNavHtml(iconFn) {
+    return SETTINGS_NAV.map(({ heading, items }) => {
+      const head = heading ? `<div class="settings-nav-heading">${heading}</div>` : '';
+      const links = items.map(({ id, label, icon }) => `<a class="settings-nav-item" href="#settings-${id}" data-section="${id}">${iconFn(icon)}<span>${label}</span></a>`);
+      return head + links.join('');
+    }).join('');
+  }
+
+  // tops は [{ id, top }] を上から順に並べたもの。どの節にも届いていなければ先頭を現在地にする
+  function activeSection(tops, scrollTop) {
+    const reached = tops.filter((t) => t.top <= scrollTop + SECTION_TOP_MARGIN);
+    const current = reached[reached.length - 1] || tops[0];
+    return current ? current.id : null;
+  }
+
+  // 設定画面の左の一覧。項目を押すと節までスクロールし、スクロールに合わせて現在地を動かす。
+  // section(id) はその節の要素を返す関数（節がなければ null）
+  function bindSettingsNav({ nav, scroller, section }) {
+    const items = () => [...nav.querySelectorAll('[data-section]')];
+    const sync = () => {
+      const base = scroller.getBoundingClientRect().top - scroller.scrollTop;
+      const tops = items().flatMap((a) => {
+        const el = section(a.dataset.section);
+        return el ? [{ id: a.dataset.section, top: el.getBoundingClientRect().top - base }] : [];
+      });
+      const current = activeSection(tops, scroller.scrollTop);
+      for (const a of items()) {
+        const on = a.dataset.section === current;
+        a.classList.toggle('active', on);
+        if (on) a.setAttribute('aria-current', 'true');
+        else a.removeAttribute('aria-current');
+      }
+    };
+    const scrollTo = (id) => {
+      const el = section(id);
+      if (!el) return;
+      el.scrollIntoView();
+      sync();
+    };
+    nav.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-section]');
+      if (!item) return;
+      e.preventDefault(); // 既定の動きのままだと location の # が変わるので、スクロールだけする
+      scrollTo(item.dataset.section);
+    });
+    scroller.addEventListener('scroll', sync);
+    sync();
+    return { scrollTo, sync };
+  }
+
+  return { VIEWS, DEFAULT_VIEW, VIEW_KEY, SETTINGS_NAV, normalizeView, loadView, saveView, canSchedule, bindNavMenu, settingsNavHtml, activeSection, bindSettingsNav };
 });
