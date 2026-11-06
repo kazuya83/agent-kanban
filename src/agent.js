@@ -904,7 +904,10 @@ class AgentManager extends EventEmitter {
   changed(card) {
     this.store.save();
     this.emit('changed', card ? card.id : null);
-    if (card) this.queueIssueSync(card);
+    if (card) {
+      this.queueIssueSync(card);
+      this.queueIssueComments(card);
+    }
   }
 
   // ---------- Issue のステータス ----------
@@ -940,13 +943,58 @@ class AgentManager extends EventEmitter {
     c.issueSync = c.issueSync || {};
     if (c.issueSync.wanted === key) return;
     c.issueSync.wanted = key;
+    this.queueIssueWork(c, () => this.runIssueSync(c, key));
+  }
+
+  // カードごとに、サービスへの書き込みを順番に動かす
+  queueIssueWork(c, work) {
     this.issueSyncs = this.issueSyncs || new Map();
     const prev = this.issueSyncs.get(c.id) || Promise.resolve();
-    const next = prev.then(() => this.runIssueSync(c, key));
+    const next = prev.then(work);
     this.issueSyncs.set(c.id, next);
     next.then(() => {
       if (this.issueSyncs.get(c.id) === next) this.issueSyncs.delete(c.id);
     });
+  }
+
+  // カードの状態を見て、まだ書いていない出来事を返す（書く文つき）
+  issueCommentEvents(c) {
+    const seen = c.issueComments || {};
+    const out = [];
+    if (c.status === 'running' && !seen.started) out.push({ event: 'started', value: true, body: c.branch ? tr('Worktree Kanban でタスクを開始しました（ブランチ: {branch}）', { branch: c.branch }) : tr('Worktree Kanban でタスクを開始しました') });
+    if (c.prUrl && seen.pr !== c.prUrl) out.push({ event: 'pr', value: c.prUrl, body: tr('PR を作成しました: {url}', { url: c.prUrl }) });
+    if (this.issueStatusKey(c) === 'done' && !seen.done) out.push({ event: 'done', value: true, body: tr('Worktree Kanban のタスクが完了しました') });
+    return out;
+  }
+
+  // タスクの開始・PR の作成・完了を Issue にコメントで書き戻す（commentEvents を持つサービスだけ）。
+  // 切っているあいだの出来事も「書いた」ことにする（あとで入れたときに、古い出来事をまとめて書かない）
+  queueIssueComments(c) {
+    if (!c.issue) return;
+    const provider = this.issueProvider(c);
+    if (!provider || !provider.commentEvents || typeof provider.addComment !== 'function') return;
+    const events = this.issueCommentEvents(c);
+    if (!events.length) return;
+    c.issueComments = c.issueComments || {};
+    const enabled = this.store.repoSettings(c.repoPath).issueComments !== false;
+    for (const { event, value, body } of events) {
+      c.issueComments[event] = value;
+      if (enabled) this.queueIssueWork(c, () => this.runIssueComment(c, body));
+    }
+    this.store.save(); // 再起動で同じコメントを二重に書かない
+  }
+
+  async runIssueComment(c, body) {
+    if (!this.store.card(c.id)) return; // 破棄された
+    try {
+      await this.addIssueComment(c, body);
+    } catch (err) {
+      if (!this.store.card(c.id)) return;
+      const provider = this.issueProvider(c);
+      this.log(c, 'error', tr('{label} にコメントを書けませんでした: {message}', { label: provider ? provider.label : IssueRef.providerOf(c.issue), message: err.message }));
+      this.store.save();
+      this.emit('changed', c.id);
+    }
   }
 
   async runIssueSync(c, key) {
