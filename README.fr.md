@@ -32,7 +32,7 @@ Application de bureau (Electron, Mac / Windows / Linux) qui lance en parallèle 
 ## Pourquoi Worktree Kanban ?
 
 - **Des agents en organigramme** — décrivez un flux en langage naturel ou dessinez-le, et les agents se passent le travail étape par étape, en suivant branches, boucles et étapes parallèles.
-- **Vous gardez la main** — vérifiez le diff avant de fusionner ou d'ouvrir une PR. Avec Claude Code, vous approuvez aussi les actions sur la carte.
+- **Vous gardez la main** — vérifiez le diff avant de fusionner ou d'ouvrir une PR. Avec Claude Code, Codex et Cursor, vous approuvez aussi les actions sur la carte.
 - **Une tâche, un worktree** — chaque tâche a son propre worktree git et sa branche : elles n'entrent en conflit ni entre elles ni avec votre arbre de travail.
 - **Plusieurs dépôts à la fois** — ouvrez jusqu'à 3 dépôts en onglets ; changer d'onglet n'arrête rien.
 - **Les CLI que vous utilisez déjà** — Claude Code, Codex CLI, Antigravity CLI, Gemini CLI et Cursor CLI, avec votre connexion et vos réglages actuels.
@@ -55,11 +55,11 @@ flowchart LR
 
 - **1 tâche = 1 worktree = 1 branche.** Elle crée un worktree dans `<repo>.worktrees/<id>`, à côté du dépôt, et travaille sur une branche `agent/<résumé>-<id>`. Les tâches ne se gênent pas entre elles, ni avec l'arbre de travail que vous avez ouvert
 - **L'agent est la CLI, lancée telle quelle.** Claude Code s'exécute avec `claude -p --input-format stream-json --output-format stream-json`, et sa sortie s'affiche sur la carte comme journal. La connexion, le modèle, `CLAUDE.md` et les skills sont ceux que vous utilisez dans le terminal
-- **L'approbation passe par `--permission-prompt-tool` de Claude Code.** Seules les actions que le mode de permission ou `--allowedTools` n'autorise pas tout seul apparaissent sur la carte comme attente d'approbation
+- **L'approbation passe par `--permission-prompt-tool` de Claude Code, `codex app-server` de Codex et `cursor-agent acp` de Cursor.** Seules les actions que le mode de permission ou `--allowedTools` (le réglage des outils autorisés de Worktree Kanban) n'autorise pas tout seul apparaissent sur la carte comme attente d'approbation
 - **Une fois terminé, vous intégrez le travail par un merge (`--no-ff`) ou en ouvrant une PR / MR (`gh` pour GitHub, l'API pour GitLab).** Vous choisissez la branche cible, et vous pouvez pousser vers origin après le merge
 - L'état du tableau est enregistré dans `board.json`, dans le dossier userData d'Electron. Il n'y a pas de serveur externe
 
-Avec Codex / Antigravity / Gemini / Cursor, à cause des limites de la CLI, l'approbation sur la carte, les questions à choix, btw et l'affichage du coût ne sont pas disponibles (détails dans [docs/agents.md](docs/agents.md) (English)).
+Sur Codex / Antigravity / Gemini / Cursor, les limites de la CLI empêchent les questions à choix multiples, btw et l'affichage du coût. L'approbation sur la carte fonctionne avec Codex et Cursor, mais pas avec Antigravity ni Gemini (voir [docs/agents.md](docs/agents.md) (English)).
 
 ## Fonctions principales
 

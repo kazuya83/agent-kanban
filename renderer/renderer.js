@@ -4412,7 +4412,7 @@ function renderSettingsView() {
           <label class="field">${tr('<span>cursor-agent コマンドのパス</span>')}<input id="sCursor" value="${esc(s.cursorPath || 'cursor-agent')}" /></label>
           <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sCursorModel" placeholder="${tr('例: gpt-5 / sonnet-4.5')}" value="${esc(s.cursorModel || '')}" /></label>
         </div>`)}
-      <small class="muted s-note">${tr('Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Antigravity / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Antigravity と Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。')}</small>
+      <small class="muted s-note">${tr('Claude Code・Codex・Cursor は、自動で許可されない操作をカードで承認できます（「毎回確認する」でも、Cursor のファイル編集は承認なしで書かれます。Codex の「ファイル編集は自動」は、worktree の sandbox の中のコマンドも承認なしで動きます）。Antigravity / Gemini はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → ファイル編集だけ自動で許可）。')}</small>
       <label class="field">${tr('<span>新しいタスク・会話で最初から選んでおくエージェント</span>')}
         <select id="sDefaultAgent"></select>
         <small>${tr('オーケストレーションで Pipeline・競争を選んでいれば、タスクを作るときの「エージェント」の欄では、そちらを最初から選んでおきます（使えない状態のときや会話では、このエージェント）。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。')}</small></label>`,

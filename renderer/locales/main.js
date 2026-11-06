@@ -605,4 +605,12 @@
   "Issue を読めませんでした: {message}": {"en":"Could not read Issues: {message}","es":"No se pudieron leer los Issues: {message}","fr":"Impossible de lire les Issues : {message}","zh":"无法读取 Issue：{message}"},
   "#{number} のタスクを作って開始しました": {"en":"Created and started the task for #{number}","es":"Se creó e inició la tarea de #{number}","fr":"Tâche de #{number} créée et démarrée","zh":"已创建并开始 #{number} 的任务"},
   "#{number} のタスクを作りました": {"en":"Created the task for #{number}","es":"Se creó la tarea de #{number}","fr":"Tâche de #{number} créée","zh":"已创建 #{number} 的任务"},
+  "この版の {label} は承認のやりとりに対応していないので、CLI 側の許可で動かします": {"en":"This version of {label} does not support approval requests, so permissions are handled by the CLI","es":"Esta versión de {label} no admite solicitudes de aprobación, por lo que los permisos los gestiona la CLI","fr":"Cette version de {label} ne prend pas en charge les demandes d'approbation : les autorisations sont gérées par la CLI","zh":"此版本的 {label} 不支持批准请求，因此由 CLI 处理权限"},
+  "（不明）": {"en":"(unknown)","es":"(desconocido)","fr":"(inconnu)","zh":"（未知）"},
+  "追加の権限": {"en":"Additional permissions","es":"Permisos adicionales","fr":"Autorisations supplémentaires","zh":"额外权限"},
+  "ターンが失敗しました": {"en":"The turn failed","es":"El turno falló","fr":"Le tour a échoué","zh":"本轮运行失败"},
+  "Codex の会話を始められませんでした": {"en":"Could not start a Codex conversation","es":"No se pudo iniciar una conversación de Codex","fr":"Impossible de démarrer une conversation Codex","zh":"无法开始 Codex 会话"},
+  "前の会話を読み込めなかったので、新しい会話で始めます: {message}": {"en":"Could not load the previous conversation, so a new one was started: {message}","es":"No se pudo cargar la conversación anterior, así que se inició una nueva: {message}","fr":"Impossible de charger la conversation précédente, une nouvelle a été démarrée : {message}","zh":"无法加载之前的会话，已开始新会话：{message}"},
+  "会話を始められませんでした": {"en":"Could not start a conversation","es":"No se pudo iniciar una conversación","fr":"Impossible de démarrer une conversation","zh":"无法开始会话"},
+  "途中で止まりました（{reason}）": {"en":"Stopped partway ({reason})","es":"Se detuvo a mitad de camino ({reason})","fr":"Arrêt en cours de route ({reason})","zh":"中途停止（{reason}）"},
 });

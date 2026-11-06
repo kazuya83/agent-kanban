@@ -14,6 +14,7 @@ const IssueRef = require('../renderer/issue-ref');
 const ghCli = require('./gh');
 const { withSkill } = require('./skills');
 const providers = require('./providers');
+const AgentRpc = require('./agent-rpc');
 const attachments = require('./attachments');
 const { findSimilarTasks } = require('./similar');
 const os = require('os');
@@ -24,6 +25,9 @@ const Subtasks = require('./subtasks');
 const Checkpoints = require('./checkpoints');
 const { SCRIPT_KINDS, SCRIPT_SETTINGS, PORT_START, PORT_END, PORT_COUNT, portsFree, cleanScript, appendOutput, startScript } = require('./worktree-scripts');
 const I18n = require('../renderer/i18n');
+const APP_VERSION = require('../package.json').version;
+const RPC_PROBE_TIMEOUT_MS = 20000; // 承認のやりとりができるかを確かめるときに、CLI の返事を待つ長さ
+const RPC_RECHECK_MS = 10 * 60 * 1000; // 使えなかった CLI を、もう一度確かめるまでの長さ
 // GitHub の Issue は、これまでどおり番号だけを渡す（fetchIssue などはテストで差し替えるので、形を変えない）
 const issueArg = (ref) => (IssueRef.providerOf(ref) === IssueRef.DEFAULT_PROVIDER ? ref.number : ref);
 const issueRef = (arg) => (arg && typeof arg === 'object' ? arg : IssueRef.cleanIssue({ number: arg }));
@@ -739,6 +743,16 @@ function scriptFailReason(run) {
   if (run.timedOut) return tr('時間切れ');
   if (run.error) return run.error;
   return run.code === null ? tr('シグナル {signal}', { signal: run.signal || '?' }) : tr('終了コード {code}', { code: run.code });
+}
+
+// JSON-RPC で動かしている CLI は、ターンが終わっても動き続ける。stdin を閉じて、残っていれば止める
+function closeRpcChild(child) {
+  try {
+    child.stdin.end();
+  } catch {
+    /* もう閉じている */
+  }
+  setTimeout(() => child.exitCode === null && child.signalCode === null && killTree(child), 1500).unref();
 }
 
 function killTree(child) {
@@ -2923,6 +2937,54 @@ class AgentManager extends EventEmitter {
     return child;
   }
 
+  // 承認のやりとりができる起動のしかたが、この CLI の版で使えるかを確かめる（使えないときは前の起動のしかたに戻す）。
+  // 使えると分かったら覚えておく。使えないと分かったときは、CLI を入れ替えたときのために、しばらくしたら確かめ直す
+  async rpcReady(kind, agent, cwd) {
+    const key = `${agent}:${wsl.parseWslPath(cwd)?.distro || ''}`;
+    this.rpcSupport = this.rpcSupport || new Map();
+    const known = this.rpcSupport.get(key);
+    if (known && (known.ok || Date.now() - known.at < RPC_RECHECK_MS)) return known.ok;
+    let child;
+    try {
+      child = await this.spawnAgent(agent, cwd, providers.rpcArgs(agent, {}));
+    } catch {
+      return true; // CLI が見つからない: このあとの起動で、いつものエラーを出す
+    }
+    const probe = AgentRpc.probeRpc(kind, { cwd: wsl.parseWslPath(cwd)?.linux || cwd, version: APP_VERSION, write: (t) => child.stdin.write(t) });
+    child.stdin.on('error', () => {});
+    child.stderr.resume();
+    let buf = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        try {
+          if (line) probe.onMessage(JSON.parse(line));
+        } catch {
+          /* 問い合わせの答えではない出力は読み飛ばす */
+        }
+      }
+    });
+    let timer;
+    const gone = new Promise((_, reject) => {
+      child.on('error', reject);
+      child.on('close', () => reject(new Error('exited')));
+      timer = setTimeout(() => reject(new Error('timeout')), RPC_PROBE_TIMEOUT_MS);
+    });
+    const ok = await Promise.race([probe.run, gone]).then(
+      () => true,
+      () => false,
+    );
+    clearTimeout(timer);
+    probe.close('probe finished');
+    closeRpcChild(child);
+    this.rpcSupport.set(key, { ok, at: Date.now() });
+    return ok;
+  }
+
   // 会話（チャット）の権限モード。リポジトリのフォルダ（手元の作業中のファイル）でそのまま動くので、
   // ファイルの変更やコマンドは毎回カードで確かめる（「計画だけ」「すべて自動で許可」を選んでいればそれに従う）
   chatPermissionMode(mode) {
@@ -3115,6 +3177,7 @@ class AgentManager extends EventEmitter {
     // 言語の指示はエージェントにだけ渡し、ログ（lastPromptSent）には残さない
     const spoken = withReplyLanguage(prompt);
     let args;
+    let rpcKind = null;
     if (agent === 'claude') {
       // stdin を開いたままにして、実行中でもメッセージ（btw）を送れるようにする
       args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--replay-user-messages'];
@@ -3140,7 +3203,14 @@ class AgentManager extends EventEmitter {
         c.forkNext = false;
       }
       const attachDir = this.attachDirOf(c);
-      args = providers.buildArgs(agent, { mode, model: modelOf(c, s), sessionId: c.sessionId ? assertSessionId(c.sessionId) : null, prompt: spoken, includeDirs: attachDir ? [attachDir] : [] });
+      const sessionId = c.sessionId ? assertSessionId(c.sessionId) : null;
+      rpcKind = providers.rpcKindOf(agent, mode, { sessionId, sessionVia: c.sessionVia });
+      if (rpcKind && !(await this.rpcReady(rpcKind, agent, cwd))) {
+        rpcKind = null;
+        this.log(c, 'system', tr('この版の {label} は承認のやりとりに対応していないので、CLI 側の許可で動かします', { label }));
+      }
+      if (rpcKind) args = providers.rpcArgs(agent, { mode, model: modelOf(c, s) });
+      else args = providers.buildArgs(agent, { mode, model: modelOf(c, s), sessionId, prompt: spoken, includeDirs: attachDir ? [attachDir] : [] });
     }
 
     const sentAtts = c.pendingAttachments || null;
@@ -3156,7 +3226,24 @@ class AgentManager extends EventEmitter {
     this.procs.set(c.id, child);
     // sent: stdin に書いたメッセージ（acked = claude が受け取ったことをリプレイで確認済み）
     const run = { agent, resultError: null, finished: false, child, sent: [], stdinClosed: false, idleTimer: null };
-    if (agent !== 'claude') run.parser = providers.createParser(agent, { summarize: summarizeInput });
+    if (rpcKind) {
+      run.rpcKind = rpcKind;
+      run.rpc = AgentRpc.createRpcSession(rpcKind, {
+        mode,
+        model: modelOf(c, s),
+        sessionId: c.sessionId || null,
+        cwd: wsl.parseWslPath(cwd)?.linux || cwd,
+        prompt: spoken,
+        version: APP_VERSION,
+        summarize: summarizeInput,
+        write: (text) => child.stdin.write(text),
+        emit: (actions) => {
+          if (!run.finished) for (const a of actions) this.applyAction(c, a, run);
+        },
+        permit: (req) => this.requestPermission({ cardId: c.id, ...req }),
+        done: () => closeRpcChild(child),
+      });
+    } else if (agent !== 'claude') run.parser = providers.createParser(agent, { summarize: summarizeInput });
     run.done = new Promise((r) => (run.markDone = r));
     this.runs = this.runs || new Map();
     this.runs.set(c.id, run);
@@ -3179,8 +3266,11 @@ class AgentManager extends EventEmitter {
     });
     child.stdin.on('error', () => {});
     if (agent === 'claude') this.writeMessage(run, spoken, null, attachments.imageBlocks(sentAtts));
-    else {
-      // Codex / Antigravity / Gemini は指示を stdin で1回だけ受け取る（Cursor は引数で受け取ったので空で閉じる）。実行中の btw は終了後の追加指示にする
+    else if (run.rpc) {
+      run.stdinClosed = true; // 指示は RPC で渡す。実行中の btw は、ほかの CLI と同じく終了後の追加指示にする
+      run.rpc.start();
+    } else {
+      // ここへ来るのは RPC を使わないとき。指示は stdin で1回だけ受け取る（Cursor は引数で受け取ったので空で閉じる）。実行中の btw は終了後の追加指示にする
       run.stdinClosed = true;
       child.stdin.end(providers.promptViaArg(agent) ? '' : spoken);
     }
@@ -3198,6 +3288,12 @@ class AgentManager extends EventEmitter {
       clearTimeout(run.idleTimer);
       if (buf.trim()) this.handleLine(c, buf.trim(), run);
       if (run.parser) for (const a of run.parser.flush()) this.applyAction(c, a, run);
+      if (run.rpc) {
+        for (const a of run.rpc.flush()) this.applyAction(c, a, run);
+        run.rpc.close(tr('エージェントが終了しました'));
+        // ターンを終えたあとは、こちらから閉じる。ターンの途中で落ちたときは失敗にする
+        code = run.rpc.ended ? 0 : code || 1;
+      }
       this.procs.delete(c.id);
       this.runs.delete(c.id);
       // 受け取られないまま終わった btw は「届かなかった」にする（終了後の追加指示待ち follow は残す）
@@ -3378,6 +3474,10 @@ class AgentManager extends EventEmitter {
       this.log(c, 'stderr', truncate(line, 2000));
       return;
     }
+    if (run.rpc) {
+      run.rpc.onMessage(ev);
+      return;
+    }
     if (run.parser) {
       for (const a of run.parser.onEvent(ev || {})) this.applyAction(c, a, run);
       return;
@@ -3461,6 +3561,7 @@ class AgentManager extends EventEmitter {
       case 'session':
         if (!isSessionId(a.id)) break;
         this.recordSession(c, a.id);
+        c.sessionVia = run.rpcKind || null; // Cursor の acp と -p は、互いに会話の続きができない
         this.log(c, 'system', a.model ? tr('セッション開始（{agent} / モデル: {model}）', { agent: agentLabel(run.agent), model: a.model }) : tr('セッション開始（{agent}）', { agent: agentLabel(run.agent) }));
         this.changed(c);
         break;
@@ -3662,6 +3763,11 @@ class AgentManager extends EventEmitter {
     input = input && typeof input === 'object' ? input : {};
     if (toolName === 'AskUserQuestion') return this.askQuestion(c, input, toolUseId, signal);
     if ((c.alwaysAllow || []).includes(toolName)) {
+      this.log(c, 'permission',tr('自動で許可しました: {toolName}  {summarizeInput}', { toolName, summarizeInput: summarizeInput(input) }));
+      return Promise.resolve({ behavior: 'allow', updatedInput: input });
+    }
+    // Claude Code は CLI 側で見ている。それ以外の CLI の承認はここへ来るので、設定の「許可しておくツール」をここで見る
+    if (agentOf(c) !== 'claude' && providers.isAllowedTool(splitList(this.store.repoSettings(c.repoPath).allowedTools), toolName, input)) {
       this.log(c, 'permission',tr('自動で許可しました: {toolName}  {summarizeInput}', { toolName, summarizeInput: summarizeInput(input) }));
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
     }

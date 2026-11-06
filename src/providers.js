@@ -13,6 +13,9 @@
 //
 // Claude Code は承認（--permission-prompt-tool）や実行中のメッセージ（btw）に対応しているので、
 // これまでどおり agent.js の中で直接扱う
+//
+// Codex（codex app-server）と Cursor（cursor-agent acp）のカードの承認は、agent-rpc.js が JSON-RPC で話す。
+// 動かす手前で使えるかを確かめ、使えない版は、ここの buildArgs の起動のしかたに戻す
 
 const { tr } = require('../renderer/i18n');
 
@@ -48,7 +51,8 @@ function agentModel(settings, a) {
 }
 
 // 権限モード（Claude Code の名前）を、それぞれの CLI のやり方に直す。
-// Codex / Antigravity / Gemini / Cursor はカードでの承認に対応していないので、自動で許可されない操作は CLI 側で止められる
+// Antigravity / Gemini はカードでの承認に対応していないので、自動で許可されない操作は CLI 側で止められる。
+// Codex / Cursor は agent-rpc.js で動かすとカードで承認できる（下は、それが使えないときの起動のしかた）
 function codexPolicy(mode) {
   if (mode === 'bypassPermissions') return { bypass: true };
   return { sandbox: mode === 'plan' ? 'read-only' : 'workspace-write' };
@@ -71,6 +75,49 @@ function cursorPolicy(mode) {
   if (mode === 'plan') return ['--mode', 'plan'];
   if (mode === 'bypassPermissions') return ['--force', '--approve-mcps'];
   return ['--force'];
+}
+
+// カードで承認できる起動のしかたの種類（なければ null）。
+//   codex: 途中で許可を聞くモードだけ app-server で動かす（計画だけ・すべて許可は聞くことがない。会話は codex exec と共通）
+//   cursor: acp と -p は会話の保存場所が別で、互いに続きができない。-p で始めた会話は -p のまま続ける
+function rpcKindOf(a, mode, { sessionId, sessionVia } = {}) {
+  if (a === 'codex') return mode === 'default' || mode === 'acceptEdits' ? 'codex' : null;
+  if (a === 'cursor') return sessionId && sessionVia !== 'acp' ? null : 'acp';
+  return null;
+}
+function rpcArgs(a, { mode, model } = {}) {
+  if (a === 'codex') {
+    return ['app-server'];
+  }
+  if (a === 'cursor') {
+    // モデルは session/set_model だと版ごとの長い名前が要るので、起動の引数で渡す
+    const args = mode === 'bypassPermissions' ? ['--force', '--approve-mcps'] : [];
+    if (model) args.push('--model', model);
+    args.push('acp');
+    return args;
+  }
+  throw new Error(tr('このエージェントには対応していません: {a}', { a }));
+}
+
+// 設定の「許可しておくツール」（Bash(npm test:*) など）に入っている操作か。
+// Claude Code は CLI 側で見るので、カードの承認を Worktree Kanban が受ける CLI のためのもの。
+// 「Bash(npm test:*)」は前方一致なので、つないだコマンド（npm test; rm x）は通さない
+function isAllowedTool(list, toolName, input) {
+  const command = input && typeof input.command === 'string' ? input.command.trim() : '';
+  for (const rule of list || []) {
+    const m = /^([^()]+)(?:\((.*)\))?$/.exec(String(rule).trim());
+    if (!m || m[1] !== toolName) continue;
+    if (m[2] == null) return true;
+    if (toolName !== 'Bash') continue;
+    const prefix = /^(.*?)(?::\*|\s*\*)$/.exec(m[2]);
+    if (!prefix) {
+      if (command === m[2]) return true;
+      continue;
+    }
+    if (/[;&|<>`$\n\r]/.test(command)) continue;
+    if (command === prefix[1] || command.startsWith(`${prefix[1]} `)) return true;
+  }
+  return false;
 }
 
 /**
@@ -653,7 +700,11 @@ module.exports = {
   agentModel,
   promptViaArg,
   buildArgs,
+  rpcKindOf,
+  rpcArgs,
+  isAllowedTool,
   createParser,
+  trunc,
   todoItems,
   todosFromTool,
   codexPolicy,

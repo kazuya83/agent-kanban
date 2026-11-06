@@ -55,11 +55,11 @@ flowchart LR
 
 - **1 タスク = 1 worktree = 1 ブランチ**。リポジトリの隣の `<repo>.worktrees/<id>` に worktree を作り、`agent/<内容>-<id>` のブランチで作業させます。作業中のタスク同士や、手元の作業ツリーとはぶつかりません
 - **エージェントは CLI をそのまま起動します**。Claude Code は `claude -p --input-format stream-json --output-format stream-json` で動かし、出力をログとしてカードに表示します。ログイン・モデル・`CLAUDE.md`・スキルは、ターミナルで使うときと同じものが使われます
-- **承認は Claude Code の `--permission-prompt-tool` で受けます**。権限モードや `--allowedTools` で自動で許可されない操作だけが、カードに「承認待ち」として出ます
+- **承認は Claude Code の `--permission-prompt-tool`、Codex の `codex app-server`、Cursor の `cursor-agent acp` で受けます**。権限モードや `--allowedTools`（Worktree Kanban の設定の「許可しておくツール」）で自動で許可されない操作だけが、カードに「承認待ち」として出ます
 - **終わったら、マージ（`--no-ff`）か PR / MR の作成（GitHub は `gh`、GitLab は API）で取り込みます**。マージ先のブランチは選べ、マージしたあとに origin へ push することもできます
 - ボードの状態は Electron の userData フォルダの `board.json` に保存します。外部のサーバーは使いません
 
-Codex / Antigravity / Gemini / Cursor では、CLI の制約から、カードでの承認・選択肢の質問・btw・金額の表示が使えません（詳しくは [docs/agents.ja.md](docs/agents.ja.md)）。
+Codex / Antigravity / Gemini / Cursor では、CLI の制約から、選択肢の質問・btw・金額の表示が使えません。カードでの承認は Codex と Cursor で使えますが、Antigravity と Gemini では使えません（詳しくは [docs/agents.ja.md](docs/agents.ja.md)）。
 
 ## 主な機能
 

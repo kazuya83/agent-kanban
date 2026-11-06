@@ -25,6 +25,7 @@ Each release that changes the app raises the last number of the version. There i
 - Slack integration: notifications for completions, failures, and items waiting for you, and starting tasks from Slack for allowed users only. Nobody can start a task by default.
 - Approving and answering from Slack: buttons on notifications for permission checks, agent questions, spec checks, and replies, limited to allowed users. Slack offers Allow only when the full tool input can be shown. Needs "Interactivity & Shortcuts" turned on in the Slack app.
 - An "Integrations" section in Settings. Tokens are encrypted with a key from the OS secure storage.
+- In-card approval for Codex (`codex app-server`) and Cursor (`cursor-agent acp`). Versions that do not support it keep the previous behavior.
 
 ## 0.1.94
 
