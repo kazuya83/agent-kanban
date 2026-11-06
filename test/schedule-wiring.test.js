@@ -191,7 +191,11 @@ test('preload: 4つの操作を公開し、2引数でも { id, ... } の1引数�
     if (request === 'electron') {
       return {
         contextBridge: { exposeInMainWorld: (_n, a) => (api = a) },
-        ipcRenderer: { invoke: async (ch, arg) => (invoked.push([ch, arg]), { ok: true, data: null }), on() {} },
+        ipcRenderer: {
+          invoke: async (ch, arg) => (invoked.push([ch, arg]), { ok: true, data: null }),
+          on() {},
+          sendSync: () => 'en',
+        },
       };
     }
     return load.call(this, request, ...rest);

@@ -49,7 +49,7 @@ test('節の分け方: 欄が決めた節にある', () => {
 
 test('保存しても画面に残り、「元に戻す」は描き直すだけ', () => {
   const body = fnSource('renderSettingsView');
-  assert.match(body, /id="sCancel">元に戻す</);
+  assert.match(body, /id="sCancel">\$\{tr\('元に戻す'\)\}</);
   assert.doesNotMatch(body, /キャンセル/);
   assert.match(body.slice(body.indexOf("$('sCancel').onclick"), body.indexOf("$('sOk').onclick")), /renderSettingsView\(\)/);
   assert.doesNotMatch(body.slice(body.indexOf("$('sCancel').onclick"), body.indexOf("$('sOk').onclick")), /updateSettings/, '元に戻すでは保存しない');
@@ -296,6 +296,7 @@ function ghHarness({ modal, settings }) {
   const settingsPanel = settings ? panel('settings') : null;
   const ctx = {
     esc: (x) => x,
+    tr: (s, vars) => (vars ? s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : s),
     ghState: { busy: false, lines: [], code: null },
     document: { querySelector: () => modalPanel },
     $: (id) => (id === 'ghPanel' ? settingsPanel : null),
