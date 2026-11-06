@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How to migrate from Conductor to Worktree Kanban</title>
+  <meta name="description" content="What changes at Conductor, how to export Conductor Cloud data before it shuts down, what carries over, and how to move to Worktree Kanban step by step.">
+  <link rel="canonical" href="https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.html">
+  <link rel="alternate" hreflang="en" href="https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.html">
+  <link rel="alternate" hreflang="ja" href="https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.ja.html">
+  <link rel="icon" href="images/icon.png">
+  <link rel="stylesheet" href="migrate.css">
+</head>
+<body>
+  <header>
+    <img src="images/icon.png" alt="">
+    <a href="./">Worktree Kanban</a>
+    <a class="lang" href="migrate-from-conductor.ja.html" lang="ja">日本語</a>
+  </header>
+  <main>
+    <h1>How to migrate from Conductor</h1>
+    <p class="checked">Checked against Conductor's announcement and documentation on November 7, 2026. Worktree Kanban is not affiliated with Conductor or Meta.</p>
+    <p><strong>If you use Conductor Cloud, export your data first.</strong> Cloud goes read-only on November 13, 2026, and shuts down on November 20, when Conductor begins deleting Cloud user data. Follow step 1 before anything else.</p>
+    <p>Your local code is safe: Conductor's local workspaces are ordinary git worktrees and branches, so they do not depend on the app. Worktree Kanban cannot import Conductor's workspaces or chats automatically, so this guide saves what matters first, then moves open work over by hand. Allow about 30 minutes per repository.</p>
+
+    <h2>What is happening to Conductor</h2>
+    <ul>
+      <li>On November 4, 2026, Conductor <a href="https://www.conductor.build/announcement">announced it is joining Meta</a>. New users can no longer sign up or download the app. Existing users can keep using it for free.</li>
+      <li>Conductor Cloud goes read-only on November 13: you can read old chats and export data, but not send new messages. It shuts down on November 20, and deletion of Cloud user data begins. Active subscribers get a refund.</li>
+      <li>The local Mac app keeps working for now, with <a href="https://www.conductor.build/changelog/0.93.0-conductor-is-joining-meta">new models and critical bug fixes until early 2027</a>. It then winds down, and Conductor says it will delete all Conductor user data when the app shuts down.</li>
+    </ul>
+    <p><strong>If you only use local workspaces, nothing forces you to move today.</strong> The local app has a few months left, so you can move at your own pace. If you use Cloud, the dates above apply now.</p>
+
+    <h2>What carries over</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>In Conductor</th><th>In Worktree Kanban</th></tr></thead>
+        <tbody>
+          <tr><td>Git branches and commits</td><td>Stay in your repository, ready to use</td></tr>
+          <tr><td>Cloud workspaces</td><td>Use Conductor's Transfer to local first (step 1), then move them like local workspaces</td></tr>
+          <tr><td>Workspaces in progress</td><td>Recreate them as tasks based on the existing branch (step 5)</td></tr>
+          <tr><td>Chats and checkpoints</td><td>Not imported. Keep the export and backup for reference. Worktree Kanban starts recording its own points with each new task</td></tr>
+          <tr><td>Setup script</td><td>Setup script</td></tr>
+          <tr><td>Run actions</td><td>Run script, started by hand from the worktree tab. There is one per project, not several named actions</td></tr>
+          <tr><td>Archive script</td><td>Cleanup script, which runs just before a worktree is removed</td></tr>
+          <tr><td>Files to copy and <code>.worktreeinclude</code></td><td>Add <code>cp</code> lines to the Setup script, such as <code>cp "$WORKTREE_KANBAN_ROOT/.env" .</code></td></tr>
+          <tr><td><code>CONDUCTOR_ROOT_PATH</code>, <code>CONDUCTOR_WORKSPACE_PATH</code>, <code>CONDUCTOR_PORT</code></td><td><code>WORKTREE_KANBAN_ROOT</code>, <code>WORKTREE_KANBAN_WORKTREE</code>, <code>WORKTREE_KANBAN_PORT</code> (also 10 ports per task)</td></tr>
+          <tr><td><code>CONDUCTOR_WORKSPACE_NAME</code></td><td><code>WORKTREE_KANBAN_TASK_ID</code>, for a unique name per task</td></tr>
+          <tr><td>Bundled Claude Code and Codex</td><td>Not bundled. Install and sign in to each agent's CLI on the machine</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Check the differences first</h2>
+    <p>Worktree Kanban is not a drop-in replacement, so check these before you start.</p>
+    <h3>You would lose</h3>
+    <ul>
+      <li><strong>Cloud workspaces and multiplayer.</strong> Agents run on your own PCs, and the board is kept on one machine. There are no cloud sandboxes and no shared chats, and tasks stop when that machine is off.</li>
+      <li><strong>OpenCode.</strong> Worktree Kanban runs Claude Code, Codex CLI, Antigravity CLI, Gemini CLI, and Cursor CLI. Approving actions on the card and a few other features <a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/agents.md">work only with some agents</a>.</li>
+      <li><strong>The iOS Remote Control app.</strong> Worktree Kanban has no mobile app.</li>
+      <li><strong>The Conductor API and MCP server</strong> for driving workspaces from other tools.</li>
+      <li><strong>Settings shared through the repository.</strong> Scripts live on each machine, not in a file like <code>.conductor/settings.toml</code>.</li>
+      <li><strong>Linked directories across repositories.</strong> Each task belongs to one repository. You can keep up to 3 repositories open as tabs.</li>
+    </ul>
+    <h3>You would gain</h3>
+    <ul>
+      <li><strong>Windows and Linux.</strong> <a href="https://www.conductor.build/docs/installation">Conductor is available only for macOS</a>. Worktree Kanban also runs on <a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/install.md">Windows and on Linux (x86_64)</a>, including WSL repositories on Windows. Remote control works between Mac and Windows only.</li>
+      <li><strong>Checkpoints that also cover Pipelines.</strong> Conductor's checkpoints revert a chat turn. Worktree Kanban records a point before each agent run, and <a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/usage.md#restore-an-earlier-point">restoring</a> returns the files, the Pipeline progress, and the conversation together. It works while a task is stopped in review or has failed, keeps up to 100 points per task, and cannot be undone.</li>
+      <li><strong><a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/agents.md">Pipelines</a>.</strong> Describe a flow in plain language, such as "implement with Codex, review with Claude, and go back if changes are needed", and agents hand the work over step by step along a flowchart with branches, loops, and parallel steps.</li>
+      <li><strong><a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/remote.md">Mac and Windows remote control</a></strong> over an SSH tunnel, with no external server.</li>
+      <li><strong>No cloud service to depend on.</strong> Worktree Kanban keeps its data on your machine. It is source-available under <a href="https://github.com/kazuya83/worktree-kanban/blob/main/LICENSE">FSL-1.1-ALv2</a>, which excludes competing commercial products and services. Each version also becomes available under Apache 2.0 two years after its release.</li>
+    </ul>
+
+    <h2>Migrate in 6 steps</h2>
+
+    <h3>1. Export Cloud data, if you use it</h3>
+    <p>Use Conductor's official steps, and do this first. If you do not use Cloud, skip this step.</p>
+    <ul>
+      <li><strong>To download all your data:</strong> in Conductor, go to Settings → Account → Export data.</li>
+      <li><strong>To move a cloud workspace and its chats to your Mac:</strong> right-click the workspace and choose Transfer to local.</li>
+    </ul>
+    <p>Do both before November 13. After that date, the announcement promises only reading old chats and exporting data, until the shutdown on November 20. Check that the exported files open before you move on.</p>
+
+    <h3>2. Save your work in git</h3>
+    <p>Run this in each repository to list Conductor's worktrees. They are usually under <code>~/conductor/workspaces/&lt;repo&gt;/&lt;workspace&gt;</code>.</p>
+<pre><code>git worktree list</code></pre>
+    <p>For each worktree you want to keep, commit anything uncommitted and push the branch. A pushed branch can also be picked up from a Windows or Linux machine.</p>
+<pre><code>git -C &lt;worktree-path&gt; status --short
+git -C &lt;worktree-path&gt; add -A
+git -C &lt;worktree-path&gt; commit -m "WIP: move from Conductor"
+git -C &lt;worktree-path&gt; push -u origin HEAD</code></pre>
+
+    <h3>3. Back up local data</h3>
+    <p>Quit Conductor, then copy these folders somewhere safe. Copy your Setup, Archive, and Run scripts from the project's Settings too, unless they are in <code>.conductor/settings.toml</code>. Workspaces can hold files such as <code>.env</code>, so keep the copy private and do not commit it.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Folder</th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td><code>~/Library/Application Support/com.conductor.app</code></td><td>Local chat history and app data</td></tr>
+          <tr><td><code>~/conductor</code></td><td>Workspaces</td></tr>
+          <tr><td><code>~/.claude</code>, <code>~/.codex</code></td><td>Claude Code and Codex files. These tools keep using them after you leave Conductor</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>4. Install Worktree Kanban</h3>
+    <p>Mac / Linux:</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.sh | bash</code></pre>
+    <p>Windows (PowerShell):</p>
+<pre><code>irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex</code></pre>
+    <p>Or <a href="https://github.com/kazuya83/worktree-kanban/releases/latest">download it from Releases</a>. The builds are not signed or notarized, so your OS may warn you the first time. Install and sign in to the CLI of each agent you use, then open your repository and choose your agents under "Agents to use" in Settings. Add your scripts under "Branches and landing", replacing any <code>CONDUCTOR_</code> variables with the names in the table above.</p>
+
+    <h3>5. Move open work</h3>
+    <ul>
+      <li><strong>Work that is nearly finished:</strong> finish it from the worktree or branch in your terminal, and merge it or open a PR as usual.</li>
+      <li><strong>Work that needs more agent time:</strong> set "Base branch" to that workspace's branch under "Branches and landing", then create a task. Its worktree starts from that branch. The merge target defaults to the same branch, so choose your main branch in the merge dialog if you want to land it directly. Then set "Base branch" back.</li>
+      <li><strong>Issues not started yet:</strong> create tasks by hand, or use the Issue tab under "+ New task" for GitHub, GitLab, Linear, and Jira.</li>
+    </ul>
+    <p>The agent does not see the Conductor chat, so write what is done and what is left in the new task.</p>
+
+    <h3>6. Clean up</h3>
+    <p>Once everything is merged or pushed, archive the workspaces in Conductor or remove the worktrees yourself, along with any branches you no longer need. <code>git branch -d</code> refuses to delete a branch that is not merged.</p>
+<pre><code>git worktree remove &lt;worktree-path&gt;
+git branch -d &lt;branch-name&gt;
+git worktree prune</code></pre>
+    <p>If you are unsure, do this later. Keep Conductor installed until you are done, because it can no longer be downloaded.</p>
+
+    <a class="download" href="https://github.com/kazuya83/worktree-kanban/releases/latest">Download Worktree Kanban</a>
+  </main>
+  <footer><a href="./">Home</a> · <a href="https://github.com/kazuya83/worktree-kanban">GitHub</a> · <a href="https://github.com/kazuya83/worktree-kanban/blob/main/LICENSE">FSL-1.1-ALv2 License</a></footer>
+</body>
+</html>

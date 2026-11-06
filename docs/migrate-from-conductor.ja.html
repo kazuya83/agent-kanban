@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conductor から Worktree Kanban に移る方法</title>
+  <meta name="description" content="Conductor に何が起きているか、終了前に Conductor Cloud のデータを書き出す方法、引き継げるもの、Worktree Kanban に移る手順をまとめました。">
+  <link rel="canonical" href="https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.ja.html">
+  <link rel="alternate" hreflang="en" href="https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.html">
+  <link rel="alternate" hreflang="ja" href="https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.ja.html">
+  <link rel="icon" href="images/icon.png">
+  <link rel="stylesheet" href="migrate.css">
+</head>
+<body>
+  <header>
+    <img src="images/icon.png" alt="">
+    <a href="./">Worktree Kanban</a>
+    <a class="lang" href="migrate-from-conductor.html" lang="en">English</a>
+  </header>
+  <main>
+    <h1>Conductor から移る方法</h1>
+    <p class="checked">2026年11月7日に、Conductor の告知とドキュメントで確かめた内容です。Worktree Kanban は Conductor・Meta とは関係ありません。</p>
+    <p><strong>Conductor Cloud を使っているなら、まずデータを書き出してください。</strong>Cloud は2026年11月13日に読み取り専用になり、11月20日に終了します。終了の日から、Cloud のユーザーデータの削除が始まります。何よりも先に手順1を進めてください。</p>
+    <p>ローカルのコードは失われません。Conductor のローカルのワークスペースは普通の git の worktree とブランチなので、アプリがなくても残ります。Worktree Kanban は Conductor のワークスペースやチャットを自動では取り込めないため、このページでは、大事なものを先に保存してから、進行中の作業を手で移します。目安は、1リポジトリあたり30分ほどです。</p>
+
+    <h2>Conductor に何が起きているか</h2>
+    <ul>
+      <li>2026年11月4日に、Conductor は <a href="https://www.conductor.build/announcement">Meta に合流すると告知</a>しました。新しいユーザーの登録とアプリのダウンロードはできなくなりました。今のユーザーは、無料で使い続けられます。</li>
+      <li>Conductor Cloud は11月13日に読み取り専用になります。古いチャットを読むこととデータの書き出しはできますが、新しいメッセージは送れません。11月20日に終了し、Cloud のユーザーデータの削除が始まります。契約中の人には返金されます。</li>
+      <li>ローカルの Mac アプリは当面動き、<a href="https://www.conductor.build/changelog/0.93.0-conductor-is-joining-meta">2027年の初めまで新しいモデルへの対応と重大なバグの修正</a>が続きます。そのあとは終了に向かい、アプリの終了時にすべてのユーザーデータを削除すると告知されています。</li>
+    </ul>
+    <p><strong>ローカルのワークスペースだけを使っているなら、今すぐ移る必要はありません。</strong>ローカルのアプリには数か月の余裕があるので、自分のペースで移れます。Cloud を使っているなら、上の日付がすぐに関わります。</p>
+
+    <h2>何が引き継げるか</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Conductor</th><th>Worktree Kanban</th></tr></thead>
+        <tbody>
+          <tr><td>git のブランチとコミット</td><td>リポジトリに残るので、そのまま使えます</td></tr>
+          <tr><td>Cloud のワークスペース</td><td>先に Conductor の Transfer to local で手元に移し（手順1）、ローカルのワークスペースと同じように移します</td></tr>
+          <tr><td>進行中のワークスペース</td><td>今のブランチをもとにタスクを作り直します（手順5）</td></tr>
+          <tr><td>チャットとチェックポイント</td><td>取り込めません。書き出したものとバックアップを参照用に残します。Worktree Kanban では、新しいタスクから時点を記録します</td></tr>
+          <tr><td>Setup スクリプト</td><td>セットアップスクリプト</td></tr>
+          <tr><td>Run のアクション</td><td>実行スクリプト（worktree タブから手で起動します）。名前付きで複数は持てず、プロジェクトごとに1つです</td></tr>
+          <tr><td>Archive スクリプト</td><td>片付けスクリプト（worktree を消す直前に動きます）</td></tr>
+          <tr><td>Files to copy・<code>.worktreeinclude</code></td><td>セットアップスクリプトに <code>cp "$WORKTREE_KANBAN_ROOT/.env" .</code> のような行を足します</td></tr>
+          <tr><td><code>CONDUCTOR_ROOT_PATH</code>・<code>CONDUCTOR_WORKSPACE_PATH</code>・<code>CONDUCTOR_PORT</code></td><td><code>WORKTREE_KANBAN_ROOT</code>・<code>WORKTREE_KANBAN_WORKTREE</code>・<code>WORKTREE_KANBAN_PORT</code>（こちらもタスクごとに10個のポート）</td></tr>
+          <tr><td><code>CONDUCTOR_WORKSPACE_NAME</code></td><td>タスクごとの一意な名前には <code>WORKTREE_KANBAN_TASK_ID</code> を使います</td></tr>
+          <tr><td>同梱の Claude Code・Codex</td><td>同梱していません。使うエージェントの CLI をその PC に入れて、ログインします</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>先に確かめておく違い</h2>
+    <p>Worktree Kanban は完全な代わりではありません。始める前に、次の点を確かめてください。</p>
+    <h3>できなくなること</h3>
+    <ul>
+      <li><strong>Cloud のワークスペースとマルチプレイヤー。</strong>エージェントは自分の PC で動き、ボードは1台の PC に保存されます。クラウドのサンドボックスや共有のチャットはなく、その PC の電源が切れるとタスクも止まります。</li>
+      <li><strong>OpenCode。</strong>動かせるのは Claude Code・Codex CLI・Antigravity CLI・Gemini CLI・Cursor CLI です。カード上の承認などの一部の機能は、<a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/agents.ja.md">エージェントによっては使えません</a>。</li>
+      <li><strong>iOS の Remote Control アプリ。</strong>Worktree Kanban にスマートフォンのアプリはありません。</li>
+      <li><strong>Conductor の API と MCP サーバー</strong>を使った、ほかのツールからの操作。</li>
+      <li><strong>リポジトリで共有する設定。</strong>スクリプトは PC ごとに保存され、<code>.conductor/settings.toml</code> のようなファイルでは共有できません。</li>
+      <li><strong>複数のリポジトリのディレクトリをつなぐ機能。</strong>タスクは1つのリポジトリに属します。リポジトリは、タブで3つまで同時に開けます。</li>
+    </ul>
+    <h3>できるようになること</h3>
+    <ul>
+      <li><strong>Windows と Linux で使える。</strong><a href="https://www.conductor.build/docs/installation">Conductor は macOS だけ</a>です。Worktree Kanban は <a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/install.ja.md">Windows と Linux（x86_64）</a>でも動き、Windows では WSL のリポジトリも扱えます。なお、遠隔操作は Mac と Windows のあいだだけです。</li>
+      <li><strong>Pipeline も戻せるチェックポイント。</strong>Conductor のチェックポイントは、チャットのターンを戻します。Worktree Kanban は、エージェントが動く回の直前ごとに時点を記録し、<a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/usage.ja.md#途中の状態に戻す">戻す</a>とファイル・Pipeline の進み具合・会話がそろって戻ります。戻せるのはタスクがレビューか失敗で止まっているときで、時点は1タスク100件までです。戻した操作は取り消せません。</li>
+      <li><strong><a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/agents.ja.md">Pipeline</a>。</strong>「Codex で実装して Claude でレビューし、直すところがあれば実装に戻す」のように文章で書くと、フローチャートになります。分岐・ループ・並列のとおりに、工程ごとにエージェントが作業を引き継ぎます。</li>
+      <li><strong>SSH トンネルを使った、外部サーバーなしの <a href="https://github.com/kazuya83/worktree-kanban/blob/main/docs/remote.ja.md">Mac と Windows の相互遠隔操作</a>。</strong></li>
+      <li><strong>クラウドのサービスに頼らない。</strong>データは自分の PC に保存されます。Worktree Kanban は <a href="https://github.com/kazuya83/worktree-kanban/blob/main/LICENSE">FSL-1.1-ALv2</a> で公開している source-available のソフトウェアで、競合する商用の製品やサービスには使えません。各版は、リリースから2年後に Apache 2.0 でも使えるようになります。</li>
+    </ul>
+
+    <h2>移行の6つの手順</h2>
+
+    <h3>1. Cloud のデータを書き出す（使っている場合）</h3>
+    <p>Conductor の公式の手順で、最初に行います。Cloud を使っていなければ、飛ばしてください。</p>
+    <ul>
+      <li><strong>すべてのデータをダウンロードする：</strong>Conductor の Settings → Account → Export data を開きます。</li>
+      <li><strong>Cloud のワークスペースとチャットを Mac に移す：</strong>ワークスペースを右クリックして、Transfer to local を選びます。</li>
+    </ul>
+    <p>どちらも11月13日より前に済ませてください。告知では、それ以降に11月20日の終了までできるのは、古いチャットを読むこととデータの書き出しだけです。次へ進む前に、書き出したファイルを開けることも確かめてください。</p>
+
+    <h3>2. 作業を git に保存する</h3>
+    <p>リポジトリごとに次を実行して、Conductor の worktree を一覧にします。場所はふつう <code>~/conductor/workspaces/&lt;リポジトリ&gt;/&lt;ワークスペース&gt;</code> です。</p>
+<pre><code>git worktree list</code></pre>
+    <p>残したい worktree は、コミットしていない変更をコミットし、ブランチを push します。push しておくと、Windows や Linux の PC でも続きから作業できます。</p>
+<pre><code>git -C &lt;worktree のパス&gt; status --short
+git -C &lt;worktree のパス&gt; add -A
+git -C &lt;worktree のパス&gt; commit -m "WIP: move from Conductor"
+git -C &lt;worktree のパス&gt; push -u origin HEAD</code></pre>
+
+    <h3>3. ローカルのデータをバックアップする</h3>
+    <p>Conductor を終了してから、次のフォルダを安全な場所にコピーします。Setup・Archive・Run のスクリプトは、<code>.conductor/settings.toml</code> に入っていなければ、プロジェクトの Settings から控えておきます。ワークスペースには <code>.env</code> などが入っていることがあるので、コピーは人に渡さず、コミットもしないでください。</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>フォルダ</th><th>中身</th></tr></thead>
+        <tbody>
+          <tr><td><code>~/Library/Application Support/com.conductor.app</code></td><td>ローカルのチャットの履歴とアプリのデータ</td></tr>
+          <tr><td><code>~/conductor</code></td><td>ワークスペース</td></tr>
+          <tr><td><code>~/.claude</code>・<code>~/.codex</code></td><td>Claude Code と Codex のファイル。Conductor をやめたあとも、それぞれのツールが使います</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>4. Worktree Kanban をインストールする</h3>
+    <p>Mac / Linux：</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.sh | bash</code></pre>
+    <p>Windows（PowerShell）：</p>
+<pre><code>irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex</code></pre>
+    <p><a href="https://github.com/kazuya83/worktree-kanban/releases/latest">Releases からダウンロード</a>することもできます。署名・公証がないため、初めて開くときに OS の警告が出ることがあります。使うエージェントの CLI を入れてログインしたら、リポジトリを開き、設定の「使うエージェント」でエージェントを選びます。「ブランチと取り込み」にスクリプトを入れるときは、<code>CONDUCTOR_</code> で始まる変数を、上の表の名前に置き換えてください。</p>
+
+    <h3>5. 進行中の作業を移す</h3>
+    <ul>
+      <li><strong>ほぼ終わっている作業：</strong>ターミナルで worktree かブランチから仕上げて、いつもどおりマージするか PR を作ります。</li>
+      <li><strong>まだエージェントに任せたい作業：</strong>「ブランチと取り込み」の「ベースブランチ」をそのワークスペースのブランチにしてから、タスクを作ります。そのブランチから worktree が作られます。マージ先の初期値も同じブランチになるので、main に直接入れるときはマージの画面で選び直してください。終わったら「ベースブランチ」を元に戻します。</li>
+      <li><strong>まだ始めていない Issue：</strong>タスクを手で作ります。GitHub・GitLab・Linear・Jira の Issue なら、「＋ 新しいタスク」の Issue のタブを使えます。</li>
+    </ul>
+    <p>エージェントは Conductor でのチャットを読めません。終わったことと残っていることを、新しいタスクに書いてください。</p>
+
+    <h3>6. 片付ける</h3>
+    <p>すべてマージか push が終わったら、Conductor でワークスペースをアーカイブするか、自分で worktree を消します。いらなくなったブランチも消します。<code>git branch -d</code> は、マージしていないブランチの削除を断ります。</p>
+<pre><code>git worktree remove &lt;worktree のパス&gt;
+git branch -d &lt;ブランチ名&gt;
+git worktree prune</code></pre>
+    <p>迷うなら、あとで構いません。Conductor はもうダウンロードできないので、移し終わるまでアプリを消さないでください。</p>
+
+    <a class="download" href="https://github.com/kazuya83/worktree-kanban/releases/latest">Worktree Kanban をダウンロード</a>
+  </main>
+  <footer><a href="./">ホーム</a> · <a href="https://github.com/kazuya83/worktree-kanban">GitHub</a> · <a href="https://github.com/kazuya83/worktree-kanban/blob/main/LICENSE">FSL-1.1-ALv2 License</a></footer>
+</body>
+</html>

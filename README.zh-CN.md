@@ -282,6 +282,7 @@ irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 
 | [安装](docs/install.md) (English) | 安装、更新、卸载，以及在 Windows 上使用 WSL 仓库 |
 | [面向开发者](docs/development.md) (English) | 从源码运行、构建、发布、应用的结构，以及测试 |
 | [从 Vibe Kanban 迁移](https://kazuya83.github.io/worktree-kanban/migrate-from-vibe-kanban.html) (English) | Vibe Kanban 发生了什么、可以保留什么，以及迁移步骤 |
+| [从 Conductor 迁移](https://kazuya83.github.io/worktree-kanban/migrate-from-conductor.html) (English) | Conductor 正在发生什么、如何导出 Cloud 数据、可以保留什么，以及迁移步骤 |
 
 ## 许可证
 
