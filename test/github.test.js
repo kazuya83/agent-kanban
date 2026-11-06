@@ -38,6 +38,11 @@ if (a[0] === 'issue' && a[1] === 'view') {
     state: n === 9 ? 'CLOSED' : 'OPEN', labels: [{ name: 'bug' }], comments: [{ author: { login: 'alice' }, body: 'Safari でも起きます' }] }));
   process.exit(0);
 }
+if (a[0] === 'issue' && a[1] === 'list') {
+  console.log(JSON.stringify([{ number: 31, title: '新しい', url: 'https://github.com/acme/app/issues/31', createdAt: '2026-11-07T01:00:00Z' }]));
+  fs.writeFileSync(state + '.list-args', JSON.stringify(a));
+  process.exit(0);
+}
 process.exit(2);
 `,
   );
@@ -66,6 +71,61 @@ test('Issue から指示を作る', () => {
   assert.match(p, /ラベル: bug/);
   assert.match(p, /@bob\n iOS だけ|@bob\niOS だけ/);
   assert.match(p, /## 追加の指示\nテストも追加して/);
+});
+
+test('listIssues: gh でラベルと作成者を指定して、開いている Issue を読む', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-gh-list-'));
+  const binDir = path.join(tmp, 'bin');
+  fs.mkdirSync(binDir);
+  fakeGh(binDir);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${binDir}${path.delimiter}${oldPath}`;
+  try {
+    const repo = path.join(tmp, 'repo');
+    fs.mkdirSync(repo);
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/app.git'], { cwd: repo });
+    const list = await github.listIssues(repo, { labels: ['agent', 'good first issue'], author: '@me' });
+    assert.deepStrictEqual(list, [{ number: 31, title: '新しい', url: 'https://github.com/acme/app/issues/31', createdAt: Date.parse('2026-11-07T01:00:00Z') }]);
+    const args = JSON.parse(fs.readFileSync(path.join(binDir, 'logged-in.list-args'), 'utf8'));
+    assert.deepStrictEqual(args.slice(0, 6), ['issue', 'list', '--repo', 'acme/app', '--state', 'open']);
+    assert.deepStrictEqual(args.slice(-6), ['--label', 'agent', '--label', 'good first issue', '--author', '@me']);
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('listIssues: gh がなければ REST API で読み、PR は除く', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-api-list-'));
+  const repo = path.join(tmp, 'repo');
+  fs.mkdirSync(repo);
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/app.git'], { cwd: repo });
+  const urls = [];
+  const realFetch = global.fetch;
+  global.fetch = async (url) => {
+    urls.push(String(url));
+    return { ok: true, status: 200, json: async () => [{ number: 5, title: 'a', html_url: 'u5', created_at: '2026-11-07T01:00:00Z' }, { number: 6, title: 'pr', html_url: 'u6', created_at: '2026-11-07T01:00:00Z', pull_request: {} }] };
+  };
+  // gh を見つからなくする
+  const env = require('../src/env');
+  const realResolve = env.resolveCommand;
+  t.after(() => {
+    global.fetch = realFetch;
+    env.resolveCommand = realResolve;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+  env.resolveCommand = () => null;
+  delete require.cache[require.resolve('../src/github')];
+  const fresh = require('../src/github');
+  const list = await fresh.listIssues(repo, { labels: ['agent', 'bug'], author: 'alice' });
+  assert.deepStrictEqual(list.map((x) => x.number), [5]);
+  assert.match(urls[0], /\/repos\/acme\/app\/issues\?/);
+  assert.match(urls[0], /labels=agent%2Cbug/);
+  assert.match(urls[0], /creator=alice/);
+  await assert.rejects(() => fresh.listIssues(repo, { author: '@me' }), /@me を使うには/);
+  delete require.cache[require.resolve('../src/github')];
 });
 
 test('gh: 未ログイン → ログイン（確認コードを受け取る）→ Issue からカードを作る', async () => {

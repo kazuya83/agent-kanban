@@ -104,6 +104,65 @@ async function viaApi(slug, number, token) {
   };
 }
 
+const ISSUE_LIST_LIMIT = 200; // 新しい順にこの件数まで読む
+
+async function listViaGh(gh, repoPath, slug, { labels, author }) {
+  const args = ['issue', 'list', '--repo', `${slug.owner}/${slug.repo}`, '--state', 'open', '--limit', String(ISSUE_LIST_LIMIT), '--json', 'number,title,url,createdAt'];
+  for (const l of labels) args.push('--label', l);
+  if (author) args.push('--author', author);
+  const out = await execFileP(gh, args, { cwd: repoPath });
+  return JSON.parse(out).map((d) => ({ number: d.number, title: d.title || '', url: d.url, createdAt: Date.parse(d.createdAt) }));
+}
+
+async function listViaApi(slug, { labels, author }, token) {
+  if (author === '@me') throw new Error(tr('作成者の @me を使うには、gh をインストールして GitHub にログインしてください（「Issue から」の画面からできます）'));
+  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'worktree-kanban' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const query = new URLSearchParams({ state: 'open', sort: 'created', direction: 'desc', per_page: '100' });
+  if (labels.length) query.set('labels', labels.join(','));
+  if (author) query.set('creator', author);
+  const res = await fetch(`https://api.github.com/repos/${slug.owner}/${slug.repo}/issues?${query}`, { headers });
+  if (res.status === 404) throw new Error(tr('{owner}/{repo} の Issue を読めません。private リポジトリの場合は、gh をインストールして GitHub にログインしてください（「Issue から」の画面からできます）', { owner: slug.owner, repo: slug.repo }));
+  if (res.status === 401) throw new Error(tr('GitHub トークンが正しくありません'));
+  if (res.status === 403) throw new Error(tr('GitHub API の利用制限に達しました。gh をインストールして GitHub にログインしてください（「Issue から」の画面からできます）'));
+  if (!res.ok) throw new Error(tr('GitHub API がエラーを返しました（{status}）', { status: res.status }));
+  return (await res.json())
+    .filter((d) => !d.pull_request) // この API は PR も Issue として返す
+    .map((d) => ({ number: d.number, title: d.title || '', url: d.html_url, createdAt: Date.parse(d.created_at) }));
+}
+
+// gh で読み、だめなら REST API で読む
+async function viaGhOrApi(cli, rest) {
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
+  const gh = resolveCommand('gh');
+  let ghError = null;
+  if (gh) {
+    try {
+      return await cli(gh);
+    } catch (err) {
+      ghError = err;
+    }
+  }
+  try {
+    return await rest(token);
+  } catch (err) {
+    // gh も API もだめなら、gh のエラーのほうが原因に近いことが多いので添える
+    if (ghError && ghError.stderr) err.message += `\n${tr('（gh のエラー: {message}）', { message: String(ghError.stderr).trim().split('\n')[0] })}`;
+    throw err;
+  }
+}
+
+/**
+ * 開いている Issue を、新しい順に読む（本文やコメントは読まない）
+ * @param {string} repoPath
+ * @param {{ labels?: string[], author?: string }} filter labels は全部付いているものだけ。author は作成者（@me も可）
+ * @returns {Promise<{ number: number, title: string, url: string, createdAt: number }[]>}
+ */
+async function listIssues(repoPath, { labels = [], author = '' } = {}) {
+  const slug = await repoSlug(repoPath);
+  return viaGhOrApi((gh) => listViaGh(gh, repoPath, slug, { labels, author }), (token) => listViaApi(slug, { labels, author }, token));
+}
+
 /**
  * @param {string} repoPath
  * @param {number} number
@@ -111,23 +170,7 @@ async function viaApi(slug, number, token) {
  */
 async function fetchIssue(repoPath, number, opts = {}) {
   const slug = await repoSlug(repoPath);
-  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
-  const gh = resolveCommand('gh');
-  let ghError = null;
-  if (gh) {
-    try {
-      return { ...(await viaGh(gh, repoPath, slug, number)), slug };
-    } catch (err) {
-      ghError = err;
-    }
-  }
-  try {
-    return { ...(await viaApi(slug, number, token)), slug };
-  } catch (err) {
-    // gh も API もだめなら、gh のエラーのほうが原因に近いことが多いので添える
-    if (ghError && ghError.stderr) err.message += `\n${tr('（gh のエラー: {message}）', { message: String(ghError.stderr).trim().split('\n')[0] })}`;
-    throw err;
-  }
+  return viaGhOrApi(async (gh) => ({ ...(await viaGh(gh, repoPath, slug, number)), slug }), async (token) => ({ ...(await viaApi(slug, number, token)), slug }));
 }
 
 // ---------- GitHub Projects のステータス ----------
@@ -355,6 +398,7 @@ module.exports = {
   parseIssueNumbers,
   repoSlug,
   fetchIssue,
+  listIssues,
   buildIssuePrompt,
   PROJECT_STATUS,
   normalizeStatusName,

@@ -37,10 +37,11 @@ const PERMISSION_MODES = [
   ['bypassPermissions', tr('すべて自動で許可する（注意）')],
 ];
 
-// エージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）と、オーケストレーション（Pipeline・競争）
+// エージェント（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI）と、オーケストレーション（Pipeline・競争）
 const AGENTS = [
   ['claude', 'Claude Code', 'Claude'],
   ['codex', 'Codex CLI', 'Codex'],
+  ['antigravity', 'Antigravity CLI', 'Antigravity'],
   ['gemini', 'Gemini CLI', 'Gemini'],
   ['cursor', 'Cursor CLI', 'Cursor'],
 ];
@@ -119,7 +120,7 @@ function pipelineOfRef(v, s = state.board.settings || {}) {
   return isRelayRef(v) ? pipelines(s).find((p) => p.id === v.slice(RELAY_PREFIX.length)) || null : null;
 }
 
-const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'chat', logs: new Map(), headSig: '', relayOpen: new Set(), chartZoom: null, view: AppView.loadView(localStorage) };
+const state = { board: { settings: {}, cards: [] }, repoOpenMode: 'replace', selected: null, tab: 'chat', logs: new Map(), logsVersion: new Map(), logsLoading: new Map(), headSig: '', relayOpen: new Set(), chartZoom: null, view: AppView.loadView(localStorage) };
 const $ = (id) => document.getElementById(id);
 // index.html の data-icon="名前" の場所に、モノクロの SVG アイコンを入れる（icons.js）
 for (const el of document.querySelectorAll('[data-icon]')) el.outerHTML = icon(el.dataset.icon, el.className);
@@ -705,7 +706,7 @@ function renderBoard() {
   if (!settings.repoPath) {
     $('board').innerHTML = viewingHost()
       ? tr('<div class="empty-state"><h2>接続先（{v}）でリポジトリを選んでください</h2><p>遠隔操作中は、ホストのリポジトリでエージェントが動きます。ホストの最近開いたリポジトリや、ホストのフォルダから選べます。</p><button class="btn primary" id="emptyRepo">ホストのリポジトリを選ぶ</button></div>', { v: (esc(remoteHostLabel())) })
-      : tr('<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、エージェント（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ・クローン・新規作成</button></div>');
+      : tr('<div class="empty-state"><h2>まずリポジトリを選んでください</h2><p>タスクごとにこのリポジトリの git worktree を作って、エージェント（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI）を並列に動かします。</p><button class="btn primary" id="emptyRepo">リポジトリを選ぶ・クローン・新規作成</button></div>');
     $('emptyRepo').onclick = chooseRepo;
     return;
   }
@@ -941,11 +942,11 @@ async function select(id, { subFrom = null } = {}) {
   // サブタスクを親の「サブタスク」タブから開いたときは、閉じると親に戻る
   state.subFrom = subFrom && card(subFrom) ? subFrom : null;
   if (state.chatListOpen) closeModal();
-  // 会話と、親の「サブタスク」タブから開いたサブタスクは、ボードの横ではなく、画面の中央にモーダルで開く
+  // 会話と、親の「サブタスク」タブから開いたサブタスクは、右からのスライドではなく、画面の中央にモーダルで開く
   const chatModal = isChat(card(id)) || !!state.subFrom;
   $('detail').classList.toggle('as-modal', chatModal);
   $('detailBackdrop').classList.toggle('hidden', !chatModal);
-  $('detail').classList.remove('hidden');
+  $('detail').classList.remove('hidden', 'closing');
   $('followInput').value = '';
   followAttach.clear();
   state.followSkill = null;
@@ -958,9 +959,21 @@ async function select(id, { subFrom = null } = {}) {
   updateTabsFor(card(id));
   markSeenIfOpen();
   if (!state.logs.has(id)) {
-    const logs = await run(() => api.logs(id));
-    state.logs.set(id, logs || []);
+    // 読み込みのあいだに logsVersion が進んでも、古いログを新しい版だと扱わない
+    const seen = card(id) ? card(id).logsVersion : undefined;
+    const logs = await readLogs(id, seen);
+    // 新しい読みに引き継がれたら、捨てた結果では保存も描画もしない
+    if (logs === 'superseded') return;
+    // 配列が返ったときだけ保存する。失敗はマップに置かず、次に開いたときに読み直す。
+    // 先に成功した読みを、あとから届いた失敗や古い結果で消さない
+    if (Array.isArray(logs) && (!state.logs.has(id) || state.logsVersion.get(id) === seen)) {
+      state.logs.set(id, logs);
+      state.logsVersion.set(id, seen);
+    }
   }
+  if (card(id)) await ensureLogsFresh(card(id));
+  // 読み直しているあいだに別のカードを開いていたら、そちらの描画を上書きしない
+  if (state.selected !== id) return;
   renderDetailBody();
 }
 
@@ -985,8 +998,11 @@ function setTab(tab) {
 function closeDetail() {
   state.selected = null;
   state.subFrom = null;
-  $('detail').classList.add('hidden');
-  $('detail').classList.remove('as-modal');
+  const panel = $('detail');
+  // スライドで開いているパネルは右へ抜けてから隠す（animationend で hidden にする）。モーダルはすぐ閉じる
+  if (panel.classList.contains('as-modal')) panel.classList.add('hidden');
+  else if (!panel.classList.contains('hidden')) panel.classList.add('closing');
+  panel.classList.remove('as-modal');
   $('detailBackdrop').classList.add('hidden');
   renderBoard();
 }
@@ -1070,10 +1086,153 @@ function flowGoto(n) {
   return tr('{v}「{v2}」へ', { v: tr(typeName), v2: FlowModel.displayText(shown, n.type) });
 }
 
+// 戻す地点。戻せるかの判定はしない（blocked と points は publicCards が渡す）
+function rewindView(c) {
+  const raw = c && c.rewind;
+  const points = [];
+  if (raw && typeof raw === 'object' && Array.isArray(raw.points)) {
+    for (const p of raw.points) {
+      if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !p.id) continue;
+      points.push({
+        id: p.id,
+        at: typeof p.at === 'number' && Number.isFinite(p.at) ? p.at : null,
+        seq: typeof p.seq === 'number' && Number.isFinite(p.seq) ? p.seq : null,
+        label: typeof p.label === 'string' ? p.label : '',
+        stepIndex: Number.isInteger(p.stepIndex) && p.stepIndex >= 0 ? p.stepIndex : null,
+        stepStart: p.stepStart === true,
+        agent: typeof p.agent === 'string' ? p.agent : '',
+      });
+    }
+  }
+  const blocked = raw && typeof raw === 'object' && typeof raw.blocked === 'string' && raw.blocked.trim() ? raw.blocked.trim() : null;
+  return { blocked, points };
+}
+// 工程の最初の実行。points は古い順。seq が小さいものを優先し、同じなら先に来たもの
+function rewindStepPoint(points, stepIndex) {
+  let best = null;
+  for (const p of points || []) {
+    if (!p.stepStart || p.stepIndex !== stepIndex) continue;
+    if (!best) {
+      best = p;
+      continue;
+    }
+    const bs = best.seq == null ? Infinity : best.seq;
+    const ps = p.seq == null ? Infinity : p.seq;
+    if (ps < bs) best = p;
+  }
+  return best;
+}
+function rewindButtonHtml(point, verb, blocked) {
+  const title = blocked ? ` title="${esc(blocked.replace(/\s+/g, ' ').trim())}"` : '';
+  return tr('<button type="button" class="btn small ghost rw-btn" data-act="rewind" data-cp="{id}"{disabled}{title}>{verb}</button>', {
+    id: esc(point.id),
+    disabled: blocked ? ' disabled' : '',
+    title,
+    verb,
+  });
+}
+function rewindStepHtml(view, stepIndex) {
+  if (!view || !Array.isArray(view.points)) return '';
+  const point = rewindStepPoint(view.points, stepIndex);
+  if (!point) return '';
+  return `<div class="rf-rewind">${rewindButtonHtml(point, tr('ここからやり直す'), view.blocked)}</div>`;
+}
+function rewindFlowNote(view, stepCount) {
+  if (!view || !view.blocked) return '';
+  const n = Number.isInteger(stepCount) && stepCount > 0 ? stepCount : 0;
+  for (let i = 0; i < n; i++) {
+    if (rewindStepPoint(view.points, i)) return tr('<p class="rf-rewind-note">{reason}</p>', { reason: esc(view.blocked) });
+  }
+  return '';
+}
+function rewindConfirmMessage(point) {
+  const name = point && point.label ? tr('「{name}」', { name: point.label }) : tr('この時点');
+  return tr('{name}に戻しますか？\nあとの変更は捨てられ、元に戻せません。戻したら、すぐに動き始めます。', { name });
+}
+async function rewindCard(c, checkpointId) {
+  if (isBusy()) return;
+  if (!c || typeof checkpointId !== 'string' || !checkpointId) return;
+  const view = rewindView(c);
+  if (view.blocked) return;
+  const point = view.points.find((p) => p.id === checkpointId);
+  if (!point) return;
+  if (!confirm(rewindConfirmMessage(point))) return;
+  await runBusy(tr('戻しています…'), () => api.rewind(c.id, point.id), tr('戻しました'));
+}
+// 進捗タブの「履歴」。points は古い順なので、画面では逆（新しい順）に出す
+function rewindHistoryHtml(c) {
+  const view = rewindView(c);
+  if (!view.points.length) return '';
+  const note = view.blocked ? tr('<p class="rw-blocked">{reason}</p>', { reason: esc(view.blocked) }) : '';
+  const rows = view.points.slice().reverse().map((p) => {
+    const bits = [];
+    if (p.at != null) bits.push(`<span class="rw-t">${esc(hhmm(p.at))}</span>`);
+    bits.push(`<span class="rw-x">${esc(p.label || tr('（名前なし）'))}</span>`);
+    if (p.agent) bits.push(`<span class="rw-who">${esc(agentShort(p.agent))}</span>`);
+    if (p.stepStart) bits.push(`<span class="rw-start">${esc(tr('工程の最初'))}</span>`);
+    if (p.seq != null) bits.push(`<span class="rw-seq">#${esc(p.seq)}</span>`);
+    return `<li><span class="rw-main">${bits.join('')}</span>${rewindButtonHtml(p, tr('ここに戻す'), view.blocked)}</li>`;
+  }).join('');
+  return tr('<section class="pg-sec pg-history"><div class="pg-sec-head"><b>{v}履歴</b> <span class="muted small">新しい順</span></div>{note}<ul class="pg-rewind">{rows}</ul></section>', { v: icon('clock'), note, rows });
+}
+// 同じ版の api.logs は1本だけ。run() は使わない（失敗のたびにトーストを出さない）。
+// 失敗や配列でない結果は fail。別の版の読みが始まったあとの結果は superseded。
+function readLogs(id, version) {
+  const cur = state.logsLoading.get(id);
+  if (cur && cur.version === version) return cur.promise;
+  let done;
+  const promise = new Promise((resolve) => { done = resolve; });
+  const flight = { version, promise };
+  state.logsLoading.set(id, flight);
+  (async () => {
+    let logs;
+    try {
+      logs = await api.logs(id);
+    } catch {
+      logs = undefined;
+    }
+    // 版が進んで別の読みに替わったときだけ、この結果は使わない
+    if (state.logsLoading.get(id) !== flight) {
+      done('superseded');
+      return;
+    }
+    state.logsLoading.delete(id);
+    done(Array.isArray(logs) ? logs : 'fail');
+  })();
+  return promise;
+}
+// logsVersion が変わっていたら、読み込み済みのログを取り直す。
+// 同じ版の読みが既にあれば、その Promise を待つ。失敗したときはログも版も変えず、次の更新で静かにやり直す。
+async function ensureLogsFresh(c) {
+  if (!c || !state.logs.has(c.id)) return;
+  if (state.logsVersion.get(c.id) === c.logsVersion) return;
+  const version = c.logsVersion;
+  const logs = await readLogs(c.id, version);
+  if (logs === 'superseded' || !Array.isArray(logs)) return;
+  const now = card(c.id);
+  if (!now || now.logsVersion !== version) {
+    if (now) await ensureLogsFresh(now);
+    return;
+  }
+  state.logs.set(now.id, logs);
+  state.logsVersion.set(now.id, version);
+  afterLogsReloaded(now.id);
+}
+function afterLogsReloaded(id) {
+  if (state.selected !== id) return;
+  if (state.tab === 'log' || state.tab === 'chat') renderDetailBody();
+  else if (state.tab === 'progress') {
+    const body = $('detailBody');
+    if (body) body.dataset.progressSig = '';
+    scheduleProgress();
+  }
+}
+
 // 詳細: Pipelineの工程をワークフローの形で見せる（状態・エージェント・時間・金額・前の工程の報告）
 function relayFlowHtml(c) {
   if (!c.relay || isChat(c)) return '';
   const r = c.relay;
+  const rw = rewindView(c);
   const hist = new Map((r.history || []).map((h) => [h.index, h])); // 同じ工程を何度か動かしたら、最後の回
   const runs = (i) => (r.history || []).filter((h) => h.index === i).length + (i === r.index && !r.waiting && !r.atJoin ? 1 : 0);
   const doneN = r.steps.filter((_, i) => relayStepState(c, i) === 'done').length;
@@ -1126,10 +1285,11 @@ function relayFlowHtml(c) {
         ${judgeHtml}
         ${st.instruction ? `<div class="rf-inst" title="${esc(st.instruction)}">${esc(st.instruction)}</div>` : ''}
         ${report}
+        ${rewindStepHtml(rw, i)}
       </div>
     </li>`;
   });
-  return tr('<div class="relay-flow"><div class="rf-title">{v}Pipeline{v2} <span class="muted small">{doneN}/{length} 工程が完了{v3}{v4}</span></div>{v5}<ol class="rf-list">{v6}</ol></div>', { v: (icon('pipeline')), v2: (r.pipeline && r.pipeline.name && r.pipeline.name !== 'Pipeline' ? tr('「{name}」', { name: esc(r.pipeline.name) }) : ''), doneN, length: (r.steps.length), v3: (loopN ? tr('・ループ {loopN} 回', { loopN }) : ''), v4: (r.limitReached ? tr('・ループの上限で終了') : ''), v5: (relayWaitHtml(c)), v6: (nodes.join('')) });
+  return tr('<div class="relay-flow"><div class="rf-title">{v}Pipeline{v2} <span class="muted small">{doneN}/{length} 工程が完了{v3}{v4}</span></div>{v5}<ol class="rf-list">{v6}</ol></div>', { v: (icon('pipeline')), v2: (r.pipeline && r.pipeline.name && r.pipeline.name !== 'Pipeline' ? tr('「{name}」', { name: esc(r.pipeline.name) }) : ''), doneN, length: (r.steps.length), v3: (loopN ? tr('・ループ {loopN} 回', { loopN }) : ''), v4: (r.limitReached ? tr('・ループの上限で終了') : ''), v5: (relayWaitHtml(c) + rewindFlowNote(rw, r.steps.length)), v6: (nodes.join('')) });
 }
 
 // ---------------- サブタスク ----------------
@@ -1510,7 +1670,7 @@ async function subtaskAction(c, el) {
   }
 }
 
-// 「進捗」タブ: エージェントの TODO・Pipelineのフローチャート・最近の作業
+// 「進捗」タブ: エージェントの TODO・Pipelineのフローチャート・戻す履歴・最近の作業
 const TODO_MARK = { completed: ['✓', tr('完了')], in_progress: ['▶', tr('作業中')], pending: ['○', tr('これから')], cancelled: ['–', tr('取りやめ')] };
 function todoListHtml(todos, title) {
   const items = (todos && todos.items) || [];
@@ -1635,6 +1795,7 @@ function progressHtml(c) {
     parts.push(tr('<section class="pg-sec"><div class="pg-sec-head"><b>{v}フローチャート</b></div>{v2}</section>', { v: (icon('pipeline')), v2: (relayChartHtml(c)) }));
     parts.push(`<section class="pg-sec">${relayFlowHtml(c)}</section>`);
   }
+  parts.push(rewindHistoryHtml(c));
   // 今のエージェントの TODO（並列の枝を待っているときは、枝ごと）
   const kids = c.relay && c.relay.waiting ? c.relay.waiting.children.map((id) => card(id)).filter(Boolean) : [];
   if (kids.length) for (const k of kids) parts.push(todoListHtml(k.todos, tr('枝「{label}」の TODO', { label: (esc(k.relay.branchOf.label)) })));
@@ -1970,9 +2131,14 @@ async function detailAction(e) {
   if (chip) return run(() => api.openExternal(chip.dataset.url));
   const go = e.target.closest('[data-goto]');
   if (go) return select(go.dataset.goto);
-  const act = e.target.closest('[data-act]')?.dataset.act;
+  const btn = e.target.closest('[data-act]');
+  const act = btn?.dataset.act;
   const c = card(state.selected);
   if (!act || !c) return;
+  if (act === 'rewind') {
+    if (btn.disabled) return;
+    return rewindCard(c, btn.dataset.cp);
+  }
   if (act === 'start') runBusy(tr('タスクを開始しています…'), () => api.start(c.id));
   if (act === 'resume') runBusy(tr('再開しています…'), () => api.resume(c.id), tr('再開しました'));
   if (act === 'dismissInterrupted') run(() => api.dismissInterrupted(c.id));
@@ -2813,7 +2979,7 @@ function updateBtwTab(c) {
   $('btwTab').textContent = n ? `btw (${n})` : 'btw';
   const live = c && (c.status === 'running' || c.status === 'queued');
   $('btwTab').classList.toggle('live', !!live);
-  // Codex / Gemini / Cursor は実行中の stdin 追加に対応していない（終了後に追加指示／待機中は開始の指示に付け足す）
+  // Codex / Antigravity / Gemini / Cursor は実行中の stdin 追加に対応していない（終了後に追加指示／待機中は開始の指示に付け足す）
   $('btwTab').title = c && agentOf(c) !== 'claude'
     ? tr('{v} では、実行中に送ると今の作業のあと追加指示として送ります（待機中なら開始するときの指示に付け足します）', { v: (agentLabel(agentOf(c))) })
     : tr('実行中のエージェントに、作業を止めずにメッセージを送ります');
@@ -3197,11 +3363,12 @@ function firstAgentOf(v) {
 // ---------------- モデルを選ぶ欄（タスク・会話を作るとき） ----------------
 
 // 設定のエージェントごとの既定のモデルの名前（キー）と、入力欄に出す候補
-const MODEL_KEY = { claude: 'model', codex: 'codexModel', gemini: 'geminiModel', cursor: 'cursorModel' };
+const MODEL_KEY = { claude: 'model', codex: 'codexModel', antigravity: 'antigravityModel', gemini: 'geminiModel', cursor: 'cursorModel' };
 const MODEL_SUGGEST = {
   claude: ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
   codex: ['gpt-5-codex', 'gpt-5'],
-  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+  antigravity: ['gemini-4-argon-high', 'gemini-3.8-flash-high'],
+  gemini: ['gemini-2.5-pro', 'gemini-3.5-flash'],
   cursor: ['gpt-5', 'sonnet-4.5', 'opus-4.1'],
 };
 function settingsModel(agent, s = state.board.settings || {}) {
@@ -4222,7 +4389,13 @@ function renderSettingsView() {
           <label class="field">${tr('<span>codex コマンドのパス</span>')}<input id="sCodex" value="${esc(s.codexPath || 'codex')}" /></label>
           <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sCodexModel" placeholder="${tr('例: gpt-5-codex')}" value="${esc(s.codexModel || '')}" /></label>
         </div>`)}
+      ${agentConfigHtml('antigravity', s, `
+        <div class="row">
+          <label class="field">${tr('<span>agy コマンドのパス</span>')}<input id="sAntigravity" value="${esc(s.antigravityPath || 'agy')}" /></label>
+          <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sAntigravityModel" placeholder="${tr('例: gemini-4-argon-high')}" value="${esc(s.antigravityModel || '')}" /></label>
+        </div>`)}
       ${agentConfigHtml('gemini', s, `
+        <small class="muted s-note">${tr('Gemini CLI は、2026年6月18日で Google AI Pro / Ultra と無料の個人アカウントでは使えなくなりました。有料の API キーや Gemini Code Assist の Standard / Enterprise なら使えます。個人のアカウントでは Antigravity CLI を使ってください。')}</small>
         <div class="row">
           <label class="field">${tr('<span>gemini コマンドのパス</span>')}<input id="sGemini" value="${esc(s.geminiPath || 'gemini')}" /></label>
           <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sGeminiModel" placeholder="${tr('例: gemini-2.5-pro')}" value="${esc(s.geminiModel || '')}" /></label>
@@ -4232,7 +4405,7 @@ function renderSettingsView() {
           <label class="field">${tr('<span>cursor-agent コマンドのパス</span>')}<input id="sCursor" value="${esc(s.cursorPath || 'cursor-agent')}" /></label>
           <label class="field">${tr('<span>モデル（空なら既定）</span>')}<input id="sCursorModel" placeholder="${tr('例: gpt-5 / sonnet-4.5')}" value="${esc(s.cursorModel || '')}" /></label>
         </div>`)}
-      <small class="muted s-note">${tr('Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。')}</small>
+      <small class="muted s-note">${tr('Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Antigravity / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Antigravity と Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。')}</small>
       <label class="field">${tr('<span>新しいタスク・会話で最初から選んでおくエージェント</span>')}
         <select id="sDefaultAgent"></select>
         <small>${tr('オーケストレーションで Pipeline・競争を選んでいれば、タスクを作るときの「エージェント」の欄では、そちらを最初から選んでおきます（使えない状態のときや会話では、このエージェント）。競争の比較も、このエージェントに頼みます（スキルの提案は、元のタスクのエージェントが使えればそちらに頼みます）。')}</small></label>`,
@@ -4715,6 +4888,8 @@ ${tr('読めなかったファイル: {v1}', { v1: (parsed.skipped.join(tr('、'
         claudePath: $('sClaude').value.trim() || 'claude',
         codexPath: $('sCodex').value.trim() || 'codex',
         codexModel: $('sCodexModel').value.trim(),
+        antigravityPath: $('sAntigravity').value.trim() || 'agy',
+        antigravityModel: $('sAntigravityModel').value.trim(),
         geminiPath: $('sGemini').value.trim() || 'gemini',
         geminiModel: $('sGeminiModel').value.trim(),
         cursorPath: $('sCursor').value.trim() || 'cursor-agent',
@@ -4937,7 +5112,7 @@ async function chooseRepo(opts) {
          : ''
      }
      ${tabNote}
-     ${distros.length ? `<p class="muted small">${tr('選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。')}</p>` : ''}
+     ${distros.length ? `<p class="muted small">${tr('選んだフォルダが WSL の中なら、git とエージェント（claude / codex / agy / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。')}</p>` : ''}
      ${recentHtml}
      <div class="repo-choices">
        ${
@@ -5157,6 +5332,11 @@ async function repoSetupModal(mode, distros = []) {
 $('newBtn').onclick = () => newTask();
 $('chatBtn').onclick = openChats;
 $('detailBackdrop').addEventListener('mousedown', closeDetailOrBack);
+$('detail').addEventListener('animationend', (e) => {
+  if (e.target !== e.currentTarget || e.animationName !== 'detail-slide-out') return;
+  e.currentTarget.classList.add('hidden');
+  e.currentTarget.classList.remove('closing');
+});
 $('sessionsBtn').onclick = openSessionManager;
 $('rcBtn').onclick = openRemoteSettings;
 
@@ -5394,6 +5574,7 @@ api.onBoard((board) => {
     renderDetailHead();
     const c = card(state.selected);
     if (c) {
+      ensureLogsFresh(c);
       updateBtwTab(c);
       // サブタスクがなくなって、今のタブが消えたら開き直す
       const tabBefore = state.tab;
@@ -5445,6 +5626,9 @@ document.addEventListener('click', (e) => {
 
 api.onLog(({ id, entry }) => {
   if (!state.logs.has(id)) return;
+  const current = card(id);
+  // 戻したあとは版が進んでいる。読み直す前に足すと、捨てたログの末尾に新しい行が残る
+  if (current && state.logsVersion.get(id) !== current.logsVersion) return;
   state.logs.get(id).push(entry);
   if (state.selected === id && state.tab === 'log') {
     const body = $('detailBody');

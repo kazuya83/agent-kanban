@@ -15,7 +15,7 @@ GitHub Actions はテストだけを動かす。**ビルドとリリースは、
 
 - macOS。Apple Silicon では **Rosetta 2** が必要（Windows のインストーラーと AppImage を作る道具が Intel 用のため）
   - 無いときは、ユーザーに `softwareupdate --install-rosetta --agree-to-license` を実行してもらう（管理者のパスワードを聞かれることがある）
-- `release` では `gh` にログイン済みであること（`gh auth status`）と、エージェントの CLI（`claude` / `codex` / `gemini` / `cursor-agent`）のどれかが PATH にあること（中でエージェントを動かすため）
+- `release` では `gh` にログイン済みであること（`gh auth status`）と、エージェントの CLI（`claude` / `codex` / `agy` / `gemini` / `cursor-agent`）のどれかが PATH にあること（中でエージェントを動かすため）
 
 ## review（レビューのとき）
 

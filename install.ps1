@@ -130,8 +130,8 @@ Info "Installed: $dest ($tag)"
 Info "Launch it from `"$appName`" on the Start menu or the desktop."
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Warn 'git was not found. Install Git for Windows: https://git-scm.com/' }
-if (-not (Get-Command claude -ErrorAction SilentlyContinue) -and -not (Get-Command codex -ErrorAction SilentlyContinue) -and -not (Get-Command gemini -ErrorAction SilentlyContinue) -and -not (Get-Command cursor-agent -ErrorAction SilentlyContinue)) {
-  Warn 'No agent CLI (claude / codex / gemini / cursor-agent) was found. Install the one you use and sign in (Claude Code, Codex CLI, Gemini CLI, or Cursor CLI).'
+if (-not (Get-Command claude -ErrorAction SilentlyContinue) -and -not (Get-Command codex -ErrorAction SilentlyContinue) -and -not (Get-Command agy -ErrorAction SilentlyContinue) -and -not (Get-Command gemini -ErrorAction SilentlyContinue) -and -not (Get-Command cursor-agent -ErrorAction SilentlyContinue)) {
+  Warn 'No agent CLI (claude / codex / agy / gemini / cursor-agent) was found. Install the one you use and sign in (Claude Code, Codex CLI, Antigravity CLI, Gemini CLI, or Cursor CLI).'
 }
 
 if (-not $env:WORKTREE_KANBAN_NO_LAUNCH -and -not $env:AGENT_KANBAN_NO_LAUNCH) {

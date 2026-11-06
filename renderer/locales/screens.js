@@ -1655,11 +1655,11 @@
     "fr": "Choisissez un dossier sur cette machine. Les agents s'exécutent ici à côté des tâches de l'hôte. Les onglets de cette machine ne s'affichent pas sur l'hôte.",
     "zh": "选择此电脑上的文件夹。代理在此电脑上与主机的任务并排运行。此电脑的标签不会显示在主机上。"
   },
-  "選んだフォルダが WSL の中なら、git とエージェント（claude / codex / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。": {
-    "en": "If the folder is inside WSL, git and the agents (claude / codex / gemini / cursor-agent) also run inside WSL (git and the agents you use must be installed in WSL too).",
-    "es": "Si la carpeta está dentro de WSL, git y los agentes (claude / codex / gemini / cursor-agent) también se ejecutan dentro de WSL (git y los agentes que uses también deben estar en WSL).",
-    "fr": "Si le dossier est dans WSL, git et les agents (claude / codex / gemini / cursor-agent) s'exécutent aussi dans WSL (git et les agents utilisés doivent aussi être installés dans WSL).",
-    "zh": "如果所选文件夹在 WSL 中，git 和代理（claude / codex / gemini / cursor-agent）也会在 WSL 中运行（WSL 里也需要安装 git 和所用代理）。"
+  "選んだフォルダが WSL の中なら、git とエージェント（claude / codex / agy / gemini / cursor-agent）も WSL の中で動かします（WSL の中にも git と使うエージェントが必要です）。": {
+    "en": "If the folder is inside WSL, git and the agents (claude / codex / agy / gemini / cursor-agent) also run inside WSL (git and the agents you use must be installed in WSL too).",
+    "es": "Si la carpeta está dentro de WSL, git y los agentes (claude / codex / agy / gemini / cursor-agent) también se ejecutan dentro de WSL (git y los agentes que uses también deben estar en WSL).",
+    "fr": "Si le dossier est dans WSL, git et les agents (claude / codex / agy / gemini / cursor-agent) s'exécutent aussi dans WSL (git et les agents utilisés doivent aussi être installés dans WSL).",
+    "zh": "如果所选文件夹在 WSL 中，git 和代理（claude / codex / agy / gemini / cursor-agent）也会在 WSL 中运行（WSL 里也需要安装 git 和所用代理）。"
   },
   "ホストのフォルダを開く": {
     "en": "Open a folder on the host",
@@ -2995,5 +2995,191 @@
     "es": "No se encuentra el comando {agent}. Instala {label} e inicia sesión, o indica la ruta completa de {agent} en Ajustes (se averigua con which {agent} en la terminal, o where {agent} en Windows). Si no lo usas, desmarca la casilla en Agentes que usar, en Ajustes.",
     "fr": "La commande {agent} est introuvable. Installez {label} et connectez-vous, ou indiquez le chemin complet de {agent} dans Réglages (which {agent} dans un terminal, ou where {agent} sous Windows). Si vous ne l'utilisez pas, décochez-le dans Agents à utiliser, dans Réglages.",
     "zh": "找不到 {agent} 命令。请安装 {label} 并登录，或在“设置”中指定 {agent} 的完整路径（在终端用 which {agent}，Windows 用 where {agent} 查看）。若不使用，请在“设置”的“使用的代理”中取消勾选。"
-  }
+  },
+  "N分おき": {
+    "en": "Every N minutes",
+    "es": "Cada N minutos",
+    "fr": "Toutes les N minutes",
+    "zh": "每隔 N 分钟"
+  },
+  "{minutes}分おき": {
+    "en": "Every {minutes} minutes",
+    "es": "Cada {minutes} minutos",
+    "fr": "Toutes les {minutes} minutes",
+    "zh": "每隔 {minutes} 分钟"
+  },
+  "Issue の監視": {
+    "en": "Issue watch",
+    "es": "Vigilancia de Issues",
+    "fr": "Surveillance des Issues",
+    "zh": "Issue 监视"
+  },
+  "間隔は {min}〜{max} の数字で入れてください": {
+    "en": "Enter an interval from {min} to {max}",
+    "es": "Introduce un intervalo de {min} a {max}",
+    "fr": "Saisissez un intervalle de {min} à {max}",
+    "zh": "请输入 {min} 到 {max} 之间的间隔"
+  },
+  "ラベル: {labels}": {
+    "en": "Labels: {labels}",
+    "es": "Etiquetas: {labels}",
+    "fr": "Libellés : {labels}",
+    "zh": "标签：{labels}"
+  },
+  "作成者: {author}": {
+    "en": "Author: {author}",
+    "es": "Autor: {author}",
+    "fr": "Auteur : {author}",
+    "zh": "作者：{author}"
+  },
+  "開いている Issue すべて": {
+    "en": "All open Issues",
+    "es": "Todos los Issues abiertos",
+    "fr": "Toutes les Issues ouvertes",
+    "zh": "所有打开的 Issue"
+  },
+  "対象の Issue": {
+    "en": "Target Issues",
+    "es": "Issues objetivo",
+    "fr": "Issues ciblées",
+    "zh": "目标 Issue"
+  },
+  "カードの扱い": {
+    "en": "Card handling",
+    "es": "Qué hacer con la tarjeta",
+    "fr": "Traitement de la carte",
+    "zh": "卡片处理方式"
+  },
+  "自動で開始する": {
+    "en": "Start automatically",
+    "es": "Empezar automáticamente",
+    "fr": "Démarrer automatiquement",
+    "zh": "自动开始"
+  },
+  "Todo に置くだけ": {
+    "en": "Just place it in Todo",
+    "es": "Solo dejarla en Todo",
+    "fr": "La placer simplement dans Todo",
+    "zh": "仅放到 Todo"
+  },
+  "最終確認": {
+    "en": "Last checked",
+    "es": "Última comprobación",
+    "fr": "Dernière vérification",
+    "zh": "上次检查"
+  },
+  "未確認": {
+    "en": "Not checked yet",
+    "es": "Sin comprobar",
+    "fr": "Pas encore vérifié",
+    "zh": "尚未检查"
+  },
+  "追加の指示": {
+    "en": "Additional instructions",
+    "es": "Instrucciones adicionales",
+    "fr": "Instructions supplémentaires",
+    "zh": "附加指示"
+  },
+  "新しい Issue があるかを、次回を待たずに確かめます": {
+    "en": "Checks for new Issues without waiting for the next run",
+    "es": "Busca Issues nuevos sin esperar a la próxima ejecución",
+    "fr": "Cherche de nouvelles Issues sans attendre la prochaine exécution",
+    "zh": "不等下次运行，立即检查是否有新 Issue"
+  },
+  "今すぐ確認": {
+    "en": "Check now",
+    "es": "Comprobar ahora",
+    "fr": "Vérifier maintenant",
+    "zh": "立即检查"
+  },
+  "Issue を確認しています…": {
+    "en": "Checking Issues…",
+    "es": "Comprobando Issues…",
+    "fr": "Vérification des Issues…",
+    "zh": "正在检查 Issue…"
+  },
+  "新しい Issue のタスクを {n} 件作りました": {
+    "en": "Created tasks for {n} new Issues",
+    "es": "Se crearon tareas para {n} Issues nuevos",
+    "fr": "Tâches créées pour {n} nouvelles Issues",
+    "zh": "已为 {n} 个新 Issue 创建任务"
+  },
+  "新しい Issue はありません": {
+    "en": "No new Issues",
+    "es": "No hay Issues nuevos",
+    "fr": "Aucune nouvelle Issue",
+    "zh": "没有新 Issue"
+  },
+  "何分おきに実行するか（{min}〜{max}）": {
+    "en": "Run every how many minutes ({min}–{max})",
+    "es": "Cada cuántos minutos ejecutar ({min}–{max})",
+    "fr": "Exécuter toutes les combien de minutes ({min}–{max})",
+    "zh": "每隔多少分钟运行（{min}–{max}）"
+  },
+  "対象のラベル（カンマ区切り。全部付いている Issue だけ。空なら絞らない）": {
+    "en": "Labels (comma-separated. Only Issues with all of them. Leave empty for no filter)",
+    "es": "Etiquetas (separadas por comas. Solo Issues que las tengan todas. Vacío para no filtrar)",
+    "fr": "Libellés (séparés par des virgules. Seules les Issues qui les ont tous. Vide pour ne pas filtrer)",
+    "zh": "标签（用逗号分隔。仅限带有全部标签的 Issue。留空则不筛选）"
+  },
+  "対象の作成者（空なら絞らない。@me は gh のログインユーザー）": {
+    "en": "Author (leave empty for no filter. @me is the user signed in to gh)",
+    "es": "Autor (vacío para no filtrar. @me es el usuario con sesión en gh)",
+    "fr": "Auteur (vide pour ne pas filtrer. @me désigne l'utilisateur connecté à gh)",
+    "zh": "作者（留空则不筛选。@me 表示 gh 的登录用户）"
+  },
+  "作ったカードの扱い": {
+    "en": "What to do with created cards",
+    "es": "Qué hacer con las tarjetas creadas",
+    "fr": "Que faire des cartes créées",
+    "zh": "如何处理创建的卡片"
+  },
+  "Todo に置くだけ（人が見てから開始する）": {
+    "en": "Just place them in Todo (a person reviews, then starts them)",
+    "es": "Solo dejarlas en Todo (alguien las revisa y luego las empieza)",
+    "fr": "Les placer simplement dans Todo (une personne vérifie, puis démarre)",
+    "zh": "仅放到 Todo（由人查看后再开始）"
+  },
+  "Issue の本文とコメントが、そのままエージェントへの指示になります。public リポジトリでは誰でも書けるので、ラベルや作成者で対象を絞ってください。": {
+    "en": "The Issue body and comments become instructions to the agent as they are. Anyone can write them in a public repository, so narrow the target by label or author.",
+    "es": "El cuerpo y los comentarios del Issue pasan tal cual a ser instrucciones para el agente. En un repositorio público cualquiera puede escribirlos, así que limita el objetivo por etiqueta o autor.",
+    "fr": "Le corps et les commentaires de l'Issue deviennent tels quels des instructions pour l'agent. Dans un dépôt public, tout le monde peut les écrire : limitez la cible par libellé ou par auteur.",
+    "zh": "Issue 的正文和评论会原样成为给代理的指示。公开仓库中任何人都能写，请用标签或作者缩小范围。"
+  },
+  "登録した時点ですでにある Issue は対象にしません。登録のあとに作られた Issue を、1回の確認で {n} 件までカードにします。": {
+    "en": "Issues that already exist at registration are not included. Issues created afterward become cards, up to {n} per check.",
+    "es": "Los Issues que ya existen al registrar no se incluyen. Los creados después se convierten en tarjetas, hasta {n} por comprobación.",
+    "fr": "Les Issues déjà présentes à l'enregistrement ne sont pas incluses. Celles créées ensuite deviennent des cartes, jusqu'à {n} par vérification.",
+    "zh": "注册时已存在的 Issue 不包含在内。之后创建的 Issue 会变成卡片，每次检查最多 {n} 个。"
+  },
+  "種類": {
+    "en": "Type",
+    "es": "Tipo",
+    "fr": "Type",
+    "zh": "类型"
+  },
+  "タスクを実行する": {
+    "en": "Run a task",
+    "es": "Ejecutar una tarea",
+    "fr": "Exécuter une tâche",
+    "zh": "运行任务"
+  },
+  "Issue の監視（新しい Issue ごとにカードを作る）": {
+    "en": "Issue watch (create a card for each new Issue)",
+    "es": "Vigilancia de Issues (crea una tarjeta por cada Issue nuevo)",
+    "fr": "Surveillance des Issues (crée une carte par nouvelle Issue)",
+    "zh": "Issue 监视（为每个新 Issue 创建卡片）"
+  },
+  "スケジュール名（省略できます）": {
+    "en": "Schedule name (optional)",
+    "es": "Nombre de la programación (opcional)",
+    "fr": "Nom de la planification (facultatif)",
+    "zh": "计划名称（可省略）"
+  },
+  "追加の指示（省略できます。Issue の内容に加えてエージェントに伝えます）": {
+    "en": "Additional instructions (optional. Sent to the agent along with the Issue)",
+    "es": "Instrucciones adicionales (opcional. Se envían al agente junto con el Issue)",
+    "fr": "Instructions supplémentaires (facultatif. Transmises à l'agent avec l'Issue)",
+    "zh": "附加指示（可省略。会与 Issue 内容一起发给代理）"
+  },
 });

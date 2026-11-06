@@ -144,6 +144,7 @@ const PROXY_CHANNELS = new Set([
   'card:dismissInterrupted',
   'card:stop',
   'card:send',
+  'card:rewind',
   'compete:adopt',
   'compete:compare',
   'subtasks:set',

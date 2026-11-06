@@ -1049,6 +1049,24 @@
     "fr": "Exemple : gpt-5-codex",
     "zh": "例：gpt-5-codex"
   },
+  "<span>agy コマンドのパス</span>": {
+    "en": "<span>Path to the agy command</span>",
+    "es": "<span>Ruta del comando agy</span>",
+    "fr": "<span>Chemin de la commande agy</span>",
+    "zh": "<span>agy 命令的路径</span>"
+  },
+  "例: gemini-4-argon-high": {
+    "en": "Example: gemini-4-argon-high",
+    "es": "Ejemplo: gemini-4-argon-high",
+    "fr": "Exemple : gemini-4-argon-high",
+    "zh": "例：gemini-4-argon-high"
+  },
+  "Gemini CLI は、2026年6月18日で Google AI Pro / Ultra と無料の個人アカウントでは使えなくなりました。有料の API キーや Gemini Code Assist の Standard / Enterprise なら使えます。個人のアカウントでは Antigravity CLI を使ってください。": {
+    "en": "Gemini CLI stopped working for Google AI Pro / Ultra and free personal accounts on June 18, 2026. It still works with paid API keys and Gemini Code Assist Standard / Enterprise. On a personal account, use Antigravity CLI.",
+    "es": "Gemini CLI dejó de funcionar con Google AI Pro / Ultra y las cuentas personales gratuitas el 18 de junio de 2026. Sigue funcionando con claves de API de pago y con Gemini Code Assist Standard / Enterprise. Con una cuenta personal, usa Antigravity CLI.",
+    "fr": "Gemini CLI ne fonctionne plus avec Google AI Pro / Ultra et les comptes personnels gratuits depuis le 18 juin 2026. Il fonctionne toujours avec les clés API payantes et Gemini Code Assist Standard / Enterprise. Avec un compte personnel, utilisez Antigravity CLI.",
+    "zh": "自 2026 年 6 月 18 日起，Gemini CLI 已无法用于 Google AI Pro / Ultra 和免费个人账号。付费 API 密钥和 Gemini Code Assist Standard / Enterprise 仍可使用。个人账号请使用 Antigravity CLI。"
+  },
   "<span>gemini コマンドのパス</span>": {
     "en": "<span>Path to the gemini command</span>",
     "es": "<span>Ruta del comando gemini</span>",
@@ -1073,11 +1091,11 @@
     "fr": "Exemple : gpt-5 / sonnet-4.5",
     "zh": "例：gpt-5 / sonnet-4.5"
   },
-  "Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。": {
-    "en": "Claude Code can approve actions that are not allowed automatically, on the card. Codex / Gemini / Cursor cannot approve on the card, so the CLI allows them according to the permission mode (plan only → read-only; allow everything → no prompts; otherwise Codex can write only inside the worktree sandbox, Gemini auto-allows file edits only, and Cursor allows file edits and commands with --force, while deny in Cursor’s cli-config.json is still honored).",
-    "es": "Claude Code puede aprobar en la tarjeta lo que no se permite automáticamente. Codex / Gemini / Cursor no aprueban en la tarjeta, así que el CLI los permite según el modo de permisos (solo plan → solo lectura; permitir todo → sin confirmación; en los demás casos Codex solo escribe dentro del sandbox del worktree, Gemini permite automáticamente solo la edición de archivos y Cursor permite edición y comandos con --force; el deny de cli-config.json de Cursor se respeta).",
-    "fr": "Claude Code peut approuver sur la carte ce qui n’est pas autorisé automatiquement. Codex / Gemini / Cursor ne le peuvent pas : le CLI autorise selon le mode (plan seul → lecture seule ; tout autoriser → sans confirmation ; sinon Codex n’écrit que dans le sandbox du worktree, Gemini autorise seulement l’édition de fichiers, et Cursor autorise fichiers et commandes avec --force, tout en respectant deny dans cli-config.json de Cursor).",
-    "zh": "Claude Code 可以把不会自动允许的操作放到卡片上批准。Codex / Gemini / Cursor 不能在卡片上批准，因此会按权限模式在 CLI 侧允许（只做计划 → 只读；全部自动允许 → 不再确认；其他情况：Codex 只能在 worktree 的 sandbox 里写，Gemini 只自动允许编辑文件，Cursor 用 --force 允许编辑文件和命令，仍遵守 Cursor 的 cli-config.json 里的 deny）。"
+  "Claude Code は、自動で許可されない操作をカードで承認できます。Codex / Antigravity / Gemini / Cursor はカードでの承認に対応していないため、権限モードに合わせて CLI 側で許可します（計画だけ → 読み取りのみ、すべて自動で許可 → 確認なし、それ以外 → Codex は worktree の中だけ書ける sandbox・Antigravity と Gemini はファイル編集だけ自動で許可・Cursor は --force でファイル編集とコマンドを許可（Cursor の cli-config.json の deny は守られます））。": {
+    "en": "Claude Code can approve actions that are not allowed automatically, on the card. Codex / Antigravity / Gemini / Cursor cannot approve on the card, so the CLI allows them according to the permission mode (plan only → read-only; allow everything → no prompts; otherwise Codex can write only inside the worktree sandbox, Antigravity and Gemini auto-allow file edits only, and Cursor allows file edits and commands with --force, while deny in Cursor’s cli-config.json is still honored).",
+    "es": "Claude Code puede aprobar en la tarjeta lo que no se permite automáticamente. Codex / Antigravity / Gemini / Cursor no aprueban en la tarjeta, así que el CLI los permite según el modo de permisos (solo plan → solo lectura; permitir todo → sin confirmación; en los demás casos Codex solo escribe dentro del sandbox del worktree, Antigravity y Gemini permiten automáticamente solo la edición de archivos y Cursor permite edición y comandos con --force; el deny de cli-config.json de Cursor se respeta).",
+    "fr": "Claude Code peut approuver sur la carte ce qui n’est pas autorisé automatiquement. Codex / Antigravity / Gemini / Cursor ne le peuvent pas : le CLI autorise selon le mode (plan seul → lecture seule ; tout autoriser → sans confirmation ; sinon Codex n’écrit que dans le sandbox du worktree, Antigravity et Gemini autorisent seulement l’édition de fichiers, et Cursor autorise fichiers et commandes avec --force, tout en respectant deny dans cli-config.json de Cursor).",
+    "zh": "Claude Code 可以把不会自动允许的操作放到卡片上批准。Codex / Antigravity / Gemini / Cursor 不能在卡片上批准，因此会按权限模式在 CLI 侧允许（只做计划 → 只读；全部自动允许 → 不再确认；其他情况：Codex 只能在 worktree 的 sandbox 里写，Antigravity 和 Gemini 只自动允许编辑文件，Cursor 用 --force 允许编辑文件和命令，仍遵守 Cursor 的 cli-config.json 里的 deny）。"
   },
   "<span>新しいタスク・会話で最初から選んでおくエージェント</span>": {
     "en": "<span>Agent selected by default for new tasks and chat</span>",

@@ -4,15 +4,15 @@
 
 # Worktree Kanban
 
-<strong>并行运行 AI 编程代理，并从另一台电脑操作。</strong><br />
-Mac 和 Windows 可以互相远程控制。
+<strong>用流程图编排多个 AI 编程代理、关键决定由人来做的看板。</strong><br />
+用 Codex 实现，用 Claude 审查，需要修改时退回。是否合并由你决定。
 
 [官网](https://kazuya83.github.io/worktree-kanban/) · [下载](https://github.com/kazuya83/worktree-kanban/releases/latest)
 
 [![Release](https://img.shields.io/github/v/release/kazuya83/worktree-kanban?label=release&color=3b5bfd)](https://github.com/kazuya83/worktree-kanban/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-52525B)](https://github.com/kazuya83/worktree-kanban/releases/latest)
-[![Remote control](https://img.shields.io/badge/remote%20control-Mac%20%E2%87%84%20Windows-0891B2)](docs/images/en/rc-client.png)
-[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
+[![Pipeline](https://img.shields.io/badge/pipeline-Codex%20%E2%86%92%20Claude%20%E2%86%92%20you-0891B2)](docs/images/en/feature-pipeline.gif)
+[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Antigravity%20%7C%20Gemini%20%7C%20Cursor-7C3AED)](https://github.com/kazuya83/worktree-kanban#readme)
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-52525B)](LICENSE)
 
 [English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
@@ -21,21 +21,22 @@ Mac 和 Windows 可以互相远程控制。
 
 <div align="center">
 
-![演示：创建任务、卡片并行运行、批准、查看差异并合并，然后远程操作看板](docs/images/zh/demo.gif)
+![演示：用自然语言描述流程，Codex 实现后由 Claude 审查并退回，人工批准命令，查看差异并合并](docs/images/zh/demo.gif)
 
 </div>
 
-这是一个桌面应用（Electron，Mac / Windows / Linux）。它把 AI 编程智能体的 CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI）按任务放进各自的 git worktree 里并行运行，并用看板管理。**不限于同一个仓库里的任务，多个仓库的任务也可以同时进行。**
+这是一个桌面应用（Electron，Mac / Windows / Linux）。它把 AI 编程智能体的 CLI（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI）按任务放进各自的 git worktree 里并行运行，并用看板管理。**不限于同一个仓库里的任务，多个仓库的任务也可以同时进行。**
 
 ![看板：待办、执行中、评审、完成四列。执行中的卡片会显示提问、等待批准和正在工作](docs/images/zh/board.png)
 
 ## 为什么选择 Worktree Kanban
 
-- **Mac ⇄ Windows 互相远程控制** — 在一台电脑上运行代理，在另一台电脑上操作同一个看板：批准、回答问题、发送指示、合并。
+- **用流程图编排代理** — 用自然语言描述或手动绘制流程，代理会沿着分支、循环和并行步骤逐步交接工作。
+- **最终由你决定** — 合并或创建 PR 前可以查看差异。使用 Claude Code 时，还可以在卡片上批准操作。
 - **一个任务，一个 worktree** — 每个任务都有自己的 git worktree 和分支，任务之间、任务与你的工作区都不会冲突。
 - **同时处理多个仓库** — 最多可用标签页打开 3 个仓库，切换标签页不会中断任何任务。
-- **沿用你现有的 CLI** — Claude Code、Codex CLI、Gemini CLI、Cursor CLI，登录和设置保持不变。
-- **最终由你决定** — 合并或创建 PR 前可以查看差异。使用 Claude Code 时，还可以在卡片上批准操作。
+- **沿用你现有的 CLI** — Claude Code、Codex CLI、Antigravity CLI、Gemini CLI、Cursor CLI，登录和设置保持不变。
+- **Mac ⇄ Windows 互相远程控制** — 在一台电脑上运行代理，在另一台电脑上操作同一个看板：批准、回答问题、发送指示、合并。
 - **完全本地** — 看板状态保存在你的电脑上，不使用外部服务器。已连接的服务由你的电脑直接通信。
 
 ## 工作方式
@@ -58,13 +59,15 @@ flowchart LR
 - **结束后，用合并（`--no-ff`）或创建 PR / MR（GitHub 用 `gh`，GitLab 用 API）把结果收进来。** 可以选择合并到哪条分支，合并之后也可以 push 到 origin
 - 看板状态保存在 Electron 的 userData 文件夹里的 `board.json`。不使用外部服务器
 
-在 Codex / Gemini / Cursor 上，由于 CLI 的限制，不能使用卡片上的批准、选择题提问、btw 和金额显示（详见 [docs/agents.md](docs/agents.md) (English)）。
+在 Codex / Antigravity / Gemini / Cursor 上，由于 CLI 的限制，不能使用卡片上的批准、选择题提问、btw 和金额显示（详见 [docs/agents.md](docs/agents.md) (English)）。
 
 ## 主要功能
 
 ### 从另一台电脑操作（RC）
 
 可以在另一台电脑（客户端）的 Worktree Kanban 上，操作正在运行智能体的那台电脑（主机）的看板。Mac 和 Windows 都可以做主机，也都可以做客户端。在客户端上，批准、回答提问、追加指示、合并等，都可以像主机画面一样使用。
+
+![从另一台电脑连接，并在主机的看板上批准](docs/images/zh/feature-remote.gif)
 
 - 主机上的应用只在 `127.0.0.1` 上等待连接。客户端应用用 `ssh -N -L` 建立隧道来连接，所以主机上只需要 SSH 服务器。从外面连接时使用 Tailscale 等
 - SSH 使用密钥登录。在客户端的「RC 设置」里创建 ed25519 密钥（`~/.ssh/agent-kanban_ed25519`），再把公钥登记到主机的「RC 设置」
@@ -76,11 +79,25 @@ flowchart LR
 
 步骤，以及连不上时的处理方法，写在 [docs/remote.md](docs/remote.md) (English)。
 
-此外还支持：把大任务拆成子任务，并行或按顺序推进（从父分支分出去，完成后合并回父分支；也可以只启动某一个子任务；支持 GitHub、GitLab、Linear、Jira 的子 Issue）、用拖放改变卡片的状态（列）、给正在运行的智能体发消息（btw）、附加图片和文件、Pipeline 与竞争（多个智能体的组合），以及在 Windows 上使用 WSL 的仓库。用法汇总在 [docs/usage.md](docs/usage.md) (English)。
+此外还支持：用拖放改变卡片的状态（列）、给正在运行的智能体发消息（btw）、附加图片和文件、竞争（多个智能体解决同一任务），以及在 Windows 上使用 WSL 的仓库。用法汇总在 [docs/usage.md](docs/usage.md) (English)。
+
+### Pipeline：用自然语言描述流程，并按流程运行任务
+用自然语言写下想要的流程，例如“用 Codex 实现，用 Claude 审查，如有需要修改的地方就回到实现”，智能体就会组建流程图。创建任务时选择这个 Pipeline，智能体就会按照其中的分支和循环逐步交接工作。流程图也可以手动修改。
+
+![用自然语言编写流程，在新任务中选择它，然后看着各步骤运行，并在审查后返回实现](docs/images/zh/feature-pipeline.gif)
+
+详情见 [docs/agents.md](docs/agents.md) (English)。
+
+### 子任务
+任务较大时，智能体可以提议把它拆成子任务。子任务从父分支分出，并行或按顺序推进，完成后合并回父分支。也可以只启动某一个子任务，并支持 GitHub、GitLab、Linear、Jira 的子 Issue。
+
+![接受拆分提议，然后看着子任务运行并合并](docs/images/zh/feature-subtasks.gif)
 
 ### 并行运行多个仓库
 
 仓库以标签页打开（最多 3 个）。切换标签页不会让其他仓库的任务停下来。未选中的标签会显示**正在运行的任务数**（蓝色）和**正在等你处理的任务数**（批准、提问等，橙色），所以只看标签就能知道哪个仓库需要你动手。同时运行的任务数上限（设置里的「同时运行数量」）在所有仓库之间共享。
+
+![切换仓库标签页，其他标签页的任务继续运行](docs/images/zh/feature-repos.gif)
 
 ![用标签页打开三个仓库。未选中的标签会显示正在运行的任务数，以及等待你处理的任务数](docs/images/zh/repo-tabs.png)
 
@@ -93,6 +110,8 @@ flowchart LR
 ### 批准
 
 需要许可的操作，可以在卡片和详情面板里看完将要执行的命令和全部输入，再选择允许、拒绝，或在这个任务里始终允许。拒绝时可以把理由返回给智能体。
+
+![查看完整命令后批准](docs/images/zh/feature-approval.gif)
 
 <details>
 <summary>查看截图</summary>
@@ -126,6 +145,8 @@ flowchart LR
 
 Slack 应用的创建方法和各服务的详情见 [docs/integrations.md](docs/integrations.md) (English)。
 
+![输入 Issue 编号，为每个 Issue 创建一张卡片](docs/images/zh/feature-issue.gif)
+
 <details>
 <summary>查看截图</summary>
 
@@ -137,6 +158,8 @@ Slack 应用的创建方法和各服务的详情见 [docs/integrations.md](docs/
 
 Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现回答表单。支持多选和自由输入（其他）。
 
+![选择选项来回答智能体的提问](docs/images/zh/feature-question.gif)
+
 <details>
 <summary>查看截图</summary>
 
@@ -147,6 +170,8 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 ### worktree 与 diff
 
 「worktree」标签会显示分支的提交、未提交的更改、与基线的关系，以及同一仓库的其他 worktree。「diff」标签里，可以按文件夹树选择改过的文件，逐个查看差异。
+
+![查看差异后合并](docs/images/zh/feature-merge.gif)
 
 <details>
 <summary>查看截图</summary>
@@ -161,6 +186,8 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 
 在「对话」里，不必创建任务（worktree），就可以向智能体询问这个仓库。回复以 Markdown 显示。想让它开始干活时，用「变成任务」，把这段对话接着做成任务。
 
+![在对话中询问代码，然后把它转成任务](docs/images/zh/feature-chat.gif)
+
 <details>
 <summary>查看截图</summary>
 
@@ -171,6 +198,8 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 ### 通知
 
 等待批准、提问、等待回答、等待评审和完成，会积在右上角的铃铛图标里，同时也会发出桌面通知。按下通知就会打开那个任务。通知也可以发到 Slack（见上面的「外部服务集成」）。
+
+![打开通知，前往需要你处理的卡片](docs/images/zh/feature-notifications.gif)
 
 <details>
 <summary>查看截图</summary>
@@ -183,6 +212,8 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 
 合并发生冲突时，卡片会变成冲突。先把基线分支并入任务分支，然后可以选择让智能体解决，或自己在编辑器里修改。无论哪种方式，在你合并之前，基线分支都不会改变。
 
+![让智能体解决冲突，然后合并](docs/images/zh/feature-conflict.gif)
+
 <details>
 <summary>查看截图</summary>
 
@@ -193,6 +224,8 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 ### 技能与过去的对话
 
 创建任务时，可以选择一项 Claude Code 的技能（以 `/技能名` 传入）。也可以选择过去的 Claude Code 对话（会话），从那里继续。
+
+![为新任务选择技能和过去的对话](docs/images/zh/feature-skills.gif)
 
 <details>
 <summary>查看截图</summary>
@@ -205,10 +238,12 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 
 从顶栏菜单切换到「任务调度」，就可以用卡片管理在指定时间（仅一次、每小时、每天、每周、每月）创建并运行任务的日程。看板任务可以直接登记成日程，也可以从日程立刻创建任务。只有在应用开着的时候才会运行（详见 [docs/usage.md](docs/usage.md) (English)）。
 
+![登记每天的依赖项检查，立即运行，并在看板上查看结果](docs/images/zh/feature-scheduler.gif)
+
 ## 需要准备
 
 - git
-- 要使用的智能体 CLI（Claude Code / Codex CLI / Gemini CLI / Cursor CLI 之一），并已登录
+- 要使用的智能体 CLI（Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI 之一），并已登录
 - 使用 GitHub 的 Issue 和 PR 时需要 `gh`（也可以从应用里安装）
 - 连接 GitLab、Linear、Jira、Slack 时需要各自的令牌。保存令牌需要操作系统的安全存储（Linux 上是 GNOME Keyring、KWallet 等）。GitLab 仓库的 Issue 和 MR 不需要 `gh`
 
@@ -240,7 +275,7 @@ irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 
 | 文档 | 内容 |
 | --- | --- |
 | [画面与用法](docs/usage.md) (English) | 各项功能的用法：批准、提问、规格确认、任务调度、技能、对话、btw、合并 / PR、Issue 状态、通知、冲突等 |
-| [智能体与编排](docs/agents.md) (English) | Claude Code / Codex / Gemini / Cursor 的差异，Pipeline 与竞争 |
+| [智能体与编排](docs/agents.md) (English) | Claude Code / Codex / Antigravity / Gemini / Cursor 的差异，Pipeline 与竞争 |
 | [设置](docs/settings.md) (English) | 从顶栏菜单打开的设置画面和各个项目 |
 | [集成](docs/integrations.md) (English) | 设置 GitLab、Linear、Jira 和 Slack，以及能做和不能做的事 |
 | [远程操作](docs/remote.md) (English) | 通过 SSH 隧道从另一台电脑操作看板的步骤，以及连不上时的处理方法 |

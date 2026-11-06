@@ -81,6 +81,24 @@ test('nextRun: 1回だけ', () => {
   assert.strictEqual(nextRun(rule, rule.at + 1), null);
 });
 
+test('N分おき: 形・次回・言葉', () => {
+  const rule = { kind: 'interval', minutes: 5 };
+  assert.deepStrictEqual(cleanRule({ ...rule, hour: 1 }), rule);
+  for (const minutes of [0, 1441, 1.5, '', null]) assert.strictEqual(cleanRule({ kind: 'interval', minutes }), null);
+  assert.strictEqual(nextRun(rule, 1000), 1000 + 5 * 60 * 1000);
+  assert.strictEqual(describeRule(rule), '5分おき');
+});
+
+test('Issue の監視の設定を整える', () => {
+  assert.strictEqual(cleanSchedule({ id: 'a', repoPath: '/r', prompt: 'x', rule: { kind: 'hourly', minute: 0 } }).issues, null);
+  const s = cleanSchedule({ id: 'a', repoPath: '/r', prompt: '', createdAt: 5, rule: { kind: 'hourly', minute: 0 }, issues: { labels: ' a b, c、a b,', author: ' @bob ', autoStart: 'yes', seen: [1, 1, 'x', -2, 3] } });
+  assert.deepStrictEqual(s.issues, { labels: ['a b', 'c'], author: 'bob', autoStart: false, after: 5, seen: [1, 3], lastCheckedAt: null });
+  assert.strictEqual(s.title, 'Issue の監視');
+  assert.strictEqual(cleanSchedule({ id: 'a', repoPath: '/r', rule: { kind: 'hourly', minute: 0 }, issues: { author: '@me' } }).issues.author, '@me');
+  assert.strictEqual(scheduleError({ repoPath: '/r', prompt: '', rule: { kind: 'hourly', minute: 0 }, issues: {} }), '');
+  assert.strictEqual(scheduleError({ repoPath: '/r', prompt: '', rule: { kind: 'hourly', minute: 0 } }), '指示を入力してください');
+});
+
 test('nextRun: 毎時', () => {
   const rule = { kind: 'hourly', minute: 15 };
   assert.strictEqual(nextRun(rule, at(2026, 11, 6, 10, 0)), at(2026, 11, 6, 10, 15));
@@ -192,6 +210,7 @@ test('cleanSchedule: 足りない項目を初期値でそろえる', () => {
     model: '',
     readOnly: false,
     rule: { kind: 'daily', hour: 9, minute: 0 },
+    issues: null,
     enabled: true,
     catchUp: false,
     createdAt: now,

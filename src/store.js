@@ -264,9 +264,11 @@ const DEFAULT_SETTINGS = {
   updatePending: null, // 更新のために終了したときの { from, to, at }（次の起動で、更新できたかを知らせる）
   // ---- エージェント ----
   enabledAgents: DEFAULT_ENABLED_AGENTS, // 使うエージェント（チェックを付けたものだけ、コマンド・モデルを設定してタスクや会話で選べる）
-  defaultAgent: 'claude', // 新しいタスク・会話で最初から選んでおくエージェント（claude / codex / gemini / cursor。Pipeline・競争はタスクを作るときに選ぶ）
+  defaultAgent: 'claude', // 新しいタスク・会話で最初から選んでおくエージェント（claude / codex / antigravity / gemini / cursor。Pipeline・競争はタスクを作るときに選ぶ）
   codexPath: 'codex',
   codexModel: '',
+  antigravityPath: 'agy',
+  antigravityModel: '',
   geminiPath: 'gemini',
   geminiModel: '',
   cursorPath: 'cursor-agent',

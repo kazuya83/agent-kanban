@@ -165,8 +165,8 @@ esac
 
 # What you need in order to run
 command -v git >/dev/null || warn "git was not found. Please install it."
-if ! command -v claude >/dev/null && ! command -v codex >/dev/null && ! command -v gemini >/dev/null && ! command -v cursor-agent >/dev/null; then
-  warn "No agent CLI (claude / codex / gemini / cursor-agent) was found. Install the one you use and sign in (Claude Code, Codex CLI, Gemini CLI, or Cursor CLI)."
+if ! command -v claude >/dev/null && ! command -v codex >/dev/null && ! command -v agy >/dev/null && ! command -v gemini >/dev/null && ! command -v cursor-agent >/dev/null; then
+  warn "No agent CLI (claude / codex / agy / gemini / cursor-agent) was found. Install the one you use and sign in (Claude Code, Codex CLI, Antigravity CLI, Gemini CLI, or Cursor CLI)."
 fi
 
 echo

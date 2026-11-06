@@ -96,7 +96,7 @@ test('after-merge-build.sh は、見つかったエージェントをそれぞ�
   const { dir } = tmpStore(t);
   const sh = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'after-merge-build.sh'), 'utf8');
   const fns = sh.slice(sh.indexOf('# ---- 使うエージェント ----'), sh.indexOf('run_once() {'));
-  for (const n of ['codex', 'gemini']) fs.writeFileSync(path.join(dir, n), '#!/bin/sh\necho "$0 $*"\n', { mode: 0o755 });
+  for (const n of ['codex', 'gemini', 'agy']) fs.writeFileSync(path.join(dir, n), '#!/bin/sh\necho "$0 $*"\n', { mode: 0o755 });
   const run = (env) =>
     execFileSync('/bin/bash', ['-c', `set -u\nclaude_bin=claude\n${fns}\npick_agent || { echo none; exit 0; }\nrun_agent "$(skill_line)"`], {
       env: { PATH: `${dir}:/usr/bin:/bin`, ...env },
@@ -104,6 +104,7 @@ test('after-merge-build.sh は、見つかったエージェントをそれぞ�
     });
   assert.match(run({}), /codex exec .*SKILL\.md/);
   assert.match(run({ AFTER_MERGE_AGENT: 'gemini' }), /gemini -p .*SKILL\.md.*--approval-mode yolo/);
+  assert.match(run({ AFTER_MERGE_AGENT: 'antigravity' }), /agy -p .*SKILL\.md.*--dangerously-skip-permissions/);
   assert.strictEqual(run({ AFTER_MERGE_AGENT: 'cursor' }).trim(), 'none');
   fs.writeFileSync(path.join(dir, 'claude'), '#!/bin/sh\necho "$0 $*"\n', { mode: 0o755 });
   assert.match(run({}), /claude -p \/build-apps review --permission-mode acceptEdits/, 'claude があれば前と同じ');

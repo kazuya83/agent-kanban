@@ -79,7 +79,7 @@ See [usage.md](usage.md#update-issue-status-automatically) and [integrations.md]
 
 | Item | Description |
 | --- | --- |
-| Agents to use | Check the ones you use out of Claude Code / Codex CLI / Gemini CLI / Cursor CLI. Only checked agents can have the items below set, and only they can be chosen for tasks, conversations, Pipeline, and competition |
+| Agents to use | Check the ones you use out of Claude Code / Codex CLI / Antigravity CLI / Gemini CLI / Cursor CLI. Only checked agents can have the items below set, and only they can be chosen for tasks, conversations, Pipeline, and competition |
 | (per agent) Command path | Set the full path when the command is not found after launching from Finder or the like |
 | (per agent) Model | Passed to `--model` / `-m`. If empty, the default model is used |
 | Agent selected by default | The agent already selected when you open a new task or conversation (one of the agents to use; if Pipeline or competition is chosen under orchestration, that is selected for tasks instead) |

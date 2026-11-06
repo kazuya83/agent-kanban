@@ -39,10 +39,11 @@ function setup() {
     repoPath: repo,
     claudePath: bin('claude', FAKE_CLAUDE),
     codexPath: bin('codex', FAKE_CLI, 'codex'),
+    antigravityPath: bin('agy', FAKE_CLI, 'antigravity'),
     geminiPath: bin('gemini', FAKE_CLI, 'gemini'),
     cursorPath: bin('cursor-agent', FAKE_CLI, 'cursor'),
     maxParallel: 3,
-    enabledAgents: ['claude', 'codex', 'gemini', 'cursor'],
+    enabledAgents: ['claude', 'codex', 'antigravity', 'gemini', 'cursor'],
     specCheck: false, // ここでは指示をそのまま渡したときの流れを確かめる（仕様の確認は agent.test.js で確かめる）
   });
   const agents = new AgentManager(store, { mcpScript: path.join(__dirname, '..', 'src', 'permission-mcp.js'), mcpDir: path.join(tmp, 'data', 'mcp'), nodeBin: process.execPath });
@@ -69,6 +70,32 @@ function waitFor(pred, ms = 10000) {
   });
 }
 
+test('providers: Antigravity の出力をアクションに直す', () => {
+  const p = providers.createParser('antigravity', { summarize: (x) => JSON.stringify(x) });
+  const up = (o) => p.onEvent({ event: 'step_update', step_update: { conversation_id: 'c1', ...o } });
+  assert.deepStrictEqual(p.onEvent({ event: 'init', conversation_id: 'c1', init: { model: 'm1' } }), [{ type: 'session', id: 'c1', model: 'm1' }]);
+  assert.deepStrictEqual(up({ step_index: 0, state: 'DONE', step_type: 'user_input' }), []);
+  // 発言は、少しずつ届いたものをツールの呼び出しか終わりでまとめる（DONE にも続きが入っている）
+  assert.deepStrictEqual(up({ step_index: 1, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'ファイルを' }), []);
+  assert.deepStrictEqual(up({ step_index: 1, state: 'DONE', step_type: 'agent_response', text_delta: '読みます' }), []);
+  // ツールは ACTIVE で1回だけ出し、DONE で結果を出す
+  const cmd = { name: 'run_command', parameters: { CommandLine: 'npm test' } };
+  assert.deepStrictEqual(up({ step_index: 2, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: cmd }), [{ type: 'text', text: 'ファイルを読みます' }, { type: 'tool', name: 'Bash', summary: 'npm test' }]);
+  assert.deepStrictEqual(up({ step_index: 2, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: cmd }), []);
+  assert.deepStrictEqual(up({ step_index: 2, state: 'DONE', step_type: 'tool', tool_name: 'run_command', tool_info: { ...cmd, output: 'ok!\r\n' } }), [{ type: 'tool_result', text: 'ok!\r\n', error: false }]);
+  // 権限がなく拒否されたツールはエラーになる。DONE から始まるツールも取りこぼさない
+  const denied = up({ step_index: 3, state: 'ERROR', step_type: 'tool', tool_name: 'write_file', tool_info: { name: 'write_file', parameters: { Path: '/w.txt' }, error: { type: 'TOOL_ERROR', message: 'permission check failed' } } });
+  assert.deepStrictEqual(denied, [{ type: 'tool', name: 'Write', summary: '/w.txt' }, { type: 'tool_result', text: 'permission check failed', error: true }]);
+  assert.deepStrictEqual(up({ step_index: 4, state: 'DONE', step_type: 'tool', tool_name: 'mcp_x', tool_info: { parameters: { a: 1 } } }), [{ type: 'tool', name: 'mcp_x', summary: '{"a":1}' }, { type: 'tool_result', text: 'ok', error: false }]);
+  up({ step_index: 5, state: 'DONE', step_type: 'agent_response', text_delta: '完了' });
+  assert.deepStrictEqual(p.onEvent({ event: 'result', result: { status: 'SUCCESS', response: '完了' } }), [{ type: 'text', text: '完了' }, { type: 'result' }]);
+  // ログインしていないときの実際の形（init は来ない）
+  assert.deepStrictEqual(p.onEvent({ event: 'result', result: { conversation_id: '', status: 'ERROR', error: 'authentication failed or timed out', finished_reason: 'error' } }), [{ type: 'result', error: 'authentication failed or timed out' }]);
+  assert.deepStrictEqual(p.onEvent({ event: 'result', result: { status: 'CANCELED' } }), [{ type: 'result', error: 'エラー（CANCELED）' }]);
+  // 種類が type のイベントは読まない
+  assert.deepStrictEqual(p.onEvent({ type: 'init' }), []);
+});
+
 test('providers: 引数（権限モード・モデル・続き）', () => {
   assert.deepStrictEqual(providers.buildArgs('codex', { mode: 'acceptEdits' }), ['exec', '--json', '--skip-git-repo-check', '-c', 'sandbox_mode=workspace-write', '-']);
   assert.deepStrictEqual(providers.buildArgs('codex', { mode: 'plan', model: 'o3', sessionId: 'abc' }), ['exec', 'resume', '--json', '--skip-git-repo-check', '-c', 'sandbox_mode=read-only', '-m', 'o3', 'abc', '-']);
@@ -76,6 +103,12 @@ test('providers: 引数（権限モード・モデル・続き）', () => {
   assert.deepStrictEqual(providers.buildArgs('gemini', { mode: 'acceptEdits', sessionId: 's1' }), ['--output-format', 'stream-json', '--skip-trust', '--approval-mode', 'auto_edit', '--resume', 's1']);
   assert.strictEqual(providers.geminiApproval('bypassPermissions'), 'yolo');
   assert.strictEqual(providers.geminiApproval('plan'), 'plan');
+  // Antigravity の引数は本物の agy 1.5 で確かめたもの。指示は stdin で渡す
+  assert.deepStrictEqual(providers.buildArgs('antigravity', { mode: 'acceptEdits' }), ['--output-format', 'stream-json', '--mode', 'accept-edits']);
+  assert.deepStrictEqual(providers.buildArgs('antigravity', { mode: 'plan', model: 'gemini-3.8-flash-high', sessionId: 'c1', includeDirs: ['/a', '/b'] }), ['--output-format', 'stream-json', '--mode', 'plan', '--model', 'gemini-3.8-flash-high', '--conversation', 'c1', '--add-dir', '/a', '--add-dir', '/b']);
+  assert.deepStrictEqual(providers.antigravityPolicy('bypassPermissions'), ['--dangerously-skip-permissions']);
+  assert.deepStrictEqual(providers.antigravityPolicy('default'), []);
+  assert.strictEqual(providers.promptViaArg('antigravity'), false);
   // Cursor は指示を最後の引数で渡す（「-」で始まる指示はオプションに見えないよう空白を付ける）
   assert.deepStrictEqual(providers.buildArgs('cursor', { mode: 'acceptEdits', prompt: 'やって' }), ['-p', '--output-format', 'stream-json', '--trust', '--force', 'やって']);
   assert.deepStrictEqual(providers.buildArgs('cursor', { mode: 'plan', model: 'gpt-5', sessionId: 'c1', prompt: '-x' }), ['-p', '--output-format', 'stream-json', '--trust', '--mode', 'plan', '--model', 'gpt-5', '--resume', 'c1', ' -x']);
@@ -103,6 +136,36 @@ test('providers: Gemini の少しずつ届く発言はまとめ、Codex のイ�
   assert.deepStrictEqual(r.map((x) => x.type), ['tool', 'tool_result']);
   assert.strictEqual(r[1].error, true);
   assert.deepStrictEqual(cp.onEvent({ type: 'turn.failed', error: { message: 'bad' } }), [{ type: 'result', error: 'bad' }]);
+});
+
+test('Antigravity のタスク: 指示を stdin で渡して worktree で動き、追加指示は --conversation で続ける', async () => {
+  const { agents, calls } = setup();
+  const [c] = agents.createTask({ title: 'ag', prompt: 'アンチグラビティで作って', agent: 'antigravity' });
+  assert.strictEqual(c.agent, 'antigravity');
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  assert.match(c.sessionId, /^agy-conv-/);
+  assert.strictEqual(c.sessions[0].agent, 'antigravity');
+  assert.match(c.lastText, /antigravity done/);
+  assert.ok(c.logs.some((l) => l.kind === 'text' && l.agent === 'antigravity' && l.text.trim() === 'ファイルを作ります'));
+  assert.ok(c.logs.some((l) => l.kind === 'tool' && /^Write/.test(l.text)));
+  assert.match(await agents.diff(c.id), /アンチグラビティで作って/);
+  const first = calls().filter((x) => x.kind === 'antigravity')[0].args;
+  assert.deepStrictEqual(first.slice(0, 4), ['--output-format', 'stream-json', '--mode', 'accept-edits']);
+  assert.ok(!first.includes('アンチグラビティで作って'), '指示は引数に入れない');
+  const sid = c.sessionId;
+  agents.send(c.id, 'もう1つ');
+  await waitFor(() => c.status === 'review' && calls().filter((x) => x.kind === 'antigravity').length === 2);
+  const second = calls().filter((x) => x.kind === 'antigravity')[1].args;
+  assert.strictEqual(second[second.indexOf('--conversation') + 1], sid);
+});
+
+test('Antigravity のタスク: 失敗はエラー列に', async () => {
+  const { agents } = setup();
+  const [c] = agents.createTask({ title: 'ag', prompt: '[fail] アンチグラビティ', agent: 'antigravity' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'failed');
+  assert.strictEqual(c.error, 'agy boom');
 });
 
 test('providers: Cursor のイベントを共通の形に直す', () => {
@@ -590,4 +653,332 @@ test('タスク・会話を作るときに選んだモデルで動かす（空�
   Object.assign(store.settings, { orchestration: 'compete', competeAgents: ['codex', 'gemini'] });
   const cards = agents.createTask({ prompt: 'くらべて', agent: 'compete', model: 'gpt-5' });
   assert.ok(cards.every((c) => !c.model));
+});
+
+test('チェックポイント: 2回動かして1回目の前へ戻すと、あとの変更を捨てて同じ指示を自動でやり直す', async () => {
+  const { agents } = setup();
+  const [c] = agents.createTask({ title: 'rw', prompt: '一度目の作業' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review' && c.checkpoints && c.checkpoints.length === 1);
+  const wt = c.worktreePath;
+  fs.writeFileSync(path.join(wt, 'manual.txt'), 'hand\n');
+  const cost = c.costUsd;
+  agents.send(c.id, '二度目だけ');
+  await waitFor(() => c.status === 'review' && c.checkpoints.length === 2);
+  assert.ok(c.costUsd >= cost);
+  const show = execFileSync('git', ['show', `${c.checkpoints[1].commit}:manual.txt`], { cwd: wt, encoding: 'utf8' });
+  assert.strictEqual(show, 'hand\n', '起動前の手直しは、その回のチェックポイントに入る');
+  const first = c.checkpoints[0];
+  const spent = c.costUsd;
+  c.lastMessage = '捨てる返事';
+  c.rewindPrompt = '画面に出さない指示';
+  assert.strictEqual(agents.publicCards().find((x) => x.id === c.id).rewindPrompt, undefined);
+  delete c.rewindPrompt;
+  await agents.rewind(c.id, first.id);
+  assert.notStrictEqual(c.lastMessage, '捨てる返事');
+  assert.ok(c.costUsd >= spent, '使った金額は戻さない');
+  assert.ok(!c.checkpoints.some((x) => x.id === first.id));
+  assert.ok(!fs.existsSync(path.join(wt, 'manual.txt')));
+  assert.deepStrictEqual(fs.readdirSync(wt).filter((f) => f.startsWith('out-')), [], '戻した直後は、その時点よりあとのファイルがない');
+  assert.ok(c.logs.some((l) => l.kind === 'system' && /戻しました/.test(l.text)));
+  assert.ok(c.logsVersion >= 1);
+  const pub = agents.publicCards().find((x) => x.id === c.id);
+  assert.strictEqual(pub.checkpoints, undefined);
+  assert.ok(pub.rewind && pub.rewind.points.length >= 0);
+  assert.ok(!JSON.stringify(pub.rewind).includes('二度目だけ'));
+  await waitFor(() => c.status === 'review' && c.checkpoints.length >= 1);
+  const diff = await agents.diff(c.id);
+  assert.match(diff, /一度目の作業/);
+  assert.doesNotMatch(diff, /二度目だけ/);
+});
+
+test('チェックポイント: Pipeline の工程へ戻すと index と history と counts が戻り、同じ指示で再実行される', async () => {
+  const { agents, store } = setup();
+  useSteps(store, [
+    { agent: 'gemini', label: '実装', instruction: '実装して' },
+    { agent: 'codex', label: 'レビュー', instruction: 'レビューして', onFail: 0, maxLoops: 3 },
+  ]);
+  const [c] = agents.createTask({ title: 'relay-rw', prompt: '[judge] ループのタスク', agent: 'relay' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review' && c.relay.done, 20000);
+  const again = c.checkpoints.find((x) => x.stepStart && x.relay && x.relay.index === 0 && x.seq > 1);
+  assert.ok(again, 'ループで工程の最初に戻った時点');
+  await agents.rewind(c.id, again.id);
+  assert.strictEqual(c.relay.index, again.relay.index);
+  assert.strictEqual(c.relay.history.length, again.relay.historyLen);
+  assert.deepStrictEqual(c.relay.counts, again.relay.counts);
+  assert.strictEqual(c.relay.done, undefined);
+  assert.strictEqual(c.relay.limitReached, undefined);
+  assert.strictEqual(c.relay.stepStartedAt, c.startedAt, '戻したあとの実行が、工程の開始時刻になる');
+  await waitFor(() => c.lastPromptSent === again.prompt, 20000);
+  await waitFor(() => c.status === 'review' && c.relay.done, 20000);
+  assert.ok(c.relay.history.length >= again.relay.historyLen);
+});
+
+test('チェックポイント: Codex は引き継ぎ文を付けて新しい会話でやり直す', async () => {
+  const { agents, calls } = setup();
+  const [c] = agents.createTask({ title: 'cx-rw', prompt: '最初の指示', agent: 'codex' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  agents.send(c.id, '二度目の指示');
+  await waitFor(() => c.status === 'review' && c.checkpoints.length === 2);
+  const cp = c.checkpoints[1];
+  assert.ok(cp.session && cp.session.id);
+  assert.strictEqual(cp.session.size, undefined, 'Codex の会話はバイト数を持たない');
+  await agents.rewind(c.id, cp.id);
+  await waitFor(() => c.status === 'review' && c.lastPromptSent && c.lastPromptSent.includes('ここまでのやりとり'));
+  assert.ok(c.lastPromptSent.startsWith('## ここまでのやりとり\n'));
+  assert.ok(c.lastPromptSent.endsWith('二度目の指示'));
+  const handoff = c.lastPromptSent.slice(0, -'二度目の指示'.length);
+  assert.match(handoff, /【ユーザー】 最初の指示/);
+  assert.match(handoff, /codex done/);
+  assert.doesNotMatch(handoff, /二度目の指示/, '送り直す指示は引き継ぎ文に入れない');
+  const last = calls().filter((x) => x.kind === 'codex').at(-1);
+  assert.notStrictEqual(last.args[1], 'resume');
+});
+
+test('チェックポイント: 戻したあとの記録は引き継ぎ文を含まず、もう一度戻しても引き継ぎは一つ', async () => {
+  const { agents } = setup();
+  const [c] = agents.createTask({ title: 'cx-rw2', prompt: '最初の指示', agent: 'codex' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  agents.send(c.id, '二度目の指示');
+  await waitFor(() => c.status === 'review' && c.checkpoints.length === 2);
+  await agents.rewind(c.id, c.checkpoints[1].id);
+  await waitFor(() => c.status === 'review' && c.checkpoints.some((x) => x.prompt === '二度目の指示'));
+  const again = c.checkpoints.find((x) => x.prompt === '二度目の指示');
+  assert.ok(again);
+  assert.strictEqual(again.label, '二度目の指示');
+  assert.ok(!again.prompt.includes('ここまでのやりとり'));
+  assert.strictEqual(agents.publicCards().find((x) => x.id === c.id).rewindPrompt, undefined);
+  await agents.rewind(c.id, again.id);
+  await waitFor(() => c.status === 'review' && !c.checkpoints.some((x) => x.id === again.id) && c.checkpoints.some((x) => x.prompt === '二度目の指示'));
+  const sent = c.lastPromptSent;
+  assert.strictEqual((sent.match(/## ここまでのやりとり/g) || []).length, 1);
+  assert.ok(sent.startsWith('## ここまでのやりとり\n'));
+  assert.ok(sent.endsWith('二度目の指示'));
+});
+
+test('チェックポイント: forkNext のときは元の会話ファイルを切り詰めない', async () => {
+  const { agents, tmp } = setup();
+  const configDir = path.join(tmp, 'claude-config');
+  agents.opts.claudeConfigFor = async () => configDir;
+  const [c] = agents.createTask({ title: 'fork-rw', prompt: '最初' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review');
+  const id = 'forksess01';
+  const proj = path.join(configDir, 'projects', 'repo');
+  fs.mkdirSync(proj, { recursive: true });
+  const file = path.join(proj, `${id}.jsonl`);
+  const body = '{"type":"user"}\n{"type":"assistant"}\n';
+  fs.writeFileSync(file, body);
+  agents.setSession(c.id, { mode: 'resume', id, title: '元の会話' });
+  assert.strictEqual(c.forkNext, true);
+  agents.send(c.id, 'フォークして続ける');
+  await waitFor(() => c.status === 'review' && c.checkpoints.some((x) => x.forkNext));
+  fs.appendFileSync(file, '{"extra":true}\n');
+  const grown = fs.readFileSync(file, 'utf8');
+  const cp = c.checkpoints.find((x) => x.forkNext);
+  await agents.rewind(c.id, cp.id);
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), grown);
+  assert.strictEqual(c.sessionId, id);
+  assert.strictEqual(c.forkNext, true);
+  await waitFor(() => c.sessionId === `fork-of-${id}`);
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), grown, 'やり直しのあとも元の会話はそのまま');
+});
+
+test('チェックポイント: Claude の会話は size まで切り詰めて続きから動かす。ほかのカードが使っていたら切り詰めない', async () => {
+  const { agents, tmp } = setup();
+  const configDir = path.join(tmp, 'claude-config');
+  agents.opts.claudeConfigFor = async () => configDir;
+  const [c] = agents.createTask({ title: 'trunc', prompt: '一度目' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review' && c.sessionId);
+  const sid = c.sessionId;
+  const proj = path.join(configDir, 'projects', 'repo');
+  fs.mkdirSync(proj, { recursive: true });
+  const file = path.join(proj, `${sid}.jsonl`);
+  const body = '{"id":"toolu_KEEPKEEP1"}\n{"b":2}\n';
+  fs.writeFileSync(file, body);
+  const side = path.join(proj, sid);
+  fs.mkdirSync(path.join(side, 'tool-results'), { recursive: true });
+  fs.mkdirSync(path.join(side, 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(side, 'tool-results', 'toolu_KEEPKEEP1.txt'), 'keep');
+  fs.writeFileSync(path.join(side, 'tool-results', 'toolu_DROPDROP1.txt'), 'drop');
+  fs.writeFileSync(path.join(side, 'subagents', 'agent-abc123def4567890.jsonl'), 'later');
+  fs.writeFileSync(path.join(side, 'ccr-tip.json'), '{}');
+  agents.send(c.id, '二度目');
+  await waitFor(() => c.status === 'review' && c.checkpoints.length === 2);
+  const cp = c.checkpoints[1];
+  assert.strictEqual(cp.session.size, Buffer.byteLength(body));
+  fs.appendFileSync(file, '{"id":"toolu_DROPDROP1","agentId":"abc123def4567890"}\n');
+  await agents.rewind(c.id, cp.id);
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), body);
+  assert.ok(fs.existsSync(path.join(side, 'tool-results', 'toolu_KEEPKEEP1.txt')));
+  assert.ok(!fs.existsSync(path.join(side, 'tool-results', 'toolu_DROPDROP1.txt')));
+  assert.ok(!fs.existsSync(path.join(side, 'subagents', 'agent-abc123def4567890.jsonl')));
+  assert.ok(fs.existsSync(path.join(side, 'ccr-tip.json')));
+  assert.strictEqual(c.sessionId, sid);
+  assert.strictEqual(c.forkNext, false);
+  await waitFor(() => c.status === 'review' && c.lastPromptSent === cp.prompt);
+  assert.doesNotMatch(c.lastPromptSent, /ここまでのやりとり/);
+  assert.strictEqual(c.sessionId, sid);
+
+  fs.appendFileSync(file, '{"d":4}\n');
+  const kept = fs.readFileSync(file, 'utf8');
+  const [other] = agents.createTask({ title: 'other', prompt: '別' });
+  other.sessionId = sid;
+  const again = c.checkpoints[c.checkpoints.length - 1];
+  await agents.rewind(c.id, again.id);
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), kept, 'ほかのカードが使っている会話は切らない');
+  await waitFor(() => c.status === 'review' && /ここまでのやりとり/.test(c.lastPromptSent || ''));
+  assert.ok(c.lastPromptSent.startsWith('## ここまでのやりとり\n'));
+  const handoff = c.lastPromptSent.slice(0, -String(again.prompt || '').length);
+  assert.doesNotMatch(handoff, /【ユーザー】 二度目/);
+  assert.notStrictEqual(c.sessionId, sid);
+});
+
+test('チェックポイント: 会話を切り詰められなくても、戻したカードは新しい会話でやり直す', async () => {
+  const { agents, tmp } = setup();
+  const configDir = path.join(tmp, 'claude-config');
+  agents.opts.claudeConfigFor = async () => configDir;
+  const [c] = agents.createTask({ title: 'trunc-fail', prompt: '一度目' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review' && c.sessionId);
+  const sid = c.sessionId;
+  const proj = path.join(configDir, 'projects', 'repo');
+  fs.mkdirSync(proj, { recursive: true });
+  const file = path.join(proj, `${sid}.jsonl`);
+  const body = '{"a":1}\n';
+  fs.writeFileSync(file, body);
+  agents.send(c.id, '二度目');
+  await waitFor(() => c.status === 'review' && c.checkpoints.length === 2 && c.checkpoints[1].session && c.checkpoints[1].session.size);
+  const cp = c.checkpoints[1];
+  const sessions = require('../src/sessions');
+  const orig = sessions.truncateSession;
+  let calls = 0;
+  sessions.truncateSession = () => {
+    calls += 1;
+    throw new Error('disk');
+  };
+  try {
+    await agents.rewind(c.id, cp.id);
+  } finally {
+    sessions.truncateSession = orig;
+  }
+  assert.strictEqual(calls, 1);
+  assert.ok(!c.checkpoints.some((x) => x.id === cp.id));
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), body);
+  await waitFor(() => c.status === 'review' && /ここまでのやりとり/.test(c.lastPromptSent || ''));
+  assert.notStrictEqual(c.sessionId, sid);
+});
+
+test('チェックポイント: 実行中と、戻しているあいだは拒否する。ファイルを戻せないときはカードを変えない', async () => {
+  const { agents } = setup();
+  process.env.FAKE_SLEEP = '1500';
+  try {
+    const [running] = agents.createTask({ title: 'run', prompt: '作業中' });
+    agents.start(running.id);
+    await waitFor(() => running.status === 'running' && running.sessionId);
+    await assert.rejects(() => agents.rewind(running.id, 'x'), /実行中/);
+    agents.stop(running.id);
+    await waitFor(() => running.status === 'review');
+  } finally {
+    delete process.env.FAKE_SLEEP;
+  }
+
+  const [c] = agents.createTask({ title: 'guard', prompt: '守る' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review' && c.checkpoints.length === 1);
+  agents.rewinding.add(c.id);
+  assert.throws(() => agents.send(c.id, 'x'), /戻しているところです/);
+  assert.throws(() => agents.moveCard(c.id, 'done'), /戻しているところです/);
+  await assert.rejects(() => agents.merge(c.id), /戻しているところです/);
+  await assert.rejects(() => agents.createPullRequest(c.id), /戻しているところです/);
+  await assert.rejects(() => agents.discard(c.id), /戻しているところです/);
+  await assert.rejects(() => agents.rewind(c.id, c.checkpoints[0].id), /戻しているところです/);
+  agents.rewinding.delete(c.id);
+  assert.strictEqual(c.status, 'review');
+
+  const cp = c.checkpoints[0];
+  const logs = c.logs.length;
+  cp.commit = 'a'.repeat(40);
+  await assert.rejects(() => agents.rewind(c.id, cp.id), /コミットが見つかりません/);
+  assert.strictEqual(c.status, 'review');
+  assert.strictEqual(c.logs.length, logs);
+  cp.commit = null;
+  await assert.rejects(() => agents.rewind(c.id, cp.id), /コミットがありません/);
+  assert.strictEqual(c.logs.length, logs);
+
+  const wt = c.worktreePath;
+  execFileSync('git', ['checkout', '-q', '--detach'], { cwd: wt });
+  cp.commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim();
+  await assert.rejects(() => agents.rewind(c.id, cp.id), /ブランチ/);
+  execFileSync('git', ['checkout', '-q', c.branch], { cwd: wt });
+  const gitDir = path.resolve(wt, execFileSync('git', ['rev-parse', '--git-dir'], { cwd: wt, encoding: 'utf8' }).trim());
+  fs.writeFileSync(path.join(gitDir, 'MERGE_HEAD'), `${cp.commit}\n`);
+  await assert.rejects(() => agents.rewind(c.id, cp.id), /途中なので戻せません/);
+  fs.rmSync(path.join(gitDir, 'MERGE_HEAD'));
+  assert.strictEqual(c.status, 'review');
+  assert.strictEqual(c.logs.length, logs);
+});
+
+test('チェックポイント: 中断の再開・コンフリクト解消・完了後の会話は記録しない', async () => {
+  const { agents, store } = setup();
+  const [c] = agents.createTask({ title: 'skip', prompt: '一度だけ' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review' && c.checkpoints.length === 1);
+  const n = c.checkpoints.length;
+  c.status = 'running';
+  const agents2 = new AgentManager(store, agents.opts);
+  assert.ok(c.interrupted);
+  agents2.resume(c.id);
+  await waitFor(() => c.status === 'review' && !c.interrupted);
+  assert.strictEqual(c.checkpoints.length, n, '中断からの再開は記録しない');
+
+  c.conflict = { resolving: true, target: 'main', files: [] };
+  agents.send(c.id, '解消して');
+  await waitFor(() => c.status === 'review' && !c.conflict);
+  assert.strictEqual(c.checkpoints.length, n, 'コンフリクト解消の実行は記録しない');
+
+  c.status = 'done';
+  agents.send(c.id, '完了後の質問');
+  await waitFor(() => c.status === 'done' && /完了後の質問/.test(c.lastPromptSent || ''));
+  assert.strictEqual(c.checkpoints.length, n, '完了後の会話は記録しない');
+});
+
+test('チェックポイント: マージ途中の追加指示ではコミットせず、MERGE_HEAD とマーカーを残す', async () => {
+  const { agents, repo } = setup();
+  const [c] = agents.createTask({ title: 'merge-cp', prompt: '一度目' });
+  agents.start(c.id);
+  await waitFor(() => c.status === 'review' && c.checkpoints && c.checkpoints.length === 1);
+  const wt = c.worktreePath;
+  const commit = (cwd, msg) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', msg], { cwd });
+  fs.writeFileSync(path.join(wt, 'conflict.txt'), 'branch\n');
+  execFileSync('git', ['add', 'conflict.txt'], { cwd: wt });
+  commit(wt, 'branch side');
+  fs.writeFileSync(path.join(repo, 'conflict.txt'), 'main\n');
+  execFileSync('git', ['add', 'conflict.txt'], { cwd: repo });
+  commit(repo, 'main side');
+  let merged = false;
+  try {
+    execFileSync('git', ['merge', '--no-ff', 'main'], { cwd: wt, encoding: 'utf8' });
+    merged = true;
+  } catch {
+    /* コンフリクトで終了コード 1 */
+  }
+  assert.strictEqual(merged, false);
+  const gitDir = path.resolve(wt, execFileSync('git', ['rev-parse', '--git-dir'], { cwd: wt, encoding: 'utf8' }).trim());
+  assert.ok(fs.existsSync(path.join(gitDir, 'MERGE_HEAD')));
+  assert.match(fs.readFileSync(path.join(wt, 'conflict.txt'), 'utf8'), /<<<<<<< /);
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim();
+  const commits = execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim();
+  agents.send(c.id, 'マージ途中の追加');
+  await waitFor(() => c.status === 'review' && c.checkpoints.length === 2 && /マージ途中の追加/.test(c.lastPromptSent || ''));
+  assert.ok(fs.existsSync(path.join(gitDir, 'MERGE_HEAD')), 'MERGE_HEAD が残る');
+  assert.strictEqual(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim(), head);
+  assert.strictEqual(execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim(), commits, 'マーカー入りのコミットは増えない');
+  assert.match(fs.readFileSync(path.join(wt, 'conflict.txt'), 'utf8'), /<<<<<<< /);
+  assert.strictEqual(execFileSync('git', ['show', 'HEAD:conflict.txt'], { cwd: wt, encoding: 'utf8' }), 'branch\n');
+  assert.strictEqual(c.checkpoints[1].commit, head, '起動直前の HEAD を記録する');
 });

@@ -4,6 +4,7 @@
 // スケジュール: {
 //   id, repoPath, title, prompt, skill, agent, model, readOnly,
 //   rule,                      繰り返し（下の RULE の形）
+//   issues,                    Issue の監視のときの設定（下の ISSUES の形）。通常のスケジュールは null
 //   enabled,                   false なら動かさない（nextRunAt も null）
 //   catchUp,                   予定から大きく遅れたときに、起動後に1回だけ実行する
 //   createdAt, updatedAt,
@@ -16,10 +17,18 @@
 // }
 // RULE（時刻はこの PC のローカル時刻）:
 //   { kind: 'once', at }                        1回だけ（at はミリ秒）
+//   { kind: 'interval', minutes }               N分おき（1〜1440）
 //   { kind: 'hourly', minute }                  毎時
 //   { kind: 'daily', hour, minute }             毎日
 //   { kind: 'weekly', weekdays, hour, minute }  毎週（weekdays は 0=日〜6=土 を1つ以上）
 //   { kind: 'monthly', day, hour, minute }      毎月（その月にない日は、その月の末日）
+// ISSUES（確認のたびに、新しい Issue 1件につきカードを1枚作る）:
+//   { labels,                   この全部のラベルが付いた Issue だけ。空なら絞らない
+//     author,                   この人が作った Issue だけ（@me は gh のログインユーザー）。空なら絞らない
+//     autoStart,                true ならカードを作ってすぐ開始する。false なら Todo に置くだけ
+//     after,                    この日時より後に作られた Issue だけを対象にする（監視を始めた日時）
+//     seen,                     もうカードにした Issue の番号（新しいものを SEEN_MAX 件まで）
+//     lastCheckedAt }           最後に確認できた日時
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -33,12 +42,16 @@
   function weekdayNames() {
     return [tr('日'), tr('月'), tr('火'), tr('水'), tr('木'), tr('金'), tr('土')];
   }
-  const RULE_KINDS = ['once', 'hourly', 'daily', 'weekly', 'monthly'];
+  const RULE_KINDS = ['once', 'interval', 'hourly', 'daily', 'weekly', 'monthly'];
   const RUN_STATUSES = ['ok', 'skipped', 'missed', 'failed'];
   const MAX_RUNS = 20;
   const LATE_MS = 10 * 60 * 1000; // 予定からこれより遅れたら「見送り」にする（アプリの停止・スリープ）
   const TITLE_MAX = 40; // タイトルを指示の1行目から作るときの長さ（タスクのカードと同じ）
   const MAX_TIME = 8.64e15; // Date で表せる最後の時刻
+  const INTERVAL_MIN = 1; // N分おきの範囲。チェックのタイマーが30秒おきなので、これより細かくしても意味がない
+  const INTERVAL_MAX = 24 * 60;
+  const ISSUE_BATCH = 10; // 1回の確認で作るカードの上限。残りは次回へ回す（Issue が一度に大量に作られても、カードで埋まらないように）
+  const SEEN_MAX = 500;
 
   // 整数にする（空文字・null・true は 0 や 1 にしない）。範囲の外なら NaN
   function intIn(v, min, max) {
@@ -74,6 +87,10 @@
       const at = timeOf(rule.at);
       return Number.isNaN(at) ? null : { kind, at };
     }
+    if (kind === 'interval') {
+      const minutes = intIn(rule.minutes, INTERVAL_MIN, INTERVAL_MAX);
+      return Number.isNaN(minutes) ? null : { kind, minutes };
+    }
     const minute = intIn(rule.minute, 0, 59);
     if (Number.isNaN(minute)) return null;
     if (kind === 'hourly') return { kind, minute };
@@ -107,6 +124,7 @@
     const base = Number(after);
     if (!r || !(Math.abs(base) <= MAX_TIME)) return null;
     if (r.kind === 'once') return r.at > base ? r.at : null;
+    if (r.kind === 'interval') return base + r.minutes * 60 * 1000;
     const d = new Date(base);
     if (r.kind === 'hourly') {
       d.setMinutes(r.minute, 0, 0);
@@ -144,6 +162,7 @@
         time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
       });
     }
+    if (r.kind === 'interval') return tr('{minutes}分おき', { minutes: r.minutes });
     if (r.kind === 'hourly') return tr('毎時 {minute}分', { minute: r.minute });
     const time = `${pad(r.hour)}:${pad(r.minute)}`;
     if (r.kind === 'daily') return tr('毎日 {time}', { time });
@@ -162,6 +181,30 @@
     return out;
   }
 
+  /** ラベルの入力（カンマ区切り。ラベル名には空白が入ることがある）を一覧にする */
+  function parseLabels(v) {
+    const list = Array.isArray(v) ? v : str(v).split(/[,、]/);
+    return [...new Set(list.map((x) => str(x).trim()).filter(Boolean))];
+  }
+
+  /**
+   * Issue の監視の設定を整える
+   * @param {number} from 日時が保存されていないときに、監視を始めた日時とする値
+   * @returns {object|null} 監視でなければ null
+   */
+  function cleanIssueWatch(raw, from) {
+    if (!raw || typeof raw !== 'object') return null;
+    const seen = (Array.isArray(raw.seen) ? raw.seen : []).filter((n) => Number.isInteger(n) && n > 0);
+    return {
+      labels: parseLabels(raw.labels),
+      author: str(raw.author).trim().replace(/^@(?!me$)/, ''),
+      autoStart: raw.autoStart === true,
+      after: timeOrNull(raw.after) || from,
+      seen: [...new Set(seen)].slice(-SEEN_MAX),
+      lastCheckedAt: timeOrNull(raw.lastCheckedAt),
+    };
+  }
+
   /**
    * スケジュールを整える。入力の確かめは scheduleError、ここは保存する形にそろえるだけで、例外は出さない
    * nextRunAt がなければ now から計算し、次回がないスケジュールは止める（動くはずのものが黙って動かなくならないように）
@@ -175,16 +218,18 @@
     const prompt = str(raw.prompt).trim();
     const enabled = raw.enabled !== false;
     const nextRunAt = enabled ? timeOrNull(raw.nextRunAt) || nextRun(rule, now) : null;
+    const issues = cleanIssueWatch(raw.issues, timeOrNull(raw.createdAt) || now);
     return {
       id: str(raw.id).trim(),
       repoPath,
-      title: str(raw.title).trim() || [...prompt.split('\n')[0].trim()].slice(0, TITLE_MAX).join(''),
+      title: str(raw.title).trim() || [...prompt.split('\n')[0].trim()].slice(0, TITLE_MAX).join('') || (issues ? tr('Issue の監視') : ''),
       prompt,
       skill: str(raw.skill).trim(),
       agent: str(raw.agent).trim(),
       model: str(raw.model).trim(),
       readOnly: raw.readOnly === true,
       rule,
+      issues,
       enabled: enabled && nextRunAt !== null,
       catchUp: raw.catchUp === true,
       createdAt: timeOrNull(raw.createdAt) || now,
@@ -216,7 +261,7 @@
   function scheduleError(input) {
     const i = input || {};
     if (!str(i.repoPath).trim()) return tr('先にリポジトリを選んでください');
-    if (!str(i.prompt).trim()) return tr('指示を入力してください');
+    if (!i.issues && !str(i.prompt).trim()) return tr('指示を入力してください'); // Issue の監視では、指示は Issue から作る
     const kind = i.rule && i.rule.kind;
     if (cleanRule(i.rule)) return '';
     if (kind === 'once') return tr('実行する日時を入力してください');
@@ -233,10 +278,16 @@
     },
     MAX_RUNS,
     LATE_MS,
+    INTERVAL_MIN,
+    INTERVAL_MAX,
+    ISSUE_BATCH,
+    SEEN_MAX,
     cleanRule,
     nextRun,
     describeRule,
     cleanRuns,
+    parseLabels,
+    cleanIssueWatch,
     cleanSchedule,
     cleanSchedules,
     scheduleError,
