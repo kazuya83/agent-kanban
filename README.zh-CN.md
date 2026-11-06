@@ -58,7 +58,7 @@ flowchart LR
 - **结束后，用合并（`--no-ff`）或创建 PR（`gh`）把结果收进来。** 可以选择合并到哪条分支，合并之后也可以 push 到 origin
 - 看板状态保存在 Electron 的 userData 文件夹里的 `board.json`。不使用外部服务器
 
-在 Codex / Gemini / Cursor 上，由于 CLI 的限制，不能使用卡片上的批准、选择题提问、btw 和金额显示（详见 [docs/agents.md](docs/agents.md) (Japanese)）。
+在 Codex / Gemini / Cursor 上，由于 CLI 的限制，不能使用卡片上的批准、选择题提问、btw 和金额显示（详见 [docs/agents.md](docs/agents.md) (English)）。
 
 ## 主要功能
 
@@ -74,9 +74,9 @@ flowchart LR
 
 ![从客户端操作主机上的看板（顶部显示「远程操作中 → SSH 100.101.102.103」）](docs/images/zh/rc-client.png)
 
-步骤，以及连不上时的处理方法，写在 [docs/remote.md](docs/remote.md) (Japanese)。
+步骤，以及连不上时的处理方法，写在 [docs/remote.md](docs/remote.md) (English)。
 
-此外还支持：把大任务拆成子任务，并行或按顺序推进（从父分支分出去，完成后合并回父分支；也可以只启动某一个子任务；支持 GitHub 的子 Issue）、用拖放改变卡片的状态（列）、给正在运行的智能体发消息（btw）、附加图片和文件、Pipeline 与竞争（多个智能体的组合），以及在 Windows 上使用 WSL 的仓库。用法汇总在 [docs/usage.md](docs/usage.md) (Japanese)。
+此外还支持：把大任务拆成子任务，并行或按顺序推进（从父分支分出去，完成后合并回父分支；也可以只启动某一个子任务；支持 GitHub 的子 Issue）、用拖放改变卡片的状态（列）、给正在运行的智能体发消息（btw）、附加图片和文件、Pipeline 与竞争（多个智能体的组合），以及在 Windows 上使用 WSL 的仓库。用法汇总在 [docs/usage.md](docs/usage.md) (English)。
 
 ### 并行运行多个仓库
 
@@ -86,7 +86,7 @@ flowchart LR
 
 按标签栏的「＋」，或按一下已打开的标签，就能从最近打开的仓库里选择。也可以从这里用 URL 克隆，或新建一个仓库。
 
-没有用 git 管理的文件夹（做视频等代码以外的工作）也可以打开。这时不创建 worktree，直接在文件夹里运行任务，结束后用「标为完成」结束（详见 [docs/usage.md](docs/usage.md) (Japanese)）。
+没有用 git 管理的文件夹（做视频等代码以外的工作）也可以打开。这时不创建 worktree，直接在文件夹里运行任务，结束后用「标为完成」结束（详见 [docs/usage.md](docs/usage.md) (English)）。
 
 ![选择仓库的对话框（最近打开的仓库，以及已在标签页中打开的仓库）](docs/images/zh/repo-switch.png)
 
@@ -182,7 +182,7 @@ Claude Code 用 `AskUserQuestion` 提问时，卡片会变成提问，并出现�
 
 ### 任务调度
 
-从顶栏菜单切换到「任务调度」，就可以用卡片管理在指定时间（仅一次、每小时、每天、每周、每月）创建并运行任务的日程。看板任务可以直接登记成日程，也可以从日程立刻创建任务。只有在应用开着的时候才会运行（详见 [docs/usage.md](docs/usage.md) (Japanese)）。
+从顶栏菜单切换到「任务调度」，就可以用卡片管理在指定时间（仅一次、每小时、每天、每周、每月）创建并运行任务的日程。看板任务可以直接登记成日程，也可以从日程立刻创建任务。只有在应用开着的时候才会运行（详见 [docs/usage.md](docs/usage.md) (English)）。
 
 ## 需要准备
 
@@ -204,7 +204,7 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/insta
 irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex
 ```
 
-用同样的命令也可以更新到最新版。也可以从应用里更新：「设置」→「应用更新」→「更新到新版本」。勾选「有新版本时自动更新」后，会在没有任务运行时自动替换并重新启动。指定版本、卸载、从文件安装，以及首次启动时的警告，请看 [docs/install.md](docs/install.md) (Japanese)。
+用同样的命令也可以更新到最新版。也可以从应用里更新：「设置」→「应用更新」→「更新到新版本」。勾选「有新版本时自动更新」后，会在没有任务运行时自动替换并重新启动。指定版本、卸载、从文件安装，以及首次启动时的警告，请看 [docs/install.md](docs/install.md) (English)。
 
 ## 用法
 
@@ -217,12 +217,12 @@ irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 
 
 | 文档 | 内容 |
 | --- | --- |
-| [画面与用法](docs/usage.md) (Japanese) | 各项功能的用法：批准、提问、规格确认、任务调度、技能、对话、btw、合并 / PR、Issue 状态、通知、冲突等 |
-| [智能体与编排](docs/agents.md) (Japanese) | Claude Code / Codex / Gemini / Cursor 的差异，Pipeline 与竞争 |
-| [设置](docs/settings.md) (Japanese) | 从顶栏菜单打开的设置画面和各个项目 |
-| [远程操作](docs/remote.md) (Japanese) | 通过 SSH 隧道从另一台电脑操作看板的步骤，以及连不上时的处理方法 |
-| [安装](docs/install.md) (Japanese) | 安装、更新、卸载，以及在 Windows 上使用 WSL 仓库 |
-| [面向开发者](docs/development.md) (Japanese) | 从源码运行、构建、发布、应用的结构，以及测试 |
+| [画面与用法](docs/usage.md) (English) | 各项功能的用法：批准、提问、规格确认、任务调度、技能、对话、btw、合并 / PR、Issue 状态、通知、冲突等 |
+| [智能体与编排](docs/agents.md) (English) | Claude Code / Codex / Gemini / Cursor 的差异，Pipeline 与竞争 |
+| [设置](docs/settings.md) (English) | 从顶栏菜单打开的设置画面和各个项目 |
+| [远程操作](docs/remote.md) (English) | 通过 SSH 隧道从另一台电脑操作看板的步骤，以及连不上时的处理方法 |
+| [安装](docs/install.md) (English) | 安装、更新、卸载，以及在 Windows 上使用 WSL 仓库 |
+| [面向开发者](docs/development.md) (English) | 从源码运行、构建、发布、应用的结构，以及测试 |
 
 ## 许可证
 
