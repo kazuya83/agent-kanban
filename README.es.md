@@ -58,7 +58,7 @@ flowchart LR
 - **Al terminar, incorporas el trabajo con un merge (`--no-ff`) o creando un PR (`gh`).** Puedes elegir la rama de destino y, después del merge, hacer push a origin
 - El estado del tablero se guarda en `board.json`, en la carpeta userData de Electron. No hay un servidor externo
 
-En Codex / Gemini / Cursor, por los límites de la CLI, no están disponibles la aprobación en la tarjeta, las preguntas de opción múltiple, btw ni el coste (más detalles en [docs/agents.md](docs/agents.md) (Japanese)).
+En Codex / Gemini / Cursor, por los límites de la CLI, no están disponibles la aprobación en la tarjeta, las preguntas de opción múltiple, btw ni el coste (más detalles en [docs/agents.md](docs/agents.md) (English)).
 
 ## Funciones principales
 
@@ -74,9 +74,9 @@ Puedes manejar el tablero del PC que ejecuta los agentes (el host) desde Worktre
 
 ![Manejo del tablero del host desde el cliente (arriba se lee «Control remoto → SSH 100.101.102.103»)](docs/images/es/rc-client.png)
 
-Los pasos, y cómo arreglar una conexión que falla, están en [docs/remote.md](docs/remote.md) (Japanese).
+Los pasos, y cómo arreglar una conexión que falla, están en [docs/remote.md](docs/remote.md) (English).
 
-Además: dividir una tarea grande en subtareas que avanzan en paralelo o en orden (salen de la rama padre y se fusionan al terminar; también se puede iniciar una sola subtarea; se admiten los sub-issues de GitHub), cambiar el estado (columna) de una tarjeta arrastrándola, mensajes a un agente en ejecución (btw), adjuntar imágenes y archivos, Pipeline y competición (combinaciones de varios agentes), y repositorios de WSL en Windows. El uso está resumido en [docs/usage.md](docs/usage.md) (Japanese).
+Además: dividir una tarea grande en subtareas que avanzan en paralelo o en orden (salen de la rama padre y se fusionan al terminar; también se puede iniciar una sola subtarea; se admiten los sub-issues de GitHub), cambiar el estado (columna) de una tarjeta arrastrándola, mensajes a un agente en ejecución (btw), adjuntar imágenes y archivos, Pipeline y competición (combinaciones de varios agentes), y repositorios de WSL en Windows. El uso está resumido en [docs/usage.md](docs/usage.md) (English).
 
 ### Ejecutar varios repositorios en paralelo
 
@@ -86,7 +86,7 @@ Los repositorios se abren en pestañas (hasta 3). Cambiar de pestaña no detiene
 
 El «+» de la barra de pestañas, o pulsar la pestaña abierta, permite elegir entre los repositorios abiertos hace poco. Desde ahí también se puede clonar desde una URL o crear un repositorio nuevo.
 
-Puedes abrir una carpeta que no es un repositorio git (producción de vídeo y otro trabajo que no es código). En ese caso la tarea se ejecuta directamente en la carpeta, sin crear un worktree, y se cierra con «Marcar como hecha» (más detalles en [docs/usage.md](docs/usage.md) (Japanese)).
+Puedes abrir una carpeta que no es un repositorio git (producción de vídeo y otro trabajo que no es código). En ese caso la tarea se ejecuta directamente en la carpeta, sin crear un worktree, y se cierra con «Marcar como hecha» (más detalles en [docs/usage.md](docs/usage.md) (English)).
 
 ![Diálogo para elegir repositorio (recientes y los que están abiertos en pestañas)](docs/images/es/repo-switch.png)
 
@@ -182,7 +182,7 @@ Al crear una tarea puedes elegir una skill de Claude Code (se pasa como `/nombre
 
 ### Programador de tareas
 
-Desde el menú de la barra superior, cambia a «Programador de tareas» para gestionar, en tarjetas, programaciones que crean y ejecutan una tarea en un momento dado (una vez, cada hora, cada día, cada semana o cada mes). Puedes registrar una tarea del kanban como programación, y también crear una tarea desde una programación en el momento. Las programaciones solo se ejecutan mientras la aplicación está abierta (más detalles en [docs/usage.md](docs/usage.md) (Japanese)).
+Desde el menú de la barra superior, cambia a «Programador de tareas» para gestionar, en tarjetas, programaciones que crean y ejecutan una tarea en un momento dado (una vez, cada hora, cada día, cada semana o cada mes). Puedes registrar una tarea del kanban como programación, y también crear una tarea desde una programación en el momento. Las programaciones solo se ejecutan mientras la aplicación está abierta (más detalles en [docs/usage.md](docs/usage.md) (English)).
 
 ## Requisitos
 
@@ -204,7 +204,7 @@ curl -fsSL https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/insta
 irm https://raw.githubusercontent.com/kazuya83/worktree-kanban/main/install.ps1 | iex
 ```
 
-Los mismos comandos actualizan a la última versión. También se puede actualizar desde la aplicación: «Ajustes» → «Actualización de la aplicación» → «Actualizar a la nueva versión». Si marcas «Actualizar automáticamente cuando salga una versión nueva», se sustituye y se vuelve a abrir cuando no hay ninguna tarea en marcha. Para fijar una versión, desinstalar, instalar desde un archivo y el aviso del primer arranque, consulta [docs/install.md](docs/install.md) (Japanese).
+Los mismos comandos actualizan a la última versión. También se puede actualizar desde la aplicación: «Ajustes» → «Actualización de la aplicación» → «Actualizar a la nueva versión». Si marcas «Actualizar automáticamente cuando salga una versión nueva», se sustituye y se vuelve a abrir cuando no hay ninguna tarea en marcha. Para fijar una versión, desinstalar, instalar desde un archivo y el aviso del primer arranque, consulta [docs/install.md](docs/install.md) (English).
 
 ## Uso
 
@@ -217,12 +217,12 @@ Los mismos comandos actualizan a la última versión. También se puede actualiz
 
 | Documento | Contenido |
 | --- | --- |
-| [Pantalla y uso](docs/usage.md) (Japanese) | Uso de cada función: aprobación, preguntas, comprobación de la especificación, programador de tareas, skills, conversación, btw, merge / PR, estado de los Issues, notificaciones, conflictos y más |
-| [Agentes y orquestación](docs/agents.md) (Japanese) | Diferencias entre Claude Code / Codex / Gemini / Cursor, Pipeline y competición |
-| [Ajustes](docs/settings.md) (Japanese) | La pantalla de ajustes que se abre desde el menú de la barra superior, y sus apartados |
-| [Control remoto](docs/remote.md) (Japanese) | Cómo manejar el tablero desde otro PC por un túnel SSH, y cómo arreglar una conexión que falla |
-| [Instalación](docs/install.md) (Japanese) | Instalación, actualización, desinstalación y uso de un repositorio de WSL en Windows |
-| [Para desarrolladores](docs/development.md) (Japanese) | Ejecutar desde el código, compilar, publicar, cómo está hecha la aplicación y las pruebas |
+| [Pantalla y uso](docs/usage.md) (English) | Uso de cada función: aprobación, preguntas, comprobación de la especificación, programador de tareas, skills, conversación, btw, merge / PR, estado de los Issues, notificaciones, conflictos y más |
+| [Agentes y orquestación](docs/agents.md) (English) | Diferencias entre Claude Code / Codex / Gemini / Cursor, Pipeline y competición |
+| [Ajustes](docs/settings.md) (English) | La pantalla de ajustes que se abre desde el menú de la barra superior, y sus apartados |
+| [Control remoto](docs/remote.md) (English) | Cómo manejar el tablero desde otro PC por un túnel SSH, y cómo arreglar una conexión que falla |
+| [Instalación](docs/install.md) (English) | Instalación, actualización, desinstalación y uso de un repositorio de WSL en Windows |
+| [Para desarrolladores](docs/development.md) (English) | Ejecutar desde el código, compilar, publicar, cómo está hecha la aplicación y las pruebas |
 
 ## Licencia
 

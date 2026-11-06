@@ -1,49 +1,51 @@
-# 遠隔操作（SSH トンネルで別の PC からボードを操作する）
+[English](remote.md) · [日本語](remote.ja.md)
 
-エージェントを動かす PC（**ホスト**）のボードを、別の PC（**クライアント**）の Worktree Kanban から、**ほぼそのまま表示・操作**できます。
+# Remote control (operate the board from another PC over an SSH tunnel)
 
-- ホストもクライアントも、**Mac でも Windows でも** かまいません（Windows → Mac、Windows → Windows、Mac → Windows、Mac → Mac のどれでもつなげます）。どのマシンもホストにもクライアントにもなれます
-- ホストのアプリは `127.0.0.1` だけで待ち受けるので、インターネットへ直接は出ません。**SSH のポート転送**を通してつなぎます（クライアントのアプリが `ssh` を起動してトンネルを張ります）
-- 外出先からつなぐときは、両方の PC に [Tailscale](https://tailscale.com/) を入れます。ルーターの設定は要りません
+You can view and operate the board of the PC running the agents (the **host**) from Worktree Kanban on another PC (the **client**), **almost as if you were sitting at it**.
 
-> Tailscale の IP（`100.x.x.x`）を「接続先ホスト」に入れて直接つなぐと、`connect ETIMEDOUT` になります。ホストが `127.0.0.1` でしか待ち受けていないためです。接続方法を **「SSH 経由」** にして、Tailscale の IP は **SSH の接続先** に入れてください。
+- The host and the client can each be **Mac or Windows** (Windows → Mac, Windows → Windows, Mac → Windows, and Mac → Mac all work). Any machine can be either a host or a client
+- The host app listens only on `127.0.0.1`, so it is not directly exposed to the internet. You connect through **SSH port forwarding** (the client app starts `ssh` and opens the tunnel)
+- To connect while away from home or the office, install [Tailscale](https://tailscale.com/) on both PCs. No router configuration is needed
 
-## 全体の流れ
+> If you put the Tailscale IP (`100.x.x.x`) in "Host" and connect directly, you get `connect ETIMEDOUT`, because the host listens only on `127.0.0.1`. Set the connection method to **"via SSH"** and put the Tailscale IP in the **SSH target** instead.
 
-| | ホスト（作業する PC） | クライアント（操作する PC） |
+## Overview
+
+| | Host (the PC doing the work) | Client (the PC you operate from) |
 | --- | --- | --- |
-| 1 | Tailscale を入れてログイン | Tailscale を入れて同じアカウントでログイン |
-| 2 | SSH サーバーをオンにする | Worktree Kanban の「RC設定」で **鍵を作る** |
-| 3 | 受け取った公開鍵を「RC設定」で選んで登録する | パスワードなしで `ssh` で入れるか確かめる |
-| 4 | Worktree Kanban で「ホストを開始」 | Worktree Kanban で「SSH 経由」で接続 |
+| 1 | Install Tailscale and sign in | Install Tailscale and sign in with the same account |
+| 2 | Turn on the SSH server | **Create a key** in "RC settings" in Worktree Kanban |
+| 3 | Register the received public key by choosing it in "RC settings" | Confirm you can get in with `ssh` without a password |
+| 4 | "Start host" in Worktree Kanban | Connect "via SSH" in Worktree Kanban |
 
-1〜3 は最初の1回だけです。
+Steps 1 to 3 are needed only once.
 
-## 1. Tailscale を入れる（両方の PC）
+## 1. Install Tailscale (both PCs)
 
-1. 両方の PC に [Tailscale](https://tailscale.com/download) を入れて、**同じアカウント** でログインします
-2. どちらの PC でも、Tailscale が **接続中（Connected）** になっているのを確かめます。ホストの IP（`100.x.x.x`）とマシン名は、Tailscale のメニューか [管理画面](https://login.tailscale.com/admin/machines) に出ます
-3. クライアントのターミナルで次を実行して、返事が来ればつながっています
+1. Install [Tailscale](https://tailscale.com/download) on both PCs and sign in with the **same account**
+2. On both PCs, confirm that Tailscale is **Connected**. The host's IP (`100.x.x.x`) and machine name are shown in the Tailscale menu and in the [admin console](https://login.tailscale.com/admin/machines)
+3. Run the following in a terminal on the client. If you get a reply, the two are connected
 
    ```bash
-   tailscale ping <ホストの Tailscale の IP>
+   tailscale ping <host's Tailscale IP>
    ```
 
-   （Mac で `tailscale` が見つからないときは `/Applications/Tailscale.app/Contents/MacOS/Tailscale ping <IP>`）
+   (If `tailscale` is not found on a Mac, use `/Applications/Tailscale.app/Contents/MacOS/Tailscale ping <IP>`)
 
-> 管理画面で相手が **offline** になっていると、SSH は必ずタイムアウトします。Windows はログオフ・スリープ中や、Tailscale を終了していると offline になります。
+> If the other machine shows as **offline** in the admin console, SSH always times out. Windows goes offline while logged off or asleep, or when Tailscale has been quit.
 
-同じ LAN の中だけで使うなら、Tailscale の代わりにホストの LAN の IP（`192.168.x.x` など）でもかまいません。
+If you only use it within one LAN, you can use the host's LAN IP (such as `192.168.x.x`) instead of Tailscale.
 
-## 2. ホストの SSH サーバーをオンにする
+## 2. Turn on the SSH server on the host
 
-### ホストが Mac のとき
+### If the host is a Mac
 
-「システム設定 → 一般 → 共有 → **リモートログイン**」をオンにします（「i」から、入れるユーザーを選べます）。
+Turn on "System Settings → General → Sharing → **Remote Login**" (the "i" button lets you choose which users can log in).
 
-### ホストが Windows のとき
+### If the host is Windows
 
-管理者の PowerShell で、OpenSSH サーバーを入れて起動し、ログオン時に自動で起動するようにします（「設定 → システム → オプション機能 → 機能を表示」から「OpenSSH サーバー」を追加してもかまいません）。
+In an administrator PowerShell, install the OpenSSH server, start it, and set it to start automatically (you can also add "OpenSSH Server" from "Settings → System → Optional features → View features").
 
 ```powershell
 Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
@@ -51,68 +53,68 @@ Start-Service sshd
 Set-Service sshd -StartupType Automatic
 ```
 
-ファイアウォールで SSH（22 番）が開いているかも確かめます。何も出なければ、2 行目で開けます。
+Also check that SSH (port 22) is open in the firewall. If the first line shows nothing, the second line opens it.
 
 ```powershell
 Get-NetFirewallRule -Name *OpenSSH-Server* | Select-Object Name, Enabled, Profile
 New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
 ```
 
-### 確かめる
+### Check it
 
-ホストの Worktree Kanban で上部の **「RC設定」** を開くと、**クライアントに入れる SSH の接続先（Tailscale の IP）・ユーザー名・SSH サーバーが動いているか** が表示されます。「動いていません」と出ていたら、上の手順をやり直してください。
+Open **"RC settings"** at the top of Worktree Kanban on the host. It shows **the SSH target to enter on the client (the Tailscale IP), the user name, and whether the SSH server is running**. If it says "Not running", redo the steps above.
 
-## 3. SSH の鍵を作って、ホストに登録する
+## 3. Create an SSH key and register it on the host
 
-アプリからはパスワードを入力できないので、**鍵で SSH に入れる** ようにします。鍵を作るところまではクライアントのアプリがやり、**公開鍵のファイルをホストへ渡すのはご自身で** 行います（ホストのパスワードをアプリに渡さないためです）。受け取った公開鍵は、ホストのアプリで選ぶだけで登録できます。
+The app cannot enter a password, so you set things up to **log in over SSH with a key**. The client app handles creating the key, and **you pass the public key file to the host yourself** (so that the host's password is never given to the app). Once the host has the public key, you only have to choose it in the host app to register it.
 
-### クライアントで鍵を作る（アプリでできます）
+### Create the key on the client (the app can do this)
 
-1. クライアントの Worktree Kanban で上部の **「RC設定」** を開き、「クライアント」の接続方法を **SSH 経由** にします
-2. 「① SSH の鍵を作る」の **「鍵を作る」** を押します。パスフレーズなしの ed25519 の鍵が `~/.ssh/agent-kanban_ed25519`（Windows は `C:\Users\<you>\.ssh\agent-kanban_ed25519`）にでき、「鍵ファイル」の欄に入ります
-3. 公開鍵と、ホストに登録するコマンド（ホストが Mac / Windows の管理者 / Windows の管理者ではないユーザー）が出るので、**「コピー」** で写します
+1. Open **"RC settings"** at the top of Worktree Kanban on the client, and set the connection method under "Client" to **via SSH**
+2. Press **"Create key"** under "① Create an SSH key". An ed25519 key without a passphrase is created at `~/.ssh/agent-kanban_ed25519` (on Windows, `C:\Users\<you>\.ssh\agent-kanban_ed25519`) and entered in the "Key file" field
+3. The public key and the commands that register it on the host (for a Mac host, a Windows administrator, and a Windows non-administrator) appear. Copy them with **"Copy"**
 
-すでに使っている鍵があれば、「鍵ファイル」にそのパスを入れると、その公開鍵と登録コマンドが出ます（パスフレーズ付きの鍵は、アプリからは使えません）。自分で作るなら `ssh-keygen -t ed25519` でもかまいません。
+If you already have a key, enter its path in "Key file" to see its public key and registration commands (keys with a passphrase cannot be used from the app). You can also create one yourself with `ssh-keygen -t ed25519`.
 
-Windows で「ssh-keygen が見つかりません」と出るときは、「設定 → システム → オプション機能」で「OpenSSH クライアント」を追加します。
+If Windows says ssh-keygen was not found, add "OpenSSH Client" under "Settings → System → Optional features".
 
-### 公開鍵をホストに登録する（ホストの Worktree Kanban で）
+### Register the public key on the host (in Worktree Kanban on the host)
 
-1. クライアントでできた **公開鍵のファイル**（`agent-kanban_ed25519.pub`。RC設定の「① SSH の鍵」に場所が出ています）を、USB メモリ・共有フォルダ・メールなどで、ホストの PC の好きな場所に置きます。**秘密鍵（`.pub` の付かない方）は渡さないでください**
-2. ホストの Worktree Kanban で上部の **「RC設定」** を開き、「ホスト」の **「操作側の公開鍵を登録する」** で **「ファイルを選択…」** から、置いた `.pub` を選びます
-3. **「登録する」** を押すと、SSH で入れるように設定されます
-   - Mac: `~/.ssh/authorized_keys` に足して、権限を 600 にします
-   - Windows で管理者のユーザー: `C:\ProgramData\ssh\administrators_authorized_keys` に足して、`icacls` で権限を絞ります。書き込めないと出たときは、Worktree Kanban を「管理者として実行」で開き直すか、表示されたコマンドを管理者の PowerShell で実行します
-   - Windows で管理者ではないユーザー: `C:\Users\<you>\.ssh\authorized_keys` に足します
+1. Put the **public key file** created on the client (`agent-kanban_ed25519.pub`; its location is shown under "① SSH key" in RC settings) anywhere on the host PC, using a USB stick, a shared folder, email, or the like. **Do not hand over the private key (the file without `.pub`)**
+2. Open **"RC settings"** at the top of Worktree Kanban on the host, and under **"Register the client public key"** in "Host", use **"Choose file…"** to choose the `.pub` file you placed there
+3. Press **"Register"** to allow SSH logins
+   - Mac: the key is added to `~/.ssh/authorized_keys` and the permissions are set to 600
+   - Windows, administrator user: the key is added to `C:\ProgramData\ssh\administrators_authorized_keys` and permissions are restricted with `icacls`. If it says it cannot write, reopen Worktree Kanban with "Run as administrator", or run the displayed command in an administrator PowerShell
+   - Windows, non-administrator user: the key is added to `C:\Users\<you>\.ssh\authorized_keys`
 
-同じ鍵がもう登録されていれば、二重には足しません。秘密鍵を選んだときは登録せずに止めます。
+A key that is already registered is not added twice. If you choose a private key, it stops without registering anything.
 
-アプリを使わずに登録するときは、クライアントの RC設定に出ている、ホストの OS に合ったコマンドを **ホストの PC で** 実行してもかまいません。下は、それを手で行うときの手順です。
+To register without the app, you can run the command for the host's OS, shown in the client's RC settings, **on the host PC**. The steps below show how to do this by hand.
 
-### 公開鍵をホストに登録する（ホストが Mac のとき）
+### Register the public key by hand (Mac host)
 
-クライアントが **Windows** なら PowerShell で:
+If the client is **Windows**, in PowerShell:
 
 ```powershell
-type $env:USERPROFILE\.ssh\agent-kanban_ed25519.pub | ssh <ユーザー名>@<ホストの IP> "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+type $env:USERPROFILE\.ssh\agent-kanban_ed25519.pub | ssh <user name>@<host IP> "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
 ```
 
-クライアントが **Mac** ならターミナルで:
+If the client is a **Mac**, in a terminal:
 
 ```bash
-ssh-copy-id -i ~/.ssh/agent-kanban_ed25519.pub <ユーザー名>@<ホストの IP>
+ssh-copy-id -i ~/.ssh/agent-kanban_ed25519.pub <user name>@<host IP>
 ```
 
-どちらも、このときだけホストのパスワードを聞かれます。ユーザー名は、ホストのターミナルで `whoami` と打つと出る名前です。
+Either way, you are asked for the host's password this one time. The user name is what `whoami` prints in a terminal on the host.
 
-### 公開鍵をホストに登録する（ホストが Windows のとき）
+### Register the public key by hand (Windows host)
 
-Windows の OpenSSH サーバーは、**ホストのユーザーが管理者かどうか** で鍵を置く場所が変わります。
+On the Windows OpenSSH server, where the key goes depends on **whether the host user is an administrator**.
 
-1. クライアントの `agent-kanban_ed25519.pub`（Windows なら `C:\Users\<you>\.ssh\agent-kanban_ed25519.pub`）をメモ帳などで開くか、RC設定の「公開鍵をコピー」で、1 行をまるごとコピーします
-2. ホストで PowerShell を開き、次の `'…'` にその 1 行を貼って実行します
+1. Open the client's `agent-kanban_ed25519.pub` (on Windows, `C:\Users\<you>\.ssh\agent-kanban_ed25519.pub`) in Notepad or the like and copy the whole line, or use "Copy public key" in RC settings
+2. Open PowerShell on the host, paste that line into the `'…'` below, and run it
 
-   **ホストのユーザーが管理者のとき**（ふつうの個人の PC はこちら。PowerShell は **管理者として実行**）:
+   **If the host user is an administrator** (the usual case on a personal PC; use **Run as administrator** for PowerShell):
 
    ```powershell
    $key = 'ssh-ed25519 AAAA... you@client'
@@ -120,7 +122,7 @@ Windows の OpenSSH サーバーは、**ホストのユーザーが管理者か�
    icacls.exe C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
    ```
 
-   **管理者ではないとき**:
+   **If not an administrator**:
 
    ```powershell
    $key = 'ssh-ed25519 AAAA... you@client'
@@ -128,74 +130,74 @@ Windows の OpenSSH サーバーは、**ホストのユーザーが管理者か�
    Add-Content -Path $env:USERPROFILE\.ssh\authorized_keys -Value $key
    ```
 
-ユーザー名は、ホストの PowerShell で `$env:USERNAME` と打つと出る名前です（Microsoft アカウントでも、メールアドレスではなくこの名前を使います）。
+The user name is what `$env:USERNAME` prints in PowerShell on the host (even with a Microsoft account, use this name rather than the email address).
 
-### パスワードなしで入れるか確かめる
+### Confirm you can log in without a password
 
-クライアントで次を実行して、**パスワードを聞かれずに** 終われば準備完了です（RC設定の「③」にも、そのまま使えるコマンドが出ます）。
+Run the following on the client. If it finishes **without asking for a password**, you are ready (a ready-to-use command also appears at "③" in RC settings).
 
 ```bash
-ssh -i ~/.ssh/agent-kanban_ed25519 <ユーザー名>@<ホストの IP> exit
+ssh -i ~/.ssh/agent-kanban_ed25519 <user name>@<host IP> exit
 ```
 
-初めてのときは「Are you sure you want to continue connecting」と聞かれるので `yes` と答えます。
+The first time, it asks "Are you sure you want to continue connecting". Answer `yes`.
 
-## 4. つなぐ
+## 4. Connect
 
-1. **ホスト** の Worktree Kanban で上部の「RC設定」→「ホストを開始」を押します（ペアリング用の 6 桁コードが出ます。待ち受けポートの既定は `17831`）
-2. **クライアント** の Worktree Kanban で上部の「RC設定」→ クライアントで次を入れて接続します
-   - 接続方法: **SSH 経由**
-   - SSH の接続先: ホストの Tailscale の IP（`100.x.x.x`）か名前（ホストの設定画面に出ている値）
-   - ユーザー名: ホストのログイン名（ホストの設定画面に出ている値）
-   - SSH ポート: `22`、鍵ファイル: アプリで作った鍵（「鍵を作る」を押すと自動で入ります）
-   - ホストの待ち受けポート: `17831`、ペアリングコード: ホストに出ている 6 桁
-3. 上部のピルに「遠隔操作中」と出ているあいだは、ホスト側のボード・承認・質問・追加指示がそのまま使えます。切断するとトンネルも閉じます
+1. On the **host**, press "RC settings" → "Start host" at the top of Worktree Kanban (a 6-digit pairing code appears; the default listen port is `17831`)
+2. On the **client**, open "RC settings" at the top of Worktree Kanban, enter the following under Client, and connect
+   - Connection method: **via SSH**
+   - SSH target: the host's Tailscale IP (`100.x.x.x`) or name (the value shown on the host's settings screen)
+   - User name: the host's login name (the value shown on the host's settings screen)
+   - SSH port: `22`; key file: the key created by the app (pressing "Create key" fills it in automatically)
+   - Host listen port: `17831`; pairing code: the 6 digits shown on the host
+3. While the pill at the top shows "Remote control", the host's board, approvals, questions, and follow-up instructions all work as they are. Disconnecting also closes the tunnel
 
-### 2 回目からは、前回の接続を再開する
+### Resume the previous connection from the second time on
 
-一度つなぐとトークンと接続先が保存されるので、2 回目からはコードも入力も要りません。
+After you connect once, the token and target are saved, so from the second time on you do not need the code or any input.
 
-- **つないだままアプリを終了した** ときは、次に起動したときに **前回の接続を自動で再開** します。上部のピルに「前回の接続を再開中…」と出て、つながるとそのままホストのボードになります（ホストがまだ起動していないときなどは、間をあけて何度か試します）
-- **回線が切れた・ホストのアプリを再起動した** ときも、自動でつなぎ直します
-- 自分で **「切断」** を押したときは、次の起動時には自動ではつなぎません。そのときは上部の **「↻ 前回の接続を再開」** を押すだけでつながります（RC設定の「前回の接続を再開」でも同じです）
-- 自動の再開をやめたいときは、RC設定の「再開をやめる」を押します。ホストでペアが破棄されていたときは、自動の再開をやめて、6 桁のコードでのペアリングに戻ります
+- If you **quit the app while connected**, it **resumes the previous connection automatically** at the next launch. The pill at the top shows "Resuming the previous connection…", and once connected you are on the host's board (if the host has not started yet, for example, it retries several times with a pause in between)
+- If **the line drops or the host app restarts**, it reconnects automatically too
+- If you press **"Disconnect"** yourself, it does not connect automatically at the next launch. Just press **"↻ Resume previous connection"** at the top to connect (the same button is in RC settings)
+- To stop automatic resuming, press "Stop resuming" in RC settings. If the pairing was dropped on the host, automatic resuming stops and you go back to pairing with the 6-digit code
 
-### これまでの接続から選んでつなぐ
+### Choose from previous connections
 
-つないだことのある接続先は、トークンといっしょに **新しい順に 10 件まで** 残ります。RC設定の「クライアント」の **「これまでの接続」** に、接続先ごとのカード（`user@100.x.x.x`・SSH 経由か直接か・ホストのポート・最後に接続した時刻）が並びます。
+Targets you have connected to are kept with their tokens, **up to 10, newest first**. "Previous connections" under "Client" in RC settings lists a card for each target (`user@100.x.x.x`, via SSH or direct, the host port, and when you last connected).
 
-- **カードを押すだけ** で、その接続先と保存したトークンでつなぎます（コードも入力も要りません）。いくつかのホストを切り替えて使うときも、カードを選ぶだけです
-- 前回つないだ接続先には「前回」の印が付きます。上部の「↻ 前回の接続を再開」は、この接続先につなぎます
-- カードの **「×」** で、その接続を一覧から消します（保存したトークンも忘れます）
-- ホストでペアが破棄されていてつながらなかった接続は、一覧から外れます。6 桁のコードでペアリングし直すと、また並びます
+- **Just press a card** to connect with that target and its saved token (no code or input needed). This is also all it takes to switch between several hosts
+- The target you connected to last is marked as the previous one. "↻ Resume previous connection" at the top connects to it
+- **"×"** on a card removes that connection from the list (and forgets the saved token)
+- A connection that failed because the pairing was dropped on the host leaves the list. Pair again with the 6-digit code and it comes back
 
-自分で `ssh -L 17831:127.0.0.1:17831 <user>@<host>` を張りたいときは、接続方法を「直接」にして接続先ホストを `127.0.0.1` にします。
+If you want to open `ssh -L 17831:127.0.0.1:17831 <user>@<host>` yourself, set the connection method to "Direct" and the host to `127.0.0.1`.
 
-## うまくいかないとき
+## Troubleshooting
 
-| 出たメッセージ | よくある原因と直し方 |
+| Message | Common cause and fix |
 | --- | --- |
-| SSH の接続が **タイムアウト** しました | 相手から返事がありません。① 両方の PC で Tailscale が接続中か（管理画面で offline になっていないか、`tailscale ping <IP>` が返るか） ② IP・名前がホストの設定画面の値と合っているか ③ ホストがスリープしていないか ④ ホストで SSH サーバーが動いているか（上の「2.」） ⑤ ホストのファイアウォール（Mac の「ステルスモード」「外部からの接続をすべてブロック」、Windows の 22 番の受信規則）を確かめます |
-| SSH の接続を **断られました** | ホストで SSH サーバーが動いていません（Mac は「リモートログイン」、Windows はサービス `sshd`）。SSH のポートが 22 以外なら、設定の「SSH ポート」も合わせます |
-| SSH の **認証に失敗** しました | 鍵が登録されていないか、ユーザー名が違います。上の「3.」をやり直し、`ssh <ユーザー名>@<IP> exit` がパスワードなしで通るか確かめます。ホストが Windows で管理者のユーザーなら、`administrators_authorized_keys` に入れて `icacls` で権限を絞る必要があります |
-| ホストの鍵が以前と違う | ホストを入れ直したなどで鍵が変わりました。クライアントで `ssh-keygen -R <IP>` を実行してから、もう一度つなぎます |
-| SSH はつながりましたが、ホストの Worktree Kanban に届きませんでした | ホストで「ホストを開始」していないか、待ち受けポートが違います |
-| ポート転送を断られました | ホストの `sshd_config`（Mac は `/etc/ssh/sshd_config`、Windows は `C:\ProgramData\ssh\sshd_config`）で `AllowTcpForwarding no` になっています |
-| ホストの Worktree Kanban の版が古いため、次の設定を保存できませんでした | ホストのアプリが古く、カスタムエージェントや Pipeline のフローチャートなどの新しい設定を知りません。ホストの Worktree Kanban を新しい版に更新して（設定の「アプリの更新」）、もう一度保存します |
-| ssh コマンドが見つかりません | Windows は「OpenSSH クライアント」を追加します。設定の「ssh コマンド」にフルパスを入れることもできます |
+| The SSH connection **timed out** | There is no reply from the other side. Check: ① Tailscale is connected on both PCs (not offline in the admin console, and `tailscale ping <IP>` gets a reply) ② the IP or name matches the value on the host's settings screen ③ the host is not asleep ④ the SSH server is running on the host ("2." above) ⑤ the host's firewall (on a Mac, "Stealth Mode" and "Block all incoming connections"; on Windows, the inbound rule for port 22) |
+| The SSH connection was **refused** | The SSH server is not running on the host (on a Mac, "Remote Login"; on Windows, the `sshd` service). If the SSH port is not 22, match the "SSH port" setting too |
+| SSH **authentication failed** | The key is not registered, or the user name is wrong. Redo "3." above and confirm that `ssh <user name>@<IP> exit` works without a password. If the host is Windows and the user is an administrator, the key must be in `administrators_authorized_keys` with permissions restricted by `icacls` |
+| The host key has changed | The key changed, for example because the host was reinstalled. Run `ssh-keygen -R <IP>` on the client, then connect again |
+| SSH connected, but Worktree Kanban on the host did not respond | "Start host" has not been pressed on the host, or the listen port is wrong |
+| Port forwarding was refused | `AllowTcpForwarding no` is set in the host's `sshd_config` (on a Mac, `/etc/ssh/sshd_config`; on Windows, `C:\ProgramData\ssh\sshd_config`) |
+| The following settings could not be saved because Worktree Kanban on the host is out of date | The host app is old and does not know newer settings such as custom agents or Pipeline flowcharts. Update Worktree Kanban on the host ("App updates" in Settings) and save again |
+| The ssh command was not found | On Windows, add "OpenSSH Client". You can also enter the full path in the "ssh command" setting |
 
-## そのほか
+## Other notes
 
-- ホストを止める・ペアを破棄する・トークンを忘れる操作も、同じ「RC設定」の画面にあります。上部の「遠隔操作中」「ホスト待ち受け」のピルを押しても開きます
-- ホストのタブを見ているあいだは、ボード・作業ディレクトリ（worktree）・エージェントはすべて **ホストのもの** です。左上のタブには、接続先の印を付けて **ホストのリポジトリ** が出ます
-- 遠隔操作中も、**このマシン（クライアント）のリポジトリ** をタブで開けます。左上の「＋」やタブのリポジトリ名から開く画面の上で「ホスト」か「このマシン」かを選びます。このマシンのタブはホストのタブの右に「このマシン」の印を付けて並び、そのタブのタスクはこのマシンのエージェントで動きます。ホストのタスクとこのマシンのタスクは、並べて同時に動かせます
-- このマシンのタブは **ホストには表示されず、ホストへ送られることもありません**（ホストの画面には、ホストのタブだけが出ます）。タブの数は、ホストとこのマシンでそれぞれ 3 つまでです。タブの「×」で閉じられます（もう片方の側にタブがあれば、その側の最後のタブも閉じられます）
-- ホストが別の PC にも操作側としてつないでいても、操作側に出るのはホスト自身のタブとボードだけです（つないでいる先のリポジトリは混ざりません）
-- このマシンのタブを見ているときは、「フォルダを開く」（Finder・エクスプローラー）なども、ふだんどおり使えます。切断すると、このマシンのタブだけが残ります
-- 遠隔操作中も、左上のリポジトリ欄から **ホストのリポジトリに切り替えられます**。ホストで最近開いたリポジトリを選ぶか、「ホストのフォルダを開く」でホストのフォルダをこの画面で辿って選びます（パスを直接入れて移動することもできます）。クローン・新規作成の「置き場所」の「選ぶ…」も、ホストのフォルダから選べます
-- 「フォルダを開く」（Finder・エクスプローラー）はホストの画面に出てしまうため、ホストのタブでは使えません
-- ペアリングコードは 10 分で切れ、5 回間違えると無効になります（ホスト側で再発行してください）。トークンなどの秘密は遠隔へは送りません
+- Stopping the host, dropping pairings, and forgetting the token are on the same "RC settings" screen. You can also open it by pressing the "Remote control" or "Host listening" pill at the top
+- While you are viewing a host tab, the board, working directories (worktrees), and agents are all **the host's**. The tabs at the top left show **the host's repositories**, marked with the connection target
+- You can also open **this machine's (the client's) repositories** in tabs during remote control. Choose "Host" or "This machine" at the top of the screen opened from the "+" at the top left or a tab's repository name. Tabs for this machine appear to the right of the host tabs, marked "This machine", and their tasks run on this machine's agents. Host tasks and tasks on this machine can run side by side at the same time
+- Tabs for this machine are **not shown on the host and are never sent to it** (the host's screen shows only the host's tabs). Up to 3 tabs are allowed on each of the host and this machine. Close a tab with its "×" (if the other side has a tab, the last tab on this side can be closed too)
+- Even if the host is itself connected to another PC as a client, a client connected to it sees only the host's own tabs and board (repositories from that other connection do not mix in)
+- While viewing a tab for this machine, "Open folder" (Finder or Explorer) and the like work as usual. When you disconnect, only the tabs for this machine remain
+- During remote control, you can also **switch to the host's repositories** from the repository area at the top left. Choose a repository recently opened on the host, or browse the host's folders on this screen with "Open a folder on the host" (you can also enter a path directly). "Choose…" under "Location" for cloning and creating new repositories also picks from the host's folders
+- "Open folder" (Finder or Explorer) is not available on host tabs, because it would open on the host's screen
+- A pairing code expires after 10 minutes and becomes invalid after 5 wrong attempts (issue a new one on the host). Secrets such as tokens are not sent to the remote side
 
 ---
 
-[← README に戻る](../README.md)
+[← Back to README](../README.md)

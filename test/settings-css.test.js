@@ -124,8 +124,8 @@ for (const file of docs) {
   });
 }
 
-test('docs/settings.md に、すべての項目の見出しと開き方がある', () => {
-  const text = read('docs/settings.md');
+test('docs/settings.ja.md に、すべての項目の見出しと開き方がある', () => {
+  const text = read('docs/settings.ja.md');
   assert.match(text, /メニューボタン[^\n]*「設定」/);
   for (const name of ['全般', 'アプリの更新', 'ブランチと取り込み', 'Issue 連携', '権限', 'タスクの既定', '使うエージェント', 'カスタムエージェント', 'オーケストレーション']) {
     assert.match(text, new RegExp(`^## ${name}$`, 'm'), `## ${name} がない`);
@@ -134,8 +134,16 @@ test('docs/settings.md に、すべての項目の見出しと開き方がある
   assert.match(text, /元に戻す/);
 });
 
-test('docs/settings.md のページ内リンクの行き先がある', () => {
+test('docs/settings.md に、すべての項目の見出しと開き方が英語である', () => {
   const text = read('docs/settings.md');
+  assert.match(text, /\*\*"Settings"\*\* from the menu button/);
+  for (const name of ['General', 'App updates', 'Branches and landing', 'Issue sync', 'Permissions', 'Task defaults', 'Agents to use', 'Custom agents', 'Orchestration']) {
+    assert.match(text, new RegExp(`^## ${name}$`, 'm'), `## ${name} がない`);
+  }
+});
+
+for (const file of ['docs/settings.md', 'docs/settings.ja.md']) test(`${file} のページ内リンクの行き先がある`, () => {
+  const text = read(file);
   const anchors = new Set([...text.matchAll(/^#{1,6} (.+)$/gm)].map((m) => m[1].trim().toLowerCase().replace(/\s+/g, '-')));
   const links = [...text.matchAll(/\]\(#([^)]+)\)/g)].map((m) => m[1]);
   assert.ok(links.length >= 9);

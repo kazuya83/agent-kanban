@@ -770,6 +770,6 @@ test('isHiddenSubtask: 並列の枝は、親がボードにいても隠さない
 });
 
 test('使い方: 並列の枝のカードに「サブタスク」のラベルが付くと書いてある', () => {
-  const doc = fs.readFileSync(path.join(__dirname, '..', 'docs', 'usage.md'), 'utf8');
+  const doc = fs.readFileSync(path.join(__dirname, '..', 'docs', 'usage.ja.md'), 'utf8');
   assert.match(doc, /Pipeline の並列で自動で作られた枝のカードには、ボード上で「サブタスク」のラベルが付きます（工程の名前に「サブタスク」がなくても付きます）/);
 });
