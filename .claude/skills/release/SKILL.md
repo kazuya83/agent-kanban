@@ -12,7 +12,7 @@ GitHub Actions ではビルド・リリースをしないので、手元の Mac 
 
 - macOS。Apple Silicon では **Rosetta 2** が必要（無いときは、ユーザーに `softwareupdate --install-rosetta --agree-to-license` を実行してもらう）
 - `gh` にログイン済みであること（`gh auth status`）
-- `claude` が PATH にあること（中で `claude -p "/build-apps review"` を動かすため）
+- エージェントの CLI（`claude` / `codex` / `gemini` / `cursor-agent`）のどれかが PATH にあること（中でエージェントに `/build-apps review` を頼むため。見つかったものをこの順に使い、`AFTER_MERGE_AGENT` で選べる）
 
 ## 手順
 
@@ -28,7 +28,7 @@ GitHub Actions ではビルド・リリースをしないので、手元の Mac 
 5. ユーザーが OK したら:
    1. 手元の main が進んでいれば `git push origin main`
    2. `scripts/after-merge-build.sh --force` を動かす（5〜10 分かかるので、Bash の `run_in_background` で動かし、終わるのを待つ）
-      - 中で `claude -p "/build-apps review"` が動き、落ちたところ（install.sh / install.ps1 など）を直す。直したところがあればコミットして、もう一度ビルドし、main にマージして push する
+      - 中でエージェントが `/build-apps review` を動かし、落ちたところ（install.sh / install.ps1 など）を直す。直したところがあればコミットして、もう一度ビルドし、main にマージして push する
       - ビルドが通ったら、できたファイルで `gh release create` する（もう一度ビルドはしない）
       - 段階ごとに macOS の通知が出る（1/4〜4/4・終わりました）
 6. 終わったら `scripts/after-merge-build.sh --status` を見て報告する: 版の番号、直したところ（マージ・push したか）、公開した Release の URL（出さなかったときはその理由）

@@ -15,7 +15,7 @@ GitHub Actions はテストだけを動かす。**ビルドとリリースは、
 
 - macOS。Apple Silicon では **Rosetta 2** が必要（Windows のインストーラーと AppImage を作る道具が Intel 用のため）
   - 無いときは、ユーザーに `softwareupdate --install-rosetta --agree-to-license` を実行してもらう（管理者のパスワードを聞かれることがある）
-- `release` では `gh` にログイン済みであること（`gh auth status`）と、`claude` が PATH にあること（中で `claude -p` を動かすため）
+- `release` では `gh` にログイン済みであること（`gh auth status`）と、エージェントの CLI（`claude` / `codex` / `gemini` / `cursor-agent`）のどれかが PATH にあること（中でエージェントを動かすため）
 
 ## review（レビューのとき）
 
@@ -33,4 +33,4 @@ GitHub Actions はテストだけを動かす。**ビルドとリリースは、
 ## 注意
 
 - `dist/` は毎回消して作り直す
-- main にタスクをマージすると、`.githooks/post-merge` → `scripts/after-merge-build.sh` が、このスキルの `review` を `claude -p` で裏で動かす（`build-apps/<sha>` という worktree の中で動く）。そのときはユーザーに質問できないので、最後まで自分で直す。コミット・マージ・push・Release の公開はスクリプトが行うので、スキルの中ではしない。できたファイルは、スクリプトが main をチェックアウトしているフォルダの `dist/` に写し、ビルドが通ればそのファイルで Release を公開する（ユーザーがこの自動の公開を有効にしている。止めるときは `AFTER_MERGE_NO_RELEASE=1`）
+- main にタスクをマージすると、`.githooks/post-merge` → `scripts/after-merge-build.sh` が、このスキルの `review` を、見つかったエージェントで裏で動かす（`build-apps/<sha>` という worktree の中で動く）。そのときはユーザーに質問できないので、最後まで自分で直す。コミット・マージ・push・Release の公開はスクリプトが行うので、スキルの中ではしない。できたファイルは、スクリプトが main をチェックアウトしているフォルダの `dist/` に写し、ビルドが通ればそのファイルで Release を公開する（ユーザーがこの自動の公開を有効にしている。止めるときは `AFTER_MERGE_NO_RELEASE=1`）

@@ -1247,7 +1247,7 @@ class AgentManager extends EventEmitter {
       card.readOnly = true;
     }
     if (issue) card.issue = { number: issue.number, title: issue.title, url: issue.url };
-    card.agent = agent || 'claude';
+    card.agent = agent || providers.defaultAgentOf(s);
     if (model && !relay) card.model = cleanModel(model);
     if (persona && !relay) card.persona = persona;
     if (relay) card.relay = relay;
